@@ -66,7 +66,7 @@ export function decodeSessionSecret(value: string): Buffer {
   throw new Error("GATEWAY_SESSION_SECRET_INVALID");
 }
 
-export function resolveConfig(input: GatewayConfig): ResolvedConfig {
+export function resolveConfig(input: GatewayConfig, options: { nativeOnly?: boolean } = {}): ResolvedConfig {
   const parsed = configuration.safeParse(input);
   if (!parsed.success) throw new Error("GATEWAY_CONFIGURATION_ERROR");
   const config = parsed.data;
@@ -80,7 +80,7 @@ export function resolveConfig(input: GatewayConfig): ResolvedConfig {
   }];
   if (config.environment === "production") {
     if ((tenantResolution === "backend" && !backendUrl.startsWith("https://")) || tenants.some((tenant) => !tenant.backendUrl.startsWith("https://") || !tenant.tenantOrigin.startsWith("https://")) ||
-        !input.corsOrigins?.length || config.corsOrigins.some((value) => !value.startsWith("https://")) ||
+        (!options.nativeOnly && !input.corsOrigins?.length) || config.corsOrigins.some((value) => !value.startsWith("https://")) ||
         config.trustedProxyIps.length === 0) {
       throw new Error("PRODUCTION_REQUIRES_HTTPS_BACKEND_TENANT_CORS_AND_TRUSTED_PROXY_IPS");
     }

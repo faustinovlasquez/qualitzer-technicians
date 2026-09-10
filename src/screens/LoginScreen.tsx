@@ -8,6 +8,7 @@ import { palette, radius, typography } from "../ui/theme";
 import { gatewayLoopbackWarning, loginConnectionError, probeGatewayConnection, safeGatewayUrl, suggestedExpoGatewayUrl, type GatewayProbeResult } from "../infrastructure/gatewayConnection";
 import { uploadFetch } from "../infrastructure/photos";
 import { NetworkError } from "../infrastructure/errors";
+import { gatewayConfiguration } from "../infrastructure/gatewayConfig";
 
 export interface LoginScreenProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -43,10 +44,11 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
   const visibleError = error ?? localError;
   const native = Platform.OS !== "web";
   const loopbackWarning = native ? gatewayLoopbackWarning(gatewayUrl) : null;
-  const suggested = native && __DEV__ ? suggestedExpoGatewayUrl(suggestedGatewayUrl, gatewayUrl) : undefined;
+  const gatewayLocked = gatewayConfiguration.locked;
+  const suggested = !gatewayLocked && native && __DEV__ ? suggestedExpoGatewayUrl(suggestedGatewayUrl, gatewayUrl) : undefined;
 
   function changeGateway(value: string): void {
-    if (isBusy || submissionLock.current) return;
+    if (gatewayLocked || isBusy || submissionLock.current) return;
     connectionVersion.current.version += 1;
     connectionVersion.current.pending = false;
     setDiagnostic(null);
@@ -75,7 +77,8 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
     </> : null}
     <Button title="Comprobar conexión" variant="secondary" loading={diagnosticBusy} disabled={isBusy || diagnosticBusy} onPress={() => { void checkConnection(); }} />
     {diagnosticResult ? <Text accessibilityLiveRegion="polite" style={[styles.connectionHelp, diagnosticResult.status !== "ready" && styles.connectionDanger]}>{diagnosticResult.message}</Text> : null}
-    {native ? <>
+    {gatewayLocked ? <BodyText style={styles.connectionHelp}>Servidor fijado en esta versión. Su disponibilidad depende del despliegue de la pasarela en esta URL base; la app no necesita Expo Go ni un equipo local.</BodyText> : null}
+    {native && !gatewayLocked ? <>
       <Button title={showConnection ? "Ocultar configuración" : "Configurar conexión"} variant="ghost" disabled={isBusy} onPress={() => setShowConnection((value) => !value)} />
       {showConnection ? <Field label="URL de la pasarela" value={gatewayUrl} onChangeText={changeGateway} keyboardType="url" autoCapitalize="none" autoCorrect={false} autoComplete="off" textContentType="URL" editable={!isBusy} accessibilityState={{ disabled: isBusy }} /> : null}
     </> : null}
@@ -171,7 +174,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                     <Text style={styles.errorText}>{visibleError}</Text>
                   </View>
                 ) : null}
-                {native ? connectionPanel : null}
+                {native || gatewayLocked ? connectionPanel : null}
                 <View style={styles.sessionNotice}>
                   <Ionicons name="shield-checkmark-outline" size={20} color={palette.primary} accessible={false} />
                   <Text style={styles.sessionNoticeText}>La sesión se recuerda automáticamente en este dispositivo hasta que cierres sesión o el servidor solicite un nuevo acceso por revocación o seguridad.</Text>
@@ -188,7 +191,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                 </View>
               </Card>
 
-              <Card style={styles.connectionCard}>
+              {!gatewayLocked ? <Card style={styles.connectionCard}>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Conexión avanzada. Configurar pasarela móvil"
@@ -213,7 +216,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                     <BodyText style={styles.connectionHelp}>Cámbiala solo si tu administrador te lo indica. Usa la dirección de la pasarela móvil, no el portal de una empresa. Las empresas disponibles se muestran después de verificar tus credenciales.</BodyText>
                   </View>
                 ) : null}
-              </Card>
+              </Card> : null}
             </View>
           </View>
           <Text style={styles.footer}>Menos escritorio. Más terreno.</Text>

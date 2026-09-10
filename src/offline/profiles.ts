@@ -7,12 +7,13 @@ import { sameTenant } from "../domain/tenantSession";
 import type { DurableStore } from "./contracts";
 import { createDurableStore } from "./DurableStore";
 import { offlineUserSchema, updateState } from "./state";
+import { canonicalGatewayUrl } from "../../config/gatewayPolicy";
 
 export const OFFLINE_PROFILE_MAX_AGE_MS: number | null = null;
 const profilesNamespace = "offline-passports-v1";
 async function passportKey(stored: StoredSession): Promise<string> {
   const tenant = stored.tenant;
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(["offline-passport-v2", new URL(stored.gatewayUrl).origin, tenant.id, tenant.portalOrigin, tenant.environment, stored.token]));
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(["offline-passport-v2", canonicalGatewayUrl(stored.gatewayUrl), tenant.id, tenant.portalOrigin, tenant.environment, stored.token]));
 }
 export async function saveOfflineProfile(session: Session, gatewayUrl: string, store?: DurableStore, now = Date.now()): Promise<void> {
   if (session.mode !== "live") return;

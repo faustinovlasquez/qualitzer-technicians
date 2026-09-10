@@ -230,3 +230,90 @@ export function createSessionPersistence(config: ResolvedConfig, backend?: Backe
   const key = config.sessionSecret === undefined ? developmentKey(file) : decodeSessionSecret(config.sessionSecret);
   return new EncryptedFileSessionPersistence(file, key, config.tenants, backend);
 }
+
+const embeddedWriters = new Set<() => void>();
+let embeddedExitRegistered = false;
+
+function assertPrivateEmbeddedPath(file: string, directory: boolean): void {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)) {
+    throw new Error("SESSION_PERSISTENCE_REQUIRES_PRIVATE_DIRECTORY");
+  }
+  if (process.platform !== "win32" && ((stat.mode & 0o777) !== (directory ? 0o700 : 0o600) || stat.uid !== process.getuid?.())) {
+    throw new Error("SESSION_PERSISTENCE_PERMISSIONS_ERROR");
+  }
+  if (process.platform === "win32") {
+    const script = "$ErrorActionPreference='Stop'; $acl=Get-Acl -LiteralPath $env:QZ_PRIVATE_PATH; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $rules=$acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]); foreach($rule in $rules){if($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -ne $sid -and $rule.IdentityReference.Value -ne 'S-1-5-18'){exit 1}}; exit 0";
+    const result = childProcess.spawnSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command", script], {
+      shell: false, windowsHide: true, stdio: "ignore", env: { ...process.env, QZ_PRIVATE_PATH: file },
+    });
+    if (result.error || result.status !== 0) throw new Error("SESSION_PERSISTENCE_PERMISSIONS_ERROR");
+  }
+}
+
+export function prepareEmbeddedSessionStorage(sessionFile: string) {
+  const file = resolve(sessionFile);
+  const directory = dirname(file);
+  if (/^(?:session\.key|\.writer\.lock)[. ]*$/i.test(basename(file))) throw new Error("GATEWAY_SESSION_FILE_INVALID");
+  for (let ancestor = directory; ; ancestor = dirname(ancestor)) {
+    if (exists(ancestor) && fs.lstatSync(ancestor).isSymbolicLink()) throw new Error("SESSION_PERSISTENCE_REQUIRES_PRIVATE_DIRECTORY");
+    if (ancestor === dirname(ancestor)) break;
+  }
+  if (exists(directory)) assertPrivateEmbeddedPath(directory, true);
+  prepareDirectory(file);
+  const keyFile = join(directory, "session.key");
+  for (const candidate of [file, keyFile]) if (exists(candidate)) assertPrivateEmbeddedPath(candidate, false);
+  if (exists(`${file}.unavailable`)) throw new Error("SESSION_PERSISTENCE_UNAVAILABLE");
+  const lockFile = join(directory, ".writer.lock");
+  const owner = Buffer.from(JSON.stringify({ pid: process.pid, nonce: randomBytes(16).toString("hex") }));
+  try { writeExclusive(lockFile, owner); }
+  catch { throw new Error("SESSION_PERSISTENCE_WRITER_EXISTS"); }
+  let released = false;
+  let key: Buffer | undefined;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    key?.fill(0);
+    embeddedWriters.delete(release);
+    try {
+      if (fs.readFileSync(lockFile).equals(owner)) { fs.unlinkSync(lockFile); syncDirectory(directory); }
+    } catch {}
+  };
+  try {
+    syncDirectory(directory);
+    if (!exists(keyFile)) {
+      if (exists(file)) throw new Error("SESSION_PERSISTENCE_KEY_UNAVAILABLE");
+      const temporary = join(directory, `.session-key-${randomBytes(12).toString("hex")}.tmp`);
+      try {
+        writeExclusive(temporary, randomBytes(32));
+        fs.linkSync(temporary, keyFile);
+      } finally {
+        if (exists(temporary)) fs.unlinkSync(temporary);
+      }
+      syncDirectory(directory);
+    }
+    assertPrivateEmbeddedPath(keyFile, false);
+    protect(keyFile);
+    if (fs.statSync(keyFile).size !== 32) throw new Error("SESSION_PERSISTENCE_KEY_UNAVAILABLE");
+    key = fs.readFileSync(keyFile);
+    if (key.length !== 32) throw new Error("SESSION_PERSISTENCE_KEY_UNAVAILABLE");
+    embeddedWriters.add(release);
+    if (!embeddedExitRegistered) {
+      process.once("exit", () => { for (const close of embeddedWriters) close(); });
+      embeddedExitRegistered = true;
+    }
+    return {
+      createPersistence(backend: BackendPersistenceOptions): ISessionPersistence {
+        if (released || !key) throw new Error("SESSION_PERSISTENCE_UNAVAILABLE");
+        const persistence = new EncryptedFileSessionPersistence(file, key, [], backend);
+        key.fill(0);
+        key = undefined;
+        return persistence;
+      },
+      release,
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}

@@ -1,0 +1,28 @@
+gradle.beforeProject { project ->
+    project.plugins.withId("com.android.application") {
+        project.extensions.getByName("androidComponents").finalizeDsl { android ->
+            def required = { name ->
+                def value = System.getenv(name)
+                if (value == null || value.isEmpty()) {
+                    throw new GradleException("MISSING_RELEASE_ENVIRONMENT: " + name)
+                }
+                return value
+            }
+            if (required("EXPO_PUBLIC_STANDALONE") != "true" ||
+                required("EXPO_PUBLIC_GATEWAY_URL") != "https://api-demos-qz-v2.qualitzer.com/mobile" ||
+                required("NODE_ENV") != "production" || required("EXPO_NO_DOTENV") != "1") {
+                throw new GradleException("INVALID_STANDALONE_RELEASE_ENVIRONMENT")
+            }
+            def signing = android.signingConfigs.maybeCreate("qualitzerRelease")
+            signing.storeFile = project.file(required("QUALITZER_SIGNING_STORE_FILE"))
+            signing.storePassword = required("QUALITZER_SIGNING_STORE_PASSWORD")
+            signing.keyAlias = "qualitzer-field"
+            signing.keyPassword = required("QUALITZER_SIGNING_KEY_PASSWORD")
+            signing.storeType = "PKCS12"
+            android.buildTypes.getByName("release").with {
+                signingConfig = signing
+                debuggable = false
+            }
+        }
+    }
+}

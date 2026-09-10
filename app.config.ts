@@ -3,6 +3,7 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
+import { standaloneGatewayUrl } from "./config/gatewayPolicy";
 
 const brandSchema = z.object({
   tenantId: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,99}$/),
@@ -61,6 +62,17 @@ function resolveBrandIcon(projectRoot: string, value: string, genericPath: strin
 
 export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   requireBaseConfig(config);
+  const standaloneFlag = process.env.EXPO_PUBLIC_STANDALONE;
+  if (standaloneFlag !== undefined && !["true", "false"].includes(standaloneFlag)) throw new Error("EXPO_PUBLIC_STANDALONE_MUST_BE_BOOLEAN_STRING");
+  const releaseProfile = ["standalone-apk", "preview", "production"].includes(process.env.EAS_BUILD_PROFILE ?? "");
+  if (releaseProfile && standaloneFlag !== "true") throw new Error("STANDALONE_BUILD_REQUIRES_EXPO_PUBLIC_STANDALONE_TRUE");
+  const standalone = standaloneFlag === "true";
+  const gatewayUrl = standalone ? standaloneGatewayUrl(process.env.EXPO_PUBLIC_GATEWAY_URL ?? "") : process.env.EXPO_PUBLIC_GATEWAY_URL;
+  config = {
+    ...config,
+    extra: { ...config.extra, gateway: { standalone, url: gatewayUrl } },
+    ...(standalone ? { updates: { ...config.updates, enabled: false, useEmbeddedUpdate: true } } : {}),
+  };
   const projectId = process.env.EXPO_PROJECT_ID;
   if (projectId !== undefined) {
     const parsed = z.uuid().safeParse(projectId);

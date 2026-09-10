@@ -26,7 +26,8 @@ import { createConnectivity } from "../offline/connectivity";
 import { bindForeground, readForeground } from "../offline/foreground";
 import { checklistAssignmentResultSchema, checklistCatalogPageSchema, type ChecklistAssignmentResult, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
 import type { OfflineController, OfflineQueuedOutcome, OfflineSnapshot } from "../domain/offline";
-import { expoGatewayUrl, loginConnectionError, suggestedExpoGatewayUrl, validGatewayUrl } from "../infrastructure/gatewayConnection";
+import { loginConnectionError, requireConfiguredGateway, storedGatewayMismatch, suggestedExpoGatewayUrl } from "../infrastructure/gatewayConnection";
+import { gatewayConfiguration } from "../infrastructure/gatewayConfig";
 
 const subscribeNothing = (): (() => void) => () => {};
 const emptyOfflineSnapshot = (): null => null;
@@ -94,10 +95,7 @@ function persistSession(value: StoredSession): Promise<void> {
 }
 
 function defaultGateway(): string {
-  const configured = process.env.EXPO_PUBLIC_GATEWAY_URL;
-  if (configured) return configured;
-  if (Platform.OS === "web") return `http://${globalThis.location.hostname}:8787`;
-  return expoGatewayUrl(Constants.expoConfig?.hostUri) ?? "http://localhost:8787";
+  return gatewayConfiguration.url;
 }
 export function useTechnicianApp() {
   const [gatewayUrl, setGatewayUrl] = useState(defaultGateway);
@@ -125,6 +123,7 @@ export function useTechnicianApp() {
   const [selectedOffline, setSelectedOffline] = useState(false);
   const offline: OfflineSnapshot | null = useSyncExternalStore(offlineController?.subscribe ?? subscribeNothing, offlineController?.getSnapshot ?? emptyOfflineSnapshot, offlineController?.getSnapshot ?? emptyOfflineSnapshot);
   const repository = useRef<TechnicianRepository | null>(null);
+  const gatewayBlock = useRef<string | null>(gatewayConfiguration.error);
   const requestVersion = useRef(0);
   const sessionVersion = useRef(0);
   const creationVersion = useRef(0);
@@ -344,10 +343,15 @@ export function useTechnicianApp() {
     const action = beginAction();
     void (async () => {
       try {
-        const savedUrl = await loadGateway();
+        if (gatewayConfiguration.error) throw new Error(gatewayConfiguration.error);
+        const savedUrl = gatewayConfiguration.locked ? null : await loadGateway();
         const stored = await loadSession();
         if (!active || version !== sessionVersion.current) return;
-        const url = validGatewayUrl(stored?.gatewayUrl ?? savedUrl ?? defaultGateway());
+        if (stored) {
+          const mismatch = storedGatewayMismatch(gatewayConfiguration, stored.gatewayUrl);
+          if (mismatch) { gatewayBlock.current = mismatch; throw new Error(mismatch); }
+        }
+        const url = requireConfiguredGateway(gatewayConfiguration, gatewayConfiguration.locked ? defaultGateway() : stored?.gatewayUrl ?? savedUrl ?? defaultGateway());
         state.current = { ...state.current, gatewayUrl: url };
         setGatewayUrl(url);
         if (!stored) return;
@@ -363,7 +367,12 @@ export function useTechnicianApp() {
           if (caught instanceof NetworkError && await restoreCachedSession(stored, repo, caught, version)) return;
           throw caught;
         }
-      } catch (caught) { if (active && version === sessionVersion.current) setError(errorText(caught)); }
+      } catch (caught) {
+        if (active && version === sessionVersion.current) {
+          if (gatewayConfiguration.locked && !repository.current) gatewayBlock.current = errorText(caught);
+          setError(errorText(caught));
+        }
+      }
       finally {
         if (active) {
           if (version === sessionVersion.current) setRestoring(false);
@@ -645,7 +654,8 @@ export function useTechnicianApp() {
     const action = beginAction();
     const loginGateway = state.current.gatewayUrl;
     try {
-      const pendingLoginGateway = validGatewayUrl(loginGateway);
+      if (gatewayBlock.current) throw new Error(gatewayBlock.current);
+      const pendingLoginGateway = requireConfiguredGateway(gatewayConfiguration, loginGateway);
       const repo = new HttpTechnicianRepository(pendingLoginGateway);
       const result = await repo.startLogin(username, password);
       if (version !== sessionVersion.current) return;
@@ -709,7 +719,8 @@ export function useTechnicianApp() {
     const version = ++sessionVersion.current;
     const action = beginAction();
     try {
-      const url = validGatewayUrl(state.current.gatewayUrl);
+      if (gatewayBlock.current) throw new Error(gatewayBlock.current);
+      const url = requireConfiguredGateway(gatewayConfiguration, state.current.gatewayUrl);
       if (version !== sessionVersion.current) return;
       await establish(new DemoTechnicianRepository(), "demo", "demo", url, DEMO_TENANT, version);
     }
@@ -770,6 +781,7 @@ export function useTechnicianApp() {
   }
 
   async function logout() {
+    if (gatewayBlock.current) { setError(gatewayBlock.current); return; }
     if (renderVersion !== sessionVersion.current || session !== state.current.session || (session && !currentContext()) || actionLock.current || logoutInProgress.current) return;
     if (pendingLogin.current && !repository.current) { cancelLoginChallenge(); return; }
     logoutInProgress.current = true;
@@ -1028,7 +1040,7 @@ export function useTechnicianApp() {
     const version = sessionVersion.current;
     const action = beginAction();
     try {
-      const result = await new HttpTechnicianRepository(validGatewayUrl(state.current.gatewayUrl), session.mode === "live" ? session.tenant : undefined).health();
+      const result = await new HttpTechnicianRepository(requireConfiguredGateway(gatewayConfiguration, state.current.gatewayUrl), session.mode === "live" ? session.tenant : undefined).health();
       if (version === sessionVersion.current) setHealth(result);
     } catch (caught) { if (version === sessionVersion.current) { setHealth(null); setError(errorText(caught)); } }
     finally { endAction(action); }
@@ -1068,6 +1080,7 @@ export function useTechnicianApp() {
   }
 
   function changeGatewayUrl(value: string) {
+    if (gatewayConfiguration.locked) return;
     if (renderVersion !== sessionVersion.current || actionLock.current || restoring || state.current.session || repository.current || sessionSetup.current || pendingLogin.current || challenge || forcePassword || finalizingSession || value === state.current.gatewayUrl) return;
     sessionVersion.current += 1; requestVersion.current += 1;
     state.current = { ...state.current, gatewayUrl: value, data: null, selected: null, selectedOrder: null, selectedCreationKind: null };
@@ -1153,7 +1166,7 @@ export function useTechnicianApp() {
 
   return {
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,
-    suggestedGatewayUrl: __DEV__ && Platform.OS !== "web" ? suggestedExpoGatewayUrl(Constants.expoConfig?.hostUri, gatewayUrl) : undefined,
+    suggestedGatewayUrl: !gatewayConfiguration.locked && __DEV__ && Platform.OS !== "web" ? suggestedExpoGatewayUrl(Constants.expoConfig?.hostUri, gatewayUrl) : undefined,
     session, data, range, selected, selectedOrder, selectedCreationKind, selectedGroupId: selectedOrder?.id ?? null, orderGroup, group, work, detailRange, detailGeneratedAt, tab, setTab: changeTab, error: error ?? offlineSetupError, busy, loading, restoring, forcePassword, finalizingSession, health, notifications,
     offline, offlineController: managedOfflineController, offlineVerifiedAt, offlineSetupError, selectedOffline, openOffline, closeOffline, prepareOfflineWeek, syncOffline,
     canonicalDetailGroup, canonicalDetailWork,

@@ -15,7 +15,7 @@ test("canonical gateway validation accepts private LAN and public HTTPS bases", 
 });
 
 test("invalid URLs never issue health requests or expose credentials in errors", async () => {
-  const values = ["", "not a URL", "file:///secret", "javascript:alert(1)", "http://example.com", "http://10.evil.test", "http://127.evil.test", "http://172.32.0.1", "http://192.169.0.1", "https://user:secret@example.com", `${current}/secret`, `${current}?token=secret`, `${current}#secret`, `${current}?`, `${current}#`, "http://192.168.1.105\n:8787", "https://example.com\\secret"];
+  const values = ["", "not a URL", "file:///secret", "javascript:alert(1)", "http://example.com", "http://10.evil.test", "http://127.evil.test", "http://172.32.0.1", "http://192.169.0.1", "https://user:secret@example.com", `${current}/%2fsecret`, `${current}?token=secret`, `${current}#secret`, `${current}?`, `${current}#`, "http://192.168.1.105\n:8787", "https://example.com\\secret"];
   for (const value of values) {
     let calls = 0;
     const result = await probeGatewayConnection(value, async () => { calls += 1; throw new Error("Must not fetch"); });
@@ -122,7 +122,7 @@ test("login network message includes safe canonical destination without implying
     assert.match(result, /http:\/\/192\.168\.1\.105:8787\./);
     assert.match(result, /no indica que tu contraseña haya sido rechazada/);
   }
-  for (const value of ["https://user:secret@example.com", `${current}?secret=token`, `${current}/secret`]) {
+  for (const value of ["https://user:secret@example.com", `${current}?secret=token`, `${current}/%2fsecret`]) {
     assert.doesNotMatch(loginConnectionError(new NetworkError("network"), value), /secret|token|user:/);
   }
   const rejected = new ApiError(401, "AUTH_INVALID_CREDENTIALS", "Revisa tu usuario y contraseña.");

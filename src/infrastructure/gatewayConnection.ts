@@ -1,26 +1,55 @@
 import { NetworkError, errorText } from "./errors";
-
-function privateHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "");
-  if (/^(fc|fd)[\da-f]{2}:/i.test(host) || /^fe[89ab][\da-f]:/i.test(host)) return true;
-  const parts = host.split(".");
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return false;
-  const [first, second] = parts.map(Number);
-  return first === 10 || (first === 192 && second === 168) || (first === 172 && second >= 16 && second <= 31);
-}
-
-function loopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "localhost." || hostname === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
-}
+import { canonicalGatewayUrl, loopbackHost, privateHost, standaloneGatewayUrl } from "../../config/gatewayPolicy";
 
 export function validGatewayUrl(value: string): string {
-  const invalid = "Ingresa la URL base de la pasarela, por ejemplo http://192.168.1.105:8787.";
-  if (/[\u0000-\u001f\u007f\\?#]/.test(value)) throw new Error(invalid);
-  let url: URL;
-  try { url = new URL(value.trim()); } catch { throw new Error(invalid); }
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || !["", "/"].includes(url.pathname)) throw new Error(invalid);
-  if (url.protocol === "http:" && !loopbackHost(url.hostname) && !privateHost(url.hostname)) throw new Error("Una pasarela pública debe usar HTTPS para proteger tus credenciales.");
-  return url.origin;
+  try { return canonicalGatewayUrl(value); }
+  catch (error) {
+    if (error instanceof Error && error.message === "GATEWAY_PUBLIC_HTTPS_REQUIRED") throw new Error("Una pasarela pública debe usar HTTPS para proteger tus credenciales.");
+    throw new Error("Ingresa la URL base completa de la pasarela, por ejemplo https://api-demos-qz-v2.qualitzer.com/mobile, sin credenciales, parámetros ni segmentos ambiguos.");
+  }
+}
+
+export interface GatewayConfiguration {
+  readonly locked: boolean;
+  readonly url: string;
+  readonly error: string | null;
+}
+
+export function resolveGatewayConfiguration(input: {
+  standaloneFlag?: string;
+  configuredUrl?: string;
+  extra?: unknown;
+  nativeRelease: boolean;
+  developmentUrl: () => string;
+}): GatewayConfiguration {
+  const extra = input.extra;
+  const extraStandalone = extra !== null && typeof extra === "object" && "standalone" in extra && extra.standalone === true;
+  const extraUrl = extra !== null && typeof extra === "object" && "url" in extra && typeof extra.url === "string" ? extra.url : undefined;
+  const locked = input.nativeRelease || input.standaloneFlag === "true" || extraStandalone;
+  if (!locked && (input.standaloneFlag === undefined || input.standaloneFlag === "false")) {
+    return { locked: false, url: input.configuredUrl || extraUrl || input.developmentUrl(), error: null };
+  }
+  try {
+    if (input.standaloneFlag !== undefined && !["true", "false"].includes(input.standaloneFlag)) throw new Error();
+    if (extraStandalone && input.standaloneFlag === "false") throw new Error();
+    const url = standaloneGatewayUrl(extraUrl ?? input.configuredUrl ?? "");
+    if (input.configuredUrl !== undefined && standaloneGatewayUrl(input.configuredUrl) !== url) throw new Error();
+    return { locked: true, url, error: null };
+  } catch {
+    return { locked: true, url: "", error: "La configuración de esta versión es inválida. Requiere una base HTTPS pública fija y coincidente; no se usará una conexión local. Solicita una compilación corregida al administrador." };
+  }
+}
+
+export function requireConfiguredGateway(configuration: GatewayConfiguration, value: string): string {
+  if (configuration.error) throw new Error(configuration.error);
+  const url = validGatewayUrl(value);
+  if (configuration.locked && url !== configuration.url) throw new Error("Esta versión solo permite la URL base HTTPS fijada al compilar.");
+  return url;
+}
+
+export function storedGatewayMismatch(configuration: GatewayConfiguration, storedUrl: string): string | null {
+  if (!configuration.locked || (!configuration.error && safeGatewayUrl(storedUrl) === configuration.url)) return null;
+  return "La sesión guardada pertenece a otra URL base. Se conservan la sesión, sus archivos y la cola sin enviarlos ni migrarlos. Para recuperarlos, instala una versión configurada para el servidor original; esta versión no permite cambiar la conexión.";
 }
 
 export function safeGatewayUrl(value: string): string | undefined {
@@ -66,7 +95,7 @@ export type GatewayProbeFetch = (url: string, init: {
 
 export async function probeGatewayConnection(value: string, fetch: GatewayProbeFetch, timeoutMs = 5000): Promise<GatewayProbeResult> {
   const base = safeGatewayUrl(value);
-  if (!base) return { status: "invalid_url", message: "La URL de la pasarela no es válida. Usa una URL base sin credenciales, rutas ni parámetros." };
+  if (!base) return { status: "invalid_url", message: "La URL de la pasarela no es válida. Usa la base completa, incluida su ruta de montaje, sin credenciales, parámetros ni segmentos ambiguos." };
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<GatewayProbeResult>((resolve) => {
@@ -82,8 +111,8 @@ export async function probeGatewayConnection(value: string, fetch: GatewayProbeF
     } catch {
       return { status: "network", message: `No se pudo conectar con ${base}. Revisa la red y la dirección; en web también puede ser un bloqueo CORS. No se enviaron credenciales.` };
     }
-    if (!response.ok) return { status: "http_error", message: "El servidor respondió con un error HTTP. No se pudo confirmar el estado de la pasarela." };
-    const unexpected: GatewayProbeResult = { status: "unexpected_response", message: "El servidor no devolvió el estado JSON esperado de la pasarela. Revisa la dirección; no se verificaron credenciales." };
+    if (!response.ok) return { status: "http_error", message: `El servidor respondió con un error HTTP en ${base}/health. No se pudo confirmar el despliegue de la pasarela en esta base.` };
+    const unexpected: GatewayProbeResult = { status: "unexpected_response", message: `El servidor no devolvió el estado JSON esperado en ${base}/health. Revisa la base completa y su despliegue; no se verificaron credenciales.` };
     if (response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return unexpected;
     let body: unknown;
     try { body = await response.json(); } catch { return unexpected; }

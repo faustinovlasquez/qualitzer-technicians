@@ -1,6 +1,14 @@
 # Configuración móvil: empresas administradas por el backend
 
-Estado vigente **09-09-2026**. Para conectar Qualitzer Field a Qualitzer se configura **sólo `BACKEND_URL` como destino de API**. No se configura una URL del proyecto frontend ni una empresa en el teléfono. Puertos, host, CORS y protección de sesiones siguen siendo ajustes independientes.
+Estado vigente **10-09-2026**. Para conectar Qualitzer Field a Qualitzer se configura **sólo `BACKEND_URL` como destino de API**. No se configura una URL del proyecto frontend ni una empresa en el teléfono. Puertos, host, CORS y protección de sesiones siguen siendo ajustes independientes.
+
+## Servidor de demos activo
+
+La configuración local de la app apunta a **https://api-demos-qz-v2.qualitzer.com/api**. El endpoint público `/api/auth/mobile/config` respondió 200 con catálogo versión 1. La pasarela sigue en el computador, puerto 8787; Expo sigue en 8081. El backend local en 5001 no es necesario para esta conexión.
+
+`GATEWAY_SESSION_FILE=.data/demos/sessions.enc` separa las sesiones cifradas de demos de las sesiones anteriores del backend local. No se borran ni reutilizan sus credenciales contra otro servidor. Al abrir la app, usar las credenciales del entorno remoto. Los datos pendientes anteriores no se trasladan a demos.
+
+Para volver al backend local, restablecer `BACKEND_URL=http://127.0.0.1:5001/api`, retirar `GATEWAY_SESSION_FILE` del entorno y reiniciar la pasarela; no borrar ningún almacén para cambiar de entorno. Esto restaura la configuración de sesiones anterior, no garantiza que una sesión no haya vencido.
 
 ## Recorrido de una solicitud
 
@@ -18,7 +26,7 @@ Las tres llamadas centrales no envían Origin, cookies, Authorization ni cabecer
 
 Antes era una **cabecera de selección del tenant enviada al backend**, no una llamada HTTP al frontend. Ahora es innecesaria porque el backend entrega esa identidad. `portalOrigin` en los datos públicos es un origen canónico para presentación y routing legacy interno: **no es un destino HTTP al portal/frontend** ni una URL que el móvil pueda usar para cambiar de empresa.
 
-El catálogo local actual identifica al master como `tenant-1`; el nombre interno conocido es `jaras` y el origen público local es `http://localhost:3000`. No se debe convertir ese origen en la IP del teléfono ni presentarlo como dominio productivo. El ID local histórico `grupo-eliseo-local` puede seguir visible como alias persistente de `tenant-1`; no son dos empresas distintas.
+El catálogo local anterior identificaba al master como `tenant-1`, nombre `jaras` y origen `http://localhost:3000`, con alias histórico `grupo-eliseo-local`. No se debe reutilizar ese alias para los tenants del servidor remoto: sus IDs y orígenes provienen de su propio catálogo. No convertir esos orígenes en la IP del teléfono.
 
 ## Entorno normal
 
@@ -26,7 +34,8 @@ En [../.env](../.env) ya se retiraron `TENANT_ORIGIN` y `GATEWAY_TENANTS_FILE`. 
 
 | Ajuste | Uso |
 | --- | --- |
-| `BACKEND_URL` | API central: localmente `http://127.0.0.1:5001/api` |
+| `BACKEND_URL` | API activa: `https://api-demos-qz-v2.qualitzer.com/api` |
+| `GATEWAY_SESSION_FILE` | Sesiones de demos separadas: `.data/demos/sessions.enc` |
 | `GATEWAY_PORT` / `GATEWAY_HOST` | Listener de la pasarela: localmente `8787` / `0.0.0.0` |
 | `GATEWAY_CORS_ORIGINS` | Orígenes exactos del navegador Expo, localhost/127.0.0.1 y LAN en puerto 8081; **no selecciona empresas** |
 

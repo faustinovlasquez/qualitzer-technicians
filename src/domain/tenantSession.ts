@@ -1,4 +1,5 @@
 import type { Session, Tenant } from "./models";
+import { canonicalGatewayUrl } from "../../config/gatewayPolicy";
 
 export const DEMO_TENANT: Tenant = { id: "demo", name: "Demostración", portalOrigin: "https://demo.example", environment: "development" };
 
@@ -7,7 +8,7 @@ export function sameTenant(left: Tenant, right: Tenant): boolean {
 }
 
 export function tenantStorageNamespace(session: Pick<Session, "tenant" | "mode" | "user">, gatewayUrl: string, branchId: number | null): string {
-  return JSON.stringify(["tenant-v2", session.mode, new URL(gatewayUrl).origin, session.tenant.id, session.tenant.portalOrigin, session.tenant.environment, session.user.id, branchId]);
+  return JSON.stringify(["tenant-v2", session.mode, canonicalGatewayUrl(gatewayUrl), session.tenant.id, session.tenant.portalOrigin, session.tenant.environment, session.user.id, branchId]);
 }
 
 export function requireSessionTenant(expected: Tenant, returned: Tenant | undefined): Tenant {
