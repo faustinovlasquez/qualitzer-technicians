@@ -1,0 +1,51 @@
+import { useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { calendarDateSchema } from "../../domain/creation";
+import { IconButton } from "../../ui/components";
+import { palette, radius, typography } from "../../ui/theme";
+import { CreationModal } from "./CreationModal";
+
+export function CreationDatePicker({ value, onChange, onClose }: { value: string; onChange: (date: string) => void; onClose: () => void }) {
+  const [month, setMonth] = useState(() => calendarDateSchema.safeParse(value).success ? value.slice(0, 7) : "2000-01");
+  const first = new Date(`${month}-01T00:00:00Z`);
+  const leading = (first.getUTCDay() + 6) % 7;
+  const count = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  const title = new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" }).format(first);
+  const changeMonth = (offset: number): void => {
+    const next = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + offset, 1)).toISOString().slice(0, 7);
+    if (next >= "2000-01" && next <= "2100-12") setMonth(next);
+  };
+  return <CreationModal title="Elegir fecha" onClose={onClose}>
+    <View style={styles.header}>
+      <IconButton name="chevron-back" label="Mes anterior" disabled={month === "2000-01"} onPress={() => changeMonth(-1)} />
+      <Text accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.heading}>{title}</Text>
+      <IconButton name="chevron-forward" label="Mes siguiente" disabled={month === "2100-12"} onPress={() => changeMonth(1)} />
+    </View>
+    <View style={styles.grid}>
+      {["L", "M", "X", "J", "V", "S", "D"].map((day) => <View key={day} style={styles.cell}><Text style={styles.weekday}>{day}</Text></View>)}
+      {Array.from({ length: leading + count }, (_, index) => {
+        const day = index - leading + 1;
+        if (day < 1) return <View key={`empty-${index}`} style={styles.cell} />;
+        const date = `${month}-${String(day).padStart(2, "0")}`;
+        const selected = date === value;
+        return <Pressable key={date} accessibilityRole="button" accessibilityLabel={new Intl.DateTimeFormat("es", { dateStyle: "full", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`))}
+          accessibilityState={{ selected }} onPress={() => { onChange(date); onClose(); }} style={[styles.cell, selected && styles.selected]}>
+          <Text style={[styles.day, selected && styles.selectedText]}>{day}</Text>
+        </Pressable>;
+      })}
+    </View>
+    <Text style={styles.hint}>También puedes escribir la fecha directamente en formato YYYY-MM-DD.</Text>
+  </CreationModal>;
+}
+
+const styles = StyleSheet.create({
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  heading: { ...typography.label, color: palette.text, flexShrink: 1, textAlign: "center", textTransform: "capitalize" },
+  grid: { flexDirection: "row", flexWrap: "wrap" },
+  cell: { width: "14.2857%", minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
+  day: { ...typography.body, color: palette.text },
+  weekday: { ...typography.caption, color: palette.textSecondary },
+  selected: { backgroundColor: palette.primary },
+  selectedText: { color: palette.white, fontWeight: "700" },
+  hint: { ...typography.caption, color: palette.textSecondary },
+});

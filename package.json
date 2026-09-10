@@ -3,20 +3,62 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo/metro-runtime": "~57.0.15",
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/netinfo": "12.0.1",
+    "cors": "^2.8.6",
     "expo": "~57.0.20",
+    "expo-constants": "~57.0.17",
+    "expo-crypto": "~57.0.2",
+    "expo-document-picker": "~57.0.1",
+    "expo-file-system": "~57.0.6",
+    "expo-image-picker": "~57.0.16",
+    "expo-linear-gradient": "~57.0.1",
+    "expo-notifications": "~57.0.17",
+    "expo-secure-store": "~57.0.3",
+    "expo-sqlite": "~57.0.2",
     "expo-status-bar": "~57.0.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "multer": "^2.3.0",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.2",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.20.1",
     "@types/react": "~19.2.2",
+    "concurrently": "^10.0.5",
+    "node": "22.23.2",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.4",
+    "tsx": "^4.23.13",
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "start": "node scripts/start.cjs",
+    "mobile": "node scripts/start.cjs --mobile",
+    "android": "node node_modules/expo/bin/cli start --android",
+    "web": "node scripts/start.cjs",
+    "gateway": "node --env-file-if-exists=.env --import tsx server/index.ts",
+    "typecheck": "tsc --noEmit && tsc --project server/tsconfig.json",
+    "test": "node scripts/test.cjs",
+    "export:web": "expo export --platform web",
+    "export:mobile": "expo export --platform android --platform ios"
+  },
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
   },
   "private": true
 }

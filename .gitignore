@@ -32,6 +32,11 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+.data/
+config/build-brand.*.json
+!config/build-brand.example.json
+assets/branding/
 
 # typescript
 *.tsbuildinfo

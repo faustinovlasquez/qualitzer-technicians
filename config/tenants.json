@@ -1,0 +1,10 @@
+[
+  {
+    "id": "grupo-eliseo-local",
+    "name": "Grupo Eliseo",
+    "tenantOrigin": "http://localhost:3000",
+    "backendUrl": "http://127.0.0.1:5001/api",
+    "environment": "development",
+    "enabled": true
+  }
+]

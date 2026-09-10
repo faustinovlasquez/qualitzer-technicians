@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Qualitzer Field: iniciar app y pasarela",
+			"type": "shell",
+			"command": "& '.\\node_modules\\node\\bin\\node.exe' 'scripts/start.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

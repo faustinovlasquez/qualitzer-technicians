@@ -1,0 +1,10 @@
+[
+  {
+    "id": "unsafe",
+    "name": "Invalid test fixture",
+    "tenantOrigin": "http://localhost:3000",
+    "backendUrl": "http://fixture-user:fixture-password@backend.invalid/api",
+    "environment": "development",
+    "enabled": true
+  }
+]

@@ -1,25 +1,32 @@
 {
   "expo": {
-    "name": "Qualitzer-Mobile",
-    "slug": "Qualitzer-Mobile",
+    "name": "Qualitzer Field",
+    "slug": "qualitzer-field",
+    "scheme": "qualitzer-field",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/field-icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.qualitzer.field",
+      "config": { "usesNonExemptEncryption": false }
     },
     "android": {
+      "package": "com.qualitzer.field",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#E6F4F2",
+        "foregroundImage": "./assets/field-adaptive.png"
       },
       "predictiveBackGestureEnabled": false
     },
+    "plugins": [
+      "expo-secure-store",
+      ["expo-notifications", { "defaultChannel": "technical-work", "color": "#226957" }],
+      ["expo-image-picker", { "photosPermission": "Qualitzer necesita acceder a las fotos que selecciones como evidencia de tu trabajo.", "cameraPermission": "Qualitzer necesita la cámara para registrar evidencias del trabajo.", "microphonePermission": false }]
+    ],
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/field-favicon.png"
     }
   }
 }

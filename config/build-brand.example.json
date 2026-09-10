@@ -1,0 +1,8 @@
+{
+  "tenantId": "example-local",
+  "name": "Empresa de ejemplo",
+  "androidPackage": "example.local",
+  "iosBundleIdentifier": "example.local",
+  "iconPath": "./assets/field-icon.png",
+  "adaptiveIconPath": "./assets/field-adaptive.png"
+}
