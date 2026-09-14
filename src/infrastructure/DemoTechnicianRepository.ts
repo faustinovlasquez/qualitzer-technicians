@@ -52,6 +52,16 @@ export class DemoTechnicianRepository implements TechnicianRepository {
     if (input.scope.workId === undefined) return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_COMMENT_WORK_REQUIRED" };
     const scope = { ...input.scope, workId: String(input.scope.workId) };
     if (input.kind === "comment") { await this.addComment(scope, input.payload.text); return; }
+    if (input.kind === "timer" || input.kind === "checklist") {
+      const { work } = this.find(scope);
+      if (!work.canExecute || work.status === "completed" || work.status === "delivered") return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_ACTOR_NOT_AUTHORIZED" };
+      if (scope.startDate !== scope.endDate || scope.startDate !== work.scheduledDate.slice(0, 10)) return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_INVALID_DATE_RANGE" };
+      if (input.kind === "checklist") { await this.attachChecklist(scope, input.payload.checklistId); return; }
+      if (work.status !== input.payload.baseStatus) return { operationId: input.operationId, state: "conflict", error: "MOBILE_SYNC_STATUS_CONFLICT" };
+      if (input.payload.status === "paused" && work.status !== "in_progress") return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_INVALID_STATUS" };
+      await this.status(scope, { status: input.payload.status });
+      return;
+    }
     const step = this.find(scope).work.checklists.flatMap((list) => list.steps).find((item) => String(item.stepId) === String(input.payload.stepId));
     if (!step) return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_STEP_NOT_FOUND" };
     if (!syncAnswersEqual(syncAnswerFromStep(step), input.payload.base)) return { operationId: input.operationId, state: "conflict", error: "MOBILE_SYNC_BASE_CONFLICT" };
@@ -72,8 +82,9 @@ export class DemoTechnicianRepository implements TechnicianRepository {
   notificationStatus(branch: number) { return this.notifications.notificationStatus(branch); }
   registerNotificationDevice(input: NotificationDeviceInput) { return this.notifications.registerNotificationDevice(input); }
   unregisterNotificationDevice(branch: number, installation: string) { return this.notifications.unregisterNotificationDevice(branch, installation); }
-  notificationInbox(branch: number, page: number) { return this.notifications.notificationInbox(branch, page); }
+  notificationInbox(branch: number, page: number, unreadOnly?: boolean) { return this.notifications.notificationInbox(branch, page, unreadOnly); }
   readNotification(branch: number, id: string) { return this.notifications.readNotification(branch, id); }
+  deleteNotification(branch: number, id: string) { return this.notifications.deleteNotification(branch, id); }
   testNotification(branch: number) { return this.notifications.testNotification(branch); }
   async health() { return { ok: true, backendReachable: false, tenantOrigin: "Demostración local" }; }
   async login(): Promise<LoginResult> { return { token: "demo", username: "Alex", email: demoUser.email, nextStep: "DONE" }; }

@@ -3,7 +3,8 @@ import { OfflineUnavailableError, type OfflineConnection } from "../domain/offli
 import { ApiError, NetworkError } from "../infrastructure/errors";
 
 export function requiresDeployment(code: string | undefined): boolean {
-  return code === "MOBILE_CREATION_SCHEMA_NOT_READY" || code === "MOBILE_SYNC_SCHEMA_NOT_READY" || code === "OFFLINE_SYNC_ROUTE_NOT_FOUND";
+  return code === "MOBILE_CREATION_SCHEMA_NOT_READY" || code === "MOBILE_SYNC_SCHEMA_NOT_READY" || code === "OFFLINE_SYNC_ROUTE_NOT_FOUND"
+    || code === "MOBILE_SYNC_ACTIONS_UNAVAILABLE";
 }
 
 export function connectionErrorCode(error: unknown): string {

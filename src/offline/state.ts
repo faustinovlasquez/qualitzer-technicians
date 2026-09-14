@@ -6,6 +6,8 @@ import { OFFLINE_LIMITS } from "./contracts";
 import { syncAnswerSchema, syncAnswerFromStep, toSyncAnswer } from "../domain/offlineProtocol";
 import { answerFromStep } from "../domain/format";
 import { cachedAssignmentsSchema, resourceCacheKey, sameResource } from "./cacheSchemas";
+import { canonicalIntentionScopeSchema, timerPayloadSchema } from "./queueIntentions";
+import { checklistAssignmentInputSchema } from "../domain/checklistAssignment";
 
 const choice = z.object({ value: z.string(), label: z.string() });
 const uiAnswer = z.object({ responseValue: z.union([z.string(), z.boolean(), z.array(choice), z.null()]), isCompleted: z.boolean(), executionStatus: z.enum(["completed", "partial", "not_completed"]).nullable(), comment: z.string().nullable() }).strict();
@@ -20,6 +22,8 @@ const operation = z.discriminatedUnion("kind", [
   common.extend({ kind: z.literal("comment"), scope: workScope, text: z.string() }),
   common.extend({ kind: z.literal("answer"), scope: workScope, stepId: z.string(), answer, base: answer, wire: z.object({ answer: syncAnswerSchema, base: syncAnswerSchema }).optional() }),
   common.extend({ kind: z.literal("document"), scope, stepId: z.string().optional(), file: fileSchema, sourceDraftId: z.string().min(1).optional() }),
+  common.extend({ kind: z.literal("timer"), scope: canonicalIntentionScopeSchema, payload: timerPayloadSchema }),
+  common.extend({ kind: z.literal("checklist"), scope: canonicalIntentionScopeSchema, payload: checklistAssignmentInputSchema }),
 ]);
 const tenant = z.object({ id: z.string(), name: z.string(), portalOrigin: z.string(), environment: z.enum(["development", "production"]), logo: z.string().nullish(), description: z.string().nullish() });
 export const offlineUserSchema = z.object({
@@ -31,7 +35,7 @@ export const offlineUserSchema = z.object({
 const stateSchema = z.object({
   version: z.literal(1), revision: z.number().int().nonnegative(), operations: z.array(operation),
   revokedResources: z.array(z.object({ key: z.string(), status: z.union([z.literal(403), z.literal(404)]) })).default([]),
-  cache: z.array(z.object({ key: z.string(), json: z.string(), fetchedAt: z.number().nonnegative(), coverage: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), branchId: z.number().int().positive(), fetchedAt: z.number().nonnegative() }).optional() })),
+  cache: z.array(z.object({ key: z.string(), json: z.string(), fetchedAt: z.number().nonnegative(), timerReadOperationIds: z.array(z.string()).optional(), coverage: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), branchId: z.number().int().positive(), fetchedAt: z.number().nonnegative() }).optional() })),
   passports: z.array(z.object({ key: z.string(), user: offlineUserSchema, verifiedAt: z.number(), disabled: z.boolean() })),
   reservations: z.array(z.object({ id: z.string(), size: z.number(), namespace: z.string() })),
   attachments: z.array(z.object({ scope, stepId: z.string().optional(), attachmentId: z.string(), file: fileSchema })).default([]),

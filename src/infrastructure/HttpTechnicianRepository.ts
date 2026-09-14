@@ -6,13 +6,17 @@ import type { Assignments, Attachment, CommentPage, DateRange, GroupScope, Healt
 import { ApiError, apiMessage, classifyTransportError } from "./errors";
 import { OfflineUnavailableError, type OfflineCommand, type OfflineDocumentMetadata } from "../domain/offline";
 import { receiptSchema } from "../offline/state";
+import { cachedAssignmentsSchema } from "../offline/cacheSchemas";
 import { receiptForOperation, syncCommandSchema, syncDocumentSchema, syncOperationIdSchema } from "../domain/offlineProtocol";
 import { appendPhoto, uploadFetch } from "./photos";
 import { requireSessionTenant } from "../domain/tenantSession";
 import { loginStartSchema, tenantListSchema, tenantLoginSchema, tenantSchema } from "./tenantSchemas";
-import { assignmentDays, dailyRange, mergeDailyAssignments, type DailyAssignmentSnapshot } from "../domain/assignmentSchedule";
+import { registerTenantChallengeClock, tenantChallengeMonotonicNow, type TenantChallengeResponseTiming } from "./tenantChallengeClock";
+import { assignmentDays, dailyRange, mergeDailyAssignments } from "../domain/assignmentSchedule";
+import { AssignmentReadCancelledError, type AssignmentReadOptions } from "../domain/assignmentRead";
+import { withAssignmentReadBatch } from "./assignmentReadBatch";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, mobileUuidSchema, positiveCreationIdSchema, type CreationInput, type CreationOptionsQuery } from "../domain/creation";
-import { notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
+import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
 
 
 export class HttpTechnicianRepository implements TechnicianRepository {
@@ -35,7 +39,15 @@ export class HttpTechnicianRepository implements TechnicianRepository {
 
   async offlineCommand(command: OfflineCommand) {
     const input = syncCommandSchema.parse(command);
-    return receiptSchema.parse(await this.request<unknown>("/api/offline/commands", "POST", input, input.operationId));
+    try {
+      return receiptSchema.parse(await this.request<unknown>("/api/offline/commands", "POST", input, input.operationId));
+    } catch (error) {
+      if ((input.kind === "timer" || input.kind === "checklist") && error instanceof ApiError && error.status === 400
+        && (error.code === "INVALID_INPUT" || error.code === "MOBILE_SYNC_INVALID_KIND")) {
+        throw new ApiError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE", "El cronómetro y la asociación de checklists requieren actualizar el servidor. La operación se conserva para reintentar.");
+      }
+      throw error;
+    }
   }
   async offlineReceipt(operationId: string, companyBranchId: number) {
     try {
@@ -77,37 +89,51 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     return notificationDeviceResultSchema.parse(await this.request<unknown>("/api/mobile-notifications/device", "PUT", notificationDeviceInputSchema.parse(input)));
   }
   unregisterNotificationDevice(branch: number, installation: string) { return this.request<void>(this.notificationPath(branch, `device/${mobileUuidSchema.parse(installation)}`), "DELETE"); }
-  async notificationInbox(branch: number, page: number) {
+  async notificationInbox(branch: number, page: number, unreadOnly?: boolean) {
     if (!Number.isInteger(page) || page < 1 || page > 1000) throw new Error("MOBILE_PUSH_INVALID_PAGE");
-    const result = notificationInboxSchema.parse(await this.request<unknown>(`${this.notificationPath(branch, "inbox")}&page=${page}`));
+    const result = notificationInboxSchema.parse(await this.request<unknown>(`${this.notificationPath(branch, "inbox")}&page=${page}${unreadOnly === true ? "&unreadOnly=true" : ""}`));
     if (result.page !== page || result.items.some((item) => item.data.companyBranchId !== branch || item.data.tenantOrigin !== this.selectedTenant().portalOrigin)) throw new Error("MOBILE_PUSH_IDENTITY_MISMATCH");
     return result;
   }
   async readNotification(branch: number, id: string) { return notificationReadResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, `inbox/${mobileUuidSchema.parse(id)}/read`), "PATCH")); }
+  async deleteNotification(branch: number, id: string) {
+    const eventId = mobileUuidSchema.parse(id);
+    const result = notificationDeleteResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, `inbox/${encodeURIComponent(eventId)}`), "DELETE"));
+    if (result.id !== eventId) throw new Error("MOBILE_PUSH_IDENTITY_MISMATCH");
+    return result;
+  }
   async testNotification(branch: number) { return notificationTestResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, "test"), "POST")); }
 
-  private async request<T>(path: string, method = "GET", body?: object | FormData, receiptOperationId?: string): Promise<T> {
+  private async request<T>(path: string, method = "GET", body?: object | FormData, receiptOperationId?: string, onResponseHeaders?: (timing: TenantChallengeResponseTiming) => void, signal?: AbortSignal): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), body instanceof FormData ? 150_000 : 45_000);
+    const cancel = () => { clearTimeout(timeout); controller.abort(); };
+    signal?.addEventListener("abort", cancel, { once: true });
     try {
+      if (signal?.aborted) throw new AssignmentReadCancelledError();
       const headers: { [name: string]: string } = {};
       if (Platform.OS === "web") headers["X-Qualitzer-Session"] = "cookie";
       else if (this.token) headers.Authorization = `Bearer ${this.token}`;
       if (this.tenant) headers["X-Qualitzer-Tenant"] = this.tenant.id;
       if (body && !(body instanceof FormData)) headers["Content-Type"] = "application/json";
       const requestBody = body instanceof FormData ? body : body ? JSON.stringify(body) : undefined;
+      const requestStartedAt = onResponseHeaders ? tenantChallengeMonotonicNow() : 0;
       const response = await uploadFetch(`${this.baseUrl}${path}`, {
         method, headers, credentials: Platform.OS === "web" ? "include" : "omit", body: requestBody, signal: controller.signal,
       }).catch((error: unknown) => {
+        if (signal?.aborted) throw new AssignmentReadCancelledError();
         if (body instanceof FormData && error instanceof Error
           && ["Unsupported FormData implementation", "Unsupported FormDataPart implementation"].includes(error.message)) {
           throw new OfflineUnavailableError("OFFLINE_DOCUMENT_MULTIPART_UNSUPPORTED");
         }
         throw classifyTransportError(error, controller.signal.aborted, Platform.OS !== "web");
       });
+      onResponseHeaders?.({ requestStartedAt, headersReceivedAt: tenantChallengeMonotonicNow(), serverDate: response.headers.get("Date") });
       const text = await response.text().catch((error: unknown) => {
+        if (signal?.aborted) throw new AssignmentReadCancelledError();
         throw classifyTransportError(error, controller.signal.aborted, Platform.OS !== "web");
       });
+      if (signal?.aborted) throw new AssignmentReadCancelledError();
       if (receiptOperationId !== undefined) {
         let data: unknown;
         try { data = JSON.parse(text); } catch { data = null; }
@@ -127,8 +153,12 @@ export class HttpTechnicianRepository implements TechnicianRepository {
         if (response.status === 401 && !path.includes("/auth/login")) this.onUnauthorized?.();
         throw new ApiError(response.status, code, apiMessage(code, message));
       }
-      return (text ? JSON.parse(text) : undefined) as T;
-    } finally { clearTimeout(timeout); }
+      try { return (text ? JSON.parse(text) : undefined) as T; }
+      catch { throw new ApiError(502, "UPSTREAM_INVALID_RESPONSE", apiMessage("UPSTREAM_INVALID_RESPONSE")); }
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", cancel);
+    }
   }
 
   private scopePath(scope: WorkScope, suffix: string): string {
@@ -137,7 +167,10 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async tenants(): Promise<Tenant[]> { return tenantListSchema.parse(await this.request<unknown>("/api/tenants")).data; }
   async startLogin(username: string, password: string): Promise<LoginStartResult> {
-    return loginStartSchema.parse(await this.request<unknown>("/api/auth/login/start", "POST", { username: username.trim(), password, remember: true }));
+    let timing: TenantChallengeResponseTiming | undefined;
+    const result = loginStartSchema.parse(await this.request<unknown>("/api/auth/login/start", "POST", { username: username.trim(), password, remember: true }, undefined, (responseTiming) => { timing = responseTiming; }));
+    if (result.nextStep === "SELECT_TENANT") registerTenantChallengeClock(result, timing);
+    return result;
   }
   async completeLogin(challenge: string, tenant: Tenant) {
     const result = tenantLoginSchema.parse(await this.request<unknown>("/api/auth/login/complete", "POST", { challenge, tenantId: tenant.id }));
@@ -167,21 +200,15 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     requireSessionTenant(this.selectedTenant(), result.tenant);
     return result;
   }
-  async assignments(range: DateRange, branchId: number): Promise<Assignments> {
-    const days = assignmentDays(range);
-    const snapshots: DailyAssignmentSnapshot[] = [];
-    let cursor = 0;
-    let failed = false;
-    await Promise.all(Array.from({ length: Math.min(2, days.length) }, async () => {
-      while (cursor < days.length && !failed) {
-        const date = days[cursor++];
-        try {
-          const data = await this.request<Assignments>(`/api/assignments?${new URLSearchParams({ ...dailyRange(date), companyBranchId: String(branchId) })}`);
-          snapshots.push({ date, data });
-        } catch (error) { failed = true; throw error; }
-      }
-    }));
-    return mergeDailyAssignments(snapshots, range.startDate);
+  async assignments(range: DateRange, branchId: number, options?: AssignmentReadOptions): Promise<Assignments> {
+    return withAssignmentReadBatch(options, async (batch) => {
+      const snapshots = await batch.map(assignmentDays(range), async (date) => {
+        const data = await batch.wait(() => this.request<Assignments>(`/api/assignments?${new URLSearchParams({ ...dailyRange(date), companyBranchId: String(branchId) })}`, "GET", undefined, undefined, undefined, batch.signal));
+        if (!cachedAssignmentsSchema.safeParse(data).success) throw new ApiError(502, "UPSTREAM_INVALID_RESPONSE", apiMessage("UPSTREAM_INVALID_RESPONSE"));
+        return { date, data };
+      });
+      return mergeDailyAssignments(snapshots, range.startDate);
+    });
   }
   status(scope: WorkScope, input: StatusInput) { return this.request<void>(this.scopePath(scope, "/status"), "POST", input); }
   answer(scope: WorkScope, stepId: string, answer: StepAnswer) { return this.request<void>(this.scopePath(scope, `/steps/${encodeURIComponent(stepId)}`), "PATCH", answer); }

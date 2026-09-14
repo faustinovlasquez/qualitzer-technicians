@@ -61,9 +61,9 @@ async function httpFixture(t: TestContext) {
       }
       if (req.method === "GET" && /^\/api\/assignments\/[^/]+(?:\/works\/[^/]+)?\/files$/.test(url.pathname)) return json(200, { data: [] });
       if (req.method !== "POST" || url.pathname !== "/api/offline/documents") return json(404, { error: "FIXTURE_ROUTE_NOT_FOUND" });
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(Buffer.from(chunk));
-      const form = await new Response(Buffer.concat(chunks), { headers: { "Content-Type": req.headers["content-type"] ?? "" } }).formData();
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of req) chunks.push(new Uint8Array(Buffer.from(chunk)));
+      const form = await new Response(new Uint8Array(Buffer.concat(chunks)), { headers: { "Content-Type": req.headers["content-type"] ?? "" } }).formData();
       assert.ok(readableFormData(form));
       assert.deepEqual([...form.keys()].sort(), ["files", "metadata"]);
       const raw = form.get("metadata");

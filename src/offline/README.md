@@ -16,7 +16,7 @@ Exports públicos desde [index.ts](index.ts):
 API estable de cada decorador:
 
 - `getSnapshot()`, `subscribe(listener)` (compatible con `useSyncExternalStore`). Snapshot: `online`, `preparing`, `syncing`, `authBlocked`, `pending`, `conflicts`, `lastSyncedAt`, `lastError`, `cachedAt`, cobertura diaria y operaciones con estado/recibo/mapeo.
-- `start()` / `stop()` idempotentes; el hook conecta `setForeground(active)` a AppState y detiene la instancia anterior antes de sustituir sesión/sucursal. La sincronización automática es de primer plano; no hay tarea durable en background ni garantía después de cerrar/deslizar la app.
+- `start()` / `stop()` idempotentes; el hook conecta `setForeground(active)` a visibilidad y acceso desbloqueado, y detiene la instancia anterior antes de sustituir sesión/sucursal. La sincronización automática requiere conexión, sesión válida y app abierta en primer plano y desbloqueada. «En segundo plano» respecto de la UI no significa un servicio del SO: no hay daemon ni garantía después de cerrar/deslizar la app.
 - `syncNow()`, `retry(operationId)`, `hasPendingChanges()` (busca **todas** las namespaces), `readLocalFile(fileId)`.
 - `prepareWeek(range, branchId, options?)`: máximo 7 fechas; guarda snapshots diarios, catálogo combinado sin `kind`, página 0 de equipos y especialidades, archivos y comentarios página 0 de hasta 30 trabajos, archivos de pasos y de hasta 30 grupos. Concurrencia de trabajos 2. Los grupos se consultan con el día de planificación, no con toda la semana. Las páginas/búsquedas de catálogo posteriores se cachean por consulta exacta: no se inventa un catálogo completo.
 - Opción explícita `{ byteBudget, downloadAttachment(attachment, scope, remainingBytes): Promise<LocalPhoto> }`. El integrador descarga con autenticación sin persistir headers/tokens y debe respetar/cancelar al superar `remainingBytes`; después se copia a almacenamiento offline y comprueba tamaño real. Sin esta opción **no se descargan bytes remotos**. Metadata `offline.downloaded=false` evita presentar URL remota como disponible sin red. IDs descargados se resuelven tras reload mediante `readLocalFile`.
@@ -25,7 +25,7 @@ API estable de cada decorador:
 
 ### Resultados de escritura y UI
 
-`createRecord`, `addComment`, `answer`, `upload`, `uploadDocuments`, `uploadGroupFiles` primero persisten. Si se confirma inmediatamente, conservan su resultado normal. Si todavía no se confirma, lanzan **`OfflineQueuedError` después del commit durable**, incluso si falló leer el resultado del intento inmediato. No es un fracaso de guardado local.
+`createRecord`, `addComment`, `answer`, `upload`, `uploadDocuments`, `uploadGroupFiles`, `status` para iniciar/pausar/reanudar y `attachChecklist` primero persisten, incluso con conexión. La UI no espera un envío ni una recarga remota para reconocer el guardado local. Si la operación registrada aún no está aplicada, devuelven **`OfflineQueuedError` después del commit durable**; no es un fracaso de guardado local. El motor envía y concilia por separado.
 
 El resultado contiene `operationId`, `operationIds` (todos los documentos del lote), `kind`, `localGroupId`, `localWorkId`, `date`, `ownsFiles`. La UI puede soltar su borrador temporal de archivos **únicamente** cuando `ownsFiles=true`, o tras éxito confirmado. Nunca mostrar “guardado en servidor” con este resultado. La UI integrada muestra pendiente y permite abrir el recurso local. El centro muestra texto/respuesta/base/recibo para revisión; no implementa edición resolutiva, merge automático ni exportación de conflictos.
 
@@ -39,7 +39,16 @@ Archivos y comentarios usan identidad sucursal/grupo/trabajo/paso o página, ind
 
 Los adjuntos confirmados se enlazan únicamente por `receipt.fileId`; el listado canónico conserva su ID/nombre y recibe la URL de la copia local. Las vinculaciones quedan en `state.attachments`. El backend actual devuelve el ID exacto mediante callbacks posteriores al commit; un recibo histórico sin ID no autoriza adivinar vínculos y el backend lo presenta para revisión. El cliente conserva bytes de recibos legacy aplicados sin ID, sin añadir otra fila confirmada ni enlazar por nombre; puede leerlos con `readLocalFile(operation.file.id)`. No hay expulsión automática de archivos.
 
-`status`, `report`, `deleteFile`, `deleteGroupFile`, `startOrder`, `deliverOrder` requieren conexión y recurso canónico. No se encolan ni se simulan relojes/entrega. El reporte legacy no se convierte silenciosamente en comentario. Notificaciones de escritura siguen online-only. Lecturas remotas fallidas usan caché **únicamente** en `NetworkError`; señales sin red evitan el intento. 401 bloquea; 403/404/503 y JSON inválido jamás devuelven caché como si fueran éxito.
+`status` para `completed`/`delivered`, `report`, `deleteFile`, `deleteGroupFile`, `startOrder` y `deliverOrder` requieren conexión y recurso canónico. No se encolan ni se simulan finalización/entrega. El reporte legacy no se convierte silenciosamente en comentario. Notificaciones de escritura siguen online-only. Lecturas remotas fallidas usan caché **únicamente** en `NetworkError`; señales sin red evitan el intento. 401 bloquea; 403/404/503 y JSON inválido jamás devuelven caché como si fueran éxito.
+
+### Cronómetro y asociación de checklist
+
+Ambas intenciones exigen un trabajo canónico único, `canExecute`, no finalizado/entregado, copia del día exacto consultado, técnico/sucursal coincidentes y ausencia de revocación conocida. El rango es diario; un trabajo atrasado visible ese día no exige que su fecha de planificación coincida. Los recursos `local-*` no habilitan estas acciones. El servidor vuelve a autorizar al aplicar.
+
+- `timer`: iniciar/reanudar (`in_progress`) o pausar (`paused`), con `baseStatus`. La cadena conserva UUID, base y dependencia; una operación conflictiva o en revisión detiene sus dependientes. El reloj es el del servidor **al aplicar**, no al tocar: inicio y pausa enviados juntos pueden contabilizar cero segundos. No se reconstruye tiempo offline ni se extrapola el reloj pendiente.
+- `checklist`: plantilla existente con `checklistId` positivo, disponible en una página del catálogo cacheada para el mismo trabajo/fecha/sucursal. No inventa un catálogo completo, pasos, respuestas ni avance; el Backend valida plantilla y relación al aplicar.
+- `applied` prueba el recibo, no que la ficha mostrada esté actualizada. Para reconciliar timers, el repositorio captura los IDs ya aplicados en almacenamiento durable **antes** del GET diario y conserva esa prueba con el snapshot/caché (`offlineTimerRead`). Ni `generatedAt`, ni la hora local, ni el recibo aislado sustituyen esa causalidad. Una lectura autoritativa posterior prevalece; la UI distingue estado solicitado, confirmación y espera/error de actualización.
+- Respuestas, asociaciones y evidencias pendientes no suman progreso confirmado ni habilitan una entrega ficticia. Archivos e historial se actualizan separadamente al recibir confirmación; el guardado local no espera esa recarga.
 
 ## Durabilidad, aislamiento y política de sesión
 
@@ -61,7 +70,7 @@ El hook bloquea logout si hay pendientes en cualquier namespace y cambio de sucu
 
 El puerto sigue tipado opcional en `TechnicianRepository extends Partial<OfflineSyncPort>`, pero HTTP y demo actuales implementan sus tres métodos. Una implementación sin puerto no activa fallback legacy:
 
-- `offlineCommand({operationId, kind: "comment"|"answer", scope: WorkScope, payload})` → POST `/api/offline/commands`. Payload comentario `{text}`; respuesta `{stepId,answer,base}`. El `base` canónico se deriva del snapshot **del servidor**, con `syncAnswerFromStep`, nunca del borrador local.
+- `offlineCommand({operationId, kind: "comment"|"answer"|"timer"|"checklist", scope: WorkScope, payload})` → POST `/api/offline/commands`. Payload comentario `{text}`; respuesta `{stepId,answer,base}`; timer `{status,baseStatus}`; checklist `{checklistId}`. Timer/checklist exigen `workId`. El `base` canónico de respuesta se deriva del snapshot **del servidor**, con `syncAnswerFromStep`, nunca del borrador local.
 - `offlineReceipt(operationId, companyBranchId)` → GET `/api/offline/receipts/:id?companyBranchId=N`. Devuelve `null` **sólo** para 404 `OFFLINE_RECEIPT_NOT_FOUND`; un 404 genérico/ruta ausente es error y no autoriza replay.
 - `offlineDocument({operationId,scope,stepId?,sha256}, LocalPhoto)` → POST `/api/offline/documents`, multipart `files` + `metadata` JSON. Una operación/UUID por archivo (lote atómico local, confirmación independiente). El servidor debe comprobar SHA-256 y usar idempotencia por operación+principal+scope+payload.
 - Recibo `{operationId,state:"applied"|"conflict"|"rejected"|"needs_review",error?,fileId?}`. Un UUID diferente nunca confirma. Root group sin `workId`; trabajo/paso con ID canónico. Dependencias de recursos locales se resuelven después de creación; jamás se envía `local-*` al upstream.
@@ -84,10 +93,16 @@ Multipart nativo: [../infrastructure/photos.ts](../infrastructure/photos.ts) fij
 
 ## Verificación
 
+### Entrega 1.0.11 — 14-09-2026
+
+Implementación integrada en fuentes; no se certifica todavía una APK nueva ni despliegue remoto. La última batería completa móvil tuvo **dos fallos de recibos**: las correcciones están en fuentes, pendientes de repetir la validación final. Evidencia UI previa verificada: **18/18 escenarios React Native Web, 463 aserciones y 44 capturas**; no es una prueba nativa ni una validación posterior de todas las fuentes actuales. No se ejecutaron tests, lint, build ni SQL del Backend. Esta limpieza documental no ejecuta terminal ni repite pruebas. Despliegue manual de Backend compatible y gateway **1.0.3**, con verificación de migraciones históricas, en [../../docs/ACTUALIZACION-FLUIDEZ-MOVIL.md](../../docs/ACTUALIZACION-FLUIDEZ-MOVIL.md).
+
+### Evidencia histórica — no certifica 1.0.11
+
 Corrección posterior de scope: **703 tests, 702 PASS, 1 skip Windows**, app/gateway noEmit sin errores. [tests/direct-document-scope.test.ts](tests/direct-document-scope.test.ts) añade 50 casos motor→HTTP real→loopback; el fake antiguo no rechazaba el scope incompleto. El E2E UI específico quedó bloqueado por un selector del test al expandir varios detalles; no se anuncia PASS. Consulta local SELECT-only del documento exacto del usuario: recibo applied/fileId30994, padre direct-11444; indicador local del teléfono no inspeccionado.
 
 Cierre 10-09-2026: **653 casos, 652 PASS, 1 skip Windows, 0 fallos**, TypeScript app/gateway sin errores y export Android/iOS/web correcto. E2E legacy: guardado UI/IndexedDB, revisión sintética exacta sin recibo, recarga offline, recuperación automática, pérdida de respuesta tras recibo, dos POST idénticos/un efecto, `fileId` y blob conservados, dos reconexiones adicionales. No se inspeccionó ni alteró la cola real del teléfono.
 
-Revisión aislada histórica: 93/93 tests del núcleo, documentada en [tests/REVIEW-VALIDATION.md](tests/REVIEW-VALIDATION.md); no sustituye integración. Batería previa comunicada: **512 casos, 511 aprobados, 1 omitido, 0 fallidos**; error TypeScript de App en corrección y cambios concurrentes requieren cierre del coordinador.
+Revisión aislada histórica: 93/93 tests del núcleo, documentada en [tests/REVIEW-VALIDATION.md](tests/REVIEW-VALIDATION.md); no sustituye integración. Batería previa comunicada: **512 casos, 511 aprobados, 1 omitido, 0 fallidos**; esos resultados no validan las fuentes de la entrega actual.
 
-El coordinador ejecutó **E2E web aislado PASS con IndexedDB real**: cuatro operaciones aplicadas, un efecto de cada tipo, blob/hash conservado tras recargas, logout bloqueado y respuesta perdida de archivo recuperada mediante POST idéntico/recibo sin duplicar. [../../tests/e2e/README.md](../../tests/e2e/README.md) delimita reproducción y alcance: gateway inaccesible con cliente web aún servido, no PWA ni validación SQLite/Android/iOS. La app standalone con bundle puede arrancar sin Metro; Expo Go no lo garantiza. Ningún test/build/lint, migración ni SQL se ejecutó en esta edición documental.
+Se ejecutó históricamente **E2E web aislado PASS con IndexedDB real**: cuatro operaciones aplicadas, un efecto de cada tipo, blob/hash conservado tras recargas, logout bloqueado y respuesta perdida de archivo recuperada mediante POST idéntico/recibo sin duplicar. [../../tests/e2e/README.md](../../tests/e2e/README.md) delimita reproducción y alcance: gateway inaccesible con cliente web aún servido, no PWA ni validación SQLite/Android/iOS. La app standalone con bundle puede arrancar sin Metro; Expo Go no lo garantiza. Ningún test/build/lint, migración ni SQL se ejecutó en esta edición documental.

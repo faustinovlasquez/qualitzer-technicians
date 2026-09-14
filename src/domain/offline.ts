@@ -1,8 +1,8 @@
 import type { CreationInput, CreationResult } from "./creation";
 import type { SyncStepAnswer } from "./offlineProtocol";
-import type { AssignmentGroup, AssignmentWork, Attachment, DateRange, GroupScope, LocalPhoto, StepAnswer, User, WorkScope } from "./models";
+import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, DateRange, GroupScope, LocalPhoto, StepAnswer, User, WorkScope } from "./models";
 
-export type OfflineOperationKind = "create" | "comment" | "answer" | "document";
+export type OfflineOperationKind = "create" | "comment" | "answer" | "document" | "timer" | "checklist";
 export type OfflineOperationStatus = "pending" | "syncing" | "applied" | "blocked" | "auth_required" | "needs_review" | "conflict";
 export type OfflineScope = GroupScope & { workId?: string };
 export interface OfflineResourceMetadata { operationId?: string; status?: OfflineOperationStatus; downloaded: boolean; confirmed: boolean; localFileId?: string; }
@@ -10,12 +10,19 @@ export interface OfflineAttachment extends Attachment { offline: OfflineResource
 export interface OfflineAssignmentWork extends AssignmentWork { offline: OfflineResourceMetadata; }
 export interface OfflineAssignmentGroup extends AssignmentGroup { offline: OfflineResourceMetadata; works: OfflineAssignmentWork[]; }
 export type OfflineAnswer = StepAnswer | SyncStepAnswer;
-export interface OfflineCommand {
+export interface OfflineTimerPayload { status: "in_progress" | "paused"; baseStatus: "pending" | "in_progress" | "paused"; }
+export interface OfflineChecklistPayload { checklistId: number; }
+export interface OfflineTimerRead { scope: WorkScope; appliedOperationIds: string[]; }
+export interface TimerReadAssignmentWork extends AssignmentWork { offlineTimerRead?: OfflineTimerRead; }
+export type OfflineCommand = {
   operationId: string;
-  kind: "comment" | "answer";
   scope: WorkScope;
-  payload: { text: string } | { stepId: string; answer: OfflineAnswer; base: OfflineAnswer };
-}
+} & (
+  | { kind: "comment"; payload: { text: string } }
+  | { kind: "answer"; payload: { stepId: string; answer: OfflineAnswer; base: OfflineAnswer } }
+  | { kind: "timer"; payload: OfflineTimerPayload }
+  | { kind: "checklist"; payload: OfflineChecklistPayload }
+);
 export interface OfflineDocumentMetadata {
   operationId: string;
   scope: OfflineScope;
@@ -56,6 +63,8 @@ export type OfflineOperation = OfflineOperationBase & (
   | { kind: "comment"; scope: WorkScope; text: string }
   | { kind: "answer"; scope: WorkScope; stepId: string; answer: OfflineAnswer; base: OfflineAnswer; wire?: { answer: SyncStepAnswer; base: SyncStepAnswer } }
   | { kind: "document"; scope: OfflineScope; stepId?: string; file: OfflineFile; sourceDraftId?: string }
+  | { kind: "timer"; scope: WorkScope; payload: OfflineTimerPayload }
+  | { kind: "checklist"; scope: WorkScope; payload: OfflineChecklistPayload }
 );
 export interface OfflineCoverage { date: string; branchId: number; fetchedAt: number; }
 export interface OfflineConnection {
@@ -90,6 +99,7 @@ export interface OfflineController {
   retry(operationId: string): Promise<void>;
   hasPendingChanges(): Promise<boolean>;
   prepareWeek(range: DateRange, branchId: number, options?: OfflinePreparationOptions): Promise<void>;
+  localAssignments?(range: DateRange, branchId: number): Promise<Assignments>;
   readLocalFile(id: string): Promise<LocalPhoto>;
 }
 export interface OfflinePreparationOptions {

@@ -1,13 +1,14 @@
 import { creationInputSchema, creationResultSchema } from "../domain/creation";
 import type { LocalPhoto, User, WorkScope } from "../domain/models";
 import { sameTenant } from "../domain/tenantSession";
-import { OfflineUnavailableError, type OfflineConnection, type OfflineOperation, type OfflineReceipt, type OfflineScope, type OfflineSnapshot } from "../domain/offline";
+import { OfflineUnavailableError, type OfflineCommand, type OfflineConnection, type OfflineOperation, type OfflineReceipt, type OfflineScope, type OfflineSnapshot } from "../domain/offline";
 import { ApiError, NetworkError } from "../infrastructure/errors";
 import { syncScopeSchema } from "../domain/offlineProtocol";
 import { OFFLINE_LIMITS, type EngineDependencies, type OfflineState } from "./contracts";
 import { cloneState, emptyState, hasPendingChanges, pendingOperation, receiptSchema, updateState } from "./state";
 import { resourceCacheKey, sameResource } from "./cacheSchemas";
 import { connectionErrorCode as errorCode, failedConnection, isServiceFailure, requiresDeployment } from "./connection";
+import { prepareQueuedIntention } from "./queueIntentions";
 
 export function canUseCache(error: unknown): boolean { return error instanceof NetworkError; }
 export function backoffMs(attempts: number): number { return Math.min(OFFLINE_LIMITS.maxBackoffMs, 2_000 * 2 ** Math.min(8, Math.max(0, attempts - 1))); }
@@ -72,6 +73,10 @@ export class OfflineEngine {
   private timer?: ReturnType<typeof setTimeout>;
   private cycle?: Promise<void>;
   private probeFailures = 0;
+  private connectionRevision = 0;
+  private authRevision = 0;
+  private authBlock?: Promise<void>;
+  private authBlockComplete = false;
   private wakeRequested = false;
   private retryTransportOnWake = false;
   constructor(readonly dependencies: EngineDependencies) {}
@@ -95,7 +100,14 @@ export class OfflineEngine {
       try { listener(); } catch { /* UI observers cannot invalidate an already committed queue write. */ }
     }
   }
-  async refresh(): Promise<void> { this.state = await this.dependencies.store.read(this.dependencies.namespace); this.publish(); }
+  async refresh(): Promise<void> {
+    this.state = await this.dependencies.store.read(this.dependencies.namespace);
+    if (!this.state.authBlocked && this.authBlockComplete) {
+      this.authBlock = undefined;
+      this.authBlockComplete = false;
+    }
+    this.publish();
+  }
   setPreparing(preparing: boolean): void { this.publish({ preparing }); }
   setMissingDates(missingDates: string[]): void { this.publish({ missingDates }); }
   getConnectionGeneration(): number { return this.generation; }
@@ -112,6 +124,7 @@ export class OfflineEngine {
   }
   noteConnectionSuccess(generation = this.generation): void {
     if (generation !== this.generation || this.stopped || this.state.authBlocked || this.connection.networkConnected === false) return;
+    this.connectionRevision++;
     const deployment = this.state.operations.find((op) => op.status !== "applied" && requiresDeployment(op.lastError));
     this.connection = { ...this.connection, status: deployment ? "service_error" : "ready", checkedAt: this.dependencies.now(), errorCode: deployment?.lastError };
     this.publish({ lastError: deployment?.lastError ?? null });
@@ -187,7 +200,9 @@ export class OfflineEngine {
     this.state = await updateState(store, namespace, (state) => {
       registered = [];
       if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
-      for (const operation of operations) {
+      for (const input of operations) {
+        const operation = input.kind === "timer" || input.kind === "checklist"
+          ? prepareQueuedIntention(state, input, this.dependencies.user, this.dependencies.branchId) : input;
         if (operation.kind === "create") creationInputSchema.parse(operation.input);
         const draft = operation.kind === "document" && operation.sourceDraftId
           ? findDraftDocument(state.operations, namespace, operation.scope, operation.sourceDraftId, operation.stepId) : undefined;
@@ -212,6 +227,7 @@ export class OfflineEngine {
       }
     });
     this.publish();
+    this.wakeRequested = true;
     this.schedule(0);
     return registered;
   }
@@ -247,7 +263,18 @@ export class OfflineEngine {
     if (!operation || operation.kind !== "document" || operation.file.namespace !== this.dependencies.namespace) throw new OfflineUnavailableError("OFFLINE_LOCAL_FILE_NOT_FOUND");
     return { ...operation.file, uri: await this.dependencies.fileStore.resolveURI(operation.file) };
   }
-  async blockAuth(): Promise<void> {
+  blockAuth(): Promise<void> {
+    if (this.authBlock) return this.authBlock;
+    this.authRevision++;
+    this.authBlock = this.invalidateAuth().then(() => {
+      this.authBlockComplete = true;
+    }, (error: unknown) => {
+      this.authBlock = undefined;
+      throw error;
+    });
+    return this.authBlock;
+  }
+  private async invalidateAuth(): Promise<void> {
     this.state = await updateState(this.dependencies.store, this.dependencies.namespace, (state) => {
       state.authBlocked = true;
       for (const op of state.operations) if (op.status === "pending" || op.status === "syncing") op.status = "auth_required";
@@ -257,8 +284,11 @@ export class OfflineEngine {
     await this.dependencies.onAuthBlocked?.();
   }
   async revalidate(): Promise<User> {
+    const generation = this.generation;
+    const authRevision = this.authRevision;
     const user = await this.dependencies.upstream.me(this.dependencies.branchId);
     if (!sameOfflineUser(this.dependencies.user, user, this.dependencies.branchId)) throw new ApiError(401, "OFFLINE_IDENTITY_CHANGED", "La identidad de la sesión cambió.");
+    if (generation !== this.generation || authRevision !== this.authRevision || this.stopped) throw new OfflineUnavailableError("OFFLINE_CYCLE_INTERRUPTED");
     await this.dependencies.onVerified?.(user);
     return user;
   }
@@ -315,6 +345,7 @@ export class OfflineEngine {
     if (!acquired) return;
     this.retryTransportOnWake = false;
     this.publish({ syncing: true, lastError: null });
+    const connectionRevision = this.connectionRevision;
     try {
       if (generation !== this.generation) return;
       await this.revalidate();
@@ -387,9 +418,11 @@ export class OfflineEngine {
         }
       }
     } catch (error) {
-      this.probeFailures++;
       if (error instanceof ApiError && error.status === 401) await this.blockAuth();
-      else this.noteConnectionFailure(error, generation);
+      else if (generation === this.generation && !(error instanceof NetworkError && connectionRevision !== this.connectionRevision && this.connection.status === "ready")) {
+        this.probeFailures++;
+        this.noteConnectionFailure(error, generation);
+      }
     } finally {
       this.state = await updateState(store, namespace, (state) => { if (state.lease?.owner === owner) state.lease = null; });
       this.publish();
@@ -434,7 +467,16 @@ export class OfflineEngine {
       if (operation.kind === "answer" && !operation.wire) throw new OfflineUnavailableError("OFFLINE_ANSWER_TYPE_UNKNOWN");
       await assertOwner();
       const workScope: WorkScope = { ...scope, workId: scope.workId };
-      receipt = await upstream.offlineCommand({ operationId: operation.id, scope: workScope, kind: operation.kind, payload: operation.kind === "comment" ? { text: operation.text } : { stepId: operation.stepId, answer: operation.wire!.answer, base: operation.wire!.base } });
+      const common = { operationId: operation.id, scope: workScope };
+      let command: OfflineCommand;
+      if (operation.kind === "comment") command = { ...common, kind: "comment", payload: { text: operation.text } };
+      else if (operation.kind === "timer") command = { ...common, kind: "timer", payload: operation.payload };
+      else if (operation.kind === "checklist") command = { ...common, kind: "checklist", payload: operation.payload };
+      else {
+        if (!operation.wire) throw new OfflineUnavailableError("OFFLINE_ANSWER_TYPE_UNKNOWN");
+        command = { ...common, kind: "answer", payload: { stepId: operation.stepId, answer: operation.wire.answer, base: operation.wire.base } };
+      }
+      receipt = await upstream.offlineCommand(command);
     }
     const checked = this.checkedReceipt(operation.id, receipt);
     if (operation.kind === "document" && checked.state === "applied"

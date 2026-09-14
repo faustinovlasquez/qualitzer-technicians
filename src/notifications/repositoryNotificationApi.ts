@@ -3,7 +3,7 @@ import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import type { NotificationApi } from "./contracts";
 import { sameNotificationSession } from "./notificationSafety";
 
-export type NotificationRepository = Pick<TechnicianRepository, "notificationStatus" | "registerNotificationDevice" | "unregisterNotificationDevice" | "notificationInbox" | "readNotification" | "testNotification">;
+export type NotificationRepository = Pick<TechnicianRepository, "notificationStatus" | "registerNotificationDevice" | "unregisterNotificationDevice" | "notificationInbox" | "readNotification" | "deleteNotification" | "testNotification">;
 
 export function bindNotificationApi(capturedSession: Session, repository: NotificationRepository): NotificationApi {
   function branch(session: Session): number {
@@ -19,8 +19,9 @@ export function bindNotificationApi(capturedSession: Session, repository: Notifi
       return repository.registerNotificationDevice(input);
     },
     notificationUnregister: (session, installationId) => repository.unregisterNotificationDevice(branch(session), installationId),
-    notificationInbox: (session, page) => repository.notificationInbox(branch(session), page),
+    notificationInbox: (session, page, unreadOnly) => repository.notificationInbox(branch(session), page, unreadOnly),
     notificationRead: (session, eventId) => repository.readNotification(branch(session), eventId),
+    notificationDelete: (session, eventId) => repository.deleteNotification(branch(session), eventId),
     notificationTest: (session) => repository.testNotification(branch(session)),
   };
 }

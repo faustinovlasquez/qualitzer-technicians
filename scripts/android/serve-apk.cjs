@@ -1,27 +1,87 @@
 "use strict";
 
 const { createServer } = require("node:http");
-const { createReadStream, readFileSync, statSync } = require("node:fs");
+const { readFileSync, lstatSync, readdirSync } = require("node:fs");
 const { createHash } = require("node:crypto");
 const { networkInterfaces } = require("node:os");
 const { resolve } = require("node:path");
 const QRCode = require("qrcode");
+const { validateVersion, expectedRelease, packageName, applicationName, gatewayUrl, certificateSha256 } = require("./release-policy.cjs");
 
 const root = resolve(__dirname, "../..");
-const name = "qualitzer-field-1.0.0-android.apk";
-const file = resolve(root, "artifacts", name);
-const report = JSON.parse(readFileSync(resolve(root, "artifacts/release-verification.json"), "utf8"));
-const sha256 = createHash("sha256").update(readFileSync(file)).digest("hex");
+function publicPath(base, relative, directory = false) {
+  const parts = relative.split("/");
+  if (parts.some(part => !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(part))) throw new Error("DOWNLOAD_PATH_NOT_ALLOWED");
+  let current = base;
+  for (let index = 0; index < parts.length; index++) {
+    current = resolve(current, parts[index]);
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink() || (index < parts.length - 1 || directory ? !stat.isDirectory() : !stat.isFile())) throw new Error("DOWNLOAD_FILE_TYPE_NOT_ALLOWED");
+  }
+  return current;
+}
+function readPublicFile(base, relative, limit = 2 * 1024 * 1024) {
+  const file = publicPath(base, relative);
+  if (lstatSync(file).size > limit) throw new Error("DOWNLOAD_FILE_TOO_LARGE");
+  return readFileSync(file);
+}
+const report = JSON.parse(readPublicFile(root, "artifacts/release-verification.json").toString("utf8"));
+const { name, version, versionCode } = validateVersion(report.version, report.versionCode);
+const expected = expectedRelease(root);
+if (version !== expected.version || versionCode !== expected.versionCode || report.apk?.replaceAll("\\", "/") !== `artifacts/${name}` || report.package !== packageName || report.certificateSha256 !== certificateSha256 || report.gatewayUrl !== gatewayUrl || report.embeddedStandalone !== true || report.remoteUpdatesEnabled !== false || report.zipAlignment16KiB !== true || report.previousApk?.signerMatches !== true) throw new Error("APK_RELEASE_IDENTITY_REQUIRED");
+if (report.applicationName !== applicationName || report.companyBrandingModule !== true) throw new Error("APK_COMPANY_BRANDING_REQUIRED");
+if (report.pushConfigured !== true || report.push?.clientConfigured !== true || report.push?.scope !== "CLIENT_ONLY") throw new Error("APK_FIREBASE_CLIENT_CONFIGURATION_REQUIRED");
+const apkContent = readPublicFile(root, `artifacts/${name}`, 256 * 1024 * 1024);
+const sha256 = createHash("sha256").update(apkContent).digest("hex");
 if (sha256 !== report.sha256 || report.debuggable !== false || report.variant !== "release") throw new Error("APK_RELEASE_VERIFICATION_REQUIRED");
-const size = statSync(file).size;
-const addresses = Object.values(networkInterfaces()).flat().filter(address => address && address.family === "IPv4" && !address.internal && /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(address.address));
-const host = addresses.find(address => address.address === "192.168.1.105")?.address ?? addresses[0]?.address;
+const size = apkContent.length;
+if (size !== report.bytes) throw new Error("APK_RELEASE_SIZE_MISMATCH");
+const gatewayVersion = "1.0.4";
+const gatewayArchiveName = `qualitzer-mobile-gateway-${gatewayVersion}.tgz`;
+const gatewayArchivePath = `artifacts/mobile-gateway/${gatewayArchiveName}`;
+const gatewayContent = readPublicFile(root, gatewayArchivePath, 32 * 1024 * 1024);
+const gatewaySha256 = createHash("sha256").update(gatewayContent).digest("hex");
+const validationDirectory = "artifacts/logs/fluidity-package";
+const validationName = readdirSync(publicPath(root, validationDirectory, true), { withFileTypes: true })
+  .filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-zA-Z0-9]{6}$/.test(entry.name))
+  .map(entry => entry.name).sort().at(-1);
+if (!validationName) throw new Error("GATEWAY_VALIDATION_REPORT_REQUIRED");
+const gatewayValidation = JSON.parse(readPublicFile(root, `${validationDirectory}/${validationName}/report.json`).toString("utf8"));
+const requiredGatewayChecks = ["generated-package-hash", "archive-structure-and-manifest", "all-source-and-dependency-provenance",
+  "timer-checklist-and-retained-notifications-static", "actual-isolated-commonjs-node20-load", "observed-inputs-stable-at-completion"];
+if (gatewayValidation.passed !== true || gatewayValidation.version !== gatewayVersion || !gatewayValidation.completedAt
+  || gatewayValidation.package?.path !== gatewayArchivePath || gatewayValidation.package?.sha256 !== gatewaySha256
+  || gatewayValidation.package?.bytes !== gatewayContent.length || !Array.isArray(gatewayValidation.checks)
+  || !requiredGatewayChecks.every(name => gatewayValidation.checks.some(check => check.name === name && check.passed === true))) throw new Error("GATEWAY_DELIVERY_VERIFICATION_REQUIRED");
+const deploymentGuide = readPublicFile(resolve(root, "../Qualitzer2.0-Backend"), "docs/ACTUALIZACION-FLUIDEZ-MOVIL.md");
+const fluidityGuide = readPublicFile(root, "docs/ACTUALIZACION-FLUIDEZ-MOVIL.md");
+const releaseGuide = readPublicFile(root, `docs/ACTUALIZACION-${version}.md`);
+const logo = readPublicFile(root, "assets/qualitzer-logo.png");
+const addresses = Object.entries(networkInterfaces()).flatMap(([network, entries]) => (entries ?? []).map(address => ({ ...address, network })))
+  .filter(address => address.family === "IPv4" && !address.internal && /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(address.address));
+const requestedHost = process.env.QUALITZER_APK_HOST;
+if (requestedHost && !addresses.some(address => address.address === requestedHost)) throw new Error("APK_HOST_MUST_BE_ASSIGNED_PRIVATE_ADDRESS");
+const host = requestedHost ?? addresses.find(address => /^(?:wi-?fi|wlan|en0)/i.test(address.network))?.address
+  ?? addresses.find(address => /^(?:ethernet|eth\d|en\d)/i.test(address.network) && !/virtual|vethernet|vpn|tun|tap/i.test(address.network))?.address;
 if (!host) throw new Error("PRIVATE_LAN_REQUIRED_FOR_APK_DOWNLOAD");
 const url = `http://${host}:8790/${name}`;
 
 async function main() {
   const qr = await QRCode.toString(url, { type: "svg", margin: 2, width: 260 });
-  const html = `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Instalar Qualitzer Field</title><style>body{font:16px system-ui;background:#f3f7f8;color:#153c46;margin:0;padding:28px}main{max-width:560px;background:white;border-radius:20px;padding:28px;margin:auto}a{display:block;padding:16px;background:#007f80;color:white;text-decoration:none;text-align:center;border-radius:12px;font-weight:700}img{display:block;margin:20px auto}small{word-break:break-all}p{line-height:1.55}</style><main><h1>Qualitzer Field · Android</h1><p>APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p><a href="/${name}">Descargar APK</a><img src="/qr.svg" width="260" height="260" alt="QR para descargar el APK en el teléfono"><p>Abre este enlace desde el teléfono conectado a la misma Wi-Fi. El computador solo sirve esta descarga; la app instalada no necesita Expo Go ni Metro.</p><p><strong>Antes de iniciar sesión:</strong> actualiza y habilita la ruta /mobile en el servidor de la API. Esta descarga no realiza el despliegue.</p><small>SHA-256: ${sha256}</small></main></html>`;
+  const html = `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Actualizar ${applicationName} ${version}</title>
+<style>body{font:16px system-ui;background:#f3f7f8;color:#153c46;margin:0;padding:24px}main{max-width:560px;background:white;border-radius:20px;padding:24px;margin:auto}a{display:block;padding:16px;background:#007f80;color:white;text-decoration:none;text-align:center;border-radius:12px;font-weight:700;margin:12px 0}img{display:block;margin:20px auto}small{word-break:break-all}p,li{line-height:1.55}li{margin:8px 0}details{margin:20px 0}</style>
+<main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
+<p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
+<a href="/${name}">Descargar actualización ${version}</a><img src="/qr.svg" width="260" height="260" alt="QR para descargar la actualización en el teléfono">
+<p><strong>Antes de instalar: requiere desplegar el Backend compatible con timer/checklist y el gateway ${gatewayVersion}.</strong> Descargar estos archivos no despliega el servidor. El gateway 1.0.3 fue generado, no entregado, antes de la corrección crítica de reconciliación semanal; no instalarlo ni sobrescribirlo. Conserva la app 1.0.10 instalada hasta que el responsable confirme el despliegue.</p>
+<p>Después, elige <strong>Actualizar</strong> sobre la app instalada. No desinstales ni borres datos o pendientes.</p>
+<ul><li>Guardado durable de respuestas, comentarios, archivos, inicio/pausa/reanudación y vinculación de checklists, sin esperar la red para continuar tras el guardado local.</li><li>Sincronización en segundo plano respecto de la interfaz, con la app abierta y desbloqueada. Si el sistema la suspende o cierra, la cola persiste y se retoma al volver; no es un servicio permanente del sistema operativo.</li><li>El tiempo oficial del cronómetro lo determina el servidor al aplicar, no la hora del toque offline; no se reconstruye el tiempo sin conexión.</li><li>Un recibo applied todavía puede mostrar «Envío confirmado · esperando actualizar estado y tiempo». No confirma una ficha fresca ni autoriza repetir el envío.</li><li>Se conservan las mejoras de agenda, avisos, capturas desbloqueadas y protección mediante huella/PIN.</li></ul>
+<p>No hay migración nueva por timer/checklist. Siguen siendo necesarias las migraciones históricas de creación, recibos y notificaciones que falten, incluida la de borrado de avisos, mediante el procedimiento autorizado.</p>
+<p>No compartas la clave privada de cuenta de servicio por chat ni la incluyas en la app. Es distinta del archivo de configuración Android ya incorporado.</p>
+<a href="/actualizacion.txt">Detalles de esta actualización</a>
+<a href="/fluidez.txt">Guía de fluidez y preparación del gateway</a>
+<details open><summary>Despliegue requerido antes de instalar</summary><a href="/${gatewayArchiveName}">Gateway ${gatewayVersion} verificado</a><a href="/actualizacion-servidor.txt">Requisitos Backend y despliegue de fluidez</a><small>SHA-256 gateway: ${gatewaySha256}</small><p>La verificación local del paquete no demuestra que esté instalado en el servidor ni que el push remoto funcione.</p></details>
+<p>La misma Wi-Fi se necesita solo para descargar. La app instalada no necesita Expo Go, Metro ni el computador.</p><small>SHA-256 APK: ${sha256}</small></main></html>`;
   const server = createServer((req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -29,10 +89,7 @@ async function main() {
     if (req.url === `/${name}`) {
       res.writeHead(200, { "Content-Type": "application/vnd.android.package-archive", "Content-Length": size, "Content-Disposition": `attachment; filename="${name}"` });
       if (req.method === "HEAD") { res.end(); return; }
-      const stream = createReadStream(file);
-      stream.on("error", () => res.destroy());
-      res.on("close", () => stream.destroy());
-      stream.pipe(res);
+      res.end(apkContent);
       return;
     }
     if (req.url === "/" || req.url === "/qr.svg") {
@@ -41,13 +98,31 @@ async function main() {
       res.end(req.method === "HEAD" ? undefined : body);
       return;
     }
+    if (req.url === "/logo.png") {
+      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": logo.length });
+      res.end(req.method === "HEAD" ? undefined : logo);
+      return;
+    }
+    if (req.url === "/actualizacion.txt" || req.url === "/fluidez.txt") {
+      const content = req.url === "/actualizacion.txt" ? releaseGuide : fluidityGuide;
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Content-Length": content.length });
+      res.end(req.method === "HEAD" ? undefined : content);
+      return;
+    }
+    if (req.url === `/${gatewayArchiveName}` || req.url === "/actualizacion-servidor.txt") {
+      const archive = req.url === `/${gatewayArchiveName}`;
+      const content = archive ? gatewayContent : deploymentGuide;
+      res.writeHead(200, { "Content-Type": archive ? "application/gzip" : "text/plain; charset=utf-8", "Content-Length": content.length, "Content-Disposition": `attachment; filename="${archive ? gatewayArchiveName : "actualizacion-servidor.txt"}"` });
+      res.end(req.method === "HEAD" ? undefined : content);
+      return;
+    }
     res.writeHead(404); res.end();
   });
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   server.maxHeadersCount = 30;
   server.on("error", () => { console.error("APK_DOWNLOAD_SERVER_UNAVAILABLE"); process.exitCode = 1; });
-  server.listen(8790, host, () => console.log(`APK_DOWNLOAD_PAGE http://${host}:8790/\nAPK_DOWNLOAD ${url}\nSHA256 ${sha256}`));
+  server.listen(8790, host, () => console.log(`APK_DOWNLOAD_PID ${process.pid}\nAPK_DOWNLOAD_PAGE http://${host}:8790/\nAPK_DOWNLOAD ${url}\nAPK_QR http://${host}:8790/qr.svg\nVERSION ${version} CODE ${versionCode}\nSHA256 ${sha256}`));
   for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => server.close());
 }
 

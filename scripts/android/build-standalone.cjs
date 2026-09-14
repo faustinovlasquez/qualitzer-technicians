@@ -3,30 +3,21 @@ const { randomBytes, createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { inspectApk } = require("./inspect-apk.cjs");
+const { expectedRelease, gatewayUrl, certificateSha256: pinnedCertificate, verifyPrevious, previous, sha256File } = require("./release-policy.cjs");
+const { captureSources, protectedSnapshot, verifySources, checkHealth } = require("./release-provenance.cjs");
+const { releaseEnvironment, resolveReleaseConfig, verifyPushConfig, readApkResources, verifyCompiledPush } = require("./release-push.cjs");
 
 const root = path.resolve(__dirname, "../..");
 const args = process.argv.slice(2);
 const toolRoot = args[args.indexOf("--tool-root") + 1];
 const architectures = args[args.indexOf("--architectures") + 1];
-if (!toolRoot || !["arm64-v8a", "arm64-v8a,armeabi-v7a"].includes(architectures)) throw new Error("INVALID_BUILD_ARGUMENTS");
-const gatewayUrl = "https://api-demos-qz-v2.qualitzer.com/mobile";
+if (!toolRoot || !["arm64-v8a", "arm64-v8a,armeabi-v7a", "arm64-v8a,armeabi-v7a,x86_64"].includes(architectures)) throw new Error("INVALID_BUILD_ARGUMENTS");
+const expected = expectedRelease(root);
 const signingRoot = path.join(root, ".data/android-signing");
 const artifacts = path.join(root, "artifacts");
 const logs = path.join(artifacts, "logs", new Date().toISOString().replace(/[:.]/g, "-"));
 fs.mkdirSync(logs, { recursive: true });
-const environment = {};
-for (const [name, value] of Object.entries(process.env)) {
-  if (/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH|USERNAME|USERDOMAIN|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES|OS|NUMBER_OF_PROCESSORS|PROCESSOR_.*|JAVA_HOME|ANDROID_HOME|ANDROID_SDK_ROOT|ANDROID_USER_HOME|GRADLE_USER_HOME)$/i.test(name)) environment[name] = value;
-}
-Object.assign(environment, {
-  NODE_ENV: "production",
-  EXPO_NO_DOTENV: "1",
-  EXPO_NO_TELEMETRY: "1",
-  CI: "1",
-  EAS_BUILD_PROFILE: "standalone-apk",
-  EXPO_PUBLIC_STANDALONE: "true",
-  EXPO_PUBLIC_GATEWAY_URL: gatewayUrl,
-});
+const environment = releaseEnvironment(process.env);
 const javaHome = path.join(toolRoot, "jdk/jdk-17.0.20.1+1");
 const buildTools = path.join(toolRoot, "sdk/build-tools/36.0.0");
 const phases = [];
@@ -119,6 +110,7 @@ async function signingEnvironment(allowCreate) {
   ], signing);
   const certificateSha256 = certificateLog.match(/SHA256:\s*([A-Fa-f0-9:]+)/)?.[1].replaceAll(":", "").toLowerCase();
   if (!certificateSha256 || certificateSha256.length !== 64) throw new Error("RELEASE_CERTIFICATE_FINGERPRINT_MISSING");
+  if (certificateSha256 !== pinnedCertificate || !certificateLog.includes("PrivateKeyEntry")) throw new Error("EXISTING_RELEASE_PRIVATE_KEY_MISMATCH");
   return { environment: signing, certificateSha256 };
 }
 
@@ -127,25 +119,26 @@ async function main() {
   const descriptor = fs.openSync(lock, "wx", 0o600);
   try {
     console.log(`BUILD_LOGS ${logs}`);
+    const protectedBefore = protectedSnapshot(root);
+    const sourcesBefore = captureSources(root);
+    fs.writeFileSync(path.join(logs, "source-capture.json"), JSON.stringify(sourcesBefore, null, 2));
+    if (expected.versionCode <= previous.versionCode || expected.version === previous.version) throw new Error("UPDATE_VERSION_MUST_ADVANCE");
+    verifyPrevious(root);
+    const signing = await signingEnvironment(false);
+    const oldSignature = await run("previous-apk-signature", path.join(buildTools, "apksigner.bat"), ["verify", "--verbose", "--print-certs", path.join(artifacts, previous.name)]);
+    if (oldSignature.match(/Signer #1 certificate SHA-256 digest: (\w+)/)?.[1] !== pinnedCertificate || !/Verified using v2 scheme.*true/.test(oldSignature)) throw new Error("PREVIOUS_APK_SIGNATURE_MISMATCH");
     const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
     if (packageJson.dependencies?.["expo-dev-client"] || fs.existsSync(path.join(root, "node_modules/expo-dev-client"))) throw new Error("DEV_CLIENT_NOT_ALLOWED");
-    const { getConfig } = require("@expo/config");
-    const saved = { ...process.env };
-    for (const name of Object.keys(process.env)) delete process.env[name];
-    Object.assign(process.env, environment);
-    let config;
-    try { config = getConfig(root, { skipSDKVersionRequirement: true }).exp; }
-    finally {
-      for (const name of Object.keys(process.env)) delete process.env[name];
-      Object.assign(process.env, saved);
-    }
-    if (config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.enabled !== false || config.android?.package !== "com.qualitzer.field" || config.version !== "1.0.0") throw new Error("INVALID_PUBLIC_RELEASE_CONFIG");
+    const config = resolveReleaseConfig(root, environment);
+    const pushConfig = verifyPushConfig(root, config);
+    if (config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.enabled !== false || config.android?.package !== "com.qualitzer.field" || config.version !== expected.version || config.android.versionCode !== expected.versionCode) throw new Error("INVALID_PUBLIC_RELEASE_CONFIG");
+    const profile = JSON.parse(fs.readFileSync(path.join(root, "eas.json"), "utf8")).build?.["standalone-apk"];
+    if (profile?.developmentClient !== false || profile.android?.buildType !== "apk" || profile.env?.EXPO_PUBLIC_GATEWAY_URL !== gatewayUrl || profile.env.EXPO_PUBLIC_STANDALONE !== "true") throw new Error("INVALID_STANDALONE_EAS_PROFILE");
     fs.writeFileSync(path.join(logs, "release-config.json"), JSON.stringify(config, null, 2));
     if (!args.includes("--skip-prebuild") && !args.includes("--verify-only")) {
-      await run("prebuild", process.execPath, [path.join(root, "node_modules/expo/bin/cli"), "prebuild", "--platform", "android", "--no-install", "--skip-dependency-update", "react-native,react"]);
+      await run("prebuild", process.execPath, [path.join(root, "node_modules/expo/bin/cli"), "prebuild", "--platform", "android", "--no-clean", "--no-install", "--skip-dependency-update", "react-native,react"]);
     }
     if (args.includes("--prebuild-only")) return;
-    const signing = await signingEnvironment(!args.includes("--verify-only"));
     if (!args.includes("--verify-only")) {
       await run("assemble-release", path.join(toolRoot, "gradle/gradle-9.3.1/bin/gradle.bat"), [
         "-p", path.join(root, "android"), "--init-script", path.join(__dirname, "release-signing.gradle"),
@@ -153,24 +146,43 @@ async function main() {
       ], signing.environment);
     }
     const sourceApk = path.join(root, "android/app/build/outputs/apk/release/app-release.apk");
+    const finalPushConfig = verifyPushConfig(root, resolveReleaseConfig(root, environment));
+    if (finalPushConfig.firebaseConfigSha256 !== pushConfig.firebaseConfigSha256) throw new Error("PUSH_FIREBASE_CONFIG_CHANGED_DURING_BUILD");
+    const manifest = await run("apk-manifest", path.join(buildTools, "aapt.exe"), ["dump", "xmltree", sourceApk, "AndroidManifest.xml"]);
+    const push = verifyCompiledPush(sourceApk, finalPushConfig, readApkResources(path.join(buildTools, "aapt.exe"), sourceApk, environment), manifest);
+    fs.writeFileSync(path.join(logs, "push-verification.json"), JSON.stringify(push, null, 2));
+    console.log(`CLIENT_PUSH_VERIFIED ${JSON.stringify(push)}`);
+    if (args.includes("--diagnostic-only")) {
+      console.log(`DIAGNOSTIC_APK ${sourceApk}`);
+      return;
+    }
     const signature = await run("verify-signature", path.join(buildTools, "apksigner.bat"), ["verify", "--verbose", "--print-certs", sourceApk]);
     if (/Android Debug|CN=AndroidDebug/i.test(signature) || !signature.includes("CN=Qualitzer Field") || !/Verified using v2 scheme.*true/.test(signature)) throw new Error("INVALID_RELEASE_SIGNATURE");
     const certificateSha256 = signature.match(/Signer #1 certificate SHA-256 digest: (\w+)/)?.[1];
     if (certificateSha256 !== signing.certificateSha256) throw new Error("APK_SIGNER_DOES_NOT_MATCH_LOCAL_RELEASE_IDENTITY");
     await run("verify-alignment", path.join(buildTools, "zipalign.exe"), ["-c", "-P", "16", "4", sourceApk]);
     const badging = await run("apk-badging", path.join(buildTools, "aapt.exe"), ["dump", "badging", sourceApk]);
-    const manifest = await run("apk-manifest", path.join(buildTools, "aapt.exe"), ["dump", "xmltree", sourceApk, "AndroidManifest.xml"]);
-    const inspection = inspectApk(sourceApk, { gatewayUrl, architectures, badging, manifest });
-    const destination = path.join(artifacts, `qualitzer-field-${config.version}-android.apk`);
-    fs.copyFileSync(sourceApk, destination);
+    const inspection = inspectApk(sourceApk, { gatewayUrl, architectures, badging, manifest, ...expected });
+    const provenance = verifySources(root, sourcesBefore, inspection.bundleSha256);
+    if (JSON.stringify(protectedBefore) !== JSON.stringify(protectedSnapshot(root))) throw new Error("PROTECTED_PROJECT_FILES_CHANGED_DURING_BUILD");
+    const previousApk = { ...verifyPrevious(root), certificateSha256: pinnedCertificate, signerMatches: certificateSha256 === pinnedCertificate };
+    const health = await checkHealth();
+    const destination = path.join(artifacts, expected.name);
+    if (fs.existsSync(destination)) {
+      if (sha256File(destination) !== sha256File(sourceApk)) throw new Error("VERSIONED_APK_ALREADY_EXISTS_WITH_DIFFERENT_BYTES");
+    } else fs.copyFileSync(sourceApk, destination, fs.constants.COPYFILE_EXCL);
     const sha256 = createHash("sha256").update(fs.readFileSync(destination)).digest("hex");
     const report = {
+      verifiedAt: new Date().toISOString(),
       apk: path.relative(root, destination), sha256, bytes: fs.statSync(destination).size,
       certificateSha256, zipAlignment16KiB: true,
-      variant: "release", gatewayUrl, ...inspection, phases,
-      limits: ["Backend /mobile deployment pending", "No physical device installation or native login tested", "Local sideload signing; retain private signing directory for updates"],
+      variant: "release", gatewayUrl, ...inspection, pushConfigured: push.pushConfigured, push, phases,
+      previousApk, provenance, health, protectedProjectFilesUnchanged: true,
+      installation: `Install over ${previous.version}; do not uninstall or clear app data/queue`,
+      limits: ["Client push configuration verified only; remote FCM/EAS credentials, backend readiness, device permission and delivery remain pending", "No physical device installation or native login tested", "Local sideload signing; retain private signing directory for updates"],
     };
     fs.writeFileSync(path.join(logs, "verification.json"), JSON.stringify(report, null, 2));
+    fs.writeFileSync(path.join(artifacts, `release-verification-${expected.version}.json`), JSON.stringify(report, null, 2));
     fs.writeFileSync(path.join(artifacts, "release-verification.json"), JSON.stringify(report, null, 2));
     fs.writeFileSync(`${destination}.sha256`, `${sha256}  ${path.basename(destination)}\n`);
     console.log(`VERIFIED_RELEASE ${JSON.stringify(report, null, 2)}`);

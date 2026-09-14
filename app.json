@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Qualitzer Field",
-    "slug": "qualitzer-field",
+    "name": "Qualitzer técnicos",
+    "slug": "qualitzer-tecnicos",
     "scheme": "qualitzer-field",
-    "version": "1.0.0",
+    "version": "1.0.11",
     "orientation": "portrait",
-    "icon": "./assets/field-icon.png",
+    "icon": "./assets/qualitzer-icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
@@ -14,19 +14,29 @@
     },
     "android": {
       "package": "com.qualitzer.field",
+      "versionCode": 12,
+      "googleServicesFile": "./config/firebase/google-services.json",
+      "blockedPermissions": ["android.permission.READ_MEDIA_IMAGES"],
+      "permissions": ["android.permission.DETECT_SCREEN_CAPTURE"],
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4F2",
-        "foregroundImage": "./assets/field-adaptive.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/qualitzer-adaptive.png"
       },
       "predictiveBackGestureEnabled": false
     },
+    "extra": {
+      "eas": {
+        "projectId": "be200e44-9d60-4881-9050-1c67afaeb650"
+      }
+    },
     "plugins": [
       "expo-secure-store",
-      ["expo-notifications", { "defaultChannel": "technical-work", "color": "#226957" }],
+      ["expo-local-authentication", { "faceIDPermission": "Qualitzer técnicos usa Face ID para desbloquear tu sesión en este teléfono." }],
+      ["expo-notifications", { "defaultChannel": "technical-work", "color": "#226957", "icon": "./assets/notification-icon.png" }],
       ["expo-image-picker", { "photosPermission": "Qualitzer necesita acceder a las fotos que selecciones como evidencia de tu trabajo.", "cameraPermission": "Qualitzer necesita la cámara para registrar evidencias del trabajo.", "microphonePermission": false }]
     ],
     "web": {
-      "favicon": "./assets/field-favicon.png"
+      "favicon": "./assets/qualitzer-favicon.png"
     }
   }
 }

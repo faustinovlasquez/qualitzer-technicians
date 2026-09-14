@@ -1,4 +1,15 @@
-# Qualitzer Field
+# Qualitzer técnicos
+
+## Instalación, producción y otros entornos
+
+Empezar por el **[manual completo paso a paso](docs/MANUAL-INSTALACION-PRODUCCION.md)**: backend, migraciones, variables, frontend web, Expo/Firebase, firma, APK, instalación y verificación. Cada fase distingue acciones de una persona, de la IA y operaciones que requieren autorización.
+
+- [Ficha para un nuevo entorno o pase](docs/PLANTILLA-PASE-ENTORNO.md)
+- [Guía específica del backend](../Qualitzer2.0-Backend/docs/INSTALACION-APP-TECNICOS.md)
+- [Guía específica del frontend web y administración](../Qualitzer2.0-Frontend/docs/INSTALACION-APP-TECNICOS.md)
+- [Entrega Android 1.0.5](docs/ACTUALIZACION-1.0.5.md) y [estado de configuración push](docs/ACTIVAR-NOTIFICACIONES.md)
+
+**Las secciones siguientes conservan notas de la preparación inicial.** Sus indicaciones Expo Go, puertos locales, versiones y límites antiguos no son el procedimiento vigente para producción; utilizar el manual anterior y las notas de versión.
 
 Aplicación móvil independiente para técnicos de Qualitzer, desarrollada con **React Native + Expo 57 + TypeScript**. Corre en Android, iPhone y navegador. Su código y dependencias están fuera de los proyectos existentes.
 
@@ -162,5 +173,6 @@ Detalles de autorización, límites y restricciones en **[server/README.md](serv
 
 ## Desarrollo
 
-Scripts disponibles en **[package.json](package.json)**: `start`, `mobile`, `web`, `gateway`, `typecheck`, `test`, `export:web`, `export:mobile`. Su presencia no implica que se hayan ejecutado para esta integración. Configuración técnica en **[server/README.md](server/README.md)** y distribuciones por empresa en **[docs/BRANDING.md](docs/BRANDING.md)**.#   q u a l i t z e r - t e c h n i c i a n s  
+Scripts disponibles en **[package.json](package.json)**: `start`, `mobile`, `web`, `gateway`, `typecheck`, `test`, `export:web`, `export:mobile`. Su presencia no implica que se hayan ejecutado para esta integración. Configuración técnica en **[server/README.md](server/README.md)** y distribuciones por empresa en **[docs/BRANDING.md](docs/BRANDING.md)**.#   q u a l i t z e r - t e c h n i c i a n s 
+ 
  

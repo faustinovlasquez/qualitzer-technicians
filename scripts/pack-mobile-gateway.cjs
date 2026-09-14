@@ -10,11 +10,11 @@ const localRequire = createRequire(path.join(root, "package.json"));
 const esbuild = localRequire("esbuild");
 const ts = localRequire("typescript");
 const name = "@qualitzer/mobile-gateway";
-const version = "1.0.0";
-const destination = path.resolve(root, "../Qualitzer2.0-Backend/infrastructure/mobile-gateway");
+const version = "1.0.4";
+const destination = path.resolve(root, "artifacts/mobile-gateway");
 const hash = (content) => crypto.createHash("sha256").update(content).digest("hex");
 const relative = (file) => path.relative(root, file).split(path.sep).join("/");
-const forbidden = /(?:^|\/)(?:expo(?:-[^/]*)?|@expo|react-native(?:-[^/]*)?|sharp|qrcode|tests|\.data)(?:\/|$)|^server\/(?:index|development|app)\.ts$/;
+const forbidden = /(?:^|\/)(?:expo(?:-[^/]*)?|@expo|react-native(?:-[^/]*)?|sharp|qrcode|tests|\.data|\.env(?:\.[^/]*)?)(?:\/|$)|^server\/(?:index|development|app)\.ts$/;
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8", shell: false, windowsHide: true });
@@ -43,6 +43,11 @@ async function build(directory) {
     bundle: true, platform: "node", format: "cjs", target: "node20.12.2",
     packages: "bundle", treeShaking: true, minify: false, sourcemap: false,
     legalComments: "inline", metafile: true, logLevel: "warning",
+    plugins: [{ name: "exclude-private-inputs", setup(context) {
+      context.onLoad({ filter: /(?:^|[\\/])\.(?:data(?:[\\/]|$)|env(?:\.[^\\/]*)?$)/i }, () => {
+        throw new Error("PRIVATE_BUNDLE_INPUT_FORBIDDEN");
+      });
+    } }],
   });
   const builtins = new Set(builtinModules.map((item) => item.replace(/^node:/, "")));
   for (const output of Object.values(result.metafile.outputs)) {
@@ -118,8 +123,10 @@ async function main() {
     const sha256 = hash(fs.readFileSync(archive));
     if (sha256 !== hash(fs.readFileSync(rebuilt))) throw new Error("NON_REPRODUCIBLE_TARBALL");
     fs.mkdirSync(destination, { recursive: true });
-    const target = path.join(destination, "qualitzer-mobile-gateway-1.0.0.tgz");
-    fs.copyFileSync(archive, target);
+    const target = path.join(destination, `qualitzer-mobile-gateway-${version}.tgz`);
+    if (fs.existsSync(target)) {
+      if (hash(fs.readFileSync(target)) !== sha256) throw new Error("VERSIONED_GATEWAY_ARCHIVE_ALREADY_EXISTS");
+    } else fs.copyFileSync(archive, target, fs.constants.COPYFILE_EXCL);
     process.stdout.write(`${JSON.stringify({ name, version, archive: target, sha256, reproducible: true, ...summary }, null, 2)}\n`);
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 }

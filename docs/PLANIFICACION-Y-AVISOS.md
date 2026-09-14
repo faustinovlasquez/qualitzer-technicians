@@ -94,6 +94,8 @@ Revisar estado real, dependencias, columnas/índices, procedimiento tenant, roll
 
 Estado comunicado: flags deshabilitados y clave push no configurada. Mantenerlos así hasta completar revisión y pruebas autorizadas.
 
+Guía operativa actualizada: [ACTIVAR-NOTIFICACIONES.md](ACTIVAR-NOTIFICACIONES.md). El módulo de push lee directamente `process.env`, a diferencia de la configuración de la pasarela: si los valores se almacenan en AWS Secrets Manager, el despliegue debe inyectarlos en el entorno del proceso. La actualización 1.0.5 incorpora Expo/Firebase mediante configuración estática validada en el APK, manteniendo el entorno de build restringido. Las credenciales FCM v1 y la habilitación remota siguen siendo independientes.
+
 | Variable | Requisito |
 | --- | --- |
 | `MOBILE_PUSH_ENABLED` | `true` sólo para activar tras completar requisitos |

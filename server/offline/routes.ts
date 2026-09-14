@@ -27,7 +27,16 @@ export function createOfflineRouter(upstream: Upstream, uploadLimiter: RequestHa
     if (!req.is("application/json")) throw new GatewayError(415, "JSON_REQUIRED");
     const input = syncCommandSchema.parse(req.body);
     const { token } = await mobileActor(upstream, req, input.scope.companyBranchId);
-    respond(res, await upstream.requestReceipt("/mobile-sync/commands", input.operationId, { method: "POST", token, json: input }));
+    try {
+      respond(res, await upstream.requestReceipt("/mobile-sync/commands", input.operationId, { method: "POST", token, json: input }));
+    } catch (error) {
+      if ((input.kind === "timer" || input.kind === "checklist") && error instanceof GatewayError
+        && error.status === 400 && error.code === "MOBILE_SYNC_INVALID_KIND") {
+        res.set("Retry-After", "60");
+        throw new GatewayError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE");
+      }
+      throw error;
+    }
   });
   router.get("/receipts/:operationId", async (req, res) => {
     emptySchema.parse(req.body ?? {});

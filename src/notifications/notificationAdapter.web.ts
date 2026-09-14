@@ -15,6 +15,7 @@ export function createNotificationAdapter(): NotificationAdapter {
     async clearResponse() {},
     async presented() { return []; },
     async dismiss() {},
+    async setBadge() { return false; },
     async openSettings() {},
   };
 }

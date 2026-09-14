@@ -25,9 +25,8 @@ export interface ChecklistAssignmentPort {
   attachChecklist(scope: WorkScope, checklistId: number): Promise<ChecklistAssignmentResult>;
 }
 
-export function checklistAssociationBlocked(group: AssignmentGroup, work: AssignmentWork, online: boolean, pendingLocalWork = false): string | null {
+export function checklistAssociationBlocked(group: AssignmentGroup, work: AssignmentWork, _online: boolean, pendingLocalWork = false): string | null {
   if (pendingLocalWork || !/^[1-9]\d*$/.test(work.id) || !/^(?:external|maintenance|direct(?:-np)?)-[1-9]\d*$/.test(group.id)) return "Sincroniza primero la creación de este trabajo para agregar un checklist.";
-  if (!online) return "Sin conexión puedes consultar los checklists disponibles en el dispositivo. Agregar un checklist requiere conexión y no se guarda en la cola.";
   if (work.status === "completed" || work.status === "delivered") return "No se pueden agregar checklists a un trabajo finalizado o entregado.";
   if (group.works.filter((item) => item.id === work.id).length !== 1) return "Actualiza el detalle del trabajo antes de agregar un checklist.";
   return null;

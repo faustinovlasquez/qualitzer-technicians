@@ -9,6 +9,7 @@ export interface UseMobileNotificationsOptions {
   storageKey: string;
   api: NotificationApi | null;
   enabled?: boolean;
+  isInteractionAllowed?: NotificationClientOptions["isInteractionAllowed"];
   onOpen: NotificationClientOptions["onOpen"];
   onForegroundRefresh?: NotificationClientOptions["onForegroundRefresh"];
 }
@@ -16,13 +17,13 @@ export interface UseMobileNotificationsOptions {
 const subscribeNothing = (): (() => void) => () => {};
 const emptySnapshot = (): null => null;
 
-export function useMobileNotifications({ session, storageKey, api, enabled = true, onOpen, onForegroundRefresh }: UseMobileNotificationsOptions) {
+export function useMobileNotifications({ session, storageKey, api, enabled = true, onOpen, onForegroundRefresh, isInteractionAllowed }: UseMobileNotificationsOptions) {
   const current = useRef<MobileNotificationClient | null>(null);
   const client = useMemo(() => {
     if (!enabled || !session || !api || session.mode !== "live" || !session.branchId || !session.user.workerId || !storageKey) return null;
     const captured = session;
     const instance: MobileNotificationClient = new MobileNotificationClient({ session: captured, storageKey, api,
-      adapter: createNotificationAdapter(), onOpen, onForegroundRefresh, isCurrent: (): boolean => current.current === instance });
+      adapter: createNotificationAdapter(), onOpen, onForegroundRefresh, isInteractionAllowed, isCurrent: (): boolean => current.current === instance });
     return instance;
   }, [enabled, Boolean(api), storageKey, session?.token, session?.mode, session?.branchId, session?.user.id, session?.user.workerId,
     session?.tenant.id, session?.tenant.portalOrigin, session?.tenant.environment]);

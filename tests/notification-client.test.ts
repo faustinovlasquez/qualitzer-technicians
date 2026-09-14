@@ -13,6 +13,8 @@ import { createNotificationAdapter as createWebAdapter } from "../src/notificati
 import { DEFAULT_NOTIFICATION_PREFERENCES, NotificationEventDeduper, notificationForSession, permissionAllowsPush } from "../src/notifications/notificationSafety";
 import { bindNotificationApi, type NotificationRepository } from "../src/notifications/repositoryNotificationApi";
 import { runningTimersFromSnapshot } from "../src/notifications/runningTimers";
+import * as notificationPresentationDedupe from "../src/notifications/notificationPresentationDedupe";
+import { notificationReadWithTimeout } from "../src/notifications/MobileNotificationClient";
 
 const projectId = "0fe95e1e-0dbb-4311-9b79-bd31bc0d41f3";
 const installationId = "fa4c5b12-317e-42fd-ac53-cb22c0e0587b";
@@ -59,7 +61,8 @@ function fixture() {
     },
     async notificationUnregister(captured, id) { assert.equal(captured, session); assert.equal(id, installationId); unregisters += 1; status = { ...status, device: null }; },
     async notificationInbox(_session, page) { return { items: items.slice((page - 1) * 25, page * 25), page, pageSize: 25 }; },
-    async notificationRead(_session, id) { read += 1; return { id, read: true }; },
+    async notificationRead(_session, id) { read += 1; items = items.map(entry => entry.id === id ? { ...entry, readAt: entry.readAt ?? timestamp } : entry); return { id, read: true }; },
+    async notificationDelete(_session, id) { items = items.filter(entry => entry.id !== id); return { id, deleted: true }; },
     async notificationTest(...args) { assert.equal(args.length, 1); assert.equal(args[0], session); tests += 1; return { eventId, state: "pending" }; },
   };
   const adapter: NotificationAdapter = {
@@ -95,6 +98,19 @@ test("payload validation rejects foreign scopes, malformed IDs, origins and date
   }
   assert.equal(notificationForSession(payload, { ...session, mode: "demo" }), null);
   assert.equal(notificationForSession(payload, { ...session, branchId: null }), null);
+});
+
+test("recipient validation rejects malformed identities and either foreign user or worker without legacy fallback", () => {
+  const recipient = { userId: session.user.id, workerId: session.user.workerId };
+  assert.deepEqual(notificationForSession({ ...payload, recipient }, session), { ...payload, recipient });
+  assert.deepEqual(notificationForSession(payload, session), payload);
+  for (const invalid of [null, false, "10", [], {}, { userId: 10 }, { workerId: 20 },
+    { ...recipient, userId: "10" }, { ...recipient, workerId: "20" },
+    { ...recipient, userId: 0 }, { ...recipient, workerId: -1 }, { ...recipient, userId: 1.5 },
+    { ...recipient, workerId: Number.MAX_SAFE_INTEGER + 1 },
+    { ...recipient, userId: 11 }, { ...recipient, workerId: 21 }]) {
+    assert.equal(notificationForSession({ ...payload, recipient: invalid }, session), null, JSON.stringify(invalid));
+  }
 });
 
 test("dedupe is bounded, rejects concurrent opens and retries rejected navigation", () => {
@@ -208,16 +224,24 @@ test("web adapter is importable without native SDK and retains authenticated inb
 
 test("bound repository rejects another session or branch and test has no body or token argument", async () => {
   const calls: number[][] = [];
+  const inboxCalls: Array<[number, number | undefined, boolean | undefined]> = [];
+  const deleteCalls: Array<[number, string]> = [];
   const repository: NotificationRepository = {
     async notificationStatus() { return { enabled: false, reasons: [], projectId: null, reconciliationSeconds: 120, deliveryGuaranteed: false }; },
     async registerNotificationDevice(input) { return { installationId: input.installationId, active: true, preferences: input.preferences, baselineCapturedAt: timestamp }; },
     async unregisterNotificationDevice() {},
-    async notificationInbox(_branch, page) { return { page, pageSize: 25, items: [] }; },
+    async notificationInbox(branch, page, unreadOnly) { inboxCalls.push([branch, page, unreadOnly]); return { page, pageSize: 25, items: [] }; },
     async readNotification(_branch, id) { return { id, read: true }; },
+    async deleteNotification(branch, id) { deleteCalls.push([branch, id]); return { id, deleted: true }; },
     async testNotification(...args: [number]) { calls.push(args); return { eventId, state: "pending" }; },
   };
   const api = bindNotificationApi(session, repository);
   await api.notificationTest(session); assert.deepEqual(calls, [[2]]);
+  await api.notificationInbox(session, 3, true); assert.deepEqual(inboxCalls, [[2, 3, true]]);
+  await api.notificationDelete(session, eventId); assert.deepEqual(deleteCalls, [[2, eventId]]);
+  assert.throws(() => api.notificationDelete({ ...session, token: "different-session" }, eventId), /SESSION_CHANGED/);
+  assert.throws(() => api.notificationDelete({ ...session, branchId: 3 }, eventId), /SESSION_CHANGED/);
+  assert.deepEqual(deleteCalls, [[2, eventId]]);
   assert.throws(() => api.notificationTest({ ...session, token: "different-session" }), /SESSION_CHANGED/);
   assert.throws(() => api.notificationStatus({ ...session, branchId: 3 }), /SESSION_CHANGED/);
   assert.throws(() => api.notificationRegister(session, { installationId, projectId, platform: "android", expoPushToken: "ExpoPushToken[testtoken0123456789]", companyBranchId: 3, preferences: DEFAULT_NOTIFICATION_PREFERENCES }), /SESSION_CHANGED/);
@@ -238,7 +262,9 @@ test("rejected canonical navigation preserves a cold response for retry", async 
 
 test("read controls only accept loaded own events and empty snapshots do not invent timers", async () => {
   const f = fixture(); const stop = f.client.start(); await f.client.refresh();
-  assert.equal(await f.client.markRead(eventId), false);
+  assert.equal(await f.client.markRead("b1ecc4bb-c526-4607-980e-60911578caf1"), false);
+  assert.equal(f.read, 0);
+  assert.equal(f.client.getSnapshot().inbox[0].id, eventId);
   await f.client.loadInbox(); assert.equal(await f.client.markRead(eventId), true);
   assert.equal(f.client.getSnapshot().inbox[0].readAt !== null, true);
   assert.deepEqual(runningTimersFromSnapshot(null), []); stop();
@@ -260,13 +286,51 @@ test("foreground presentation is synchronous, opted-in, registered and captured-
   let lookups = 0;
   f.api.notificationInbox = async () => { lookups += 1; throw new Error("MOBILE_PUSH_DATABASE_UNAVAILABLE"); };
   assert.equal(callbacks.shouldPresent(response), true);
-  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, groupType: "negotiation", workId: null } }), true);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, eventId: "b1ecc4bb-c526-4607-980e-60911578caf1" } }), false);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, groupType: "negotiation", workId: null } }), false);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, recipient: { userId: session.user.id, workerId: session.user.workerId } } }), true);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, recipient: { userId: session.user.id + 1, workerId: session.user.workerId } } }), false);
   for (const change of [{ tenantOrigin: "https://other.example" }, { companyBranchId: 3 }, { eventId: "bad" }, { kind: "OPEN_URL" }]) {
     assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, ...change } }), false);
   }
   assert.equal(lookups, 0); assert.equal(f.opened, 0); assert.equal(f.read, 0);
   f.setCurrent(false); assert.equal(callbacks.shouldPresent(response), false);
   f.setCurrent(true); stop(); assert.equal(callbacks.shouldPresent(response), false);
+});
+
+test("foreground presentation rejects an unowned legacy event until cached and never performs an ownership request", async t => {
+  const f = fixture(); f.setItems([]); t.after(f.client.start()); await f.client.retryEnable();
+  const callbacks = f.listeners; assert.ok(callbacks?.shouldPresent);
+  assert.equal(callbacks.shouldPresent(response), false);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, recipient: { userId: 10, workerId: 20 } } }), true);
+  f.setItems([item]); await f.client.loadInbox();
+  let lookups = 0;
+  f.api.notificationInbox = async () => { lookups += 1; throw new Error("UNEXPECTED_OWNERSHIP_LOOKUP"); };
+  assert.equal(callbacks.shouldPresent(response), true);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, workId: 900 } }), false);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, recipient: null } }), false);
+  assert.equal(callbacks.shouldPresent({ ...response, data: { ...payload, recipient: { userId: 11, workerId: 20 } } }), false);
+  assert.equal(lookups, 0); assert.equal(f.opened, 0); assert.equal(f.read, 0);
+});
+
+test("foreground presentation stays off before permission and registration without polling", async t => {
+  const f = fixture(); t.after(f.client.start()); await f.client.refresh();
+  const callbacks = f.listeners; assert.ok(callbacks?.shouldPresent);
+  const permissionEntered = deferred<void>(); const permissionRelease = deferred<NotificationPermission>();
+  const tokenEntered = deferred<void>(); const tokenRelease = deferred<string>();
+  t.after(() => { permissionRelease.resolve("granted"); tokenRelease.resolve("ExpoPushToken[testtoken0123456789]"); });
+  f.adapter.requestPermission = async () => { permissionEntered.resolve(); return permissionRelease.promise; };
+  f.adapter.getExpoToken = async () => { tokenEntered.resolve(); return tokenRelease.promise; };
+  const enabling = f.client.retryEnable();
+  await permissionEntered.promise;
+  assert.equal(f.client.getSnapshot().permission, "undetermined");
+  assert.equal(callbacks.shouldPresent(response), false); assert.equal(f.registrations.length, 0);
+  permissionRelease.resolve("granted"); await tokenEntered.promise;
+  assert.equal(f.client.getSnapshot().permission, "granted");
+  assert.equal(f.client.getSnapshot().registered, false); assert.equal(callbacks.shouldPresent(response), false);
+  tokenRelease.resolve("ExpoPushToken[testtoken0123456789]");
+  assert.equal(await enabling, true); assert.equal(f.registrations.length, 1);
+  assert.equal(callbacks.shouldPresent(response), true);
 });
 
 test("foreground presentation stops on OS denial and failed consent withdrawal", async () => {
@@ -385,8 +449,29 @@ function nativeAdapterHarness() {
   let handler: Handler | null = null;
   let removals = 0;
   let imports = 0;
+  let handlerInstallations = 0;
+  let scheduled = 0;
+  const badges: number[] = [];
+  const settledBadges: number[] = [];
+  let badgeCount: number | null = null;
+  let activeBadgeWrites = 0;
+  let maxActiveBadgeWrites = 0;
+  let settleBadge: (count: number) => Promise<boolean> = async () => true;
+  let acquireToken: () => Promise<{ data: string; type: "expo" }> = async () => ({ data: "ExpoPushToken[testtoken0123456789]", type: "expo" });
+  const tokenRequests: Array<{ projectId: string; devicePushToken?: NativePushToken }> = [];
   const sdk = {
-    setNotificationHandler(value: Handler | null) { handler = value; },
+    async getExpoPushTokenAsync(options: { projectId: string; devicePushToken?: NativePushToken }) { tokenRequests.push(options); return acquireToken(); },
+    setNotificationHandler(value: Handler | null) { handler = value; if (value) handlerInstallations += 1; },
+    async setBadgeCountAsync(count: number) {
+      badges.push(count); activeBadgeWrites += 1;
+      maxActiveBadgeWrites = Math.max(maxActiveBadgeWrites, activeBadgeWrites);
+      try {
+        const applied = await settleBadge(count);
+        if (applied) { badgeCount = count; settledBadges.push(count); }
+        return applied;
+      } finally { activeBadgeWrites -= 1; }
+    },
+    async scheduleNotificationAsync() { scheduled += 1; return "unexpected-local-notification"; },
     addNotificationResponseReceivedListener() { return { remove() { removals += 1; } }; },
     addNotificationReceivedListener() { return { remove() { removals += 1; } }; },
     addPushTokenListener() { return { remove() { removals += 1; } }; },
@@ -400,12 +485,16 @@ function nativeAdapterHarness() {
       case "expo-constants": return { default: { executionEnvironment: "standalone", easConfig: { projectId } }, ExecutionEnvironment: { StoreClient: "storeClient" } };
       case "react-native": return { Platform: { OS: "android" }, Linking: {}, AppState: { addEventListener() { return { remove() { removals += 1; } }; } } };
       case "zod": return { z };
+      case "./notificationPresentationDedupe": return notificationPresentationDedupe;
+      case "./MobileNotificationClient": return { notificationReadWithTimeout };
       case "expo-notifications": imports += 1; return sdk;
       default: throw new Error(`Unexpected SDK access: ${name}`);
     }
   } });
   const create = exported.createNotificationAdapter; assert.ok(create);
-  return { create, get handler() { return handler; }, get removals() { return removals; }, get imports() { return imports; } };
+  return { create, badges, settledBadges, tokenRequests, setTokenAcquisition(value: typeof acquireToken) { acquireToken = value; }, setBadgeSettlement(value: typeof settleBadge) { settleBadge = value; },
+    get badgeCount() { return badgeCount; }, get maxActiveBadgeWrites() { return maxActiveBadgeWrites; },
+    get handler() { return handler; }, get removals() { return removals; }, get imports() { return imports; }, get handlerInstallations() { return handlerInstallations; }, get scheduled() { return scheduled; } };
 }
 
 test("native handler uses synchronous scoped approval and older teardown cannot clear its replacement", async () => {
@@ -451,4 +540,128 @@ test("native handler fails closed without approval or when it throws and ignores
   const stopped = h.create().subscribe(callbacks); stopped();
   await new Promise<void>((done) => setImmediate(done));
   assert.equal(h.handler, null); assert.ok(h.imports > 0);
+});
+
+test("native handler presents an event once without local scheduling and forwards exact badge counts", async () => {
+  const h = nativeAdapterHarness();
+  const adapter = h.create();
+  let approved = false;
+  const stop = adapter.subscribe({ shouldPresent: () => approved, response() {}, received() {}, token() {}, foreground() {} });
+  await new Promise<void>(done => setImmediate(done));
+  const handler = h.handler; assert.ok(handler);
+  const notification = { request: { identifier: "first-delivery", content: { data: payload } } };
+  assert.equal((await handler.handleNotification(notification)).shouldShowBanner, false);
+  approved = true;
+  assert.equal((await handler.handleNotification(notification)).shouldShowBanner, true);
+  const duplicate = await handler.handleNotification({ request: { ...notification.request, identifier: "redelivery" } });
+  assert.deepEqual({ ...duplicate }, { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false });
+  assert.equal(h.handlerInstallations, 1); assert.equal(h.scheduled, 0);
+  assert.equal(await adapter.setBadge?.(87), true); assert.deepEqual(h.badges, [87]);
+  assert.equal(await adapter.setBadge?.(-1), false); assert.deepEqual(h.badges, [87]);
+  stop(); await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.badges, [87, 0]);
+});
+
+test("obsolete native adapter badge calls and teardown cannot clear a newer subscription badge", async t => {
+  const h = nativeAdapterHarness();
+  const callbacks: Parameters<NotificationAdapter["subscribe"]>[0] = { response() {}, received() {}, token() {}, foreground() {} };
+  const old = h.create(); const stopOld = old.subscribe(callbacks); t.after(stopOld);
+  assert.equal(await old.setBadge?.(12), true);
+  const current = h.create(); const stopCurrent = current.subscribe(callbacks); t.after(stopCurrent);
+  assert.equal(await current.setBadge?.(47), true);
+  assert.equal(await old.setBadge?.(0), false);
+  assert.equal(await old.setBadge?.(99), false);
+  stopOld(); await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.badges, [12, 47]); assert.deepEqual(h.settledBadges, [12, 47]); assert.equal(h.badgeCount, 47);
+  stopCurrent(); await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.settledBadges, [12, 47, 0]);
+});
+
+test("native badge writes serialize across adapter owners and skip queued obsolete writes and teardown", async t => {
+  const h = nativeAdapterHarness(); const entered = deferred<void>(); const release = deferred<boolean>();
+  h.setBadgeSettlement(async count => { if (count === 12) { entered.resolve(); return release.promise; } return true; });
+  const callbacks: Parameters<NotificationAdapter["subscribe"]>[0] = { response() {}, received() {}, token() {}, foreground() {} };
+  const old = h.create(); const stopOld = old.subscribe(callbacks);
+  const first = old.setBadge?.(12); await entered.promise;
+  const obsolete = old.setBadge?.(13); stopOld();
+  const current = h.create(); const stopCurrent = current.subscribe(callbacks);
+  t.after(async () => { release.resolve(true); await first; stopOld(); stopCurrent(); });
+  const next = current.setBadge?.(47);
+  await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.badges, [12]); assert.equal(h.badgeCount, null);
+  release.resolve(true);
+  assert.deepEqual(await Promise.all([first, obsolete, next]), [true, false, true]);
+  assert.equal(h.maxActiveBadgeWrites, 1); assert.deepEqual(h.settledBadges, [12, 47]); assert.equal(h.badgeCount, 47);
+  assert.equal(await old.setBadge?.(0), false);
+  await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.badges, [12, 47]); assert.equal(h.badgeCount, 47);
+});
+
+test("an already dispatched native teardown clear settles before the next owner writes its badge", async t => {
+  const h = nativeAdapterHarness(); const entered = deferred<void>(); const release = deferred<boolean>();
+  h.setBadgeSettlement(async count => { if (count === 0) { entered.resolve(); return release.promise; } return true; });
+  const callbacks: Parameters<NotificationAdapter["subscribe"]>[0] = { response() {}, received() {}, token() {}, foreground() {} };
+  const old = h.create(); const stopOld = old.subscribe(callbacks);
+  assert.equal(await old.setBadge?.(12), true); stopOld(); await entered.promise;
+  const current = h.create(); const stopCurrent = current.subscribe(callbacks);
+  t.after(() => { release.resolve(true); stopCurrent(); });
+  const next = current.setBadge?.(47);
+  await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.badges, [12, 0]); assert.equal(h.badgeCount, 12);
+  release.resolve(true); assert.equal(await next, true);
+  assert.equal(h.maxActiveBadgeWrites, 1); assert.deepEqual(h.settledBadges, [12, 0, 47]); assert.equal(h.badgeCount, 47);
+});
+
+test("revoking an older client through the actual native adapter cannot clear the newer client's badge", async t => {
+  const h = nativeAdapterHarness(); const first = fixture(); const second = fixture();
+  first.api.notificationInbox = async (_session, page) => ({ items: [item], page, pageSize: 25, unreadCount: 12, total: 12 });
+  second.api.notificationInbox = async (_session, page) => ({ items: [item], page, pageSize: 25, unreadCount: 47, total: 47 });
+  function clientWithNativeBadge(f: ReturnType<typeof fixture>, storageKey: string): MobileNotificationClient {
+    const native = h.create();
+    return new MobileNotificationClient({ session, storageKey, api: f.api,
+      adapter: { ...f.adapter, subscribe: native.subscribe, setBadge: native.setBadge },
+      isCurrent: () => true, onOpen: () => false });
+  }
+  const old = clientWithNativeBadge(first, "old-badge-owner"); t.after(old.start()); await old.refresh();
+  assert.equal(h.badgeCount, 12);
+  const current = clientWithNativeBadge(second, "current-badge-owner"); t.after(current.start()); await current.refresh();
+  assert.equal(h.badgeCount, 47); const badges = [...h.badges];
+  await old.revokeForSession(); await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.badges, badges); assert.equal(h.badgeCount, 47);
+  assert.equal(current.isCurrent(), true); assert.equal(current.getSnapshot().unreadCount, 47);
+  await current.revokeForSession(); await new Promise<void>(done => setImmediate(done));
+  assert.equal(h.badgeCount, 0); assert.ok(h.badges.length > badges.length);
+  assert.ok(h.badges.slice(badges.length).every(count => count === 0));
+});
+
+test("a legacy client never writes a native badge for missing unread counts except explicit teardown", async t => {
+  const h = nativeAdapterHarness(); const f = fixture(); const native = h.create();
+  const client = new MobileNotificationClient({ session, storageKey: "legacy-native-badge", api: f.api,
+    adapter: { ...f.adapter, subscribe: native.subscribe, setBadge: native.setBadge },
+    isCurrent: () => true, onOpen: () => false });
+  const stop = client.start(); t.after(stop);
+  assert.equal(await client.refresh(), true); assert.equal(await client.retryEnable(), true);
+  assert.equal(await client.loadInbox(), true); assert.equal(await client.markRead(eventId), true);
+  assert.equal(client.getSnapshot().unreadCount, null); assert.equal(client.getSnapshot().total, null);
+  assert.deepEqual(h.badges, []); assert.deepEqual(h.settledBadges, []); assert.equal(h.badgeCount, null);
+  stop(); await new Promise<void>(done => setImmediate(done));
+  assert.deepEqual(h.badges, [0]); assert.deepEqual(h.settledBadges, [0]); assert.equal(h.badgeCount, 0);
+});
+
+test("actual native adapter bounds SDK token acquisition at twenty seconds and forwards a rotated native token without retry", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = nativeAdapterHarness(); const entered = deferred<void>(); const token = deferred<{ data: string; type: "expo" }>();
+  h.setTokenAcquisition(async () => { entered.resolve(); return token.promise; });
+  const native: NativePushToken = { type: "android", data: "native-test-only" };
+  const pending = h.create().getExpoToken(projectId, native);
+  const rejected = assert.rejects(pending, /MOBILE_PUSH_NATIVE_TIMEOUT/);
+  await entered.promise;
+  assert.equal(h.tokenRequests.length, 1); assert.equal(h.tokenRequests[0].projectId, projectId);
+  assert.equal(h.tokenRequests[0].devicePushToken, native);
+  let settled = false;
+  void pending.then(() => { settled = true; }, () => { settled = true; });
+  t.mock.timers.tick(19_999); await Promise.resolve(); assert.equal(settled, false);
+  t.mock.timers.tick(1); await rejected;
+  token.resolve({ data: "ExpoPushToken[lateunused12345]", type: "expo" }); await Promise.resolve();
+  assert.equal(h.tokenRequests.length, 1);
 });

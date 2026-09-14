@@ -22,11 +22,11 @@ test("catalog has bounded pages, explicit metadata, no financial output and no d
   assert.equal(checklistCatalogPageSchema.safeParse({ ...result, items: [item, item] }).success, false);
 });
 
-test("child status, pending local work and online gate apply; parent and definition permissions do not lock association", () => {
+test("child status and pending local work gate association; cached offline selection and parent definition permissions do not lock it", () => {
   const child = work({ canExecute: false, canEditDefinition: false, checklists: [] });
   const parent = group({ status: "completed", works: [child] });
   assert.equal(checklistAssociationBlocked(parent, child, true), null);
-  assert.match(checklistAssociationBlocked(parent, child, false)!, /conexión/);
+  assert.equal(checklistAssociationBlocked(parent, child, false), null);
   assert.match(checklistAssociationBlocked(parent, child, true, true)!, /Sincroniza/);
   assert.match(checklistAssociationBlocked(parent, work({ id: "local-123" }), true)!, /Sincroniza/);
   assert.match(checklistAssociationBlocked(parent, work({ status: "delivered" }), true)!, /finalizado/);

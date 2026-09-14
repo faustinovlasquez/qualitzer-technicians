@@ -6,8 +6,10 @@ import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
 import { dateKey, weekRange } from "../domain/format";
-import { assignmentDay, assignmentDays, assignmentWorkForDay, assignmentWorkRange, dailyRange } from "../domain/assignmentSchedule";
+import { assignmentDay, assignmentDays, assignmentWorkForDay, assignmentWorkForQueryDate, assignmentWorkQueryRange, assignmentWorkSnapshotForQueryDate, dailyRange } from "../domain/assignmentSchedule";
+import { normalizeAssignmentsChecklistProgress } from "../domain/assignmentChecklistProgress";
 import { DEMO_TENANT, requireSessionTenant, sameTenant, tenantStorageNamespace } from "../domain/tenantSession";
+import { getTenantChallengeRemaining } from "../infrastructure/tenantChallengeClock";
 import { HttpTechnicianRepository } from "../infrastructure/HttpTechnicianRepository";
 import { DemoTechnicianRepository } from "../infrastructure/DemoTechnicianRepository";
 import { ApiError, NetworkError, errorText } from "../infrastructure/errors";
@@ -31,6 +33,7 @@ import { gatewayConfiguration } from "../infrastructure/gatewayConfig";
 
 const subscribeNothing = (): (() => void) => () => {};
 const emptyOfflineSnapshot = (): null => null;
+const alwaysAllowed = (): boolean => true;
 
 function remoteRepository(repo: TechnicianRepository | null): TechnicianRepository | null {
   return repo instanceof OfflineTechnicianRepository ? repo.remote : repo;
@@ -72,8 +75,10 @@ interface SessionSetup {
 function selectedWorkDetails(assignments: Assignments | null, selection: SelectedWork | null) {
   const group = assignments?.groups.find((item) => item.id === selection?.groupId);
   const foundWork = group?.works.find((item) => item.id === selection?.workId);
-  const schedule = foundWork?.schedules?.find((item) => assignmentDay(item.work.scheduledDate) === selection?.scheduledDate && item.queryDates.includes(selection?.queryDate ?? ""));
-  const work = foundWork && selection && (!foundWork.schedules || schedule) ? assignmentWorkForDay(foundWork, selection.scheduledDate) : undefined;
+  const scheduledWork = foundWork && selection ? assignmentWorkForDay(foundWork, selection.scheduledDate) : undefined;
+  const schedule = scheduledWork && selection ? assignmentWorkSnapshotForQueryDate(scheduledWork, selection.queryDate) : undefined;
+  const work = scheduledWork && selection && assignmentDay(scheduledWork.scheduledDate) === selection.scheduledDate
+    ? assignmentWorkForQueryDate(scheduledWork, selection.queryDate) : undefined;
   return { group, work, schedule };
 }
 
@@ -97,7 +102,9 @@ function persistSession(value: StoredSession): Promise<void> {
 function defaultGateway(): string {
   return gatewayConfiguration.url;
 }
-export function useTechnicianApp() {
+export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boolean }) {
+  const accessAllowed = access?.allowed ?? true;
+  const isAccessAllowed = access?.isAllowed ?? alwaysAllowed;
   const [gatewayUrl, setGatewayUrl] = useState(defaultGateway);
   const [challenge, setChallenge] = useState<TenantLoginChallenge | null>(null);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
@@ -125,6 +132,8 @@ export function useTechnicianApp() {
   const repository = useRef<TechnicianRepository | null>(null);
   const gatewayBlock = useRef<string | null>(gatewayConfiguration.error);
   const requestVersion = useRef(0);
+  const assignmentRead = useRef<{ key: string; version: number; generation: number; repo: TechnicianRepository; controller: AbortController; pending: Promise<void> } | null>(null);
+  const baselineRead = useRef<AbortController | null>(null);
   const sessionVersion = useRef(0);
   const creationVersion = useRef(0);
   const pendingLogin = useRef<PendingLogin | null>(null);
@@ -154,6 +163,8 @@ export function useTechnicianApp() {
   }
 
   const unauthorized = useCallback(() => {
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
     const capturedRepo = repository.current;
     const capturedSession = state.current.session;
     const capturedSetup = sessionSetup.current;
@@ -329,7 +340,7 @@ export function useTechnicianApp() {
   }
 
   async function retrySessionSetup() {
-    if (renderVersion !== sessionVersion.current || actionLock.current || !sessionSetup.current) return;
+    if (!isAccessAllowed() || renderVersion !== sessionVersion.current || actionLock.current || !sessionSetup.current) return;
     const version = sessionVersion.current;
     const action = beginAction();
     try { await finishSessionSetup(); }
@@ -382,6 +393,8 @@ export function useTechnicianApp() {
     })();
     return () => {
       active = false;
+      assignmentRead.current?.controller.abort();
+      baselineRead.current?.abort();
       sessionVersion.current += 1; requestVersion.current += 1;
       if (repository.current instanceof OfflineTechnicianRepository) repository.current.stop();
       repository.current = null; sessionSetup.current = null; pendingLogin.current = null; actionLock.current = null;
@@ -390,25 +403,46 @@ export function useTechnicianApp() {
 
   useEffect(() => {
     if (!offlineController || repository.current !== offlineController || !session) return;
-    const detachForeground = bindForeground(offlineController);
+    offlineController.setForeground(readForeground() && isAccessAllowed());
     offlineController.start();
-    return () => { detachForeground(); offlineController.stop(); };
-  }, [offlineController, session]);
+    return () => offlineController.stop();
+  }, [offlineController, session, isAccessAllowed]);
+
+  useEffect(() => {
+    if (!offlineController || repository.current !== offlineController || !session) return;
+    const detachForeground = bindForeground({ setForeground: (active) => offlineController.setForeground(active && isAccessAllowed()) });
+    return detachForeground;
+  }, [offlineController, session, accessAllowed, isAccessAllowed]);
+
+  useEffect(() => {
+    if (accessAllowed) return;
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
+  }, [accessAllowed]);
 
   useEffect(() => {
     if (offline?.authBlocked && repository.current === offlineController) unauthorized();
   }, [offline?.authBlocked, offlineController, unauthorized]);
 
-  const refreshAssignments = useCallback(async (): Promise<void> => {
+  const refreshAssignments = useCallback(async (background = false): Promise<void> => {
     const { session: current, range: currentRange } = state.current;
     const repo = repository.current;
-    if (!current || current.branchId === null || !repo) return;
+    if (!isAccessAllowed() || !current || current.branchId === null || !repo) return;
+    const key = `${current.branchId}:${currentRange.startDate}:${currentRange.endDate}`;
+    const existing = assignmentRead.current;
+    if (existing && existing.key === key && existing.repo === repo && existing.version === requestVersion.current
+      && existing.generation === sessionVersion.current && !existing.controller.signal.aborted) return existing.pending;
+    existing?.controller.abort();
+    baselineRead.current?.abort();
     const version = ++requestVersion.current;
     const generation = sessionVersion.current;
-    setLoading(true);
+    const controller = new AbortController();
+    const branchId = current.branchId;
+    setLoading(!background);
+    const pending = Promise.resolve().then(async () => {
     try {
-      const next = await repo.assignments(currentRange, current.branchId);
-      if (version !== requestVersion.current || generation !== sessionVersion.current || repository.current !== repo) return;
+      const next = normalizeAssignmentsChecklistProgress(await repo.assignments(currentRange, branchId, { signal: controller.signal }));
+      if (controller.signal.aborted || version !== requestVersion.current || generation !== sessionVersion.current || repository.current !== repo) return;
       if (next.technician.id !== current.user.workerId) { unauthorized(); throw new Error("La identidad del trabajador cambió. Vuelve a ingresar; la cola se conserva."); }
       let nextWork = state.current.selected;
       let nextOrder = state.current.selectedOrder;
@@ -429,14 +463,21 @@ export function useTechnicianApp() {
       setData(next); setError(null);
     } catch (caught) {
       if (version !== requestVersion.current || generation !== sessionVersion.current) return;
+      if (controller.signal.aborted || (caught instanceof Error && caught.name === "AbortError")) return;
       setError(errorText(caught));
       throw caught;
-    } finally { if (version === requestVersion.current) setLoading(false); }
-  }, [unauthorized]);
+    } finally {
+      if (assignmentRead.current?.controller === controller) assignmentRead.current = null;
+      if (version === requestVersion.current) setLoading(false);
+    }
+    });
+    assignmentRead.current = { key, version, generation, repo, controller, pending };
+    return pending;
+  }, [unauthorized, isAccessAllowed]);
 
   function notificationContextIsCurrent(context: NotificationOpenContext): boolean {
     const current = state.current.session;
-    return context.isCurrent() && current !== null && current === context.session && sameNotificationSession(current, context.session)
+    return isAccessAllowed() && context.isCurrent() && current !== null && current === context.session && sameNotificationSession(current, context.session)
       && context.storageKey === tenantStorageNamespace(current, state.current.gatewayUrl, current.branchId);
   }
 
@@ -448,14 +489,14 @@ export function useTechnicianApp() {
       setError("Vuelve al listado antes de abrir la notificación. Se conservará tu selección y cualquier borrador.");
       return false;
     }
+    if (state.current.tab === "profile") {
+      setError("Vuelve a la bandeja de avisos para abrir la notificación. Se conservan los cambios de configuración sin guardar.");
+      return false;
+    }
     if (payload.kind === "MOBILE_PUSH_TEST") {
       state.current = { ...state.current, tab: "notifications" };
       setTab("notifications"); setError(null);
       return true;
-    }
-    if (state.current.tab === "profile") {
-      setError("Abre el centro de notificaciones antes de consultar el trabajo. Se mantiene tu sucursal actual.");
-      return false;
     }
     const version = sessionVersion.current;
     const action = beginAction();
@@ -465,7 +506,7 @@ export function useTechnicianApp() {
       const day = payload.date ?? scheduleClock(current.user.system.timezone)?.day;
       if (!day || current.branchId === null) throw new Error("La sucursal no tiene una fecha o zona horaria válida para abrir el aviso.");
       const nextRange = dailyRange(day);
-      const fresh = await repo.assignments(nextRange, current.branchId);
+      const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(nextRange, current.branchId));
       if (version !== sessionVersion.current || repository.current !== repo || !notificationContextIsCurrent(context)) return false;
       if (fresh.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
       const group = fresh.groups.find((item) => payload.groupType === "maintenance"
@@ -512,48 +553,52 @@ export function useTechnicianApp() {
   const notificationApi = useMemo(() => session && notificationRepo ? bindNotificationApi(session, notificationRepo) : null, [session, notificationRepo]);
   const notifications: Readonly<ReturnType<typeof useMobileNotifications>> = useMobileNotifications({
     session, storageKey: session ? tenantStorageNamespace(session, gatewayUrl, session.branchId) : "anonymous", api: notificationApi,
-    enabled: liveVerified && (offlineController === null || Boolean(offline?.online && !offline.authBlocked)),
+    enabled: liveVerified && !offline?.authBlocked,
+    isInteractionAllowed: isAccessAllowed,
     onOpen: (payload, context) => notificationHandlers.current.openNotification(payload, context),
     onForegroundRefresh: (context) => notificationHandlers.current.refreshFromNotification(context),
   });
   notificationClient.current = notifications.client;
 
   useEffect(() => {
-    if (!session || session.branchId === null) return;
+    if (!accessAllowed || !session || session.branchId === null) return;
     if (manualRefresh.current?.session === session && manualRefresh.current.range === range) {
       manualRefresh.current = null;
       return;
     }
     void refreshAssignments().catch(() => undefined);
-  }, [session, range, refreshAssignments]);
+  }, [session, range, refreshAssignments, accessAllowed]);
 
   const appliedRevision = offline?.operations.filter((operation) => operation.status === "applied").map((operation) => operation.id).sort().join("|") ?? "";
   useEffect(() => {
-    if (!offlineController || repository.current !== offlineController || !session || offline?.authBlocked) return;
+    if (!accessAllowed || !offlineController || repository.current !== offlineController || !session || offline?.authBlocked) return;
     if (appliedRefresh.current?.repo !== offlineController) {
       appliedRefresh.current = { repo: offlineController, revision: appliedRevision };
       return;
     }
     if (busy || actionLock.current || selectedCreationKind || offline?.syncing || appliedRefresh.current.revision === appliedRevision) return;
     appliedRefresh.current = { repo: offlineController, revision: appliedRevision };
-    const action = beginAction();
-    void refreshAssignments().catch(() => undefined).finally(() => endAction(action));
-  }, [offlineController, session, appliedRevision, offline?.syncing, offline?.authBlocked, busy, selectedCreationKind, refreshAssignments]);
+    void refreshAssignments(true).catch(() => undefined);
+  }, [offlineController, session, appliedRevision, offline?.syncing, offline?.authBlocked, busy, selectedCreationKind, refreshAssignments, accessAllowed]);
 
   useEffect(() => {
-    if (!offlineController || !session?.branchId || !offline?.online || offline.authBlocked || busy || actionLock.current || selected || selectedOrder || selectedCreationKind || baselinePrepared.current === offlineController) return;
+    if (!accessAllowed || loading || assignmentRead.current || !offlineController || !session?.branchId || !offline?.online || offline.authBlocked || busy || actionLock.current || selected || selectedOrder || selectedCreationKind || baselinePrepared.current === offlineController) return;
     baselinePrepared.current = offlineController;
+    const controller = new AbortController();
+    baselineRead.current = controller;
     const version = sessionVersion.current;
     const branchId = session.branchId;
     void (async () => {
       const day = scheduleClock(session.user.system.timezone)?.day ?? dateKey();
-      await offlineController.assignments(weekRange(day), branchId);
-      if (version !== sessionVersion.current || repository.current !== offlineController) return;
+      await offlineController.assignments(weekRange(day), branchId, { signal: controller.signal });
+      if (controller.signal.aborted || version !== sessionVersion.current || repository.current !== offlineController) return;
       await offlineController.creationOptions({ companyBranchId: branchId, search: "", page: 0 });
     })().catch((caught: unknown) => {
+      if (controller.signal.aborted || (caught instanceof Error && caught.name === "AbortError")) return;
       if (version === sessionVersion.current && repository.current === offlineController) setOfflineSetupError(`La semana no quedó preparada completamente. Reintenta desde Sin conexión. ${errorText(caught)}`);
-    });
-  }, [offlineController, session, offline?.online, offline?.authBlocked, busy, selected, selectedOrder, selectedCreationKind]);
+    }).finally(() => { if (baselineRead.current === controller) baselineRead.current = null; });
+    return () => controller.abort();
+  }, [offlineController, session, offline?.online, offline?.authBlocked, busy, selected, selectedOrder, selectedCreationKind, accessAllowed, loading]);
 
   async function refresh(): Promise<void> {
     if (!currentContext() || actionLock.current || selectedCreationKind) return;
@@ -566,7 +611,7 @@ export function useTechnicianApp() {
   }
 
   function closeOffline(): void {
-    if (actionLock.current) return;
+    if (!isAccessAllowed() || actionLock.current) return;
     setSelectedOffline(false);
   }
 
@@ -649,7 +694,7 @@ export function useTechnicianApp() {
   }
 
   async function login(username: string, password: string) {
-    if (renderVersion !== sessionVersion.current || actionLock.current || restoring || state.current.session || repository.current || pendingLogin.current) return;
+    if (!isAccessAllowed() || renderVersion !== sessionVersion.current || actionLock.current || restoring || state.current.session || repository.current || pendingLogin.current) return;
     const version = ++sessionVersion.current;
     const action = beginAction();
     const loginGateway = state.current.gatewayUrl;
@@ -677,14 +722,17 @@ export function useTechnicianApp() {
 
   async function selectTenant(tenant: Tenant): Promise<void> {
     const pending = pendingLogin.current;
-    if (actionLock.current || !pending || pending.challenge !== challenge || pending.version !== sessionVersion.current || repository.current || state.current.session) return;
+    if (!isAccessAllowed() || actionLock.current || !pending || pending.challenge !== challenge || pending.version !== sessionVersion.current || repository.current || state.current.session) return;
     const version = pending.version;
     const action = beginAction();
     try {
       const candidate = pending.challenge.tenants.find((item) => sameTenant(item, tenant));
       if (!candidate) throw new Error("La empresa no pertenece a esta selección. Vuelve a ingresar tus credenciales.");
-      const expiresAt = Date.parse(pending.challenge.expiresAt);
-      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error("La selección de empresa venció. Vuelve a ingresar tus credenciales.");
+      const timing = getTenantChallengeRemaining(pending.challenge);
+      if (timing.remainingMs === 0) throw new Error(timing.source === "invalid"
+        ? "No se pudo validar el tiempo de esta selección. Vuelve a ingresar tus credenciales."
+        : timing.source === "unverified" ? "Se agotó el tiempo local para seleccionar la empresa. Vuelve a ingresar tus credenciales."
+          : "La selección de empresa venció. Vuelve a ingresar tus credenciales.");
       const result = await pending.repo.completeLogin(pending.challenge.challenge, candidate);
       if (version !== sessionVersion.current || pendingLogin.current !== pending) return;
       await acceptLogin(pending.repo, result, pending.pendingLoginGateway, version, candidate);
@@ -696,13 +744,13 @@ export function useTechnicianApp() {
   }
 
   function cancelLoginChallenge(): void {
-    if (actionLock.current || !pendingLogin.current || pendingLogin.current.challenge !== challenge || renderVersion !== sessionVersion.current) return;
+    if (!isAccessAllowed() || actionLock.current || !pendingLogin.current || pendingLogin.current.challenge !== challenge || renderVersion !== sessionVersion.current) return;
     clearLoginChallenge(null);
   }
 
   async function changePassword(password: string, confirmation: string) {
     const repo = remoteRepository(repository.current);
-    if (renderVersion !== sessionVersion.current || actionLock.current || !forcePassword || !(repo instanceof HttpTechnicianRepository) || !selectedTenant) return;
+    if (!isAccessAllowed() || renderVersion !== sessionVersion.current || actionLock.current || !forcePassword || !(repo instanceof HttpTechnicianRepository) || !selectedTenant) return;
     const tenant = selectedTenant;
     const version = sessionVersion.current;
     const action = beginAction();
@@ -715,7 +763,7 @@ export function useTechnicianApp() {
   }
 
   async function demo() {
-    if (renderVersion !== sessionVersion.current || actionLock.current || restoring || state.current.session || repository.current || pendingLogin.current) return;
+    if (!isAccessAllowed() || renderVersion !== sessionVersion.current || actionLock.current || restoring || state.current.session || repository.current || pendingLogin.current) return;
     const version = ++sessionVersion.current;
     const action = beginAction();
     try {
@@ -733,6 +781,8 @@ export function useTechnicianApp() {
     if (!currentContext() || actionLock.current || selected || selectedOrder || selectedCreationKind || !session || !repo || branchId === session.branchId) return;
     if (!session.user.accessBranchs.some((item) => item.id === branchId && item.isEnabled !== false && item.isDeleted !== true)) return;
     const version = sessionVersion.current;
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
     const current = session;
     const url = state.current.gatewayUrl;
     const action = beginAction();
@@ -774,17 +824,20 @@ export function useTechnicianApp() {
     finally {
       if (repository.current !== replacement) replacement?.stop();
       if (version === sessionVersion.current && repository.current === repo && repo instanceof OfflineTechnicianRepository) {
-        repo.setForeground(readForeground()); repo.start();
+        repo.setForeground(readForeground() && isAccessAllowed()); repo.start();
       }
       endAction(action);
     }
   }
 
   async function logout() {
+    if (!isAccessAllowed()) return;
     if (gatewayBlock.current) { setError(gatewayBlock.current); return; }
     if (renderVersion !== sessionVersion.current || session !== state.current.session || (session && !currentContext()) || actionLock.current || logoutInProgress.current) return;
     if (pendingLogin.current && !repository.current) { cancelLoginChallenge(); return; }
     logoutInProgress.current = true;
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
     const current = state.current.session;
     const url = state.current.gatewayUrl;
     const repo = repository.current;
@@ -801,7 +854,7 @@ export function useTechnicianApp() {
       if (tenant && token && current?.mode !== "demo") await disableOfflineProfile({ token, tenant, gatewayUrl: url, branchId: current?.branchId ?? null });
     } catch (caught) {
       if (repository.current === repo) {
-        if (repo instanceof OfflineTechnicianRepository) { repo.setForeground(readForeground()); repo.start(); }
+        if (repo instanceof OfflineTechnicianRepository) { repo.setForeground(readForeground() && isAccessAllowed()); repo.start(); }
         setError(errorText(caught));
       }
       logoutInProgress.current = false; endAction(action); return;
@@ -834,8 +887,8 @@ export function useTechnicianApp() {
     finally { logoutInProgress.current = false; endAction(action); }
   }
 
-  function currentContext(): boolean {
-    return renderVersion === sessionVersion.current && renderCreationVersion === creationVersion.current && session !== null && session === state.current.session && range === state.current.range && selected === state.current.selected && selectedOrder === state.current.selectedOrder && selectedCreationKind === state.current.selectedCreationKind && tab === state.current.tab;
+  function currentContext(requireUnlocked = true): boolean {
+    return (!requireUnlocked || isAccessAllowed()) && renderVersion === sessionVersion.current && renderCreationVersion === creationVersion.current && session !== null && session === state.current.session && range === state.current.range && selected === state.current.selected && selectedOrder === state.current.selectedOrder && selectedCreationKind === state.current.selectedCreationKind && tab === state.current.tab;
   }
 
   function openCreate(kind: CreationKind): void {
@@ -857,10 +910,10 @@ export function useTechnicianApp() {
     setSelectedCreationKind(null); setError(null);
   }
 
-  function creationContext(companyBranchId: number): { current: Session; repo: TechnicianRepository } {
+  function creationContext(companyBranchId: number, requireUnlocked = true): { current: Session; repo: TechnicianRepository } {
     const current = state.current.session;
     const repo = repository.current;
-    if (!currentContext() || !selectedCreationKind || selected || selectedOrder || !current || !repo || !current.user.workerId
+    if (!currentContext(requireUnlocked) || !selectedCreationKind || selected || selectedOrder || !current || !repo || !current.user.workerId
       || companyBranchId !== current.branchId || !current.user.accessBranchs.some((item) => item.id === companyBranchId && item.isEnabled !== false && item.isDeleted !== true)) {
       throw new Error("La sesión o la creación cambió. Vuelve a abrir el formulario en la sucursal correcta.");
     }
@@ -889,7 +942,7 @@ export function useTechnicianApp() {
     const action = beginAction();
     try {
       const result = creationResultSchema.parse(await repo.createRecord(value));
-      if (version !== sessionVersion.current || repository.current !== repo || !currentContext()) throw new Error("La sesión cambió. Conserva la misma solicitud y verifica su confirmación antes de crear otra.");
+      if (version !== sessionVersion.current || repository.current !== repo || !currentContext(false)) throw new Error("La sesión cambió. Conserva la misma solicitud y verifica su confirmación antes de crear otra.");
       if (result.kind !== value.kind || result.companyBranchId !== current.branchId || result.schedule.date !== value.schedule.date
         || result.schedule.startTime !== value.schedule.startTime || result.schedule.endTime !== value.schedule.endTime) throw new Error("La respuesta no corresponde a la solicitud enviada. Reintenta con el mismo identificador.");
       return result;
@@ -898,7 +951,7 @@ export function useTechnicianApp() {
 
   async function onCreated(value: CreationResult): Promise<void> {
     const result = creationResultSchema.parse(value);
-    const { current, repo } = creationContext(result.companyBranchId);
+    const { current, repo } = creationContext(result.companyBranchId, false);
     if (result.kind !== selectedCreationKind || actionLock.current) return;
     const version = sessionVersion.current;
     const action = beginAction();
@@ -919,7 +972,7 @@ export function useTechnicianApp() {
   async function onOfflineQueuedCreate(outcome: OfflineQueuedOutcome): Promise<void> {
     const repo = repository.current;
     const current = state.current.session;
-    if (!currentContext() || actionLock.current || !selectedCreationKind || !current || !(repo instanceof OfflineTechnicianRepository)) return;
+    if (!currentContext() || actionLock.current || !selectedCreationKind || !current || current.branchId === null || !(repo instanceof OfflineTechnicianRepository)) return;
     const operation = repo.getSnapshot().operations.find((item) => item.id === outcome.operationId);
     if (!operation || operation.kind !== "create" || outcome.kind !== "create" || operation.input.kind !== selectedCreationKind
       || operation.input.companyBranchId !== current.branchId || operation.input.schedule.date !== outcome.date
@@ -930,24 +983,26 @@ export function useTechnicianApp() {
     const version = sessionVersion.current;
     const action = beginAction();
     const nextRange = dailyRange(outcome.date);
-    creationVersion.current += 1;
-    requestVersion.current += 1;
-    manualRefresh.current = { session: current, range: nextRange };
-    state.current = { ...state.current, selectedCreationKind: null, selected: null, selectedOrder: null, data: null, range: nextRange, tab: "today" };
-    setSelectedCreationKind(null); setSelected(null); setSelectedOrder(null); setData(null); setRange(nextRange); setTab("today"); setAgendaFocusDate(outcome.date);
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
+    const request = ++requestVersion.current;
+    setLoading(false);
     try {
-      await refreshAssignments();
-      if (version !== sessionVersion.current || repository.current !== repo) return;
+      const local = normalizeAssignmentsChecklistProgress(await repo.localAssignments(nextRange, current.branchId));
+      if (version !== sessionVersion.current || request !== requestVersion.current || repository.current !== repo || !currentContext()) return;
+      if (local.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. La cola se conserva.");
       const updated = repo.getSnapshot().operations.find((item) => item.id === operation.id);
       const result = updated?.kind === "create" && updated.status === "applied" ? updated.result : undefined;
-      const groupId = result?.groupId ?? operation.localGroupId;
-      const workId = result ? String(result.workId) : operation.localWorkId;
-      if (state.current.data?.groups.some((group) => group.id === groupId && group.works.some((work) => work.id === workId))) {
-        const next: SelectedWork = { groupId, workId, draftGroupId: operation.localGroupId, draftWorkId: operation.localWorkId, queryDate: outcome.date, scheduledDate: outcome.date, initialTab: "work" };
-        state.current = { ...state.current, selected: next };
-        setSelected(next);
-      }
+      const candidates = [{ groupId: operation.localGroupId, workId: operation.localWorkId }, ...(result ? [{ groupId: result.groupId, workId: String(result.workId) }] : [])];
+      const found = candidates.find((candidate) => local.groups.some((group) => group.id === candidate.groupId && group.works.some((work) => work.id === candidate.workId)));
+      if (!found) throw new Error("No se pudo encontrar la creación en la copia local. Revisa la cola antes de repetir el envío.");
+      const next: SelectedWork = { ...found, draftGroupId: operation.localGroupId, draftWorkId: operation.localWorkId, queryDate: outcome.date, scheduledDate: outcome.date, initialTab: "work" };
+      creationVersion.current += 1;
+      manualRefresh.current = { session: current, range: nextRange };
+      state.current = { ...state.current, selectedCreationKind: null, selected: next, selectedOrder: null, data: local, range: nextRange, tab: "today" };
+      setSelectedCreationKind(null); setSelected(next); setSelectedOrder(null); setData(local); setRange(nextRange); setTab("today"); setAgendaFocusDate(outcome.date);
       setError(result ? null : "Creación guardada en este dispositivo; pendiente de confirmación del servidor.");
+      if (result) void refreshAssignments(true).catch(() => undefined);
     } catch (caught) {
       if (version === sessionVersion.current && repository.current === repo) setError(`La creación sigue guardada en la cola. No repitas el envío; no se pudo abrir la ficha. ${errorText(caught)}`);
     } finally { endAction(action); }
@@ -969,19 +1024,23 @@ export function useTechnicianApp() {
   }
 
   async function performMutation<T extends GroupScope>(value: T, operation: (repo: TechnicianRepository, value: T) => Promise<void>, refreshAfter = false): Promise<void> {
+    if (!isAccessAllowed()) throw new Error("Desbloquea la aplicación antes de continuar.");
     if (actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
     const repo = repository.current;
     if (!repo) throw new Error("La sesión no está disponible.");
     const version = sessionVersion.current;
     const action = beginAction();
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
+    requestVersion.current += 1;
+    setLoading(false);
     try {
       await operation(repo, value);
       if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la operación. Verifica el resultado antes de repetir el envío.");
       if (refreshAfter) {
-        try { await refreshAssignments(); }
-        catch (caught) {
-          if (version === sessionVersion.current && repository.current === repo) setError(`El cambio de estado fue confirmado, pero no se pudo actualizar la información. No repitas el envío; actualiza las asignaciones. ${errorText(caught)}`);
-        }
+        void refreshAssignments(true).catch((caught: unknown) => {
+          if (version === sessionVersion.current && repository.current === repo) setError(`El cambio fue confirmado, pero no se pudo actualizar la información. No repitas el envío; actualiza las asignaciones. ${errorText(caught)}`);
+        });
       }
     } finally { endAction(action); }
   }
@@ -992,6 +1051,10 @@ export function useTechnicianApp() {
       value.groupId = selected.draftGroupId; value.workId = selected.draftWorkId;
     }
     return performMutation(value, operation);
+  }
+
+  function saveAnswer(stepId: string, answer: StepAnswer): Promise<void> {
+    return performMutation(scope(stepId), (repo, value) => repo.answer(value, stepId, answer), true);
   }
 
   function performMutationGroup(operation: (repo: TechnicianRepository, value: GroupScope) => Promise<void>): Promise<void> {
@@ -1049,6 +1112,8 @@ export function useTechnicianApp() {
   function updateRange(next: DateRange): void {
     const current = state.current.range;
     if (next.startDate === current.startDate && next.endDate === current.endDate) return;
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
     const nextWeek = weekRange(next.startDate);
     setAgendaFocusDate((day) => day && day >= nextWeek.startDate && day <= nextWeek.endDate ? day : null);
     requestVersion.current += 1;
@@ -1080,7 +1145,7 @@ export function useTechnicianApp() {
   }
 
   function changeGatewayUrl(value: string) {
-    if (gatewayConfiguration.locked) return;
+    if (!isAccessAllowed() || gatewayConfiguration.locked) return;
     if (renderVersion !== sessionVersion.current || actionLock.current || restoring || state.current.session || repository.current || sessionSetup.current || pendingLogin.current || challenge || forcePassword || finalizingSession || value === state.current.gatewayUrl) return;
     sessionVersion.current += 1; requestVersion.current += 1;
     state.current = { ...state.current, gatewayUrl: value, data: null, selected: null, selectedOrder: null, selectedCreationKind: null };
@@ -1095,9 +1160,7 @@ export function useTechnicianApp() {
   }
 
   function workQueryRange(work: AssignmentWork): DateRange {
-    if (range.startDate === range.endDate) return dailyRange(range.startDate);
-    const scheduledDate = assignmentDay(work.scheduledDate);
-    return assignmentWorkRange(work, scheduledDate >= range.startDate && scheduledDate <= range.endDate ? scheduledDate : range.startDate);
+    return assignmentWorkQueryRange(work, range);
   }
 
   function workSelection(group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions): SelectedWork {
@@ -1106,6 +1169,7 @@ export function useTechnicianApp() {
     const scheduledDate = assignmentDay(work.scheduledDate);
     if (!foundWork || (foundWork.schedules ? !foundWork.schedules.some((item) => assignmentDay(item.work.scheduledDate) === scheduledDate) : assignmentDay(foundWork.scheduledDate) !== scheduledDate)) throw new Error("El trabajo o su fecha ya no pertenece a esta orden. Actualiza la información.");
     const detailRange = workQueryRange(assignmentWorkForDay(foundWork, scheduledDate));
+    if (!assignmentWorkForQueryDate(assignmentWorkForDay(foundWork, scheduledDate), detailRange.startDate)) throw new Error("La consulta de esta fecha ya no está disponible. Actualiza la información.");
     const repo = repository.current;
     const creation = repo instanceof OfflineTechnicianRepository ? repo.getSnapshot().operations.find((operation) => operation.kind === "create" && operation.result?.groupId === canonical.id && String(operation.result.workId) === foundWork.id) : undefined;
     return { groupId: canonical.id, workId: foundWork.id, queryDate: detailRange.startDate, scheduledDate, initialTab: options?.tab, initialAction: options?.action,
@@ -1161,21 +1225,21 @@ export function useTechnicianApp() {
     syncNow: () => repository.current === offlineController ? offlineActions.current.syncOffline() : Promise.reject(new Error("La sesión offline cambió.")),
     retry: (id) => repository.current === offlineController ? offlineActions.current.retryOffline(id) : Promise.reject(new Error("La sesión offline cambió.")),
     hasPendingChanges: offlineController.hasPendingChanges, readLocalFile: offlineController.readLocalFile,
-    prepareWeek: (nextRange, branchId, options) => repository.current === offlineController ? offlineController.prepareWeek(nextRange, branchId, options) : Promise.reject(new Error("La sesión offline cambió.")),
-  } : null, [offlineController]);
+    prepareWeek: (nextRange, branchId, options) => isAccessAllowed() && repository.current === offlineController ? offlineController.prepareWeek(nextRange, branchId, options) : Promise.reject(new Error("Desbloquea la app y verifica la sesión offline.")),
+  } : null, [offlineController, isAccessAllowed]);
 
   return {
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,
     suggestedGatewayUrl: !gatewayConfiguration.locked && __DEV__ && Platform.OS !== "web" ? suggestedExpoGatewayUrl(Constants.expoConfig?.hostUri, gatewayUrl) : undefined,
-    session, data, range, selected, selectedOrder, selectedCreationKind, selectedGroupId: selectedOrder?.id ?? null, orderGroup, group, work, detailRange, detailGeneratedAt, tab, setTab: changeTab, error: error ?? offlineSetupError, busy, loading, restoring, forcePassword, finalizingSession, health, notifications,
+    session, data, range, selected, selectedOrder, selectedCreationKind, selectedGroupId: selectedOrder?.id ?? null, orderGroup, group, work, detailRange, detailGeneratedAt, tab, setTab: changeTab, error: error ?? offlineSetupError, busy, loading, restoring, forcePassword, finalizingSession, health, notifications, liveVerified,
     offline, offlineController: managedOfflineController, offlineVerifiedAt, offlineSetupError, selectedOffline, openOffline, closeOffline, prepareOfflineWeek, syncOffline,
     canonicalDetailGroup, canonicalDetailWork,
     detailDraftIdentity: selected?.draftGroupId && selected.draftWorkId ? { groupId: selected.draftGroupId, workId: selected.draftWorkId } : undefined,
     storageKey: session ? tenantStorageNamespace(session, gatewayUrl, session.branchId) : "anonymous",
     login, demo, changePassword, retrySessionSetup, branch, logout, checkConnection, refresh, changeRange, agendaFocusDate, focusAgendaDay, openGroup, closeOrder, openWork, closeWork, onWorkStatus,
     openCreate, closeCreate, creationOptions, createRecord, onCreated, onOfflineQueuedCreate,
-    changeStatus: (input: StatusInput) => mutation((repo, value) => repo.status(value, input)),
-    saveAnswer: (stepId: string, answer: StepAnswer) => mutation((repo, value) => repo.answer(value, stepId, answer), stepId),
+    changeStatus: (input: StatusInput) => performMutation(scope(), (repo, value) => repo.status(value, input), true),
+    saveAnswer,
     loadChecklistOptions: (query: ChecklistCatalogQuery) => readWork(async (repo, value) => {
       if (!repo.checklistOptions) throw new Error("El catálogo de checklists no está disponible.");
       return checklistCatalogPageSchema.parse(await repo.checklistOptions(value, query));

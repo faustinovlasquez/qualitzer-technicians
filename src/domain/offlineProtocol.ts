@@ -25,7 +25,9 @@ export type SyncStepAnswer = z.output<typeof syncAnswerSchema>;
 export const syncCommandSchema = z.discriminatedUnion("kind", [
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("comment"), scope: syncScopeSchema, payload: z.object({ text: text(10000).transform((value) => value.trim()).pipe(z.string().min(1)) }).strict() }).strict(),
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("answer"), scope: syncScopeSchema, payload: z.object({ stepId: syncResourceIdSchema, answer: syncAnswerSchema, base: syncAnswerSchema }).strict() }).strict(),
-]).refine((value) => value.kind !== "answer" || value.scope.workId !== undefined);
+  z.object({ operationId: syncOperationIdSchema, kind: z.literal("timer"), scope: syncScopeSchema, payload: z.object({ status: z.enum(["in_progress", "paused"]), baseStatus: z.enum(["pending", "in_progress", "paused"]) }).strict() }).strict(),
+  z.object({ operationId: syncOperationIdSchema, kind: z.literal("checklist"), scope: syncScopeSchema, payload: z.object({ checklistId: syncPositiveIdSchema }).strict() }).strict(),
+]).refine((value) => value.kind === "comment" || value.scope.workId !== undefined);
 export type SyncCommand = z.output<typeof syncCommandSchema>;
 export const syncDocumentSchema = z.object({ operationId: syncOperationIdSchema, scope: syncScopeSchema, stepId: syncResourceIdSchema.optional(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()
   .refine((value) => value.stepId === undefined || value.scope.workId !== undefined);
@@ -40,6 +42,7 @@ export const syncErrorSchema = z.enum([
   "MOBILE_SYNC_INVALID_STATE", "MOBILE_SYNC_INVALID_TEXT", "MOBILE_SYNC_MULTIPART_REQUIRED", "MOBILE_SYNC_OPERATION_REUSED",
   "MOBILE_SYNC_RECEIPT_NOT_FOUND", "MOBILE_SYNC_REQUIRES_REVIEW", "MOBILE_SYNC_SCHEMA_NOT_READY", "MOBILE_SYNC_STEP_NOT_FOUND",
   "MOBILE_SYNC_UNAUTHORIZED", "MOBILE_SYNC_UNAVAILABLE", "MOBILE_SYNC_WORK_NOT_FOUND", "MOBILE_SYNC_WORK_REQUIRED",
+  "MOBILE_SYNC_STATUS_CONFLICT", "MOBILE_SYNC_INVALID_STATUS", "MOBILE_SYNC_INVALID_CHECKLIST",
 ]);
 export const syncReceiptSchema = z.object({ operationId: syncOperationIdSchema, state: z.enum(["applied", "conflict", "rejected", "needs_review", "in_progress"]), fileId: syncPositiveIdSchema.optional(), error: syncErrorSchema.optional() });
 export type SyncReceipt = z.output<typeof syncReceiptSchema>;

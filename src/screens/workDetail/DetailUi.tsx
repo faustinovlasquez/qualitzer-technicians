@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
-import { Image, Linking, Modal, Platform, Pressable, Text, View } from "react-native";
+import { Image, Linking, Platform, Pressable, Text, View } from "react-native";
+import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { Attachment } from "../../domain/models";
 import { BodyText, Button, IconButton } from "../../ui/components";
@@ -21,7 +22,7 @@ export function Notice({ message, tone = "info", onDismiss }: { message: string;
 
 export function ChoiceButton({ label, selected, disabled = false, multiple = false, onPress }: { label: string; selected: boolean; disabled?: boolean; multiple?: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} accessibilityRole={multiple ? "checkbox" : "radio"} accessibilityLabel={label} accessibilityState={{ checked: selected, disabled }} style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, (disabled || pressed) && styles.disabled]}>
+    <Pressable onPress={onPress} disabled={disabled} accessibilityRole={multiple ? "checkbox" : "radio"} accessibilityLabel={label} accessibilityState={{ checked: selected, disabled }} aria-checked={selected} aria-disabled={disabled} style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, (disabled || pressed) && styles.disabled]}>
       <Ionicons name={multiple ? selected ? "checkbox" : "square-outline" : selected ? "radio-button-on" : "radio-button-off"} size={22} color={selected ? palette.primary : palette.textMuted} accessible={false} />
       <Text style={styles.choiceText}>{label}</Text>
     </Pressable>

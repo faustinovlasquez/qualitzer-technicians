@@ -1,12 +1,13 @@
 import type { Session } from "../domain/models";
-import type { NotificationData, NotificationDeviceInput, NotificationDeviceResult, NotificationInbox, NotificationReadResult, NotificationStatus, NotificationTestResult } from "../domain/notifications";
+import type { NotificationData, NotificationDeleteResult, NotificationDeviceInput, NotificationDeviceResult, NotificationInbox, NotificationReadResult, NotificationStatus, NotificationTestResult } from "../domain/notifications";
 
 export interface NotificationApi {
   notificationStatus(session: Session): Promise<NotificationStatus>;
   notificationRegister(session: Session, input: NotificationDeviceInput): Promise<NotificationDeviceResult>;
   notificationUnregister(session: Session, installationId: string): Promise<void>;
-  notificationInbox(session: Session, page: number): Promise<NotificationInbox>;
+  notificationInbox(session: Session, page: number, unreadOnly?: boolean): Promise<NotificationInbox>;
   notificationRead(session: Session, eventId: string): Promise<NotificationReadResult>;
+  notificationDelete(session: Session, eventId: string): Promise<NotificationDeleteResult>;
   notificationTest(session: Session): Promise<NotificationTestResult>;
 }
 
@@ -36,6 +37,7 @@ export interface NotificationAdapter {
   clearResponse(identifier: string): Promise<void>;
   presented(): Promise<NativeNotification[]>;
   dismiss(identifier: string): Promise<void>;
+  setBadge?(count: number): Promise<boolean>;
   openSettings(): Promise<void>;
 }
 
@@ -51,6 +53,7 @@ export interface NotificationClientOptions {
   api: NotificationApi;
   adapter: NotificationAdapter;
   isCurrent(): boolean;
+  isInteractionAllowed?(): boolean;
   onOpen(payload: NotificationData, context: NotificationOpenContext): boolean | Promise<boolean>;
   onForegroundRefresh?(context: NotificationOpenContext): void | Promise<void>;
 }

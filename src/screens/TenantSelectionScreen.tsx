@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { Tenant, TenantLoginChallenge } from "../domain/models";
+import { getTenantChallengeRemaining } from "../infrastructure/tenantChallengeClock";
 import { BodyText, Brand, Button, Card, SectionTitle } from "../ui/components";
 import { palette, radius, typography } from "../ui/theme";
 import { TenantPicker } from "./TenantPicker";
@@ -16,19 +17,19 @@ export interface TenantSelectionScreenProps {
 }
 
 export function TenantSelectionScreen({ challenge, busy, error, onSelect, onCancel }: TenantSelectionScreenProps) {
-  const expiresAt = Date.parse(challenge.expiresAt);
-  const [now, setNow] = useState(() => Date.now());
-  const secondsRemaining = Number.isFinite(expiresAt) ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
+  const [, refreshClock] = useState(0);
+  const timing = getTenantChallengeRemaining(challenge);
+  const secondsRemaining = Math.ceil(timing.remainingMs / 1000);
   const expired = secondsRemaining === 0;
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     function updateClock(): void {
       if (timer !== undefined) clearTimeout(timer);
-      const currentTime = Date.now();
-      setNow(currentTime);
-      if (Number.isFinite(expiresAt) && currentTime < expiresAt) {
-        timer = setTimeout(updateClock, Math.min(1000, expiresAt - currentTime));
+      const current = getTenantChallengeRemaining(challenge);
+      refreshClock((revision) => revision + 1);
+      if (current.remainingMs > 0) {
+        timer = setTimeout(updateClock, Math.min(1000, current.remainingMs));
       }
     }
     updateClock();
@@ -39,12 +40,12 @@ export function TenantSelectionScreen({ challenge, busy, error, onSelect, onCanc
       if (timer !== undefined) clearTimeout(timer);
       subscription.remove();
     };
-  }, [challenge.challenge, expiresAt]);
+  }, [challenge]);
 
   function handleSelect(tenant: Tenant): void {
-    const currentTime = Date.now();
-    setNow(currentTime);
-    if (busy || !Number.isFinite(expiresAt) || currentTime >= expiresAt) return;
+    const current = getTenantChallengeRemaining(challenge);
+    refreshClock((revision) => revision + 1);
+    if (busy || current.remainingMs === 0) return;
     onSelect(tenant);
   }
 
@@ -62,15 +63,21 @@ export function TenantSelectionScreen({ challenge, busy, error, onSelect, onCanc
           {expired ? (
             <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.expired}>
               <Ionicons name="time-outline" size={20} color={palette.danger} accessible={false} />
-              <Text style={styles.expiredText}>La selección de empresa venció. Vuelve al acceso para iniciar sesión de nuevo.</Text>
+              <Text style={styles.expiredText}>{timing.source === "invalid"
+                ? "No se pudo validar el tiempo de esta selección. Vuelve al acceso para iniciar sesión de nuevo."
+                : timing.source === "unverified" ? "Se agotó el tiempo local para seleccionar la empresa. Vuelve al acceso para iniciar sesión de nuevo."
+                  : "La selección de empresa venció. Vuelve al acceso para iniciar sesión de nuevo."}</Text>
             </View>
           ) : (
             <View style={styles.countdown}>
               <Ionicons name="time-outline" size={18} color={palette.textSecondary} accessible={false} />
-              <Text accessibilityLiveRegion="none" style={styles.countdownText}>La selección vence en {secondsRemaining} {secondsRemaining === 1 ? "segundo" : "segundos"}.</Text>
+              <Text accessibilityLiveRegion="none" style={styles.countdownText}>{timing.source === "unverified"
+                ? "El servidor validará la vigencia al elegir la empresa. Selecciona una ahora; el tiempo disponible puede ser menor."
+                : `Tiempo estimado para elegir: ${secondsRemaining} ${secondsRemaining === 1 ? "segundo" : "segundos"}. El servidor validará la vigencia.`}</Text>
             </View>
           )}
-          <TenantPicker tenants={challenge.tenants} busy={busy} disabled={expired} onSelect={handleSelect} />
+          <Button title="Volver al acceso" variant="secondary" icon="arrow-back-outline" disabled={busy} onPress={onCancel} />
+          {!expired ? <TenantPicker tenants={challenge.tenants} busy={busy} onSelect={handleSelect} /> : null}
           {busy ? (
             <View accessibilityLiveRegion="polite" style={styles.status}>
               <ActivityIndicator color={palette.primary} />
@@ -78,7 +85,6 @@ export function TenantSelectionScreen({ challenge, busy, error, onSelect, onCanc
             </View>
           ) : null}
           {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-          <Button title="Volver al acceso" variant="secondary" icon="arrow-back-outline" disabled={busy} onPress={onCancel} />
         </Card>
       </ScrollView>
     </SafeAreaView>

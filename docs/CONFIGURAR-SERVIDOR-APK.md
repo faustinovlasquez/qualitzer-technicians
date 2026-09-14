@@ -1,7 +1,11 @@
-# Configurar el servidor para el APK de Qualitzer Field
+# Configurar el servidor para el APK de Qualitzer técnicos
 
 Guía para el programador/administrador del servidor Linux. Fecha: 10-09-2026.
 Estos pasos se ejecutan en el servidor de la API, no en el teléfono ni en el PC de desarrollo. No se ejecutaron desde esta guía.
+
+**Para una instalación nueva o producción, utilizar el [manual completo actualizado](MANUAL-INSTALACION-PRODUCCION.md) y la [guía específica del backend](../../Qualitzer2.0-Backend/docs/INSTALACION-APP-TECNICOS.md).** Este documento conserva el procedimiento inicial de la fachada móvil. La entrega Android de referencia es [1.0.5](ACTUALIZACION-1.0.5.md); la asociación FCM de pruebas ya fue realizada, sin acreditar recepción real en otro entorno.
+
+**Si `/mobile` ya funciona, no repetir la configuración inicial ni las migraciones por rutina.** Las variables se configuran una vez por API; las tablas se crean mediante migraciones por base. Son fases separadas. El paquete gateway 1.0.1 de la mejora de marca no se instala automáticamente por actualizar la APK.
 
 ## Resultado esperado
 
@@ -30,6 +34,8 @@ La integración está en la rama `app-mobile`; el commit comprobado localmente e
 
 La copia local del backend estaba en `refactor-inventario` al preparar esta guía y no contenía el módulo. Esto no identifica la rama del servidor: el programador debe verificar su entrega real.
 
+El commit inicial incorporaba gateway 1.0.0. Para la entrega actual, copiar el tarball 1.0.1 generado desde Mobile y actualizar el manifiesto y lockfile como indica [ACTUALIZACION-1.0.2.md](ACTUALIZACION-1.0.2.md), con el proceso anterior detenido. El nuevo paquete no se ha instalado automáticamente en el backend.
+
 La entrega del backend debe incluir:
 
 ```text
@@ -37,7 +43,7 @@ src/mobileGateway/
 src/app.ts
 package.json
 package-lock.json
-infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.0.tgz
+infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.1.tgz
 ```
 
 Verificar que el arranque monta `/mobile` antes del CORS/parser/autenticación legacy y registra el cierre seguro cuando el módulo está habilitado. Conservar las rutas de autenticación móvil, panel técnico, creación, sincronización y notificaciones incluidas en la misma versión.
@@ -55,7 +61,7 @@ npm ci --include=dev --ignore-scripts
 npm ls @qualitzer/mobile-gateway
 ```
 
-Debe aparecer `@qualitzer/mobile-gateway@1.0.0`. El tarball viene preempaquetado; no necesita recompilarse en el servidor. Se incluyen dependencias de desarrollo porque el arranque existente utiliza `ts-node`/`tsconfig-paths`. Si el procedimiento del servidor usa código compilado, reconstruir la API conforme a ese procedimiento y apuntar PM2 a la salida nueva, no a una compilación anterior.
+Debe aparecer `@qualitzer/mobile-gateway@1.0.1` si el manifiesto y lockfile ya incorporan la actualización. `npm ci` no actualiza por sí solo un lockfile que aún apunta a 1.0.0. El tarball viene preempaquetado; no necesita recompilarse en el servidor. Se incluyen dependencias de desarrollo porque el arranque existente utiliza `ts-node`/`tsconfig-paths`. Si el procedimiento del servidor usa código compilado, reconstruir la API conforme a ese procedimiento y apuntar PM2 a la salida nueva, no a una compilación anterior.
 
 `--ignore-scripts` no ejecuta los scripts de instalación de otras dependencias. Si alguna dependencia nativa del backend requiere un paso de instalación aprobado, conservar ese paso del despliegue habitual. No ignorar errores de dependencias o del lockfile.
 
@@ -219,11 +225,11 @@ No reinstalar ni borrar datos del teléfono para limpiar una cola pendiente. La 
 
 ## 12. Notificaciones push: etapa adicional
 
-Las operaciones principales no necesitan push. No habilitarlo sólo por haber instalado el APK: el APK entregado no tiene completada/verificada la configuración de proyecto Expo y Firebase para recepción remota.
+Las operaciones principales no necesitan push. La APK 1.0.5 incorpora Expo/Firebase del entorno de pruebas y su credencial FCM v1 está asociada en Expo. Eso no configura el servidor de otro entorno ni acredita recepción real. No habilitarlo sólo por haber instalado el APK.
 
 Si se necesitan avisos con la app cerrada, preparar proyecto Expo real, FCM v1 y configuración Firebase de Android; igualar `EXPO_PROJECT_ID` entre backend y build, preparar clave privada `MOBILE_PUSH_ENCRYPTION_KEY`, revisar esquema y activar `MOBILE_PUSH_ENABLED` / `MOBILE_PUSH_SCHEMA_READY` sólo después. Conservar el User-Agent `Qualitzer-Mobile/1.0 (Mobile; Gateway)` y configurar `EXPO_ACCESS_TOKEN` sólo si aplica. Los secretos se gestionan en el servidor/EAS, nunca en el chat ni en el bundle.
 
-Esa activación puede requerir **otro build del APK con configuración Firebase/proyecto**. No contradice que el APK actual sea standalone: Expo Go no se necesita. Procedimiento detallado en [PLANIFICACION-Y-AVISOS.md](PLANIFICACION-Y-AVISOS.md).
+Para otro dominio/proyecto, revisar las políticas fijadas antes de generar **otro build del APK**. Mantener el entorno actual no requiere recompilar únicamente por asociar una credencial FCM del mismo proyecto. El módulo push lee `process.env`, a diferencia de la pasarela: los valores guardados en AWS deben inyectarse al proceso. Expo Go no se necesita. Procedimiento actualizado en [el manual completo](MANUAL-INSTALACION-PRODUCCION.md#push-api) y [la guía de notificaciones](ACTIVAR-NOTIFICACIONES.md).
 
 ## 13. Diagnóstico y mantenimiento
 

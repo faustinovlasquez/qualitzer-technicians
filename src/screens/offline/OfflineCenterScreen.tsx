@@ -42,6 +42,7 @@ function OperationDetails({ operation, title = "Ver detalles técnicos" }: { ope
         <Text selectable style={styles.caption}>Base confirmada al editar: {JSON.stringify(operation.base, null, 2)}</Text>
         <BodyText>El estado actual del servidor debe reconsultarse antes de resolver un conflicto.</BodyText>
       </> : null}
+      {operation.kind === "timer" || operation.kind === "checklist" ? <Text selectable style={styles.caption}>Solicitud local: {JSON.stringify(operation.payload, null, 2)}</Text> : null}
     </>}
     {operation.receipt ? <Text selectable style={styles.caption}>Recibo: {JSON.stringify(operation.receipt, null, 2)}</Text> : null}
     </> : null}
@@ -78,7 +79,7 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         {snapshot?.authBlocked ? <Notice message="La sincronización está bloqueada hasta verificar de nuevo la sesión. Los pendientes se conservan; esta pantalla no cambia la autenticación." tone="warning" /> : null}
         {snapshot?.lastError ? <Notice message={`${operationErrorReason(snapshot.lastError)} (${snapshot.lastError})`} tone="warning" /> : null}
         <Button title="Sincronizar ahora" loading={action === "sync" || snapshot?.syncing} disabled={!presentation.canSync || !!action} onPress={() => void run("sync", () => controller.syncNow())} />
-        <BodyText>Sincroniza con la app abierta. No se garantiza envío con la app cerrada. Estado, cronómetro, reporte, eliminación y entrega requieren conexión; no se simulan offline.</BodyText>
+        <BodyText>Sincroniza con la app abierta. No se garantiza envío con la app cerrada. Iniciar, pausar y asociar checklists se guardan en cola; no confirman tiempos ni pasos. Reporte, eliminación y entrega requieren conexión. Entrega solo cuando no queden operaciones pendientes.</BodyText>
       </Card>
       <Card style={styles.stack}>
         <SectionTitle title="Preparar hasta 7 fechas" subtitle={`${range.startDate} — ${range.endDate}`} />
@@ -107,11 +108,13 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         {operation.kind === "comment" ? <Text selectable style={styles.label}>{operation.text}</Text> : null}
         {operation.kind === "create" ? <BodyText>{operation.input.kind === "work" ? operation.input.work.summary : operation.input.kind === "maintenance" ? operation.input.maintenance.motive : operation.input.nonProductive.initialComment ?? operation.input.nonProductive.reasonText ?? "Tiempo no productivo"}</BodyText> : null}
         {operation.kind === "answer" ? <Text selectable style={styles.label}>Respuesta local: {JSON.stringify(operation.answer.responseValue)}{operation.answer.comment ? ` · ${operation.answer.comment}` : ""}</Text> : null}
+        {operation.kind === "timer" && operation.status !== "applied" ? <BodyText>En cola · tiempo pendiente de confirmar</BodyText> : null}
+        {operation.kind === "checklist" && operation.status !== "applied" ? <BodyText>Asociación pendiente. No se crean pasos ni aumenta el progreso hasta recibir la ficha del servidor.</BodyText> : null}
         {operation.lastError ? <Notice message={`${operationErrorReason(operation.lastError)} (${operation.lastError})`} tone="warning" /> : null}
         {dependency.status !== "ready" ? <View style={styles.tight}>
           <BodyText>{dependency.reason}</BodyText>
-          {parent ? <><BodyText>{operationTitle(parent)}</BodyText>{parent.lastError ? <Text selectable style={styles.caption}>{parent.lastError}</Text> : null}<OperationDetails operation={parent} title="Ver detalles de la creación" /></> : null}
-          {parent && canRetryOperation(parent) ? <Button title="Reintentar creación del trabajo" variant="secondary" loading={action === parent.id} disabled={!presentation.canSync || !!action} onPress={() => void run(parent.id, () => controller.retry(parent.id))} /> : null}
+          {parent ? <><BodyText>{operationTitle(parent)}</BodyText>{parent.lastError ? <Text selectable style={styles.caption}>{parent.lastError}</Text> : null}<OperationDetails operation={parent} title="Ver detalles de la operación anterior" /></> : null}
+          {parent && canRetryOperation(parent) ? <Button title="Reintentar operación anterior" variant="secondary" loading={action === parent.id} disabled={!presentation.canSync || !!action} onPress={() => void run(parent.id, () => controller.retry(parent.id))} /> : null}
         </View> : null}
         <OperationDetails operation={operation} />
         {operation.kind === "document" ? <OfflineFileCard file={{ ...pendingDocumentAttachment(operation), offline: { ...pendingDocumentAttachment(operation).offline, confirmed: operation.status === "applied" } }} readLocalFile={(id) => controller.readLocalFile(id)} /> : null}

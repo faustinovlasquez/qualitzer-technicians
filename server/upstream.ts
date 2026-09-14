@@ -1,15 +1,15 @@
 import { z } from "zod";
 import { GatewayError } from "./errors";
-import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, type SyncReceipt } from "../src/domain/offlineProtocol";
+import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, syncReceiptSchema, type SyncReceipt } from "../src/domain/offlineProtocol";
 
 export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
 type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_password" |
-  "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" |
+  "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |
   "/technician-dashboard/mobile-creations" | "/technician-dashboard/mobile-creations/options" |
   "/mobile-notifications/status" | "/mobile-notifications/device" | "/mobile-notifications/inbox" | "/mobile-notifications/test" |
-  `/mobile-notifications/device/${string}` | `/mobile-notifications/inbox/${string}/read` |
+  `/mobile-notifications/device/${string}` | `/mobile-notifications/inbox/${string}/read` | `/mobile-notifications/inbox/${string}` |
   `/works/activity-checklist-steps/${number}` | `/maintenances/works/steps/${number}/response` |
   `/work_files/${number}` | `/maintenance_files/${number}` | `/maintenances/works/${number}/files` |
   `/maintenances/works/steps/${number}/files` | `/works/comments/${number}` |
@@ -66,9 +66,9 @@ export class Upstream {
     if (!((path === "/mobile-sync/commands" || path === "/mobile-sync/documents") && method === "POST") && !(path === `/mobile-sync/receipts/${id}` && method === "GET")) throw new GatewayError(400, "INVALID_INPUT");
     let status = 200;
     const result = await this.performRequest(path, { ...options, onResponse: (metadata) => { status = metadata.status; } }, id);
-    const receipt = receiptForOperation(result, id, status);
-    if (!receipt) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
-    return { status, receipt };
+    const receipt = syncReceiptSchema.safeParse(result);
+    if (!receipt.success || receipt.data.operationId !== id) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    return { status, receipt: receipt.data };
   }
 
   private async performRequest(path: BackendPath, options: RequestOptions, receiptOperationId?: string): Promise<unknown> {
@@ -78,7 +78,7 @@ export class Upstream {
     if (options.token) headers.set("Authorization", options.token);
     if (options.json !== undefined) headers.set("Content-Type", "application/json");
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), path === "/companies/branding" ? 2_500 : options.form ? 120_000 : 25_000);
+    const timeout = setTimeout(() => controller.abort(), path === "/companies/branding" || /^\/branches\/[1-9]\d*$/.test(path) ? 2_500 : options.form ? 120_000 : 25_000);
     timeout.unref();
     try {
       const response = await fetch(url, {

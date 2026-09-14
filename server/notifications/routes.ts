@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { mobileUuidSchema } from "../../src/domain/creation";
-import { notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema } from "../../src/domain/notifications";
+import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema } from "../../src/domain/notifications";
 import { mobileActor } from "../creation/authorization";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
@@ -9,7 +9,7 @@ import type { Upstream } from "../upstream";
 import { emptySchema, positiveId } from "../validation";
 
 const branchQuery = z.object({ companyBranchId: positiveId.transform(Number) }).strict();
-const inboxQuery = branchQuery.extend({ page: positiveId.transform(Number).pipe(z.number().max(1000)).default(1) });
+const inboxQuery = branchQuery.extend({ page: positiveId.transform(Number).pipe(z.number().max(1000)).default(1), unreadOnly: z.enum(["true", "false"]).optional() });
 const queryFor = (branch: number) => new URLSearchParams({ companyBranchId: String(branch) });
 
 export function createNotificationsRouter(upstream: Upstream, tenantOrigin: string): Router {
@@ -48,10 +48,11 @@ export function createNotificationsRouter(upstream: Upstream, tenantOrigin: stri
   });
   router.get("/inbox", async (req, res) => {
     emptySchema.parse(req.body ?? {});
-    const { companyBranchId, page } = inboxQuery.parse(req.query);
+    const { companyBranchId, page, unreadOnly } = inboxQuery.parse(req.query);
     const { token } = await mobileActor(upstream, req, companyBranchId);
     const query = queryFor(companyBranchId);
     query.set("page", String(page));
+    if (unreadOnly === "true") query.set("unreadOnly", "true");
     const result = parseUpstream(notificationInboxSchema, await upstream.request("/mobile-notifications/inbox", { token, query }));
     if (result.page !== page || result.items.some((item) => item.data.tenantOrigin !== tenantOrigin || item.data.companyBranchId !== companyBranchId)) throw new GatewayError(502, "MOBILE_PUSH_IDENTITY_MISMATCH");
     res.json(result);
@@ -62,6 +63,15 @@ export function createNotificationsRouter(upstream: Upstream, tenantOrigin: stri
     const id = mobileUuidSchema.parse(req.params.id);
     const { token } = await mobileActor(upstream, req, companyBranchId);
     const result = parseUpstream(notificationReadResultSchema, await upstream.request(`/mobile-notifications/inbox/${id}/read`, { method: "PATCH", token, query: queryFor(companyBranchId) }));
+    if (result.id !== id) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    res.json(result);
+  });
+  router.delete("/inbox/:id", async (req, res) => {
+    if (req.body !== undefined) throw new GatewayError(400, "INVALID_INPUT");
+    const { companyBranchId } = branchQuery.parse(req.query);
+    const id = mobileUuidSchema.parse(req.params.id);
+    const { token } = await mobileActor(upstream, req, companyBranchId);
+    const result = parseUpstream(notificationDeleteResultSchema, await upstream.request(`/mobile-notifications/inbox/${encodeURIComponent(id)}`, { method: "DELETE", token, query: queryFor(companyBranchId) }));
     if (result.id !== id) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.json(result);
   });

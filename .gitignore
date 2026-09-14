@@ -44,6 +44,9 @@ assets/branding/
 # generated native folders
 /ios
 /android
+/modules/**/android/build/
+/modules/**/android/.gradle/
+/modules/**/android/.cxx/
 
 # local signed releases and build reports
 /artifacts/

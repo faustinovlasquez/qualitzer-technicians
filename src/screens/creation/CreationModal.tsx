@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { IconButton } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";

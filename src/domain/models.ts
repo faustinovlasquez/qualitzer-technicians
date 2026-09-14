@@ -1,3 +1,5 @@
+import type { AssignmentWorkSnapshot } from "./assignmentSchedule";
+
 export type WorkStatus = "pending" | "in_progress" | "paused" | "completed" | "delivered";
 export type GroupType = "external_ot" | "internal_maintenance" | "direct_assignment";
 export interface Choice { value: string; label: string; }
@@ -84,7 +86,7 @@ export interface AssignmentWork {
   workCustomerName?: string | null;
   workEquipment?: Equipment | null;
   plannedDates?: string[];
-  schedules?: Array<{ date: string; queryDates: string[]; generatedAt: string; work: AssignmentWork }>;
+  schedules?: AssignmentWorkSnapshot[];
   systemName?: string | null;
   componentName?: string | null;
 }

@@ -1,6 +1,8 @@
-# @qualitzer/mobile-gateway 1.0.0
+# @qualitzer/mobile-gateway 1.0.4
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
+
+**Preparación solo de fuentes para 1.0.4.** El gateway 1.0.3 fue generado, no entregado, e incluye assignmentSchedule anterior a la corrección crítica de reconciliación semanal. Conservar sus bytes, checksum y manifiesto como históricos inmutables; no instalarlo, recomendarlo ni sobrescribirlo. El nuevo paquete debe acreditar las fuentes corregidas mediante su propio manifiesto y hash, pendientes del coordinador.
 
 ## API pública
 
@@ -42,8 +44,34 @@ Un bloqueo exclusivo `.writer.lock` por directorio impide dos inicializaciones s
 
 ## Empaquetado verificable
 
-Ejecutar el script desde Mobile con Node que disponga de npm CLI; usa esbuild y TypeScript ya instalados, sin npm install ni scripts de lifecycle. Genera dos builds y dos `npm pack --ignore-scripts`, exige igualdad byte a byte y copia exclusivamente `qualitzer-mobile-gateway-1.0.0.tgz` a Backend/infrastructure/mobile-gateway. No toca package.json ni src del backend.
+Ejecutar el script desde Mobile con Node que disponga de npm CLI (o `npm_execpath` apuntando al npm-cli.js instalado); usa esbuild y TypeScript ya instalados, sin npm install ni scripts de lifecycle. Genera dos builds y dos `npm pack --ignore-scripts`, exige igualdad byte a byte y copia exclusivamente `qualitzer-mobile-gateway-1.0.4.tgz` a `Mobile/artifacts/mobile-gateway`. No toca el backend ni sobrescribe los archivos históricos 1.0.0/1.0.1/1.0.2/1.0.3. Si ya existe 1.0.4 con otro hash, falla sin reemplazarlo. No ejecutar mientras otros agentes sigan modificando las entradas: dos builds iguales no bloquean cambios concurrentes. El estado de esta preparación es solo fuentes; tarball, hash y validación 1.0.4 pendientes del coordinador.
+
+Este documento se incorpora como README y es una entrada del SOURCE-MANIFEST, igual que el empaquetador y assignmentSchedule. Su contenido queda cerrado en esta preparación: no editarlo después del pack para registrar resultados. Mantener todas las entradas congeladas durante empaquetado, validación y copia; registrar la evidencia posterior en reportes externos al paquete. El principal actualizará dependencia y lockfile Backend únicamente después de comprobar el hash del nuevo TGZ.
 
 El paquete incluye LICENSE, THIRD-PARTY-LICENSES.md y SOURCE-MANIFEST.json con nombre/versión, herramientas, versiones/licencias de dependencias, SHA-256 de cada entrada fuente y del bundle. El SHA-256 del tarball se imprime al finalizar (no se incluye dentro del propio archivo). El manifiesto permite auditar las fuentes exactas; no incluye un tarball de fuentes. Para reproducir, conservar esas fuentes y versiones instaladas exactas; ejecutar nuevamente el script y comparar hashes. No incorpora fechas, rutas absolutas ni variables de entorno en el resultado.
 
 El consumidor puede instalar el tarball local con npm y `--ignore-scripts`. La generación no despliega el backend ni crea una APK: el coordinador debe montar/publicar la ruta HTTPS y configurar la app para ese gateway remoto. Solo entonces deja de ser necesario el proceso gateway en el PC.
+
+## Actualización del servidor a 1.0.1 (pendiente de despliegue)
+
+Esta versión incorpora branding de la sucursal seleccionada: después de validar usuario, trabajador y pertenencia en `/api/auth/me?companyBranchId=N`, consulta exclusivamente `GET /branches/N`. Exige un `id` numérico positivo coincidente; usa `name` y `logo` del objeto plano. Solo modifica la presentación, nunca la identidad de tenant/sesión ni el namespace offline. Devuelve `branchBranding.status` APPLIED o FALLBACK; 401/403 se propagan y los demás errores conservan la presentación global. No descarga imágenes desde el gateway.
+
+El agente responsable del despliegue debe copiar el nuevo tarball a una ruta versionada del backend, verificar el SHA-256 publicado e instalar ese archivo con `--ignore-scripts`, actualizando manifiesto y lockfile del consumidor. No reutilizar el nombre 1.0.0 ni editar el bundle generado. Conservar el prefijo HTTPS `/mobile`, backendUrl, directorio privado, clave y sesiones existentes. Detener el escritor anterior y esperar su salida antes de iniciar el nuevo proceso; no rolling reload. No borrar datos ni regenerar claves.
+
+Después del reinicio comprobar `/mobile/health` y, mediante una sesión autorizada de prueba, la sucursal seleccionada y su fallback. La instalación, reinicio y comprobación autenticada son pasos pendientes del responsable del servidor, no acciones realizadas por el empaquetado Mobile. No requieren reconstruir la APK por un cambio documental o del gateway.
+
+## Actualización de notificaciones 1.0.2
+
+Conserva las mejoras de marca de sucursal de 1.0.1 y añade filtro `unreadOnly=true`, conteos globales `unreadCount`/`total`, capacidad `canDelete` y DELETE de un aviso propio. El gateway conserva los filtros de empresa, trabajador y sucursal mediante la autorización existente, no acepta destinatarios arbitrarios ni ejecuta SQL. Los eventos nuevos incluyen una referencia numérica al destinatario para descartar presentaciones de otra cuenta en el teléfono; no sustituye la comprobación de acceso al abrir.
+
+Primero se aplica la migración incremental de bandeja del backend y se despliega su código. Luego instalar este paquete versionado y reiniciar el proceso con el procedimiento de escritor único. La app nueva conserva la lectura básica con servicios antiguos, pero no inventa conteos a partir de una página ni habilita eliminar/filtrar cuando el servicio no publica la capacidad. La migración y el despliegue remoto no los ejecuta este empaquetador.
+
+## Actualización de fluidez 1.0.4 — fuentes preparadas
+
+Amplía el esquema de comandos offline con `timer` (`status`, `baseStatus`) y `checklist` (`checklistId`), ambos con `scope.workId` obligatorio. Conserva comandos comment/answer, documentos, recibos y las notificaciones 1.0.2. El router existente revalida el actor y reenvía a `/mobile-sync/commands`; no añade recibos locales, SQL, fallback legacy ni tiempos del cliente. El reloj efectivo es el del backend al aplicar, no el momento del toque offline.
+
+Primero desplegar Backend compatible y comprobar el esquema histórico de recibos. No hay migración nueva por estos dos kinds. Un gateway antiguo puede rechazarlos: no habilitar productores nuevos hasta instalar y verificar 1.0.4. Mantener UUID, payloads, pendientes, claves y sesiones también al revertir.
+
+La procedencia debe incluir assignmentSchedule corregido: conserva por fecha exacta de consulta el trabajo completo, generatedAt y la prueba causal, sin trasladar el estado/tiempo o la prueba de otro día al reconciliar la semana. La versión por sí sola no acredita su inclusión; se exige el hash de esa fuente actual en el manifiesto.
+
+El coordinador ejecutará `scripts/testing/fluidity-package-validation.cjs` después del pack: verifica el hash calculado del archivo generado, manifiesto y fuentes actuales, contratos presentes y carga CommonJS aislada con Node 20.12.2 sin invocar la fábrica. No instala en Backend ni modifica su manifiesto/lockfile; `--copy` únicamente permite publicar copias idénticas en la ruta de artefactos versionada del Backend. `--repro` reconstruye dos veces en directorios aislados y compara con el paquete existente, sin sustituirlo. Estas comprobaciones no prueban rutas HTTP, MySQL, entrega push ni funcionamiento de APK.

@@ -5,10 +5,32 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BodyText, Brand, Button, Card, Field, IconButton, SectionTitle } from "../ui/components";
 import { palette, radius, typography } from "../ui/theme";
-import { gatewayLoopbackWarning, loginConnectionError, probeGatewayConnection, safeGatewayUrl, suggestedExpoGatewayUrl, type GatewayProbeResult } from "../infrastructure/gatewayConnection";
+import { gatewayLoopbackWarning, probeGatewayConnection, safeGatewayUrl, suggestedExpoGatewayUrl, type GatewayProbeResult } from "../infrastructure/gatewayConnection";
 import { uploadFetch } from "../infrastructure/photos";
-import { NetworkError } from "../infrastructure/errors";
+import { apiMessage, NetworkError } from "../infrastructure/errors";
 import { gatewayConfiguration } from "../infrastructure/gatewayConfig";
+
+const loginFailure = "No se pudo iniciar sesión. Revisa tus credenciales y tu conexión e inténtalo de nuevo.";
+const connectionFailure = "No se pudo conectar con Qualitzer. Revisa tu conexión a internet e inténtalo de nuevo. Si el problema continúa, contacta a tu administrador.";
+
+function loginErrorMessage(message: string | null): string | null {
+  if (!message) return null;
+  const safeCodes = ["AUTH_INVALID_CREDENTIALS", "AUTH_RATE_LIMITED", "RATE_LIMITED", "UNAUTHORIZED", "WORKER_REQUIRED", "BRANCH_FORBIDDEN", "LOGIN_CHALLENGE_EXPIRED", "INVALID_LOGIN_CHALLENGE", "PASSWORD_CHANGE_REQUIRED"];
+  for (const code of safeCodes) {
+    if (message === apiMessage(code)) return apiMessage(code);
+  }
+  if (message.startsWith("No se pudo conectar con ") || message.startsWith("La conexión tardó demasiado con ")) return connectionFailure;
+  if (message === apiMessage("UPSTREAM_UNAVAILABLE") || message === apiMessage("UPSTREAM_TIMEOUT")) return connectionFailure;
+  if (message === apiMessage("UPSTREAM_INVALID_RESPONSE")) return "El servicio no está disponible en este momento. Inténtalo más tarde o contacta a tu administrador.";
+  if (message === apiMessage("TENANT_NOT_FOUND")) return "Esta empresa no está disponible. Contacta a tu administrador.";
+  if (message === apiMessage("ORIGIN_FORBIDDEN")) return "No se puede acceder desde esta versión de la app. Contacta a tu administrador.";
+  if (message === apiMessage("LOGIN_DISCOVERY_UNAVAILABLE")) return "No se pudo verificar tu acceso a las empresas. Inténtalo de nuevo en unos momentos.";
+  if (message === apiMessage("SESSION_PERSISTENCE_UNAVAILABLE")) return "No se pudo guardar tu sesión de forma segura. Inténtalo de nuevo; si continúa, contacta a tu administrador.";
+  if (message === gatewayConfiguration.error || message === "Esta versión solo permite la URL base HTTPS fijada al compilar.") return "Esta versión de la app necesita ser revisada. Contacta a tu administrador para recuperar el acceso.";
+  if (message.startsWith("La sesión guardada pertenece a otra URL base.")) return "Tu sesión guardada no es compatible con esta versión. Tus datos pendientes se conservan. Contacta a tu administrador para recuperar el acceso sin borrar los datos de la app.";
+  if (message === "Tu sesión venció o fue cerrada desde otro dispositivo. Ingresa nuevamente. Los borradores se conservan para el mismo usuario.") return message;
+  return loginFailure;
+}
 
 export interface LoginScreenProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -41,14 +63,15 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
   const diagnosticBusy = diagnostic?.version === connectionVersion.current.version && connectionVersion.current.pending;
   const diagnosticResult = diagnostic?.version === connectionVersion.current.version ? diagnostic.result : null;
   const isBusy = busy || submitting;
-  const visibleError = error ?? localError;
+  const visibleError = loginErrorMessage(error) ?? localError;
   const native = Platform.OS !== "web";
   const loopbackWarning = native ? gatewayLoopbackWarning(gatewayUrl) : null;
   const gatewayLocked = gatewayConfiguration.locked;
+  const showDevelopmentTools = __DEV__ && !gatewayLocked;
   const suggested = !gatewayLocked && native && __DEV__ ? suggestedExpoGatewayUrl(suggestedGatewayUrl, gatewayUrl) : undefined;
 
   function changeGateway(value: string): void {
-    if (gatewayLocked || isBusy || submissionLock.current) return;
+    if (!showDevelopmentTools || isBusy || submissionLock.current) return;
     connectionVersion.current.version += 1;
     connectionVersion.current.pending = false;
     setDiagnostic(null);
@@ -57,7 +80,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
   }
 
   async function checkConnection(): Promise<void> {
-    if (isBusy || submissionLock.current || connectionVersion.current.pending) return;
+    if (!showDevelopmentTools || isBusy || submissionLock.current || connectionVersion.current.pending) return;
     const version = ++connectionVersion.current.version;
     const url = gatewayUrl;
     connectionVersion.current.pending = true;
@@ -77,11 +100,6 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
     </> : null}
     <Button title="Comprobar conexión" variant="secondary" loading={diagnosticBusy} disabled={isBusy || diagnosticBusy} onPress={() => { void checkConnection(); }} />
     {diagnosticResult ? <Text accessibilityLiveRegion="polite" style={[styles.connectionHelp, diagnosticResult.status !== "ready" && styles.connectionDanger]}>{diagnosticResult.message}</Text> : null}
-    {gatewayLocked ? <BodyText style={styles.connectionHelp}>Servidor fijado en esta versión. Su disponibilidad depende del despliegue de la pasarela en esta URL base; la app no necesita Expo Go ni un equipo local.</BodyText> : null}
-    {native && !gatewayLocked ? <>
-      <Button title={showConnection ? "Ocultar configuración" : "Configurar conexión"} variant="ghost" disabled={isBusy} onPress={() => setShowConnection((value) => !value)} />
-      {showConnection ? <Field label="URL de la pasarela" value={gatewayUrl} onChangeText={changeGateway} keyboardType="url" autoCapitalize="none" autoCorrect={false} autoComplete="off" textContentType="URL" editable={!isBusy} accessibilityState={{ disabled: isBusy }} /> : null}
-    </> : null}
   </View>;
 
   async function handleLogin(): Promise<void> {
@@ -94,7 +112,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
     try {
       await onLogin(username.trim(), password);
     } catch (caught) {
-      setLocalError(caught instanceof NetworkError ? loginConnectionError(caught, gatewayUrl) : "No se pudo iniciar sesión. Revisa tus credenciales y tu conexión e inténtalo de nuevo.");
+      setLocalError(caught instanceof NetworkError ? connectionFailure : loginFailure);
     } finally {
       setPassword("");
       setShowPassword(false);
@@ -110,26 +128,17 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
         <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={[styles.content, wide && styles.contentWide]}>
           <Brand />
           <View style={[styles.layout, wide && styles.layoutWide]}>
-            <LinearGradient colors={[palette.navy, "#174C57", palette.primary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.hero, wide && styles.heroWide]}>
-              <View pointerEvents="none" style={styles.heroOrbit} />
-              <View pointerEvents="none" style={styles.heroOrbitInner} />
-              <View style={styles.heroTop}>
-                <View style={styles.heroIcon}><Ionicons name="construct-outline" size={30} color={palette.white} accessible={false} /></View>
-                <Text style={styles.eyebrow}>TU OPERACIÓN, A MANO</Text>
-              </View>
+            <LinearGradient testID="login-hero" colors={[palette.navy, "#174C57", palette.primary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.hero, wide && styles.heroWide]}>
+              <View style={styles.heroIcon}><Ionicons name="construct-outline" size={23} color={palette.white} accessible={false} /></View>
               <View style={styles.heroCopy}>
-                <Text accessibilityRole="header" accessibilityLabel="Tu trabajo. En tus manos." style={[styles.heroTitle, width < 360 && styles.heroTitleSmall]}>Tu trabajo.{"\n"}En tus manos.</Text>
-                <Text style={styles.heroDescription}>Tus tareas, equipos y listas de verificación. Todo en un mismo lugar.</Text>
-              </View>
-              <View style={styles.heroFooter}>
-                <Ionicons name="shield-checkmark-outline" size={19} color="#A9E4D9" accessible={false} />
-                <Text style={styles.heroFooterText}>Diseñado para el trabajo en campo</Text>
+                <Text accessibilityRole="header" accessibilityLabel="Tu trabajo. En tus manos." style={styles.heroTitle}>Tu trabajo. En tus manos.</Text>
+                <Text style={styles.heroDescription}>Tareas, equipos y checklists.</Text>
               </View>
             </LinearGradient>
 
             <View style={[styles.formColumn, wide && styles.formColumnWide]}>
               <Card style={styles.form}>
-                <SectionTitle title="Entra a tu jornada" subtitle="Ingresa con tu usuario y contraseña. Si tienes acceso a varias empresas, podrás elegir después." />
+                <SectionTitle title="Entra a tu jornada" subtitle="Ingresa con tu usuario y contraseña." />
                 <View style={styles.fields}>
                   <Field
                     label="Correo o usuario"
@@ -174,10 +183,9 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                     <Text style={styles.errorText}>{visibleError}</Text>
                   </View>
                 ) : null}
-                {native || gatewayLocked ? connectionPanel : null}
                 <View style={styles.sessionNotice}>
                   <Ionicons name="shield-checkmark-outline" size={20} color={palette.primary} accessible={false} />
-                  <Text style={styles.sessionNoticeText}>La sesión se recuerda automáticamente en este dispositivo hasta que cierres sesión o el servidor solicite un nuevo acceso por revocación o seguridad.</Text>
+                  <Text style={styles.sessionNoticeText}>Tu sesión se recuerda en este dispositivo hasta que la cierres o debas identificarte de nuevo.</Text>
                 </View>
                 <Button title={isBusy ? "Iniciando sesión…" : "Iniciar sesión"} onPress={() => { void handleLogin(); }} loading={isBusy} disabled={diagnosticBusy} icon="arrow-forward-outline" />
                 <View style={styles.dividerRow}>
@@ -191,7 +199,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                 </View>
               </Card>
 
-              {!gatewayLocked ? <Card style={styles.connectionCard}>
+              {showDevelopmentTools ? <Card style={styles.connectionCard}>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Conexión avanzada. Configurar pasarela móvil"
@@ -209,10 +217,8 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                 </Pressable>
                 {showConnection ? (
                   <View style={styles.connectionBody}>
-                    {!native ? <>
-                      <Field label="URL de la pasarela" value={gatewayUrl} onChangeText={changeGateway} placeholder="https://pasarela.tu-empresa.cl" keyboardType="url" autoCapitalize="none" autoCorrect={false} autoComplete="off" textContentType="URL" editable={!isBusy} accessibilityState={{ disabled: isBusy }} />
-                      {connectionPanel}
-                    </> : null}
+                    <Field label="URL de la pasarela" value={gatewayUrl} onChangeText={changeGateway} placeholder="https://pasarela.tu-empresa.cl" keyboardType="url" autoCapitalize="none" autoCorrect={false} autoComplete="off" textContentType="URL" editable={!isBusy} accessibilityState={{ disabled: isBusy }} />
+                    {connectionPanel}
                     <BodyText style={styles.connectionHelp}>Cámbiala solo si tu administrador te lo indica. Usa la dirección de la pasarela móvil, no el portal de una empresa. Las empresas disponibles se muestran después de verificar tus credenciales.</BodyText>
                   </View>
                 ) : null}
@@ -228,28 +234,21 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
-  content: { flexGrow: 1, padding: 20, paddingTop: 26, paddingBottom: 32, gap: 26, width: "100%", maxWidth: 1100, alignSelf: "center" },
-  contentWide: { padding: 40, justifyContent: "center", gap: 32 },
-  layout: { gap: 20 },
-  layoutWide: { flexDirection: "row", gap: 32, alignItems: "stretch" },
-  hero: { borderRadius: radius.xl, padding: 26, gap: 28, overflow: "hidden" },
-  heroWide: { flex: 1, padding: 36, justifyContent: "space-between", minHeight: 510 },
-  heroOrbit: { position: "absolute", width: 290, height: 290, borderRadius: 145, borderWidth: 1, borderColor: palette.darkBorder, top: -65, right: -140 },
-  heroOrbitInner: { position: "absolute", width: 230, height: 230, borderRadius: 115, borderWidth: 1, borderColor: palette.darkBorder, top: -35, right: -110 },
-  heroTop: { flexDirection: "row", alignItems: "center", gap: 12 },
-  heroIcon: { width: 56, height: 56, borderRadius: 18, backgroundColor: palette.darkSurface, borderWidth: 1, borderColor: palette.darkBorder, alignItems: "center", justifyContent: "center" },
-  eyebrow: { ...typography.overline, color: palette.onDark, flexShrink: 1, fontSize: 10 },
-  heroCopy: { gap: 14 },
-  heroTitle: { ...typography.hero, color: palette.white },
-  heroTitleSmall: { fontSize: 30, lineHeight: 37 },
-  heroDescription: { ...typography.body, color: palette.onDark, maxWidth: 320, lineHeight: 25 },
-  heroFooter: { flexDirection: "row", alignItems: "center", gap: 9, paddingTop: 18, borderTopWidth: 1, borderTopColor: palette.darkBorder },
-  heroFooterText: { ...typography.caption, color: palette.onDark, flex: 1 },
+  content: { flexGrow: 1, padding: 16, paddingTop: 14, paddingBottom: 24, gap: 14, width: "100%", maxWidth: 1100, alignSelf: "center" },
+  contentWide: { padding: 32, justifyContent: "center", gap: 20 },
+  layout: { gap: 14 },
+  layoutWide: { flexDirection: "row", gap: 24, alignItems: "flex-start" },
+  hero: { borderRadius: radius.lg, padding: 14, gap: 12, flexDirection: "row", alignItems: "center" },
+  heroWide: { flex: 1 },
+  heroIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: palette.darkSurface, alignItems: "center", justifyContent: "center" },
+  heroCopy: { flex: 1, minWidth: 0, gap: 3 },
+  heroTitle: { fontSize: 18, lineHeight: 23, fontWeight: "700", color: palette.white },
+  heroDescription: { fontSize: 13, lineHeight: 18, color: palette.onDark },
   formColumn: { gap: 14 },
   formColumnWide: { flex: 1.05 },
-  form: { gap: 22, padding: 22 },
-  fields: { gap: 18 },
-  sessionNotice: { flexDirection: "row", alignItems: "flex-start", gap: 10, padding: 14, borderRadius: radius.md, backgroundColor: palette.primarySoft },
+  form: { gap: 14, padding: 16 },
+  fields: { gap: 12 },
+  sessionNotice: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: radius.md, backgroundColor: palette.primarySoft },
   sessionNoticeText: { ...typography.caption, color: palette.textSecondary, flex: 1 },
   error: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: palette.dangerSoft, borderRadius: radius.sm, padding: 14 },
   errorText: { ...typography.label, fontWeight: "400", color: palette.danger, flex: 1 },

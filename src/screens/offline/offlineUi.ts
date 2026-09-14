@@ -2,14 +2,22 @@ import { z } from "zod";
 import { calendarDateSchema, mobileUuidSchema } from "../../domain/creation";
 import { normalizeChecklistAnswer } from "../../domain/checklistProgress";
 import { syncResponseForStep } from "../../domain/offlineProtocol";
-import type { Attachment, ChecklistStep, DateRange, LocalPhoto, StepAnswer } from "../../domain/models";
+import type { AssignmentWork, Attachment, ChecklistStep, DateRange, LocalPhoto, StepAnswer } from "../../domain/models";
 import { isOfflineQueuedError } from "../../domain/offline";
 import type { OfflineAttachment, OfflineOperation, OfflineOperationStatus, OfflineQueuedOutcome, OfflineScope, OfflineSnapshot } from "../../domain/offline";
 import { requiresDeployment } from "../../offline/connection";
+import { timerReconciledWithWork } from "../../offline/queueIntentions";
 
 export type PendingComment = Extract<OfflineOperation, { kind: "comment" }>;
 export type PendingAnswer = Extract<OfflineOperation, { kind: "answer" }>;
 export type PendingDocument = Extract<OfflineOperation, { kind: "document" }>;
+export type PendingTimer = Extract<OfflineOperation, { kind: "timer" }>;
+export type PendingChecklist = Extract<OfflineOperation, { kind: "checklist" }>;
+export interface QueuedTimerMarker { operationId: string; status: "in_progress" | "paused"; }
+export const PENDING_TIMER_LABEL = "En cola · tiempo pendiente de confirmar";
+export function timerPendingLabel(timer: PendingTimer | null): string {
+  return timer?.status === "applied" ? "Envío confirmado · esperando actualizar estado y tiempo. Si no se actualiza, abre el detalle y actualiza la ficha; no repitas el envío" : PENDING_TIMER_LABEL;
+}
 export const queuedCreationOutcomeSchema = z.object({
   operationId: mobileUuidSchema, operationIds: z.array(mobileUuidSchema).length(1), kind: z.literal("create"),
   localGroupId: z.string(), localWorkId: z.string(), date: calendarDateSchema, ownsFiles: z.literal(false),
@@ -34,14 +42,15 @@ export function canRetryOperation(operation: OfflineOperation, now = Date.now())
 }
 
 export function offlineAttachment(file: Attachment): OfflineAttachment | null {
-  if (!("offline" in file) || !file.offline || typeof file.offline !== "object") return null;
+  if (!("offline" in file) || !Object.prototype.hasOwnProperty.call(file, "offline") || !file.offline || typeof file.offline !== "object" || Array.isArray(file.offline)) return null;
   const metadata = file.offline;
-  if (!("confirmed" in metadata) || typeof metadata.confirmed !== "boolean" || !("downloaded" in metadata) || typeof metadata.downloaded !== "boolean") return null;
+  if (!("confirmed" in metadata) || !Object.prototype.hasOwnProperty.call(metadata, "confirmed") || typeof metadata.confirmed !== "boolean"
+    || !("downloaded" in metadata) || !Object.prototype.hasOwnProperty.call(metadata, "downloaded") || typeof metadata.downloaded !== "boolean") return null;
   return file as OfflineAttachment;
 }
 
 export function isConfirmedAttachment(file: Attachment): boolean {
-  return offlineAttachment(file)?.offline.confirmed ?? !String(file.id).startsWith("local-");
+  return "offline" in file ? offlineAttachment(file)?.offline.confirmed === true : !String(file.id).startsWith("local-");
 }
 
 export function confirmedEvidenceWork<T extends { checklists: { steps: ChecklistStep[] }[] }>(work: T): T {
@@ -73,6 +82,11 @@ export function operationsForWork(snapshot: OfflineSnapshot | null | undefined, 
 export function pendingDocumentAttachment(operation: PendingDocument): OfflineAttachment {
   return { id: `local-${operation.file.id}`, name: operation.file.name, url: "", type: operation.file.mimeType, size: operation.file.size,
     createdAt: new Date(operation.createdAt).toISOString(), offline: { confirmed: false, downloaded: true, localFileId: operation.file.id, operationId: operation.id, status: operation.status } };
+}
+
+export function pendingTimerForWork(snapshot: OfflineSnapshot | null | undefined, scope: Omit<OfflineScope, "companyBranchId"> & { companyBranchId?: number }, work?: AssignmentWork): PendingTimer | null {
+  return operationsForWork(snapshot, scope).reduce<PendingTimer | null>((latest, operation) =>
+    operation.kind === "timer" && !timerReconciledWithWork(operation, work) ? operation : latest, null);
 }
 
 export function coverageDates(range: DateRange): string[] {
@@ -117,6 +131,8 @@ export function operationTitle(operation: OfflineOperation): string {
   if (operation.kind === "document") return `Archivo · ${operation.file.name}`;
   if (operation.kind === "comment") return "Comentario";
   if (operation.kind === "answer") return "Respuesta de checklist";
+  if (operation.kind === "timer") return operation.payload.status === "paused" ? "Pausar trabajo" : "Iniciar o reanudar trabajo";
+  if (operation.kind === "checklist") return `Asociar checklist · ${operation.payload.checklistId}`;
   const input = operation.input;
   return input.kind === "work" ? `Crear trabajo · ${input.work.title}` : input.kind === "maintenance" ? `Crear mantenimiento · ${input.maintenance.title}` : "Registrar tiempo no productivo";
 }
@@ -145,9 +161,9 @@ export interface OperationDependencyInfo {
 export function dependencyInfo(operation: OfflineOperation, operations: readonly OfflineOperation[] | ReadonlyMap<string, OfflineOperation>): OperationDependencyInfo {
   if (!operation.dependencyId || operation.status === "applied") return { status: "ready", title: "", reason: "" };
   const parent = "get" in operations ? operations.get(operation.dependencyId) : operations.find((entry) => entry.id === operation.dependencyId);
-  if (!parent) return { status: "missing", title: "Esperando crear el trabajo", reason: "No se encontró la creación en esta cola. El archivo o texto sigue guardado; requiere revisión." };
+  if (!parent) return { status: "missing", title: "Esperando operación anterior", reason: "No se encontró la operación anterior en esta cola. Los cambios siguen guardados; requieren revisión." };
   if (parent.status === "applied") return { status: "ready", title: "", reason: "", parent };
   const blocked = ["blocked", "conflict", "needs_review", "auth_required"].includes(parent.status);
-  return { status: blocked ? "blocked" : "waiting", title: "Esperando crear el trabajo", parent,
-    reason: operationErrorReason(parent.lastError) || (blocked ? `La creación requiere atención: ${operationStatusLabels[parent.status]}.` : "Primero debe confirmarse la creación. Este elemento aún no se ha enviado; no es un fallo.") };
+  return { status: blocked ? "blocked" : "waiting", title: parent.kind === "create" ? "Esperando crear el trabajo" : "Esperando operación anterior", parent,
+    reason: operationErrorReason(parent.lastError) || (blocked ? `La operación anterior requiere atención: ${operationStatusLabels[parent.status]}.` : "Primero debe confirmarse la operación anterior. Este elemento aún no se ha enviado; no es un fallo.") };
 }

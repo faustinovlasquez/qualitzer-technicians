@@ -23,6 +23,7 @@ export interface MockState {
   loginNextStep: "DONE" | "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED";
   forcedNextStep: "DONE" | "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED";
   branding: string;
+  branches: Map<number, unknown>;
   beforeResponse?: (call: RecordedCall) => Promise<void>;
   assignments: Assignments;
   sequence: Assignments[];
@@ -52,6 +53,7 @@ export async function mockBackend(t: TestContext, overrides: Partial<MockState> 
   const state: MockState = {
     user: user(), assignments: assignments(), sequence: [], calls: [], failures: new Map(),
     loginNextStep: "DONE", forcedNextStep: "DONE", branding: "Grupoeliseo",
+    branches: new Map(),
     files: { data: [{ id: 1, name: "Foto", url: "https://files.example.invalid/photo.png", thumbnailUrl: "https://files.example.invalid/thumb.png", type: "image/png", createdAt: "2026-09-01T10:00:00Z", responsible: { id: 9, name: "Técnico" }, netCost: 100 }], totalRows: 1, totalPages: 1 },
     ...overrides,
   };
@@ -74,6 +76,10 @@ export async function mockBackend(t: TestContext, overrides: Partial<MockState> 
     }
     if (req.path !== "/api/auth/login" && req.headers.authorization !== TOKEN) { res.status(401).json({ error: "UPSTREAM_SECRET_ERROR" }); return; }
     if (req.path === "/api/auth/me") { res.json(state.user); return; }
+    if (req.method === "GET" && /^\/api\/branches\/[1-9]\d*$/.test(req.path)) {
+      const branch = state.branches.get(Number(req.path.split("/").pop()));
+      if (branch !== undefined) { res.json(branch); return; }
+    }
     if (req.path === "/api/companies/branding") { res.json({ name: state.branding }); return; }
     if (req.path === "/api/auth/login" || req.path === "/api/auth/forced_password") {
       res.json({ username: "test", email: "test@example.invalid", token: "test-token", nextStep: req.path === "/api/auth/login" ? state.loginNextStep : state.forcedNextStep, defaultModule: "secret", internal: { secret: true } }); return;

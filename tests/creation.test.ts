@@ -78,7 +78,7 @@ test("demo notifications are honestly disabled, never register or send real push
   const notifications = new DemoNotifications();
   assert.deepEqual((await notifications.notificationStatus(1)).reasons, ["DEMO"]);
   assert.equal((await notifications.notificationStatus(1)).enabled, false);
-  assert.deepEqual(await notifications.notificationInbox(1, 1), { items: [], page: 1, pageSize: 25 });
+  assert.deepEqual(await notifications.notificationInbox(1, 1), { items: [], page: 1, pageSize: 25, unreadCount: 0, total: 0, canDelete: false });
   await assert.rejects(notifications.testNotification(1), /DEMO/);
   await assert.rejects(notifications.readNotification(1, base.clientRequestId), /MOBILE_PUSH_EVENT_NOT_FOUND/);
 });

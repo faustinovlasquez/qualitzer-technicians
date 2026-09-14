@@ -7,6 +7,112 @@
 			"command": "& '.\\node_modules\\node\\bin\\node.exe' 'scripts/start.cjs'",
 			"isBackground": true,
 			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer Field: compilar actualizacion APK firmada",
+			"type": "shell",
+			"command": "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\Build-Standalone.ps1'",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Qualitzer: compilar APK de prueba nativa",
+			"type": "shell",
+			"command": "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\Build-Standalone.ps1' -Architectures 'arm64-v8a,armeabi-v7a,x86_64' -DiagnosticOnly",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Native stability: prepare UI reader",
+			"type": "shell",
+			"command": "& 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\prepare-native-ui-dump.cjs'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Native stability: inspect Agenda",
+			"type": "shell",
+			"command": "& 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\native-stability-1.0.2.cjs' tap Agenda",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Native stability: fresh standard UI dump",
+			"type": "shell",
+			"command": "$adb = 'C:\\Users\\faust\\AppData\\Local\\QualitzerAndroid\\sdk\\platform-tools\\adb.exe'; if ((& $adb -s emulator-5580 shell getprop ro.boot.qemu.avd_name).Trim() -ne 'QualitzerAgendaApi36_20260910') { throw 'REFUSING_NON_TEST_AVD' }; & $adb -s emulator-5580 shell uiautomator dump --compressed /sdcard/native-stability-fresh.xml",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Native refresh closure: scoped validation",
+			"type": "shell",
+			"command": "& 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\native-refresh-validation.cjs'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Mobile final: validate and package gateway 1.0.1",
+			"type": "shell",
+			"command": "& 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\final-mobile-package-validation.cjs'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Native compact 1.0.3: observed action",
+			"type": "shell",
+			"command": "& 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\native-compact-1.0.3.cjs'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer 1.0.4: verificar e instalar APK final en emulador",
+			"type": "shell",
+			"command": "& 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\native-refresh-closure.cjs' verify final-1-0-4 2026-09-11T15-18-28-186Z; if ($LASTEXITCODE -eq 0) { & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\native-refresh-closure.cjs' install final-update-1-0-4 }; if ($LASTEXITCODE -eq 0) { & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\native-refresh-closure.cjs' launch final-start-1-0-4 }",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: emulador de seguridad",
+			"type": "shell",
+			"command": "$env:ANDROID_AVD_HOME = 'C:\\Users\\faust\\AppData\\Local\\QualitzerAndroid\\android-user\\avd'; $env:ANDROID_USER_HOME = 'C:\\Users\\faust\\AppData\\Local\\QualitzerAndroid\\android-user'; $env:ANDROID_HOME = 'C:\\Users\\faust\\AppData\\Local\\QualitzerAndroid\\sdk'; & 'C:\\Users\\faust\\AppData\\Local\\QualitzerAndroid\\sdk\\emulator\\emulator.exe' -avd QualitzerAgendaApi36_20260910 -port 5580 -no-snapshot-save -no-boot-anim",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de seguridad",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $listeners = Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue; foreach ($listener in $listeners) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $listener.OwningProcess); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de notificaciones",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $listeners = Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue; foreach ($listener in $listeners) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $listener.OwningProcess); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK compacta",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de agenda y capturas",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de fluidez",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
 		}
 	]
 }

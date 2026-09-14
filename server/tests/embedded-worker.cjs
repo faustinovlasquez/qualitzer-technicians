@@ -13,7 +13,8 @@ globalThis.fetch = async (input, init) => {
   if (path === "/auth/mobile/discover") return Response.json({ matches: [{ tenant, grant: "g".repeat(43), expiresAt: new Date(Date.now() + 120000).toISOString() }] });
   if (path === "/auth/mobile/complete") return Response.json({ tenant, token: "fixture-upstream-token", username: "fixture", email: "fixture@example.invalid", nextStep: "DONE" });
   if (path === "/companies/branding") return Response.json({ name: "Fixture" });
-  if (path === "/auth/me") return Response.json({ id: 9, workerId: 42, name: "Fixture", lastnames: "Test", email: "fixture@example.invalid", role: { name: "admin", isTechnician: false }, accessBranchs: [{ id: 1, name: "Main", main: true }], system: { name: "Test", timezone: "UTC" } });
+  if (path === "/branches/1") return Response.json({ id: 1, name: "Packed branch", logo: "https://cdn.example.com/branch.png" });
+  if (path === "/auth/me" || path === "/auth/me?companyBranchId=1") return Response.json({ id: 9, workerId: 42, name: "Fixture", lastnames: "Test", email: "fixture@example.invalid", role: { name: "admin", isTechnician: false }, accessBranchs: [{ id: 1, name: "Main", main: true }], system: { name: "Test", timezone: "UTC" } });
   throw new Error("UNEXPECTED_FIXTURE_NETWORK");
 };
 
@@ -24,7 +25,7 @@ async function main() {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const url = `http://127.0.0.1:${server.address().port}`;
-    const response = await nativeFetch(`${url}${action === "login" ? "/api/auth/login/start" : "/api/auth/me"}`, {
+    const response = await nativeFetch(`${url}${action === "login" ? "/api/auth/login/start" : action === "branch" ? "/api/auth/me?companyBranchId=1" : "/api/auth/me"}`, {
       method: action === "login" ? "POST" : "GET",
       headers: { "X-Forwarded-Proto": "https", "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: action === "login" ? JSON.stringify({ username: "fixture", password: "fixture-only", remember: true }) : undefined,

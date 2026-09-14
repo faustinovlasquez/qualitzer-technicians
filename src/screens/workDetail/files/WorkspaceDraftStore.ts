@@ -61,7 +61,9 @@ export class WorkspaceDraftStore {
   private publish(update: Partial<WorkspaceSnapshot>): void {
     if (this.snapshot.closed) return;
     this.snapshot = { ...this.snapshot, ...update };
-    for (const listener of this.listeners) listener();
+    for (const listener of this.listeners) {
+      try { listener(); } catch { /* Un observador no puede revertir archivos ya persistidos. */ }
+    }
   }
 
   private enqueue<T>(operation: () => Promise<T>, protectDraft = true): Promise<T> {
@@ -152,7 +154,7 @@ export class WorkspaceDraftStore {
   addFiles = (assets: SelectedFile[]): Promise<void> => this.enqueue(async () => {
     this.requireReady();
     const existing = this.snapshot.files;
-    if (existing.length + assets.length > MAX_FILES) throw new Error("El máximo es de 4 archivos pendientes por destino. No se añadió esta selección.");
+    if (existing.length + assets.length > MAX_FILES) throw new Error(`El máximo es de ${MAX_FILES} archivos pendientes por destino. No se añadió esta selección.`);
     const metadata = assets.map(describeFile);
     if (existing.reduce((sum, file) => sum + file.size, 0) + metadata.reduce((sum, file) => sum + file.size, 0) > MAX_FILES_BYTES) throw new Error("La selección supera 40 MB (40 MiB) en total. No se añadió ningún archivo.");
     await this.ensureDirectory();

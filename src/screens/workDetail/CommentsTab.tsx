@@ -21,6 +21,7 @@ export interface CommentsTabProps {
   onSubmit: (text: string) => Promise<void>;
   pending?: PendingComment[];
   offlineReady?: boolean;
+  appliedRevision?: string | number;
 }
 
 interface CommentsMessage { text: string; tone: "error" | "success" | "warning"; }
@@ -57,6 +58,7 @@ function CommentsContent(props: CommentsTabProps) {
   const [loadError, setLoadError] = useState<{ page: number; text: string } | null>(null);
   const [message, setMessage] = useState<CommentsMessage | null>(null);
   const [localQueued, setLocalQueued] = useState<{ id: string; text: string; createdAt: number }[]>([]);
+  const localQueuedRef = useRef(localQueued);
   const pending = (props.pending ?? []).filter((operation) => operation.status !== "applied");
   const pendingText = pending.some((operation) => operation.text === draft.text.trim()) || localQueued.some((operation) => operation.text === draft.text.trim());
   const textAlreadySent = draft.text.length > 0 && draft.text === draft.confirmedText;
@@ -64,7 +66,8 @@ function CommentsContent(props: CommentsTabProps) {
   useEffect(() => {
     if (!props.pending) return;
     const known = new Set(props.pending.map((operation) => operation.id));
-    setLocalQueued((previous) => previous.filter((operation) => !known.has(operation.id)));
+    localQueuedRef.current = localQueuedRef.current.filter((operation) => !known.has(operation.id));
+    setLocalQueued(localQueuedRef.current);
   }, [props.pending]);
 
   const load = useCallback(async (page: number): Promise<boolean> => {
@@ -106,6 +109,14 @@ function CommentsContent(props: CommentsTabProps) {
     void load(0);
   }, [load, props.resourceKey]);
 
+  const appliedRevision = props.appliedRevision ?? props.pending?.filter((operation) => operation.status === "applied").map((operation) => operation.id).join("|") ?? "";
+  const previousAppliedRevision = useRef(appliedRevision);
+  useEffect(() => {
+    if (previousAppliedRevision.current === appliedRevision) return;
+    previousAppliedRevision.current = appliedRevision;
+    void load(0);
+  }, [appliedRevision, load]);
+
   async function changeText(text: string): Promise<void> {
     try { await draft.store.setText(text); }
     catch (error) { if (active.current) setMessage({ text: `El texto sigue en pantalla, pero su borrador no está protegido: ${errorMessage(error)}`, tone: "error" }); }
@@ -116,29 +127,35 @@ function CommentsContent(props: CommentsTabProps) {
     catch (error) { if (active.current) setMessage({ text: errorMessage(error), tone: "error" }); }
   }
 
+  function canSubmit(): boolean {
+    return active.current && callbacks.current.offlineReady !== false && !draft.store.getSnapshot().closed;
+  }
+
   async function submit(): Promise<void> {
     const current = draft.store.getSnapshot();
     const snapshot = current.text;
-    if (callbacks.current.busy || callbacks.current.offlineReady === false || pendingText || !snapshot.trim() || snapshot.length > MAX_COMMENT_LENGTH || snapshot === current.confirmedText || !draft.store.beginComment()) return;
+    const duplicate = (callbacks.current.pending ?? []).some((operation) => operation.status !== "applied" && operation.text === snapshot.trim()) || localQueuedRef.current.some((operation) => operation.text === snapshot.trim());
+    if (!active.current || callbacks.current.busy || callbacks.current.offlineReady === false || duplicate || !snapshot.trim() || snapshot.length > MAX_COMMENT_LENGTH || snapshot === current.confirmedText || !draft.store.beginComment()) return;
     const onSubmit = callbacks.current.onSubmit;
     setMessage(null);
     let confirmed = false;
     let cleanupError: string | null = null;
     try {
       await draft.store.flush();
-      if (!active.current || draft.store.getSnapshot().closed) return;
+      if (!canSubmit()) return;
       await onSubmit(snapshot.trim());
       confirmed = true;
       try { await draft.store.confirmComment(snapshot); }
       catch (error) { cleanupError = errorMessage(error); }
-      const refreshed = active.current ? await load(0) : true;
+      if (active.current) void load(0);
       if (active.current) setMessage({
-        text: `${props.mode === "demo" ? "Comentario guardado en demostración." : "Comentario publicado."}${!refreshed ? " No se pudo actualizar el historial. Actualiza los comentarios; no vuelvas a enviar el mismo mensaje." : ""}${cleanupError ? ` Falta limpiar el borrador local: ${cleanupError} Reintenta el borrador, no el envío.` : ""}${draft.store.getSnapshot().text && draft.store.getSnapshot().text !== snapshot ? " El nuevo texto que escribiste se conserva como borrador." : ""}`,
-        tone: !refreshed || cleanupError ? "warning" : "success",
+        text: `${props.mode === "demo" ? "Comentario guardado en demostración." : "Comentario publicado."}${cleanupError ? ` Falta limpiar el borrador local: ${cleanupError} Reintenta el borrador, no el envío.` : ""}${draft.store.getSnapshot().text && draft.store.getSnapshot().text !== snapshot ? " El nuevo texto que escribiste se conserva como borrador." : ""}`,
+        tone: cleanupError ? "warning" : "success",
       });
     } catch (error) {
       if (isOfflineQueuedError(error) && error.kind === "comment") {
-        if (active.current) setLocalQueued((previous) => [...previous.filter((item) => item.id !== error.operationId), { id: error.operationId, text: snapshot.trim(), createdAt: Date.now() }]);
+        localQueuedRef.current = [...localQueuedRef.current.filter((item) => item.id !== error.operationId), { id: error.operationId, text: snapshot.trim(), createdAt: Date.now() }];
+        if (active.current) setLocalQueued(localQueuedRef.current);
         try { await draft.store.confirmComment(snapshot); }
         catch { cleanupError = "Falta limpiar el borrador local. No reenvíes este texto; reintenta el almacenamiento."; }
         if (active.current) setMessage({ text: `Comentario guardado en este dispositivo · pendiente de sincronizar. No se ha publicado en el servidor.${cleanupError ? ` ${cleanupError}` : ""}`, tone: "warning" });

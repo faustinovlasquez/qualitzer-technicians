@@ -2,14 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { assignmentCodes } from "../../domain/assignmentCodes";
-import { assignmentDay, assignmentProgress } from "../../domain/assignmentSchedule";
+import { assignmentDay, assignmentProgress, assignmentWorkForQueryDate, assignmentWorkSnapshotForQueryDate } from "../../domain/assignmentSchedule";
 import { clock, duration, isFinished, plainText, shortDate, STATUS_LABELS } from "../../domain/format";
 import type { AssignmentGroup, AssignmentWork, StatusInput, WorkOpenOptions } from "../../domain/models";
+import { isOfflineQueuedError, type OfflineSnapshot } from "../../domain/offline";
 import { Badge, Button, Card, type BadgeTone } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import { Notice } from "../workDetail/DetailUi";
 import { errorMessage } from "../workDetail/detailRules";
 import { isPendingLocalWork } from "../offline/offlineDashboardUi";
+import { operationsForWork, pendingTimerForWork, timerPendingLabel, operationErrorReason, operationStatusLabels, type PendingTimer, type QueuedTimerMarker } from "../offline/offlineUi";
 import { AssignmentMetadataRow } from "./AssignmentMetadataRow";
 import { equipmentLabel, fullDate, safeCount, scheduleTime, statusTones } from "./assignmentPresentation";
 
@@ -22,6 +24,10 @@ export interface AssignmentWorkCardProps {
   generatedAt?: string;
   online?: boolean;
   staleReadOnly?: boolean;
+  offline?: OfflineSnapshot | null;
+  queryDate?: string;
+  companyBranchId?: number;
+  pendingTimer?: PendingTimer | null;
 }
 
 const priorities: { [K in AssignmentWork["priority"]]: { label: string; tone: BadgeTone } } = {
@@ -30,12 +36,12 @@ const priorities: { [K in AssignmentWork["priority"]]: { label: string; tone: Ba
   high: { label: "Prioridad alta", tone: "danger" },
 };
 
-function WorkExecution({ work, generatedAt, online = true }: Pick<AssignmentWorkCardProps, "work" | "generatedAt" | "online">) {
+function WorkExecution({ work, generatedAt, online = true, pending = false }: Pick<AssignmentWorkCardProps, "work" | "generatedAt" | "online"> & { pending?: boolean }) {
   const receivedAt = useMemo(() => Date.now(), [work, generatedAt]);
   const [now, setNow] = useState(Date.now);
-  const running = online && work.status === "in_progress" && !work.isManualExecution;
+  const running = online && !pending && work.status === "in_progress" && !work.isManualExecution;
   const snapshot = work.schedules?.find((item) => assignmentDay(item.work.scheduledDate) === assignmentDay(work.scheduledDate));
-  const snapshotAt = Date.parse(snapshot?.generatedAt ?? generatedAt ?? "");
+  const snapshotAt = Date.parse(generatedAt ?? snapshot?.generatedAt ?? "");
   const baseline = Number.isFinite(snapshotAt) ? snapshotAt : receivedAt;
 
   useEffect(() => {
@@ -63,20 +69,43 @@ function WorkExecution({ work, generatedAt, online = true }: Pick<AssignmentWork
     </View>
     {timing.overtimeMinutes > 0 ? <Text style={styles.overtime}>{duration(timing.overtimeMinutes)} sobre lo planificado</Text> : null}
     {running ? <Text style={styles.note}>En ejecución · el servidor confirma el tiempo final.</Text> : null}
+    {pending ? <Text style={styles.note}>Último tiempo recibido, sin incremento local mientras se confirma o actualiza el estado.</Text> : null}
     {!online ? <Text style={styles.note}>Último tiempo recibido · no se simula el cronómetro sin conexión o sin ficha verificada.</Text> : null}
   </View>;
 }
 
-export function AssignmentWorkCard({ group, work, onOpenWork, onWorkStatus, busy = false, generatedAt, online = true, staleReadOnly = false }: AssignmentWorkCardProps) {
+export function AssignmentWorkCard(props: AssignmentWorkCardProps) {
+  const scopeKey = JSON.stringify([props.group.id, props.work.id, assignmentDay(props.work.scheduledDate), props.queryDate, props.companyBranchId]);
+  const queryDate = props.queryDate ?? assignmentDay(props.work.scheduledDate);
+  const work = assignmentWorkForQueryDate(props.work, queryDate);
+  const snapshot = assignmentWorkSnapshotForQueryDate(props.work, queryDate);
+  return <AssignmentWorkCardContent key={scopeKey} {...props} work={work ?? props.work} generatedAt={snapshot?.generatedAt ?? props.generatedAt} staleReadOnly={props.staleReadOnly || !work} />;
+}
+
+function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy = false, generatedAt, online = true, staleReadOnly = false, offline, queryDate, companyBranchId, pendingTimer: suppliedTimer }: AssignmentWorkCardProps) {
   const [acting, setActing] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [queuedTimer, setQueuedTimer] = useState<QueuedTimerMarker | null>(null);
+  const queuedTimerRef = useRef(queuedTimer);
   const actionRef = useRef(false);
   const mounted = useRef(true);
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const codes = assignmentCodes(group, work);
   const localWork = group.id.startsWith("local-") || isPendingLocalWork(work);
-  const executionAvailable = online && !localWork && !staleReadOnly && !work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT");
+  const date = queryDate ?? assignmentDay(work.scheduledDate);
+  const scope = { groupId: group.id, workId: work.id, startDate: date, endDate: date, companyBranchId };
+  const scopedOperations = operationsForWork(offline, scope);
+  const pendingTimer = offline !== undefined || suppliedTimer === undefined ? pendingTimerForWork(offline, scope, work) : suppliedTimer;
+  const unobservedTimer = queuedTimer && pendingTimer?.id !== queuedTimer.operationId && !scopedOperations.some((operation) => operation.id === queuedTimer.operationId) ? queuedTimer : null;
+  const desiredStatus = unobservedTimer?.status ?? pendingTimer?.payload.status ?? work.status;
+  const timerPending = Boolean(pendingTimer || unobservedTimer);
+  const timerNeedsAttention = offline?.connection?.foreground === false || pendingTimer !== null && pendingTimer.status !== "pending" && pendingTimer.status !== "syncing";
+  const offlineReady = offline !== null && !offline?.authBlocked;
+  const verifiedOnline = online && (offline === undefined || offline?.online === true) && offlineReady;
+  const executionAvailable = offlineReady && (verifiedOnline || offline !== undefined) && !localWork && !staleReadOnly && !work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT");
+  const pendingOperations = timerPending || scopedOperations.some((operation) => operation.status !== "applied")
+    || operationsForWork(offline, { groupId: group.id, startDate: date, endDate: date, companyBranchId }).some((operation) => operation.status !== "applied");
   const codeLabels = localWork ? [] : [codes.workCode, codes.workOrderCode, codes.negotiationCode].filter((code) => code !== null);
   const plannedDates = [...new Set((work.plannedDates ?? []).map(assignmentDay).filter(Boolean))].sort();
   const customer = work.workCustomerName ?? group.customerName;
@@ -87,24 +116,36 @@ export function AssignmentWorkCard({ group, work, onOpenWork, onWorkStatus, busy
   const title = plainText(work.title);
   const finished = isFinished(work);
   const locked = busy || acting;
-  const pausing = work.status === "in_progress";
-  const actionTitle = pausing ? "Pausar" : work.status === "paused" ? "Reanudar" : "Iniciar";
-  const canChangeStatus = executionAvailable && !finished && (pausing || work.canExecute);
+  const pausing = desiredStatus === "in_progress";
+  const actionTitle = pausing ? "Pausar" : desiredStatus === "paused" ? "Reanudar" : "Iniciar";
+  const canChangeStatus = executionAvailable && !finished && !timerNeedsAttention && (pausing || work.canExecute);
+  const gates = useRef({ canChangeStatus, canDeliver: false, desiredStatus });
+  gates.current = { canChangeStatus, canDeliver: executionAvailable && verifiedOnline && !pendingOperations && !finished && work.canExecute, desiredStatus };
 
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
 
+  useEffect(() => {
+    if (!queuedTimerRef.current || (pendingTimer?.id !== queuedTimerRef.current.operationId && !scopedOperations.some((operation) => operation.id === queuedTimerRef.current?.operationId))) return;
+    queuedTimerRef.current = null;
+    setQueuedTimer(null);
+  }, [offline?.operations, pendingTimer?.id]);
+
   async function changeStatus(): Promise<void> {
-    if (actionRef.current || busyRef.current || !canChangeStatus) return;
+    const status = pausing ? "paused" : "in_progress";
+    if (!mounted.current || actionRef.current || busyRef.current || !gates.current.canChangeStatus || gates.current.desiredStatus === status || queuedTimerRef.current?.status === status) return;
     actionRef.current = true;
     setActing(true);
     setOperationError(null);
     try {
-      await onWorkStatus(group, work, { status: pausing ? "paused" : "in_progress" });
+      await onWorkStatus(group, work, { status });
     } catch (error) {
-      if (mounted.current) setOperationError(`No se pudo actualizar el estado. ${errorMessage(error)}`);
+      if (isOfflineQueuedError(error) && error.kind === "timer") {
+        queuedTimerRef.current = { operationId: error.operationId, status };
+        if (mounted.current) setQueuedTimer(queuedTimerRef.current);
+      } else if (mounted.current) setOperationError(`No se pudo actualizar el estado. ${errorMessage(error)}`);
     } finally {
       actionRef.current = false;
       if (mounted.current) setActing(false);
@@ -112,8 +153,8 @@ export function AssignmentWorkCard({ group, work, onOpenWork, onWorkStatus, busy
   }
 
   function openWork(options?: WorkOpenOptions): void {
-    if (actionRef.current || busyRef.current) return;
-    if (options?.action && !executionAvailable) return;
+    if (!mounted.current || actionRef.current || busyRef.current) return;
+    if (options?.action && !gates.current.canDeliver) return;
     try { onOpenWork(group, work, options); }
     catch (error) { setOperationError(errorMessage(error)); }
   }
@@ -152,7 +193,8 @@ export function AssignmentWorkCard({ group, work, onOpenWork, onWorkStatus, busy
       <AssignmentMetadataRow icon="time-outline" text={scheduleTime(work)} />
       {plannedDates.length > 1 ? <AssignmentMetadataRow icon="calendar-outline" text={`Fechas planificadas: ${plannedDates.map(shortDate).join(" · ")}`} /> : null}
     </View>
-    <WorkExecution work={work} generatedAt={generatedAt} online={executionAvailable} />
+    {timerPending ? <Notice message={`${timerPendingLabel(pendingTimer)} · solicitado: ${STATUS_LABELS[desiredStatus]}. Estado recibido: ${STATUS_LABELS[work.status]}.${pendingTimer ? ` ${operationStatusLabels[pendingTimer.status]}.` : ""}${pendingTimer?.lastError ? ` ${operationErrorReason(pendingTimer.lastError)}` : ""}${pendingTimer?.status === "applied" && offline?.lastError ? " No se pudo actualizar la ficha. Reintenta la actualización manual desde el detalle." : ""}`} tone="warning" /> : null}
+    <WorkExecution work={work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending} />
     {total > 0 ? <View style={styles.execution}>
       <View style={styles.between}><Text style={styles.note}>Verificación completada</Text><Text style={styles.count}>{done}/{total}</Text></View>
       <View accessibilityRole="progressbar" accessibilityLabel="Lista de verificación" accessibilityValue={{ min: 0, max: total, now: done, text: `${done} de ${total} completados` }} style={styles.progressTrack}>
@@ -162,7 +204,7 @@ export function AssignmentWorkCard({ group, work, onOpenWork, onWorkStatus, busy
     <View style={styles.footer}>
       {!finished ? <View style={styles.actions}>
         <Button title={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={styles.action} />
-        <Button title="Entregar" icon="checkmark-done-outline" variant="secondary" disabled={locked || !executionAvailable || !work.canExecute} onPress={() => openWork({ action: "deliver" })} style={styles.action} />
+        <Button title="Entregar" icon="checkmark-done-outline" variant="secondary" disabled={locked || !gates.current.canDeliver} onPress={() => openWork({ action: "deliver" })} style={styles.action} />
       </View> : <Text style={styles.note}>Trabajo {work.status === "delivered" ? "entregado" : "completado"} · archivos, checklist y comentarios disponibles para consulta.</Text>}
       {!finished && !work.canExecute ? <Text style={styles.note}>Qualitzer no habilita iniciar, reanudar o entregar este trabajo. Consulta los requisitos en su detalle.</Text> : null}
       <View style={styles.actions}>

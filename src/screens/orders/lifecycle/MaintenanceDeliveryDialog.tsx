@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { Image, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, View } from "react-native";
+import { Image, KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
+import { PrivateModal as Modal } from "../../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../../../domain/orderLifecycle";
 import { BodyText, Button, Field, SectionTitle } from "../../../ui/components";

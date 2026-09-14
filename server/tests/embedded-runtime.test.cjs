@@ -9,7 +9,8 @@ const { createRequire } = require("node:module");
 const { test, before, after } = require("node:test");
 
 const root = path.resolve(__dirname, "../..");
-const archive = path.resolve(root, "../Qualitzer2.0-Backend/infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.0.tgz");
+const archive = path.resolve(root, process.env.QZM_GATEWAY_ARCHIVE ?? "artifacts/mobile-gateway/qualitzer-mobile-gateway-1.0.1.tgz");
+const expectedVersion = process.env.QZM_GATEWAY_VERSION ?? "1.0.1";
 const extraction = fs.mkdtempSync(path.join(os.tmpdir(), "qzm-embedded-artifact-"));
 const packageDirectory = path.join(extraction, "package");
 const nativeFetch = globalThis.fetch;
@@ -67,7 +68,8 @@ test("published package is one bundled CJS runtime, Node-only declarations, vers
   const manifest = require(path.join(packageDirectory, "package.json"));
   const source = require(path.join(packageDirectory, "SOURCE-MANIFEST.json"));
   assert.equal(manifest.name, "@qualitzer/mobile-gateway");
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, expectedVersion);
+  assert.equal(source.version, expectedVersion);
   assert.equal(manifest.engines.node, ">=20.12.2");
   assert.deepEqual(manifest.dependencies, {});
   assert.equal(manifest.scripts, undefined);
@@ -76,6 +78,7 @@ test("published package is one bundled CJS runtime, Node-only declarations, vers
   for (const { path: file, sha256 } of source.sources) {
     assert.doesNotMatch(file, /(?:^|\/)(?:expo|@expo|react-native|sharp|qrcode|tests|\.data)(?:\/|$)|^server\/(?:index|development|app)\.ts$/);
     assert.match(sha256, /^[a-f0-9]{64}$/);
+    assert.equal(createHash("sha256").update(fs.readFileSync(path.join(root, file))).digest("hex"), sha256, `Source provenance mismatch: ${file}`);
   }
   assert.ok(source.dependencies.some(({ name, version }) => name === "express" && version.startsWith("5.")));
   assert.ok(source.dependencies.some(({ name, version }) => name === "multer" && version.startsWith("2.")));
@@ -235,6 +238,19 @@ test("persistent synthetic login survives process restart; no raw mobile token i
   assert.deepEqual(fs.readFileSync(path.join(directory, "session.key")), key);
   assert.match(restored.data.cache, /no-store/);
   assert.equal(JSON.stringify(restored.data).includes(key.toString("hex")), false);
+});
+
+test("packed branch branding uses the authenticated selected branch without changing tenant identity", (t) => {
+  const options = fixture(t);
+  const login = child(options, "login");
+  assert.equal(login.data.status, 200);
+  const result = child(options, "branch", login.data.data.token);
+  assert.equal(result.status, 0);
+  assert.equal(result.data.status, 200);
+  assert.deepEqual(result.data.data.branchBranding, { companyBranchId: 1, status: "APPLIED" });
+  assert.equal(result.data.data.tenant.id, tenant.id);
+  assert.equal(result.data.data.tenant.name, "Packed branch");
+  assert.equal(result.data.data.tenant.logo, "https://cdn.example.com/branch.png");
 });
 
 test("missing key with an existing encrypted session refuses reset and preserves the snapshot", (t) => {

@@ -1,4 +1,14 @@
 gradle.beforeProject { project ->
+    ["com.android.application", "com.android.library"].each { pluginId ->
+        project.plugins.withId(pluginId) {
+            project.extensions.getByName("androidComponents").finalizeDsl { android ->
+                if (project.path in [":app", ":expo-modules-core"]) {
+                    android.defaultConfig.externalNativeBuild.cmake.arguments.add("-DCMAKE_OBJECT_PATH_MAX=240")
+                    android.externalNativeBuild.cmake.buildStagingDirectory = new File(project.gradle.gradleUserHomeDir, "qualitzer-field-native/" + project.name)
+                }
+            }
+        }
+    }
     project.plugins.withId("com.android.application") {
         project.extensions.getByName("androidComponents").finalizeDsl { android ->
             def required = { name ->

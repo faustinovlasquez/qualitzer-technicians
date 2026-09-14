@@ -1,0 +1,30 @@
+import { createContext, useContext } from "react";
+import { Modal as NativeModal, View, type ModalProps } from "react-native";
+import type { DeviceLockController } from "./DeviceLockController";
+import type { DeviceLockSnapshot } from "./contracts";
+
+export interface DeviceSecurityUi {
+  controller: DeviceLockController;
+  state: DeviceLockSnapshot;
+  blocked: boolean;
+  isUnlocked(): boolean;
+}
+
+export const DeviceSecurityContext = createContext<DeviceSecurityUi | null>(null);
+
+export function useDeviceSecurity(): DeviceSecurityUi {
+  const context = useContext(DeviceSecurityContext);
+  if (!context) throw new Error("DEVICE_SECURITY_PROVIDER_REQUIRED");
+  return context;
+}
+
+export function PrivateModal(props: ModalProps) {
+  const security = useContext(DeviceSecurityContext);
+  const blocked = security?.blocked ?? false;
+  return <NativeModal {...props} animationType={blocked ? "none" : props.animationType} visible={(props.visible ?? true) && !blocked}>
+    <View style={[{ flex: 1 }, blocked && { display: "none" }]} pointerEvents={blocked ? "none" : "auto"}
+      accessibilityElementsHidden={blocked} importantForAccessibility={blocked ? "no-hide-descendants" : "auto"}>
+      {props.children}
+    </View>
+  </NativeModal>;
+}

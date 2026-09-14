@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.companybranding'
+version = '1.0.0'
+
+dependencies {
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+}
+
+android {
+  namespace 'expo.modules.companybranding'
+  defaultConfig {
+    minSdkVersion 24
+    versionCode 1
+    versionName '1.0.0'
+  }
+}

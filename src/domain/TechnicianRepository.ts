@@ -1,9 +1,10 @@
 import type { Assignments, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, StatusInput, StepAnswer, User, WorkScope } from "./models";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "./orderLifecycle";
 import type { CreationInput, CreationOptions, CreationOptionsQuery, CreationResult } from "./creation";
-import type { NotificationDeviceInput, NotificationDeviceResult, NotificationInbox, NotificationReadResult, NotificationStatus, NotificationTestResult } from "./notifications";
+import type { NotificationDeleteResult, NotificationDeviceInput, NotificationDeviceResult, NotificationInbox, NotificationReadResult, NotificationStatus, NotificationTestResult } from "./notifications";
 import type { OfflineSyncPort } from "./offline";
 import type { ChecklistAssignmentPort } from "./checklistAssignment";
+import type { AssignmentReadOptions } from "./assignmentRead";
 
 export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort> {
   createRecord(input: CreationInput): Promise<CreationResult>;
@@ -11,15 +12,16 @@ export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<
   notificationStatus(branch: number): Promise<NotificationStatus>;
   registerNotificationDevice(input: NotificationDeviceInput): Promise<NotificationDeviceResult>;
   unregisterNotificationDevice(branch: number, installation: string): Promise<void>;
-  notificationInbox(branch: number, page: number): Promise<NotificationInbox>;
+  notificationInbox(branch: number, page: number, unreadOnly?: boolean): Promise<NotificationInbox>;
   readNotification(branch: number, id: string): Promise<NotificationReadResult>;
+  deleteNotification(branch: number, id: string): Promise<NotificationDeleteResult>;
   testNotification(branch: number): Promise<NotificationTestResult>;
   health(): Promise<Health>;
   login(username: string, password: string): Promise<LoginResult>;
   me(branchId?: number): Promise<User>;
   logout(): Promise<void>;
   forcePassword(password: string, confirmation: string): Promise<LoginResult>;
-  assignments(range: DateRange, branchId: number): Promise<Assignments>;
+  assignments(range: DateRange, branchId: number, options?: AssignmentReadOptions): Promise<Assignments>;
   status(scope: WorkScope, input: StatusInput): Promise<void>;
   answer(scope: WorkScope, stepId: string, answer: StepAnswer): Promise<void>;
   files(scope: WorkScope): Promise<Attachment[]>;

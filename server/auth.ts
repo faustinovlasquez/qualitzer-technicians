@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { LoginStartResult, User } from "../src/domain/models";
 import { loginResultSchema, parseUpstream, userSchema } from "./contracts";
+import { selectedBranchDisplay } from "./branch-branding";
 import { GatewayError } from "./errors";
 import { LoginDiscovery } from "./login-discovery";
 import { branchQuerySchema, emptySchema, loginCompleteSchema, loginSchema, loginStartSchema, passwordSchema } from "./validation";
@@ -74,7 +75,10 @@ export function authRouter(context: SessionContext): Router {
     const selected = parseUpstream(userSchema, await upstream.request("/auth/me", { token, query: new URLSearchParams({ companyBranchId: String(companyBranchId) }) }));
     assertBranch(selected, companyBranchId);
     if (selected.id !== user.id || selected.workerId !== user.workerId) throw new GatewayError(401, "SESSION_CHANGED");
-    res.json({ ...selected, tenant: await context.tenants.display(tenant.id) });
+    const branch = selected.accessBranchs.find((entry) => entry.id === companyBranchId);
+    if (!branch) throw new GatewayError(403, "BRANCH_FORBIDDEN");
+    const display = await context.tenants.display(tenant.id);
+    res.json({ ...selected, ...await selectedBranchDisplay(upstream, token, display, branch) });
   });
   router.post("/logout", context.middleware(true), async (req, res) => {
     const { key, runtime: { upstream } } = context.get(req);

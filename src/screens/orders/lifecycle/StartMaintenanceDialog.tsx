@@ -1,4 +1,5 @@
-import { Modal, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
+import { PrivateModal as Modal } from "../../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BodyText, Button, SectionTitle } from "../../../ui/components";
 import { Notice } from "../../workDetail/DetailUi";

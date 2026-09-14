@@ -15,13 +15,15 @@ export function notificationForSession(value: unknown, session: Session): Notifi
   const parsed = notificationDataSchema.safeParse(value);
   if (!parsed.success || session.mode !== "live" || session.user.workerId === null || session.branchId === null) return null;
   if (parsed.data.tenantOrigin !== session.tenant.portalOrigin || parsed.data.companyBranchId !== session.branchId) return null;
+  if (parsed.data.recipient && (parsed.data.recipient.userId !== session.user.id || parsed.data.recipient.workerId !== session.user.workerId)) return null;
   return parsed.data;
 }
 
 export function sameNotification(left: NotificationData, right: NotificationData): boolean {
   return left.eventId === right.eventId && left.tenantOrigin === right.tenantOrigin && left.companyBranchId === right.companyBranchId
     && left.kind === right.kind && left.groupType === right.groupType && left.groupId === right.groupId
-    && left.workId === right.workId && left.date === right.date;
+    && left.workId === right.workId && left.date === right.date
+    && left.recipient?.userId === right.recipient?.userId && left.recipient?.workerId === right.recipient?.workerId;
 }
 
 export function sameNotificationSession(left: Session, right: Session): boolean {

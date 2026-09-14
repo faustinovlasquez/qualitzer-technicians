@@ -8,6 +8,7 @@ import type { Assignments, Tenant, User } from "../../domain/models";
 import { isOfflineQueuedError, type OfflineQueuedOutcome } from "../../domain/offline";
 import { queuedCreationOutcomeSchema, queuedOutcomeData } from "../offline/offlineUi";
 import { scheduleClock } from "../../domain/weeklySchedule";
+import { useDeviceSecurity } from "../../security/DeviceSecurityContext";
 import { Badge, Button, Card, Field, IconButton } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import { CreationCatalogSelector, type CreationCatalogCache } from "./CreationCatalogSelector";
@@ -35,7 +36,7 @@ export interface CreationScreenProps {
   onBack: () => void;
   onLoadOptions: (query: CreationOptionsQuery) => Promise<CreationOptions>;
   onSubmit: (input: CreationInput) => Promise<CreationResult>;
-  onCreated?: (result: CreationResult) => void;
+  onCreated?: (result: CreationResult) => void | Promise<void>;
   onQueued?: (outcome: OfflineQueuedOutcome) => void | Promise<void>;
 }
 
@@ -62,6 +63,7 @@ function submissionError(error: unknown): string {
 }
 
 function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey }: CreationScreenProps & { draftKey: string }) {
+  const security = useDeviceSecurity();
   const store = useMemo(() => openCreationDraftStore(draftKey, kind, companyBranchId), [draftKey, kind, companyBranchId]);
   const catalogCache = useMemo<CreationCatalogCache>(() => new Map(), [draftKey]);
   const [draft, setDraft] = useState<CreationDraft>(() => ({ version: 1, kind, phase: "editing", form: emptyCreationForm(initialDate) }));
@@ -82,6 +84,8 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const [catalog, setCatalog] = useState<"equipment" | "specialties" | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
+  const latest = useRef({ busy, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked });
+  latest.current = { busy, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked };
   const changed = useRef(false);
   const loadOptionsRef = useRef(onLoadOptions);
   loadOptionsRef.current = onLoadOptions;
@@ -163,7 +167,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   }
 
   async function submit(): Promise<void> {
-    if (lock.current || busy || !ready || !options || current.current.phase === "confirmed" || current.current.phase === "queued") return;
+    if (!mounted.current || !latest.current.isUnlocked() || lock.current || latest.current.busy || !ready || !options || current.current.phase === "confirmed" || current.current.phase === "queued") return;
     if (current.current.phase === "editing" && !checkForm(true)) return;
     lock.current = true;
     setSending(true);
@@ -181,19 +185,14 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
       }
       if (pending.phase !== "pending") return;
       await store.write(pending);
-      if (!mounted.current) return;
-      const result = creationResultSchema.parse(await onSubmit(pending.input));
+      if (!mounted.current || !latest.current.isUnlocked()) return;
+      const result = creationResultSchema.parse(await latest.current.onSubmit(pending.input));
       if (result.kind !== kind || result.companyBranchId !== companyBranchId || result.schedule.date !== pending.input.schedule.date ||
         result.schedule.startTime !== pending.input.schedule.startTime || result.schedule.endTime !== pending.input.schedule.endTime) throw new Error("CREATION_RESULT_MISMATCH");
       const completed: CreationDraft = { ...pending, phase: "confirmed", result };
       current.current = completed;
       if (mounted.current) { setDraft(completed); setErrors({}); setError(""); }
-      try {
-        await store.write(completed);
-        if (mounted.current) setSaveError("");
-      } catch {
-        if (mounted.current) setSaveError("La creación está confirmada, pero no se pudo guardar la confirmación local. No vuelvas a crearla; reintenta guardar la confirmación.");
-      }
+      await persistAndOpen(completed, true);
     } catch (failure) {
       if (isOfflineQueuedError(failure) && current.current.phase === "pending") {
         const outcome = queuedCreationOutcomeSchema.safeParse(queuedOutcomeData(failure));
@@ -201,8 +200,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
           const queued: CreationDraft = { ...current.current, phase: "queued", outcome: outcome.data };
           current.current = queued;
           if (mounted.current) { setDraft(queued); setError(""); }
-          try { await store.write(queued); if (mounted.current) setSaveError(""); }
-          catch { if (mounted.current) setSaveError("La solicitud está en la cola duradera. No vuelvas a crearla; falta guardar el estado de esta pantalla. Usa Ver trabajo local para reintentar."); }
+          await persistAndOpen(queued, true);
         } else if (mounted.current) setError("Se recibió un resultado local que no corresponde a esta solicitud. Revisa el centro offline antes de continuar.");
       } else if (mounted.current) setError(current.current.phase === "pending" ? `${submissionError(failure)} Reintenta la misma solicitud o elige explícitamente editar como nueva.` : "No se pudo preparar la solicitud. Comprueba los campos y las opciones; no se envió ninguna creación.");
     } finally {
@@ -237,30 +235,38 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     finally { lock.current = false; if (mounted.current) setSending(false); }
   }
 
-  async function openCreated(): Promise<void> {
-    if (lock.current || current.current.phase !== "confirmed") return;
-    lock.current = true;
-    setSending(true);
+  async function persistAndOpen(saved: Extract<CreationDraft, { phase: "confirmed" | "queued" }>, automatic: boolean): Promise<void> {
     try {
-      await store.write(current.current);
-      setSaveError("");
-      if (onCreated) await onCreated(current.current.result);
-      else onBack();
-    } catch { if (mounted.current) setSaveError("La creación está confirmada. No se pudo guardar la confirmación o abrir la agenda; reintenta sin volver a crear."); }
-    finally { lock.current = false; if (mounted.current) setSending(false); }
+      await store.write(saved);
+    } catch {
+      if (mounted.current) setSaveError(saved.phase === "queued"
+        ? "La solicitud está en la cola duradera. No vuelvas a crearla; falta guardar el estado de esta pantalla. Usa Ver trabajo local para reintentar."
+        : "La creación está confirmada, pero no se pudo guardar la confirmación local. No vuelvas a crearla; reintenta guardar la confirmación.");
+      return;
+    }
+    if (!mounted.current || current.current !== saved) return;
+    setSaveError("");
+    if (!latest.current.isUnlocked()) return;
+    if (automatic && !(saved.phase === "queued" ? latest.current.onQueued : latest.current.onCreated)) return;
+    try {
+      if (saved.phase === "queued" && latest.current.onQueued) await latest.current.onQueued(saved.outcome);
+      else if (saved.phase === "confirmed" && latest.current.onCreated) await latest.current.onCreated(saved.result);
+      else latest.current.onBack();
+    } catch {
+      if (mounted.current) setSaveError(saved.phase === "queued"
+        ? "El trabajo sigue guardado en la cola local. No se pudo abrir la ficha; usa Ver trabajo local para reintentar sin crear otro."
+        : "La creación está confirmada. No se pudo abrir la agenda; reintenta sin volver a crear.");
+    }
   }
 
   const confirmedResult = draft.phase === "confirmed" ? draft.result : null;
-  async function openQueued(): Promise<void> {
-    if (lock.current || current.current.phase !== "queued") return;
+  async function openSaved(): Promise<void> {
+    if (!mounted.current || !latest.current.isUnlocked() || latest.current.busy || lock.current) return;
+    const saved = current.current;
+    if (saved.phase !== "confirmed" && saved.phase !== "queued") return;
     lock.current = true;
     setSending(true);
-    try {
-      await store.write(current.current);
-      setSaveError("");
-      if (onQueued) await onQueued(current.current.outcome);
-      else onBack();
-    } catch { if (mounted.current) setSaveError("El trabajo sigue guardado en la cola local. No se pudo abrir o guardar el estado de la pantalla; reintenta sin crear otro."); }
+    try { await persistAndOpen(saved, false); }
     finally { lock.current = false; if (mounted.current) setSending(false); }
   }
   return <SafeAreaView style={styles.safe}>
@@ -279,7 +285,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
           <Text style={styles.body}>{draft.form.title || creationLabels[kind]}</Text>
           <Text style={styles.body}>{draft.input.schedule.date} · {draft.input.schedule.startTime}–{draft.input.schedule.endTime}</Text>
           <Text style={styles.hint}>No está confirmado por Qualitzer. La cola conserva la misma solicitud; no hace falta volver a crearla. Puedes añadir archivos y comentarios al trabajo local.</Text>
-          <Button title="Ver trabajo local" loading={sending} disabled={busy} onPress={() => void openQueued()} />
+          <Button title="Ver trabajo local" loading={sending} disabled={busy} onPress={() => void openSaved()} />
         </Card> : confirmedResult ? <Card style={styles.card}>
           <Badge label={mode === "demo" ? "Simulación confirmada" : "Creación confirmada"} tone="success" />
           <Text accessibilityRole="header" style={styles.title}>{mode === "demo" ? "La simulación está lista" : "Tu planificación está lista"}</Text>
@@ -288,7 +294,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
           <Text style={styles.body}>{confirmedResult.schedule.date} · {confirmedResult.schedule.startTime}–{confirmedResult.schedule.endTime}</Text>
           <Text style={styles.body}>{confirmedResult.schedule.plannedMinutes} min · {confirmedResult.schedule.timezone}</Text>
           <Text style={styles.hint}>La creación ya se confirmó. Abrir o actualizar la agenda no volverá a enviarla.</Text>
-          <Button title="Ver en mi agenda" loading={sending} disabled={busy} onPress={() => void openCreated()} />
+          <Button title="Ver en mi agenda" loading={sending} disabled={busy} onPress={() => void openSaved()} />
           <Button title="Crear otro" variant="secondary" disabled={sending || busy} onPress={() => void editAsNew(true)} />
         </Card> : <>
           <View style={styles.steps} accessibilityLabel={`Paso ${step + 1} de 3: ${steps[step]}`}>

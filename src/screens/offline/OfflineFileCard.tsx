@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Modal, Platform, Text, View } from "react-native";
+import { Image, Platform, Text, View } from "react-native";
+import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { LocalPhoto } from "../../domain/models";
 import type { OfflineAttachment, OfflineController } from "../../domain/offline";

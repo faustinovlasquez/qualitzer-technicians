@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "689385636534",
+    "project_id": "qualitzer-7612f",
+    "storage_bucket": "qualitzer-7612f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:689385636534:android:482d71eca3832f7b225c17",
+        "android_client_info": {
+          "package_name": "com.qualitzer.field"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD35gwr4emlgCWmIym3DzhRBRqOL5QORoU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,30 @@
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
+const ts = require("typescript");
+const root = path.resolve(__dirname, "../..");
+process.chdir(root);
+const output = path.join(root, "artifacts/logs/compact-checklist");
+fs.mkdirSync(output, { recursive: true });
+const targets = ["src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/ChecklistTab.tsx", "src/screens/workDetail/DetailUi.tsx", "src/screens/workDetail/detailStyles.ts", "src/screens/workDetail/checklist/StepEditor.tsx", "src/screens/workDetail/checklist/styles.ts", "src/screens/workDetail/checklist/ChecklistCatalog.tsx", "tests/e2e/fixtures/compact-checklist.tsx", "tests/compact-checklist-layout.test.ts"];
+const config = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile);
+const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+const program = ts.createProgram(targets.map((name) => path.join(root, name)), { ...parsed.options, types: ["node", "react"] });
+const targetSet = new Set(targets.map((name) => path.resolve(root, name).toLowerCase()));
+const diagnostics = ts.getPreEmitDiagnostics(program).filter((item) => !item.file || targetSet.has(path.resolve(item.file.fileName).toLowerCase()));
+const format = (item) => ({ file: item.file?.fileName, code: item.code, message: ts.flattenDiagnosticMessageText(item.messageText, "\n") });
+const tests = ["tests/compact-checklist-layout.test.ts", "tests/refresh-control-native.test.ts"];
+const test = spawnSync(process.execPath, ["--import", pathToFileURL(require.resolve("tsx")).href, "--test", ...tests], { cwd: root, encoding: "utf8" });
+fs.writeFileSync(path.join(output, "tests.log"), `${test.stdout ?? ""}\n${test.stderr ?? ""}`);
+const screenshots = process.argv[2];
+if (screenshots) {
+  const ui = JSON.parse(fs.readFileSync(path.join(screenshots, "results.json"), "utf8"));
+  if (ui.passed !== true) throw new Error("UI_REPORT_NOT_PASSED");
+  for (const name of fs.readdirSync(screenshots).filter((name) => name.endsWith(".png"))) fs.copyFileSync(path.join(screenshots, name), path.join(output, name));
+  fs.copyFileSync(path.join(screenshots, "results.json"), path.join(output, "ui-results.json"));
+}
+const report = { date: new Date().toISOString(), scope: "Target-file TypeScript diagnostics (not whole-project), five layout contracts and native RefreshControl guard", targets, diagnostics: diagnostics.map(format), testExit: test.status, passed: diagnostics.length === 0 && test.status === 0 };
+fs.writeFileSync(path.join(output, "validation.json"), JSON.stringify(report, null, 2));
+console.log(test.stdout, test.stderr, JSON.stringify(report, null, 2));
+if (!report.passed) process.exitCode = 1;

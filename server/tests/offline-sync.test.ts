@@ -56,7 +56,7 @@ test("offline canonical answers preserve false/NA and compare source representat
     const mobile = normalizeChecklistAnswer(source, answerFromStep(source));
     const canonical = toSyncAnswer(source.type, mobile);
     assert.deepEqual(canonical, syncAnswerFromStep(source));
-    const body = { ...command, kind: "answer", payload: { stepId: "101", answer: canonical, base: syncAnswerFromStep(source) } };
+    const body: Extract<z.input<typeof syncCommandSchema>, { kind: "answer" }> = { ...command, kind: "answer", payload: { stepId: "101", answer: canonical, base: syncAnswerFromStep(source) } };
     assert.equal((await jsonRequest(baseUrl, "/api/offline/commands", "POST", body)).response.status, 200);
     assert.deepEqual(writeCalls(state).at(-1)?.json, syncCommandSchema.parse(body));
     assert.equal(canonical.isCompleted, typeof value === "boolean" ? value : null);
@@ -103,6 +103,61 @@ test("offline preserves structured 400/409 receipts, in-progress and collision h
     if (result.state === "in_progress") assert.equal(response.response.headers.get("retry-after"), "5");
   }
 });
+
+for (const route of ["comment", "document", "receipt"] as const) {
+  test(`offline ${route} preserves a validated 400 collision without replay or receipt lookup`, async (t) => {
+    const { state, baseUrl } = await harness(t);
+    const path = route === "comment" ? upstreamCommands : route === "document" ? upstreamDocuments : upstreamReceipt;
+    const raw = { operationId: id, state: "rejected", error: "MOBILE_SYNC_OPERATION_REUSED", fileId: 123, token: "SECRET" };
+    const expected = { operationId: id, state: "needs_review", error: "MOBILE_SYNC_OPERATION_REUSED" };
+    assert.deepEqual(receiptForOperation(raw, id, 400), expected);
+    assert.equal(receiptForOperation(expected, id, 400), null);
+    state.failures.set(path, { status: 400, body: raw });
+    const result = route === "comment"
+      ? await jsonRequest(baseUrl, "/api/offline/commands", "POST", command)
+      : route === "document"
+        ? await uploadRequest(baseUrl, "/api/offline/documents", documentForm())
+        : await jsonRequest(baseUrl, receiptPath);
+    assert.equal(result.response.status, 400);
+    assert.deepEqual(result.data, expected);
+    assert.equal(result.response.headers.get("retry-after"), null);
+    assert.equal(result.response.headers.get("cache-control"), "no-store");
+    const syncCalls = state.calls.filter((call) => call.path.startsWith("/api/mobile-sync/"));
+    assert.equal(syncCalls.length, 1);
+    assert.equal(syncCalls[0]?.path, path);
+    assert.equal(syncCalls[0]?.method, route === "receipt" ? "GET" : "POST");
+    assert.equal(writeCalls(state).length, route === "receipt" ? 0 : 1);
+    assert.equal(assignmentCalls(state).length, 0);
+  });
+
+  test(`offline ${route} still rejects contradictory raw HTTP receipts before normalization`, async (t) => {
+    const { state, baseUrl } = await harness(t);
+    const path = route === "comment" ? upstreamCommands : route === "document" ? upstreamDocuments : upstreamReceipt;
+    for (const [status, body] of [
+      [400, { operationId: id, state: "needs_review", error: "MOBILE_SYNC_OPERATION_REUSED" }],
+      [400, { operationId: id, state: "conflict", error: "MOBILE_SYNC_OPERATION_REUSED" }],
+      [400, { operationId: otherId, state: "rejected", error: "MOBILE_SYNC_OPERATION_REUSED" }],
+      [400, { operationId: id, state: "rejected", error: "MOBILE_SYNC_OPERATION_REUSED", success: false }],
+      [409, applied],
+      [200, { ...applied, error: "MOBILE_SYNC_OPERATION_REUSED" }],
+    ] as const) {
+      assert.equal(receiptForOperation(body, id, status), null);
+      state.failures.set(path, { status, body });
+      const before = state.calls.filter((call) => call.path.startsWith("/api/mobile-sync/")).length;
+      const result: Awaited<ReturnType<typeof jsonRequest>> = route === "comment"
+        ? await jsonRequest(baseUrl, "/api/offline/commands", "POST", command)
+        : route === "document"
+          ? await uploadRequest(baseUrl, "/api/offline/documents", documentForm())
+          : await jsonRequest(baseUrl, receiptPath);
+      assert.equal(result.response.status, 502);
+      assert.deepEqual(result.data, { error: "UPSTREAM_INVALID_RESPONSE" });
+      assert.equal(result.response.headers.get("retry-after"), null);
+      assert.equal(state.calls.filter((call) => call.path.startsWith("/api/mobile-sync/")).length, before + 1);
+    }
+    assert.equal(writeCalls(state).length, route === "receipt" ? 0 : 6);
+    assert.equal(assignmentCalls(state).length, 0);
+  });
+}
 
 test("offline never interprets generic 409, mismatched UUID or fabricated receipt as applied", async (t) => {
   const { state, baseUrl } = await harness(t);

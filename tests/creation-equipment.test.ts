@@ -50,7 +50,7 @@ test("offline exact fallback only uses cached equipment pages and explains absen
     [JSON.stringify(["equipment", "excavadora", 1]), options([second]).equipment!],
     [JSON.stringify(["specialties", "", 0]), options([{ ...first, id: 500 }]).equipment!],
   ]);
-  for (const error of [new NetworkError("offline"), new OfflineUnavailableError("OFFLINE_CACHE_MISS")]) {
+  for (const error of [new NetworkError("network"), new OfflineUnavailableError("OFFLINE_CACHE_MISS")]) {
     const found = await lookupEquipment(context, "EQ-001", 0, cache, async () => { throw error; });
     assert.equal(found.cachedOnly, true);
     assert.deepEqual(found.items.map((item) => item.id), [71, 99]);

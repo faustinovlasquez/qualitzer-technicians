@@ -16,7 +16,7 @@ import { OFFLINE_LIMITS } from "../contracts";
 
 const scope: WorkScope = { groupId: "direct-80", workId: "80", companyBranchId: 1, startDate: "2026-09-08", endDate: "2026-09-08" };
 const draftPhoto: LocalPhoto = { id: "persisted-draft-photo", uri: "source:photo", name: "proof.png", mimeType: "image/png", size: 10 };
-async function queued(action: Promise<void>): Promise<OfflineQueuedError> {
+async function queued(action: Promise<unknown>): Promise<OfflineQueuedError> {
   try { await action; } catch (error) { assert.ok(error instanceof OfflineQueuedError); return error; }
   throw new Error("EXPECTED_QUEUED_OUTCOME");
 }
@@ -32,7 +32,7 @@ function repositoryFixture() {
     assignments: async (range: DateRange) => { dates.push(range.startDate); if (readError) throw readError; return structuredClone(empty); },
     files: async () => { if (readError) throw readError; return []; }, comments: async () => { if (readError) throw readError; return { data: [], totalRows: 0, totalPages: 0 }; },
     creationOptions: unavailable, health: unavailable, login: unavailable, logout: unavailable, forcePassword: unavailable,
-    notificationStatus: unavailable, notificationInbox: unavailable, registerNotificationDevice: unavailable, unregisterNotificationDevice: unavailable, readNotification: unavailable, testNotification: unavailable,
+    notificationStatus: unavailable, notificationInbox: unavailable, registerNotificationDevice: unavailable, unregisterNotificationDevice: unavailable, readNotification: unavailable, deleteNotification: unavailable, testNotification: unavailable,
     status: unavailable, answer: unavailable, stepFiles: unavailable, upload: unavailable, report: unavailable, addComment: unavailable,
     uploadDocuments: unavailable, deleteFile: unavailable, groupFiles: unavailable, uploadGroupFiles: unavailable, deleteGroupFile: unavailable,
     orderDelivery: unavailable, startOrder: unavailable, deliverOrder: unavailable,
@@ -71,6 +71,7 @@ test("deployment route 404 does not revoke cached resource authorization", async
 test("local child reads do not override worker service failure with fictitious connectivity", async () => {
   const f = repositoryFixture(); f.upstream.sendError = new ApiError(409, "MOBILE_CREATION_SCHEMA_NOT_READY", "Deployment");
   await assert.rejects(f.repository.createRecord(creation()), OfflineQueuedError);
+  await f.repository.engine.syncNow();
   const local = { ...scope, groupId: `local-${uuid(1)}`, workId: `local-${uuid(1)}` };
   const connection = f.repository.getSnapshot().connection;
   assert.equal(connection?.status, "service_error");
@@ -81,23 +82,32 @@ test("local child reads do not override worker service failure with fictitious c
   assert.equal(f.repository.getSnapshot().online, false);
 });
 
-test("checklist wrappers are online-only, preserve arguments/results and never enqueue", async () => {
+test("checklist catalog preserves arguments and cached results; attachment queues before explicit synchronization", async () => {
   const f = repositoryFixture(); const calls: unknown[] = [];
-  const page = { items: [], page: 0, pageSize: 20 as const, hasMore: false };
+  const page = { items: [{ id: 7, name: "Motor", code: null, description: null, alreadyAssigned: false }], page: 0, pageSize: 20 as const, hasMore: false };
   const attached = { checklistId: 7, alreadyAssigned: false };
   f.remote.checklistOptions = async (actual, query) => { calls.push([actual, query]); return page; };
   f.remote.attachChecklist = async (actual, id) => { calls.push([actual, id]); return attached; };
-  assert.equal(await f.repository.checklistOptions(scope, { search: "motor", page: 0 }), page);
-  assert.equal(await f.repository.attachChecklist(scope, 7), attached);
-  assert.deepEqual(calls, [[scope, { search: "motor", page: 0 }], [scope, 7]]);
+  const data = assignmentsWithStep(); data.groups[0]!.works[0]!.canExecute = true;
+  f.remote.assignments = async () => data;
+  await f.repository.assignments(scope, 1);
+  assert.deepEqual(await f.repository.checklistOptions(scope, { search: "motor", page: 0 }), page);
   assert.equal((await f.store.read("a")).operations.length, 0);
   f.connect(false);
-  await assert.rejects(f.repository.checklistOptions(scope, {}), /REQUIRES_CONNECTION/);
-  await assert.rejects(f.repository.attachChecklist(scope, 7), /REQUIRES_CONNECTION/);
+  assert.deepEqual(await f.repository.checklistOptions(scope, { search: "motor", page: 0 }), page);
+  await assert.rejects(f.repository.checklistOptions(scope, {}), /CACHE_MISS/);
+  const outcome = await queued(f.repository.attachChecklist(scope, 7));
+  assert.equal(outcome.kind, "checklist");
+  assert.equal(f.upstream.commands.length, 0);
+  assert.deepEqual(calls, [[scope, { search: "motor", page: 0 }]]);
   for (const invalid of [{ ...scope, companyBranchId: 2 }, { ...scope, workId: "local-1" }, { ...scope, groupId: "local-1" }, { ...scope, groupId: "direct-0" }]) {
     await assert.rejects(f.repository.checklistOptions(invalid, {})); await assert.rejects(f.repository.attachChecklist(invalid, 7));
   }
-  assert.equal(calls.length, 2); assert.equal((await f.store.read("a")).operations.length, 0);
+  assert.equal(calls.length, 1); assert.equal((await f.store.read("a")).operations.length, 1);
+  f.connect(true); await f.repository.engine.syncNow();
+  assert.equal(f.upstream.commands.length, 1);
+  assert.deepEqual(f.upstream.commands[0], { operationId: outcome.operationId, kind: "checklist", scope, payload: { checklistId: 7 } });
+  assert.equal((await f.store.read("a")).operations[0]!.status, "applied");
 });
 
 test("checklist missing port and failed service do not fabricate results or queue writes", async () => {
@@ -155,7 +165,10 @@ test("offline creation throws queued outcome after durable commit and remains in
   assert.equal(f.upstream.creates.length, 0);
 });
 test("online creation returns canonical result only after persisted applied state", async () => {
-  const f = repositoryFixture(); const value = await f.repository.createRecord(creation());
+  const f = repositoryFixture(); await queued(f.repository.createRecord(creation()));
+  assert.equal(f.upstream.creates.length, 0);
+  await f.repository.engine.syncNow();
+  const value = await f.repository.createRecord(creation());
   assert.equal(value.groupId, "direct-80"); assert.equal((await f.store.read("a")).operations[0]?.status, "applied");
 });
 test("photo batch owns all durable files before returning queued outcome", async () => {
@@ -206,6 +219,8 @@ test("offline logout refuses pending work in other namespace", async () => {
 test("failed read after confirmed remote creation still reports queue ownership", async () => {
   const f = repositoryFixture(); f.upstream.afterCreate = () => { f.store.failWrites = true; };
   await assert.rejects(f.repository.createRecord(creation()), OfflineQueuedError);
+  await assert.rejects(f.repository.engine.syncNow(), /DISK_FULL/);
+  assert.equal(f.upstream.creates.length, 1);
   f.store.failWrites = false;
   assert.equal((await f.store.read("a")).operations.length, 1);
 });
@@ -322,7 +337,8 @@ test("legacy range-specific file and comment cache keys migrate losslessly", asy
 test("confirmed upload binds receipt file ID and replaces canonical URL with own offline copy", async () => {
   const f = repositoryFixture();
   f.upstream.offlineDocument = async (metadata) => ({ operationId: metadata.operationId, state: "applied", fileId: 88 });
-  await f.repository.uploadDocuments(scope, [{ id: "draft", uri: "source:", name: "same.png", mimeType: "image/png" }]);
+  await queued(f.repository.uploadDocuments(scope, [{ id: "draft", uri: "source:", name: "same.png", mimeType: "image/png" }]));
+  await f.repository.engine.syncNow();
   f.remote.files = async () => [{ id: 88, name: "server.png", url: "https://files.invalid/88" }, { id: 89, name: "same.png", url: "https://files.invalid/89" }];
   let files = await f.repository.files(scope); assert.equal(files.length, 2); assert.match(files[0]!.url, /^memory:/); assert.equal(files[0]!.name, "server.png");
   assert.equal((await f.store.read("a")).attachments[0]!.attachmentId, "88");
@@ -334,6 +350,7 @@ test("applied response without file ID remains queued, keeps bytes and never bin
   const f = repositoryFixture();
   f.upstream.offlineDocument = async (metadata) => ({ operationId: metadata.operationId, state: "applied" });
   await queued(f.repository.uploadDocuments(scope, [{ id: "draft", uri: "source:", name: "same.png", mimeType: "image/png" }]));
+  await f.repository.engine.syncNow();
   f.remote.files = async () => [{ id: 88, name: "same.png", url: "https://files.invalid/88" }];
   const files = await f.repository.files(scope); assert.equal(files.length, 2); assert.match(files[0]!.url, /^https:/);
   const op = (await f.store.read("a")).operations[0]!; assert.ok(op.kind === "document");
@@ -349,7 +366,8 @@ test("applied response without file ID remains queued, keeps bytes and never bin
 test("known file 403 prevents later offline fallback and local canonical access until fresh authorization", async () => {
   const f = repositoryFixture();
   f.upstream.offlineDocument = async (metadata) => ({ operationId: metadata.operationId, state: "applied", fileId: 88 });
-  await f.repository.uploadDocuments(scope, [{ id: "draft", uri: "source:", name: "same.png", mimeType: "image/png" }]);
+  await queued(f.repository.uploadDocuments(scope, [{ id: "draft", uri: "source:", name: "same.png", mimeType: "image/png" }]));
+  await f.repository.engine.syncNow();
   f.remote.files = async () => [{ id: 88, name: "same.png", url: "https://files.invalid/88" }];
   await f.repository.files(scope);
   f.remote.files = async () => { throw new ApiError(403, "FORBIDDEN", "Denied"); };
@@ -383,6 +401,8 @@ test("queued canonical answer retries exact wire even after cache changes", asyn
     return { operationId: command.operationId, state: "applied" };
   };
   await assert.rejects(f.repository.answer(scope, "9", { responseValue: false, isCompleted: false, comment: null, executionStatus: "not_completed" }), OfflineQueuedError);
+  await f.repository.engine.syncNow();
+  assert.equal(f.upstream.commands.length, 1);
   f.remote.assignments = async () => assignmentsWithStep("text"); await f.repository.assignments(scope, 1); f.advance();
   const restarted = new OfflineTechnicianRepository(f.remote, f.session, { ...f.dependencies, upstream: f.remote });
   await restarted.syncNow(); assert.equal(f.upstream.commands.length, 2); assert.deepEqual(f.upstream.commands[1], f.upstream.commands[0]);
@@ -579,7 +599,8 @@ test("comment retry after lost UI confirmation returns the original pending snap
   assert.equal(retry.operationId, first.operationId); assert.equal(retry.ownsFiles, false);
   assert.deepEqual(restarted.getSnapshot().operations.map((op) => op.id), [first.operationId]);
   f.connect(true); await restarted.syncNow(); assert.equal(f.upstream.commands.length, 1);
-  await restarted.addComment(scope, "Nota pendiente");
+  await queued(restarted.addComment(scope, "Nota pendiente"));
+  await restarted.engine.syncNow();
   assert.equal(f.upstream.commands.length, 2); assert.notEqual(f.upstream.commands[0]!.operationId, f.upstream.commands[1]!.operationId);
 });
 
@@ -596,6 +617,7 @@ test("pending comment reuse is atomic but distinct text and dates remain separat
 test("blocked comment retry returns the same held operation without sending again", async () => {
   const f = repositoryFixture(); f.upstream.receiptState = "rejected";
   const first = await queued(f.repository.addComment(scope, "Nota bloqueada"));
+  await f.repository.engine.syncNow();
   const retry = await queued(f.repository.addComment(scope, "Nota bloqueada"));
   assert.equal(retry.operationId, first.operationId); assert.equal(f.upstream.commands.length, 1);
   assert.equal(f.repository.getSnapshot().operations[0]!.status, "blocked");
@@ -618,7 +640,8 @@ test("concurrent source ID collision keeps the committed bytes and both caller s
 });
 
 test("mixed applied and new document batch reports all owned IDs and sends only the new file", async () => {
-  const f = repositoryFixture(); await f.repository.uploadDocuments(scope, [draftPhoto]);
+  const f = repositoryFixture(); await queued(f.repository.uploadDocuments(scope, [draftPhoto]));
+  await f.repository.engine.syncNow();
   const original = (await f.store.read("a")).operations[0]!;
   f.connect(false); f.files.sources.set(draftPhoto.uri, null);
   const next = { ...draftPhoto, id: "new-draft", uri: "source:new" };

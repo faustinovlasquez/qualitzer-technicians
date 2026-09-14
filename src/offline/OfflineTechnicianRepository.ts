@@ -12,8 +12,11 @@ import { overlayCreations } from "./overlay";
 import { syncAnswerFromStep, toSyncAnswer } from "../domain/offlineProtocol";
 import { notificationInboxSchema, notificationStatusSchema } from "../domain/notifications";
 import { cachedAssignmentsSchema, cachedAttachmentSchema, cachedCommentsSchema, cachedDeliverySchema, resourceCacheKey, sameResource } from "./cacheSchemas";
-import type { ChecklistAssignmentPort } from "../domain/checklistAssignment";
+import { checklistAssignmentInputSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistAssignmentPort } from "../domain/checklistAssignment";
+import { assignmentsWithTimerRead, canonicalIntentionScopeSchema, checklistCatalogCacheKey } from "./queueIntentions";
 import { isServiceFailure, requiresDeployment } from "./connection";
+import type { AssignmentReadOptions } from "../domain/assignmentRead";
+import { withAssignmentReadBatch, type AssignmentReadBatch } from "../infrastructure/assignmentReadBatch";
 
 export class OfflineTechnicianRepository implements TechnicianRepository, OfflineController {
   readonly engine: OfflineEngine;
@@ -54,20 +57,57 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     });
     await this.engine.refresh();
   }
-  private async read<T extends object>(key: string, remote: () => Promise<T>, decode: (json: string) => T, date?: string): Promise<T> {
+  private async rememberAssignments(date: string, incoming: Assignments, batch: AssignmentReadBatch, timerReadOperationIds: string[]): Promise<Assignments> {
+    const { now, store, namespace, branchId } = this.dependencies;
+    const key = `assignments:${date}`;
+    let value = incoming;
+    let readIds = timerReadOperationIds;
+    await batch.wait(() => this.assertReadable());
+    await updateState(store, namespace, (state) => {
+      batch.check();
+      if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
+      value = incoming;
+      readIds = timerReadOperationIds;
+      const cached = state.cache.find((entry) => entry.key === key);
+      if (cached?.coverage?.branchId === branchId && cached.coverage.date === date) {
+        try {
+          const previous = cachedAssignmentsSchema.parse(JSON.parse(cached.json));
+          if (previous.technician.id === incoming.technician.id && (Date.parse(previous.generatedAt) > Date.parse(incoming.generatedAt)
+            || cached.timerReadOperationIds?.some((id) => !timerReadOperationIds.includes(id)))) {
+            value = previous;
+            readIds = cached.timerReadOperationIds ?? [];
+            return;
+          }
+        } catch {}
+      }
+      const fetchedAt = now();
+      putCache(state, { key, json: JSON.stringify(incoming), fetchedAt, timerReadOperationIds, coverage: { date, branchId, fetchedAt } });
+      state.revokedResources = state.revokedResources.filter((entry) => entry.key !== key);
+    });
+    batch.check();
+    await this.engine.refresh();
+    return assignmentsWithTimerRead(value, date, branchId, readIds);
+  }
+  private async read<T extends object>(key: string, remote: () => Promise<T>, decode: (json: string, entry: CacheEntry) => T, date?: string, save?: (value: T) => Promise<T>, batch?: AssignmentReadBatch): Promise<T> {
+    batch?.check();
     await this.assertReadable();
+    batch?.check();
     let generation = this.engine.getConnectionGeneration();
     let data: T;
     try {
       const connected = await this.dependencies.connectivity.current();
+      batch?.check();
       if (generation === this.engine.getConnectionGeneration()) {
         this.engine.noteNetworkState(connected);
         generation = this.engine.getConnectionGeneration();
       }
       if (connected === false) throw new NetworkError("network");
       data = await remote();
+      batch?.check();
       this.engine.noteConnectionSuccess(generation);
     } catch (error) {
+      batch?.check();
+      if (!canUseCache(error)) batch?.fail(error);
       if (error instanceof ApiError && error.status === 401) await this.engine.blockAuth();
       else if (error instanceof NetworkError || isServiceFailure(error)) this.engine.noteConnectionFailure(error, generation);
       if (error instanceof ApiError && [403, 404].includes(error.status) && !requiresDeployment(error.code)) {
@@ -79,9 +119,12 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       }
       if (!canUseCache(error)) throw error;
       const entry = await this.cacheEntry(key);
+      batch?.check();
       if (!entry) throw new OfflineUnavailableError("OFFLINE_CACHE_MISS");
-      return decode(entry.json);
+      return decode(entry.json, entry);
     }
+    batch?.check();
+    if (save) return save(data);
     await this.remember(key, data, date);
     return data;
   }
@@ -98,32 +141,82 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       return user;
     });
   }
-  async assignments(range: DateRange, branchId: number): Promise<Assignments> {
+  async assignments(range: DateRange, branchId: number, options?: AssignmentReadOptions): Promise<Assignments> {
     this.branch(branchId);
-    const snapshots: Array<{ date: string; data: Assignments }> = [];
+    return withAssignmentReadBatch(options, async (batch) => {
+      const days = assignmentDays(range);
+      const missingDates = new Set<string>();
+      const results = await batch.map(days, async (date) => {
+        let data: Assignments;
+        let timerReadOperationIds: string[] = [];
+        try {
+          data = await batch.wait(() => this.read(`assignments:${date}`, async () => {
+            const beforeRead = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
+            if (beforeRead.authBlocked || (this.dependencies.canAccessLocal && !await this.dependencies.canAccessLocal())) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
+            batch.check();
+            timerReadOperationIds = beforeRead.operations.filter((operation) => operation.kind === "timer" && operation.status === "applied"
+              && operation.scope.companyBranchId === branchId && operation.scope.startDate === date && operation.scope.endDate === date).map((operation) => operation.id);
+            const value = await this.remote.assignments(dailyRange(date), branchId, { signal: batch.signal });
+            batch.check();
+            if (!cachedAssignmentsSchema.safeParse(value).success) throw new ApiError(502, "UPSTREAM_INVALID_RESPONSE", "La API devolvió un formato inesperado.");
+            if (value.technician.id !== this.session.user.workerId) throw new ApiError(401, "OFFLINE_WORKER_CHANGED", "La identidad cambió.");
+            return value;
+          }, (json, entry) => {
+            const value = cachedAssignmentsSchema.parse(JSON.parse(json));
+            if (value.technician.id !== this.session.user.workerId) throw new OfflineUnavailableError("OFFLINE_CACHE_IDENTITY_MISMATCH");
+            return assignmentsWithTimerRead(value, date, branchId, entry.timerReadOperationIds);
+          }, date, (value) => this.rememberAssignments(date, value, batch, timerReadOperationIds), batch));
+        } catch (error) {
+          batch.check();
+          if (!(error instanceof OfflineUnavailableError) || error.code !== "OFFLINE_CACHE_MISS") throw error;
+          const state = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
+          missingDates.add(date);
+          if (!state.operations.some((op) => op.kind === "create" && op.input.schedule.date === date)) return undefined;
+          data = this.emptyAssignments();
+        }
+        await batch.wait(() => this.assertReadable());
+        const state = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
+        if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
+        return { date, data: overlayCreations(data, date, state.operations, this.session) };
+      });
+      await batch.wait(() => this.assertReadable());
+      const snapshots = results.filter((snapshot) => snapshot !== undefined);
+      this.engine.setMissingDates(days.filter((date) => missingDates.has(date)));
+      if (!snapshots.length) throw new OfflineUnavailableError("OFFLINE_CACHE_MISS");
+      return mergeDailyAssignments(snapshots, range.startDate);
+    });
+  }
+  private emptyAssignments(): Assignments {
+    return { generatedAt: "", technician: { id: this.session.user.workerId, name: this.session.user.name, allowEditExecutionTime: false }, summary: { totalGroups: 0, totalWorks: 0, activeWorks: 0, overdueWorks: 0, plannedMinutes: 0 }, groups: [] };
+  }
+  async localAssignments(range: DateRange, branchId: number): Promise<Assignments> {
+    this.branch(branchId);
+    const days = assignmentDays(range);
+    await this.assertReadable();
+    await this.engine.refresh();
+    const state = await this.dependencies.store.read(this.dependencies.namespace);
+    if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
     const missingDates: string[] = [];
-    for (const date of assignmentDays(range)) {
+    const snapshots: Array<{ date: string; data: Assignments }> = [];
+    for (const date of days) {
+      const key = `assignments:${date}`;
+      const revoked = state.revokedResources.find((entry) => entry.key === key);
+      if (revoked) throw new ApiError(revoked.status, "OFFLINE_RESOURCE_ACCESS_REVOKED", "El acceso al recurso fue revocado.");
+      const entry = state.cache.filter((item) => item.key === key).sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
       let data: Assignments;
-      try {
-        data = await this.read(`assignments:${date}`, async () => {
-          const value = await this.remote.assignments(dailyRange(date), branchId);
-          if (value.technician.id !== this.session.user.workerId) throw new ApiError(401, "OFFLINE_WORKER_CHANGED", "La identidad cambió.");
-          return value;
-        }, (json) => {
-          const value = cachedAssignmentsSchema.parse(JSON.parse(json));
-          if (value.technician.id !== this.session.user.workerId) throw new OfflineUnavailableError("OFFLINE_CACHE_IDENTITY_MISMATCH");
-          return value;
-        }, date);
-      } catch (error) {
-        const local = (await this.dependencies.store.read(this.dependencies.namespace)).operations.some((op) => op.kind === "create" && op.input.schedule.date === date);
-        if (!(error instanceof OfflineUnavailableError) || error.code !== "OFFLINE_CACHE_MISS") throw error;
+      if (entry) {
+        if (entry.coverage && (entry.coverage.branchId !== branchId || entry.coverage.date !== date)) throw new OfflineUnavailableError("OFFLINE_CACHE_SCOPE_MISMATCH");
+        data = cachedAssignmentsSchema.parse(JSON.parse(entry.json));
+        if (data.technician.id !== this.session.user.workerId) throw new OfflineUnavailableError("OFFLINE_CACHE_IDENTITY_MISMATCH");
+        data = assignmentsWithTimerRead(data, date, branchId, entry.timerReadOperationIds);
+      } else {
         missingDates.push(date);
-        if (!local) continue;
-        data = { generatedAt: "", technician: { id: this.session.user.workerId, name: this.session.user.name, allowEditExecutionTime: false }, summary: { totalGroups: 0, totalWorks: 0, activeWorks: 0, overdueWorks: 0, plannedMinutes: 0 }, groups: [] };
+        if (!state.operations.some((op) => op.kind === "create" && op.input.companyBranchId === branchId && op.input.schedule.date === date)) continue;
+        data = this.emptyAssignments();
       }
-      const state = await this.dependencies.store.read(this.dependencies.namespace);
       snapshots.push({ date, data: overlayCreations(data, date, state.operations, this.session) });
     }
+    await this.assertReadable();
     this.engine.setMissingDates(missingDates);
     if (!snapshots.length) throw new OfflineUnavailableError("OFFLINE_CACHE_MISS");
     return mergeDailyAssignments(snapshots, range.startDate);
@@ -150,11 +243,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     return parent.id;
   }
   private async finish(operations: OfflineOperation[]): Promise<void> {
-    try {
-      await this.engine.syncNow();
-      const state = await this.dependencies.store.read(this.dependencies.namespace);
-      if (operations.every((op) => state.operations.some((entry) => entry.id === op.id && entry.status === "applied"))) return;
-    } catch { /* The queue owns these drafts even if confirmation cannot be read. */ }
+    if (operations.every((op) => op.status === "applied")) return;
     const first = operations[0];
     if (!first) return;
     throw new OfflineQueuedError({ operationId: first.id, operationIds: operations.map((op) => op.id), kind: first.kind, date: first.kind === "create" ? first.input.schedule.date : first.scope.startDate,
@@ -165,9 +254,9 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     const parsed = creationInputSchema.parse(input);
     this.branch(parsed.companyBranchId);
     const operation: OfflineOperation = { ...this.base(parsed.clientRequestId), kind: "create", input: parsed, localGroupId: `local-${parsed.clientRequestId}`, localWorkId: `local-${parsed.clientRequestId}` };
-    await this.engine.enqueue([operation]);
-    await this.finish([operation]);
-    const current = (await this.dependencies.store.read(this.dependencies.namespace)).operations.find((op) => op.id === operation.id);
+    const registered = await this.engine.enqueue([operation]);
+    await this.finish(registered);
+    const current = registered.find((op) => op.id === operation.id);
     if (!current || current.kind !== "create" || !current.result) throw new OfflineUnavailableError("OFFLINE_CREATION_RECEIPT_MISSING");
     return current.result;
   }
@@ -190,8 +279,8 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     const base = answerFromStep(step);
     const wire = { answer: toSyncAnswer(step.type, answer), base: syncAnswerFromStep(step) };
     const operation: OfflineOperation = { ...this.base(), kind: "answer", scope, stepId, answer, base, wire };
-    await this.engine.enqueue([operation]);
-    await this.finish([operation]);
+    const registered = await this.engine.enqueue([operation]);
+    await this.finish(registered);
   }
   private async documents(scope: OfflineScope, photos: LocalPhoto[], stepId?: string): Promise<void> {
     if (!photos.length) return;
@@ -318,19 +407,31 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   }
   checklistOptions: ChecklistAssignmentPort["checklistOptions"] = async (scope, query) => {
     this.checklistScope(scope);
-    return this.onlineOnly(() => {
+    const canonical = canonicalIntentionScopeSchema.parse(scope);
+    const parsed = checklistCatalogQuerySchema.parse(query);
+    return this.read(checklistCatalogCacheKey(canonical, parsed), async () => {
       if (!this.remote.checklistOptions) throw new ApiError(501, "CHECKLIST_ASSIGNMENT_CONTRACT_UNAVAILABLE", "El servidor no permite asociar checklists.");
-      return this.remote.checklistOptions(scope, query);
-    }, scope);
+      return checklistCatalogPageSchema.parse(await this.remote.checklistOptions(canonical, parsed));
+    }, (json) => checklistCatalogPageSchema.parse(JSON.parse(json)));
   };
   attachChecklist: ChecklistAssignmentPort["attachChecklist"] = async (scope, checklistId) => {
     this.checklistScope(scope);
-    return this.onlineOnly(() => {
-      if (!this.remote.attachChecklist) throw new ApiError(501, "CHECKLIST_ASSIGNMENT_CONTRACT_UNAVAILABLE", "El servidor no permite asociar checklists.");
-      return this.remote.attachChecklist(scope, checklistId);
-    }, scope);
+    const canonical = canonicalIntentionScopeSchema.parse(scope);
+    const payload = checklistAssignmentInputSchema.parse({ checklistId });
+    const registered = await this.engine.enqueue([{ ...this.base(), kind: "checklist", scope: canonical, payload }]);
+    await this.finish(registered);
+    return { checklistId, alreadyAssigned: true };
   };
-  status: TechnicianRepository["status"] = (scope, input) => this.onlineOnly(() => this.remote.status(scope, input), scope);
+  status: TechnicianRepository["status"] = async (scope, input) => {
+    if (input.status === "completed" || input.status === "delivered") return this.onlineOnly(() => this.remote.status(scope, input), scope);
+    if (input.status !== "in_progress" && input.status !== "paused") throw new OfflineUnavailableError("OFFLINE_TIMER_INVALID_TRANSITION");
+    if (Object.keys(input).some((key) => key !== "status" && key !== "executionDates")
+      || input.executionDates !== undefined && (input.executionDates.length !== 1 || input.executionDates[0] !== scope.startDate)) throw new OfflineUnavailableError("OFFLINE_TIMER_INVALID_INPUT");
+    this.branch(scope.companyBranchId);
+    const canonical = canonicalIntentionScopeSchema.parse(scope);
+    const registered = await this.engine.enqueue([{ ...this.base(), kind: "timer", scope: canonical, payload: { status: input.status, baseStatus: "pending" } }]);
+    await this.finish(registered);
+  };
   report: TechnicianRepository["report"] = (scope, note) => this.onlineOnly(() => this.remote.report(scope, note), scope);
   deleteFile: TechnicianRepository["deleteFile"] = (scope, id, stepId) => this.onlineOnly(() => this.remote.deleteFile(scope, id, stepId), scope);
   deleteGroupFile: TechnicianRepository["deleteGroupFile"] = (scope, id) => this.onlineOnly(() => this.remote.deleteGroupFile(scope, id), scope);
@@ -353,13 +454,14 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     this.branch(branch);
     return this.read("notification-status", () => this.remote.notificationStatus(branch), (json) => notificationStatusSchema.parse(JSON.parse(json)));
   };
-  notificationInbox: TechnicianRepository["notificationInbox"] = async (branch, page) => {
+  notificationInbox: TechnicianRepository["notificationInbox"] = async (branch, page, unreadOnly) => {
     this.branch(branch);
-    return this.read(`notification-inbox:${page}`, () => this.remote.notificationInbox(branch, page), (json) => notificationInboxSchema.parse(JSON.parse(json)));
+    return this.read(`notification-inbox:${page}${unreadOnly === true ? ":unread" : ""}`, () => this.remote.notificationInbox(branch, page, unreadOnly), (json) => notificationInboxSchema.parse(JSON.parse(json)));
   };
   registerNotificationDevice: TechnicianRepository["registerNotificationDevice"] = (input) => this.onlineOnly(() => this.remote.registerNotificationDevice(input));
   unregisterNotificationDevice: TechnicianRepository["unregisterNotificationDevice"] = (branch, installation) => { this.branch(branch); return this.onlineOnly(() => this.remote.unregisterNotificationDevice(branch, installation)); };
   readNotification: TechnicianRepository["readNotification"] = (branch, id) => { this.branch(branch); return this.onlineOnly(() => this.remote.readNotification(branch, id)); };
+  deleteNotification: TechnicianRepository["deleteNotification"] = (branch, id) => { this.branch(branch); return this.onlineOnly(() => this.remote.deleteNotification(branch, id)); };
   testNotification: TechnicianRepository["testNotification"] = (branch) => { this.branch(branch); return this.onlineOnly(() => this.remote.testNotification(branch)); };
   async prepareWeek(range: DateRange, branchId: number, options?: OfflinePreparationOptions): Promise<void> {
     this.branch(branchId);

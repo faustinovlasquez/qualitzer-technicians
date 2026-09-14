@@ -2,9 +2,9 @@ import { File } from "expo-file-system";
 import { Platform } from "react-native";
 import type { Attachment } from "../../../domain/models";
 import { httpUrl } from "../detailRules";
-import { MAX_PHOTOS, MAX_PHOTO_BYTES, MAX_TOTAL_BYTES } from "../localPhotos";
+import { MAX_PHOTO_BYTES, MAX_TOTAL_BYTES } from "../localPhotos";
 
-export const MAX_FILES = MAX_PHOTOS;
+export const MAX_FILES = 100;
 export const MAX_FILE_BYTES = MAX_PHOTO_BYTES;
 export const MAX_FILES_BYTES = MAX_TOTAL_BYTES;
 export const MAX_COMMENT_LENGTH = 10000;
@@ -87,7 +87,7 @@ export function sortedAttachments(files: Attachment[]): Attachment[] {
   return [...files].sort((left, right) => timestamp(right) - timestamp(left) || left.name.localeCompare(right.name, "es", { numeric: true }) || String(left.id).localeCompare(String(right.id)));
 }
 
-export function fileSizeLabel(size: number): string { return `${(size / 1024 / 1024).toFixed(1)} MB`; }
+export function fileSizeLabel(size: number): string { return `${(size / 1024 / 1024).toFixed(1)} MiB`; }
 
 export function commentDate(value: string | null): string {
   if (!value) return "Fecha no informada";

@@ -6,6 +6,8 @@ export const styles = StyleSheet.create({
   screen: { flex: 1 },
   header: { width: "100%", maxWidth: 900, alignSelf: "center", paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 8 },
   headerText: { flex: 1, minWidth: 0, gap: 2 },
+  checklistHeader: { width: "100%", maxWidth: 900, alignSelf: "center", paddingHorizontal: 8, paddingVertical: 2, flexDirection: "row", alignItems: "center", gap: 4 },
+  checklistHeaderButton: { minHeight: 44, paddingHorizontal: 8, paddingVertical: 8 },
   code: { ...typography.label, color: palette.text },
   content: { width: "100%", maxWidth: 900, alignSelf: "center", padding: 16, paddingBottom: 36, gap: 20 },
   stack: { gap: 16 },

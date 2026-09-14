@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { ScrollView, Text, View } from "react-native";
+import { checklistResumeTarget } from "../../domain/checklistResume";
 import { plainText } from "../../domain/format";
 import type { AssignmentWork, Checklist, ChecklistStep, StepAnswer } from "../../domain/models";
-import { Badge, BodyText, Button, Card, EmptyState, SectionTitle } from "../../ui/components";
+import { Badge, BodyText, Button, EmptyState, IconButton, SectionTitle } from "../../ui/components";
 import { ChecklistCatalog, ChecklistProgress } from "./checklist/ChecklistCatalog";
 import { ChecklistOverview } from "./checklist/ChecklistOverview";
 import { StepEditor } from "./checklist/StepEditor";
@@ -10,7 +11,6 @@ import { checklistStyles } from "./checklist/styles";
 import { useChecklistNavigation } from "./checklist/useChecklistNavigation";
 import { Notice } from "./DetailUi";
 import { errorMessage } from "./detailRules";
-import { styles } from "./detailStyles";
 import type { WorkDraft } from "./useWorkDraft";
 
 export interface ChecklistTabProps {
@@ -28,6 +28,9 @@ export interface ChecklistTabProps {
   storageKey: string;
   onRefresh?: () => Promise<void>;
   isAnswerQueued?: (step: ChecklistStep, answer: StepAnswer) => boolean;
+  pendingEvidenceCount?: (stepId: string) => number;
+  catalogHeader?: ReactNode;
+  notices?: ReactNode;
 }
 
 export function ChecklistTab(props: ChecklistTabProps) {
@@ -36,7 +39,7 @@ export function ChecklistTab(props: ChecklistTabProps) {
 }
 
 function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
-  const navigation = useChecklistNavigation(props.scopeKey);
+  const navigation = useChecklistNavigation(props.scopeKey, props.work.checklists);
   const [overview, setOverview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -48,9 +51,8 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
   const step = steps[index];
 
   function open(item: Checklist): void {
-    const firstStep = [...item.steps].sort((left, right) => left.order - right.order)[0];
     setOverview(false);
-    navigation.open(item.checklistId, firstStep ? String(firstStep.stepId) : undefined);
+    navigation.open(item);
   }
 
   function jump(id: string): void {
@@ -69,39 +71,49 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
     finally { refreshingRef.current = false; setRefreshing(false); }
   }
 
-  if (props.work.checklists.length === 0) return <Card><EmptyState title="Sin checklists disponibles" message="No se recibieron listas de verificación en esta ficha. Si esperabas un checklist, actualiza la asignación; los borradores anteriores no se eliminan." icon="list-outline" /></Card>;
+  const notices = <>
+    {navigation.error ? <Notice message={navigation.error} tone="warning" /> : null}
+    {refreshError ? <Notice message={refreshError} tone="error" onDismiss={() => setRefreshError(null)} /> : null}
+    {checklist && step && checklistResumeTarget({ ...checklist, steps: [step] }).reason === "evidence" ? <Notice message="La respuesta está registrada, pero falta evidencia confirmada para este paso. Abre Archivos para adjuntarla o revisar los archivos pendientes; no necesitas volver a responder." tone="warning" /> : null}
+    {props.notices}
+  </>;
+
+  if (navigation.restoring) return <View style={checklistStyles.screen}><BodyText>Recuperando navegación del checklist…</BodyText></View>;
+
+  if (!checklist) return <ScrollView style={checklistStyles.screen} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled">
+    <SectionTitle title="Checklists del trabajo" subtitle="Selecciona una lista para responder." />
+    {notices}
+    {navigation.selection.checklistId !== null ? <Notice message="El checklist seleccionado ya no aparece en la ficha recibida. No se ha elegido otro ni eliminado sus borradores." tone="warning" /> : null}
+    {props.work.checklists.length === 0 ? <EmptyState title="Sin checklists disponibles" message="No se recibieron listas de verificación en esta ficha. Si esperabas un checklist, actualiza la asignación; los borradores anteriores no se eliminan." icon="list-outline" /> : <ChecklistCatalog checklists={props.work.checklists} draft={props.draft} onOpen={open} />}
+    {props.catalogHeader}
+    <BodyText>{props.mode === "demo" ? "Demostración local. El progreso usa las respuestas guardadas de la ficha demo, no los borradores." : "Progreso confirmado por Qualitzer. Los borradores no cuentan; una respuesta confirmada no significa aprobación."}</BodyText>
+    {props.onRefresh ? <Button title="Actualizar respuestas y archivos" icon="refresh-outline" variant="ghost" loading={refreshing} disabled={props.disabled} onPress={() => { void refresh(); }} /> : null}
+  </ScrollView>;
+
   return (
-    <View style={styles.stack}>
-      <Notice message={props.mode === "demo" ? "Demostración local. El progreso usa las respuestas guardadas de la ficha demo, no los borradores." : "Progreso confirmado por Qualitzer. Los borradores no cuentan; una respuesta confirmada no significa aprobación."} />
-      {navigation.error ? <Notice message={navigation.error} tone="warning" /> : null}
-      {refreshError ? <Notice message={refreshError} tone="error" onDismiss={() => setRefreshError(null)} /> : null}
-      {props.onRefresh ? <Button title="Actualizar respuestas y archivos" icon="refresh-outline" variant="ghost" loading={refreshing} disabled={props.disabled} onPress={() => { void refresh(); }} /> : null}
-      {!checklist ? <View style={styles.stack}>
-        <SectionTitle title="Checklists del trabajo" subtitle="Selecciona una lista para responder un solo paso a la vez." />
-        {navigation.selection.checklistId !== null ? <Notice message="El checklist seleccionado ya no aparece en la ficha recibida. No se ha elegido otro ni eliminado sus borradores." tone="warning" /> : null}
-        <ChecklistCatalog checklists={props.work.checklists} draft={props.draft} onOpen={open} />
-      </View> : <Card style={checklistStyles.panel}>
-        <Button title="Volver a los checklists" icon="arrow-back-outline" variant="ghost" onPress={() => { setOverview(false); navigation.catalog(); }} />
-        <View style={styles.tight}>
-          <Text numberOfLines={1} ellipsizeMode="tail" style={checklistStyles.code}>{plainText(checklist.code) || "Sin código"}</Text>
-          <SectionTitle title={plainText(checklist.name) || "Checklist sin nombre"} />
-          <Badge label={checklist.required === true ? "Checklist obligatorio" : checklist.required === false ? "Complementario" : "Obligatoriedad no informada"} tone={checklist.required === true ? "warning" : "neutral"} />
-          <ChecklistProgress checklist={checklist} />
+    <View style={checklistStyles.screen} testID="checklist-workspace">
+      <View style={checklistStyles.toolbar}>
+        <View style={checklistStyles.toolbarRow}>
+          <IconButton name="arrow-back-outline" label="Volver a los checklists" disabled={props.disabled} onPress={() => { setOverview(false); navigation.catalog(); }} />
+          <View style={checklistStyles.toolbarTitle}>
+            <Text accessibilityRole="header" numberOfLines={2} style={checklistStyles.title}>{plainText(checklist.name) || "Checklist sin nombre"}</Text>
+            <Text accessibilityLiveRegion="polite" style={checklistStyles.progress}>{step ? `Paso ${index + 1} de ${steps.length}` : `${steps.length} pasos`}{checklist.required === true ? " · Obligatorio" : checklist.required == null ? " · Obligatoriedad no informada" : ""}{props.readOnly ? " · Solo lectura" : ""}</Text>
+          </View>
+          <IconButton name={overview ? "create-outline" : "grid-outline"} label={overview ? "Volver al paso" : "Resumen de pasos"} disabled={!step || props.disabled} onPress={() => setOverview(!overview)} />
         </View>
-        {steps.length === 0 ? <EmptyState title="Sin pasos disponibles" message="No se recibieron pasos para este checklist. Actualiza la ficha o solicita revisar su configuración; no se presume completado." icon="list-outline" /> : <View style={styles.stack}>
-          {step ? <View style={styles.tight}>
-            <Text accessibilityLiveRegion="polite" style={styles.label}>Paso {index + 1} de {steps.length}</Text>
-            <View style={checklistStyles.navigation}>
-              <Button title="Anterior" icon="chevron-back-outline" variant="secondary" style={checklistStyles.navigationButton} disabled={index === 0} onPress={() => { const previous = steps[index - 1]; if (previous) jump(String(previous.stepId)); }} />
-              <Button title="Siguiente" icon="chevron-forward-outline" variant="secondary" style={checklistStyles.navigationButton} disabled={index + 1 >= steps.length} onPress={() => { const next = steps[index + 1]; if (next) jump(String(next.stepId)); }} />
-            </View>
-            <Button title={overview ? "Volver al paso" : `Resumen · ${steps.length} pasos`} icon="grid-outline" variant="ghost" onPress={() => setOverview(!overview)} />
-          </View> : <Notice message="El paso seleccionado ya no está en la ficha recibida. Su borrador no se ha eliminado. Elige un paso del resumen para continuar." tone="warning" />}
-          <View style={styles.divider} />
-          {overview || !step ? <ChecklistOverview key={checklist.checklistId} steps={steps} stepId={stepId} draft={props.draft} onJump={jump} /> : <StepEditor key={`${checklist.checklistId}:${step.stepId}`} step={step} number={index + 1} total={steps.length} context={props} onNext={index + 1 < steps.length ? () => { const next = steps[index + 1]; if (next) jump(String(next.stepId)); } : undefined} />}
-        </View>}
-        {props.readOnly ? <BodyText>Solo lectura. Puedes recorrer los pasos sin modificar la información guardada.</BodyText> : null}
-      </Card>}
+        <ChecklistProgress checklist={checklist} compact />
+      </View>
+      {overview || !step ? <ScrollView key={`overview:${checklist.checklistId}`} style={checklistStyles.scroll} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled">
+        {steps.length === 0 ? <EmptyState title="Sin pasos disponibles" message="No se recibieron pasos para este checklist. Actualiza la ficha o solicita revisar su configuración; no se presume completado." icon="list-outline" /> : <>
+          {!step && stepId !== undefined ? <Notice message="El paso seleccionado ya no está en la ficha recibida. Su borrador no se ha eliminado. Elige un paso del resumen para continuar." tone="warning" /> : null}
+          {!step && stepId === undefined ? <Notice message={checklistResumeTarget(checklist).reason === "review" ? "No quedan pasos obligatorios pendientes en la ficha recibida. Puedes revisar o responder cualquier paso desde el resumen, incluidos los opcionales e informativos. Los borradores y envíos pendientes se conservan; esto no confirma la entrega del trabajo." : "La ficha recibida tiene pasos pendientes. Elige uno desde el resumen o vuelve a abrir el checklist para continuar por el primer pendiente. Los borradores se conservan."} /> : null}
+          <ChecklistOverview key={checklist.checklistId} steps={steps} stepId={stepId} draft={props.draft} onJump={jump} />
+        </>}
+        {checklist.required !== false ? <Badge label={checklist.required === true ? "Checklist obligatorio" : "Obligatoriedad no informada"} tone={checklist.required === true ? "warning" : "neutral"} /> : null}
+        {notices}
+      </ScrollView> : <StepEditor key={`${checklist.checklistId}:${step.stepId}`} step={step} context={props} notices={notices}
+        onPrevious={index > 0 ? () => jump(String(steps[index - 1].stepId)) : undefined}
+        onNext={index + 1 < steps.length ? () => jump(String(steps[index + 1].stepId)) : undefined} />}
     </View>
   );
 }

@@ -1,0 +1,33 @@
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const ts = require("typescript");
+const root = path.resolve(__dirname, "../..");
+const output = path.join(root, "artifacts/logs/compact-files", new Date().toISOString().replace(/[:.]/g, "-"));
+fs.mkdirSync(output, { recursive: true });
+const report = { output, scope: "File UX only; no APK, export, full suite, backend or real network writes", runs: [], diagnostics: [] };
+function run(name, args) {
+  const result = spawnSync(process.execPath, args, { cwd: root, encoding: "utf8", maxBuffer: 12 * 1024 * 1024, env: { ...process.env, EXPO_NO_DOTENV: "1" } });
+  const log = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  fs.writeFileSync(path.join(output, `${name}.log`), log);
+  report.runs.push({ name, exitCode: result.status, error: result.error?.message, summary: log.split(/\r?\n/).filter(line => /tests |pass |fail |skipped |passed|qualitzer-compact-files-/.test(line)).slice(-10) });
+  return result.stdout;
+}
+run("file-batches", ["--test", "tests/compact-files.test.cjs"]);
+run("durable-documents", ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", "--test-reporter=spec", "src/offline/tests/repository.test.ts", "src/offline/tests/engine.test.ts", "src/offline/tests/file-fingerprint.test.ts", "tests/refresh-control-native.test.ts"]);
+const targets = ["src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/FileWorkspace.tsx", "src/screens/workDetail/files/fileRules.ts", "src/screens/workDetail/files/filePicker.ts", "src/screens/workDetail/files/WorkspaceDraftStore.ts", "src/screens/workDetail/files/saveFileBatch.ts", "src/screens/workDetail/files/workspaceStyles.ts", "src/screens/workDetail/files/WorkspaceFileList.tsx", "tests/e2e/fixtures/compact-files.tsx"].map(file => path.join(root, file));
+const config = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile);
+const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+const program = ts.createProgram(targets, { ...parsed.options, noEmit: true });
+const owned = new Set(targets.map(file => path.normalize(file).toLowerCase()));
+const diagnostics = ts.getPreEmitDiagnostics(program);
+report.diagnostics = diagnostics.filter(item => !item.file || owned.has(path.normalize(item.file.fileName).toLowerCase())).map(item => ({ file: item.file?.fileName, code: item.code, message: ts.flattenDiagnosticMessageText(item.messageText, " ") }));
+report.externalDiagnosticCount = diagnostics.length - report.diagnostics.length;
+const ui = JSON.parse(run("files-ui", ["tests/e2e/compact-files-smoke.cjs"]));
+report.ui = { passed: ui.passed, tests: ui.tests, error: ui.error };
+fs.copyFileSync(path.join(ui.output, "results.json"), path.join(output, "ui-results.json"));
+for (const file of fs.readdirSync(ui.output).filter(file => file.endsWith(".png"))) fs.copyFileSync(path.join(ui.output, file), path.join(output, file));
+report.passed = report.runs.every(run => run.exitCode === 0) && report.diagnostics.length === 0;
+fs.writeFileSync(path.join(output, "validation.json"), JSON.stringify(report, null, 2));
+console.log(JSON.stringify(report, null, 2));
+process.exitCode = report.passed ? 0 : 1;

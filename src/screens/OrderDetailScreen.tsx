@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackHandler, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { assignmentWorkOrderCode } from "../domain/assignmentCodes";
+import { assignmentWorkQueryRange } from "../domain/assignmentSchedule";
 import { plainText } from "../domain/format";
 import type { AssignmentGroup, AssignmentWork, Attachment, DateRange, LocalPhoto, StatusInput, Tenant, WorkOpenOptions } from "../domain/models";
 import type { OfflineController, OfflineSnapshot } from "../domain/offline";
@@ -42,13 +43,14 @@ export interface OrderDetailScreenProps {
   storageKey: string;
   offline?: OfflineSnapshot | null;
   range?: DateRange;
+  assignmentsRange?: DateRange;
   companyBranchId?: number;
   readLocalFile?: OfflineController["readLocalFile"];
   staleReadOnly?: boolean;
 }
 
 type OrderTab = "works" | "materials" | "files";
-type OrderAction = "refresh" | "status" | "upload" | "delete" | "start" | "deliver";
+type OrderAction = "refresh" | "timer" | "status" | "upload" | "delete" | "start" | "deliver";
 const tabs: { id: OrderTab; label: string; icon: IconName }[] = [
   { id: "works", label: "Trabajos", icon: "construct-outline" },
   { id: "materials", label: "Repuestos", icon: "cube-outline" },
@@ -75,7 +77,9 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const locked = busy || action !== null;
   const online = props.offline === undefined || (props.offline !== null && props.offline.online && !props.offline.authBlocked);
   const localGroup = group.id.startsWith("local-");
+  const assignmentsRange = props.assignmentsRange ?? props.range;
   const executionAvailable = online && !localGroup && !props.staleReadOnly;
+  const timerAvailable = (online || (props.offline !== undefined && props.offline !== null && !props.offline.authBlocked)) && !localGroup && !props.staleReadOnly;
   const scopedOperations = props.range && props.companyBranchId !== undefined ? operationsForWork(props.offline, { groupId: group.id, ...props.range, companyBranchId: props.companyBranchId }) : [];
   const documents = scopedOperations.filter((operation): operation is PendingDocument => operation.kind === "document" && operation.stepId === undefined);
   const pendingDocuments = documents.filter((operation) => operation.status !== "applied");
@@ -98,6 +102,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
 
   async function runOperation(name: OrderAction, operation: () => Promise<void>): Promise<void> {
     if (actionRef.current !== null || busyRef.current || leaving.current) throw new Error("Hay una operación en curso. Espera a que termine antes de continuar.");
+    if (name === "timer" && !timerAvailable) throw new Error("Espera a recuperar una ficha verificada y la cola local antes de cambiar el cronómetro.");
     if ((name === "status" || name === "start" || name === "deliver" || name === "delete") && !executionAvailable) throw new Error("Esta acción requiere conexión y una ficha confirmada y actualizada. No se encola offline.");
     actionRef.current = name;
     setAction(name);
@@ -195,7 +200,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     >
       {mode === "demo" ? <Notice message="Modo demostración · los cambios son locales y no modifican datos reales." /> : null}
       {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
-      {!online ? <Notice message={props.offline === null ? "Recuperando la cola local. Espera antes de guardar cambios." : "Sin conexión verificada. Puedes consultar la información disponible y guardar archivos y comentarios offline. Iniciar, pausar, eliminar y entregar requieren conexión; el cronómetro no avanza en esta vista."} tone="warning" /> : null}
+      {!online ? <Notice message={props.offline === null ? "Recuperando la cola local. Espera antes de guardar cambios." : props.offline?.authBlocked ? "La sesión requiere verificación. Los cambios locales se conservan; no se pueden guardar nuevas operaciones." : "Sin conexión verificada. Puedes guardar archivos, comentarios y cambios del cronómetro en la cola local. Eliminar y entregar requieren conexión; el cronómetro no avanza en esta vista."} tone="warning" /> : null}
       {props.staleReadOnly ? <Notice message="La ficha actual aún no está verificada. Actualiza los datos y permisos antes de ejecutar. Los borradores se conservan; esto no indica que la OT esté cerrada." tone="warning" /> : null}
       {tab === "works" ? <View style={styles.stack}>
         <Card><AssignmentOrderSummary group={group} /></Card>
@@ -205,11 +210,14 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           key={JSON.stringify([group.type, group.id, work.workType, work.id])}
           group={group}
           work={work}
+          queryDate={assignmentsRange ? assignmentWorkQueryRange(work, assignmentsRange).startDate : undefined}
+          companyBranchId={props.companyBranchId}
           busy={locked}
           online={online}
+          offline={props.offline}
           staleReadOnly={props.staleReadOnly}
           onOpenWork={openWork}
-          onWorkStatus={(selectedGroup, selectedWork, input) => runOperation("status", () => onWorkStatus(selectedGroup, selectedWork, input))}
+          onWorkStatus={(selectedGroup, selectedWork, input) => runOperation(input.status === "in_progress" || input.status === "paused" ? "timer" : "status", () => onWorkStatus(selectedGroup, selectedWork, input))}
         />)}
       </View> : null}
       {tab === "materials" ? <OrderMaterialsTab group={group} onShowWorks={() => selectTab("works")} /> : null}

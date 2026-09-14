@@ -1,8 +1,10 @@
 import { isFinished, shiftDate } from "./format";
+import { normalizeWorkChecklistProgress } from "./assignmentChecklistProgress";
 import type { AssignmentGroup, Assignments, AssignmentWork, DateRange } from "./models";
 
 export interface DailyAssignmentSnapshot { date: string; data: Assignments; }
-export interface AssignmentWorkSnapshot { date: string; queryDates: string[]; generatedAt: string; work: AssignmentWork; }
+export interface AssignmentWorkQuerySnapshot { date: string; generatedAt: string; work: AssignmentWork; }
+export interface AssignmentWorkSnapshot extends AssignmentWorkQuerySnapshot { queryDates: string[]; dailyVersions?: AssignmentWorkQuerySnapshot[]; }
 export interface ScheduledAssignmentWork extends AssignmentWork { schedules?: AssignmentWorkSnapshot[]; }
 export interface ScheduledAssignmentGroup extends AssignmentGroup { works: ScheduledAssignmentWork[]; }
 export interface ScheduledAssignments extends Assignments { groups: ScheduledAssignmentGroup[]; }
@@ -71,7 +73,8 @@ export function mergeDailyAssignments(snapshots: readonly DailyAssignmentSnapsho
       const entry = grouped.get(key) ?? { group, works: new Map<string, { dates: Set<string>; snapshots: Map<string, AssignmentWorkSnapshot> }>() };
       entry.group = group;
       grouped.set(key, entry);
-      for (const work of group.works) {
+      for (const sourceWork of group.works) {
+        const work = normalizeWorkChecklistProgress(sourceWork);
         const item = entry.works.get(work.id) ?? { dates: new Set<string>(), snapshots: new Map<string, AssignmentWorkSnapshot>() };
         const day = assignmentDay(work.scheduledDate);
         for (const value of [...(work.plannedDates ?? []), day]) {
@@ -81,7 +84,14 @@ export function mergeDailyAssignments(snapshots: readonly DailyAssignmentSnapsho
         const current = item.snapshots.get(day);
         const queryDates = [...new Set([...(current?.queryDates ?? []), snapshot.date])].sort();
         const candidate = { date: snapshot.date, queryDates, generatedAt: snapshot.data.generatedAt, work };
-        item.snapshots.set(day, !current || preferredSnapshot(candidate, current) ? candidate : { ...current, queryDates });
+        const dailyVersions = [...(current?.dailyVersions ?? []).filter((version) => version.date !== snapshot.date),
+          { date: snapshot.date, generatedAt: snapshot.data.generatedAt, work }].sort((left, right) => left.date.localeCompare(right.date));
+        const selected = !current || preferredSnapshot(candidate, current) ? candidate : {
+          ...current, queryDates,
+          work: generatedTime(candidate.generatedAt) > generatedTime(current.generatedAt)
+            ? normalizeWorkChecklistProgress({ ...current.work, checklists: work.checklists }) : current.work,
+        };
+        item.snapshots.set(day, { ...selected, dailyVersions });
         entry.works.set(work.id, item);
       }
     }
@@ -116,9 +126,27 @@ export function assignmentWorkForDay(work: ScheduledAssignmentWork, day: string)
   } : work;
 }
 
+export function assignmentWorkSnapshotForQueryDate(work: ScheduledAssignmentWork, queryDate: string): AssignmentWorkQuerySnapshot | undefined {
+  const schedule = work.schedules?.find((item) => assignmentDay(item.work.scheduledDate) === assignmentDay(work.scheduledDate));
+  if (!schedule?.queryDates.includes(queryDate)) return undefined;
+  return schedule.dailyVersions ? schedule.dailyVersions.find((version) => version.date === queryDate) : schedule.date === queryDate ? schedule : undefined;
+}
+
+export function assignmentWorkForQueryDate(work: ScheduledAssignmentWork, queryDate: string): ScheduledAssignmentWork | undefined {
+  if (!work.schedules) return work;
+  const snapshot = assignmentWorkSnapshotForQueryDate(work, queryDate);
+  return snapshot ? { ...snapshot.work, plannedDates: work.plannedDates, schedules: work.schedules } : undefined;
+}
+
 export function assignmentWorkRange(work: ScheduledAssignmentWork, fallbackDay: string): DateRange {
   const snapshot = work.schedules?.find((item) => assignmentDay(item.work.scheduledDate) === assignmentDay(work.scheduledDate));
   return dailyRange(snapshot?.queryDates.includes(fallbackDay) ? fallbackDay : snapshot?.date ?? fallbackDay);
+}
+
+export function assignmentWorkQueryRange(work: ScheduledAssignmentWork, range: DateRange): DateRange {
+  if (range.startDate === range.endDate) return dailyRange(range.startDate);
+  const scheduledDate = assignmentDay(work.scheduledDate);
+  return assignmentWorkRange(work, scheduledDate >= range.startDate && scheduledDate <= range.endDate ? scheduledDate : range.startDate);
 }
 
 export function assignmentIncludesDay(work: ScheduledAssignmentWork, day: string): boolean {

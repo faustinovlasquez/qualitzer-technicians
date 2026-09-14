@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import type { CreationKind } from "../../domain/creation";
 import { IconButton, type IconName } from "../../ui/components";

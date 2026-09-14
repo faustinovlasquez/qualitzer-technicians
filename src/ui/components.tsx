@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useMemo, useState, type ComponentProps, type ReactNode, type Ref } from "react";
+import { useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -14,6 +14,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import type { Tenant } from "../domain/models";
+import { brandName, safeBrandLogo } from "../domain/branding";
 import { palette, radius, theme, typography } from "./theme";
 
 export type IconName = ComponentProps<typeof Ionicons>["name"];
@@ -180,31 +181,30 @@ export function BodyText({ children, style }: BodyTextProps) {
 
 export interface BrandProps { tenant?: Tenant; compact?: boolean; showTag?: boolean; singleLine?: boolean; }
 
-function safeBrandLogo(logo: Tenant["logo"]): string | null {
-  if (!logo || /[\s\u0000-\u001f\u007f\\]/.test(logo)) return null;
-  if (/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/i.test(logo)) return logo;
-  if (!/^https?:\/\//i.test(logo)) return null;
-  try {
-    const url = new URL(logo);
-    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname && !url.username && !url.password ? url.href : null;
-  } catch {
-    return null;
-  }
+function BrandLogo({ logo }: { logo: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const showLogo = logo !== null && !failed;
+
+  return <View style={[styles.brandMark, showLogo && styles.brandImageMark]}>
+    <Image
+      source={showLogo ? { uri: logo } : require("../../assets/qualitzer-logo.png")}
+      resizeMode="contain"
+      style={styles.brandLogo}
+      onError={showLogo ? () => setFailed(true) : undefined}
+      accessible={false}
+      testID={showLogo ? "brand-company-logo" : "brand-base-logo"}
+    />
+  </View>;
 }
 
-export function Brand({ tenant, compact = false, showTag = true, singleLine = false }: BrandProps = {}) {
-  const [failedLogo, setFailedLogo] = useState<string | null>(null);
-  const name = tenant?.name.trim() || "qualitzer";
-  const logo = useMemo(() => safeBrandLogo(tenant?.logo), [tenant?.logo]);
-  const showLogo = logo !== null && logo !== failedLogo;
+export function Brand({ tenant, compact = false }: BrandProps = {}) {
+  const name = brandName(tenant);
+  const logo = safeBrandLogo(tenant?.logo);
 
   return (
-    <View style={styles.brand} accessible accessibilityLabel={showTag ? `${name} Field` : name}>
-      <View style={[styles.brandMark, showLogo && styles.brandImageMark]}>
-        {showLogo ? <Image key={logo} source={{ uri: logo }} resizeMode="contain" style={styles.brandLogo} onError={() => setFailedLogo(logo)} accessible={false} /> : <Ionicons name="construct-outline" size={18} color={palette.primary} accessible={false} />}
-      </View>
-      <Text numberOfLines={singleLine ? 1 : 2} ellipsizeMode="tail" style={[styles.brandName, compact && styles.brandNameCompact]}>{name}</Text>
-      {showTag ? <View style={styles.brandTag}><Text style={styles.brandTagText}>FIELD</Text></View> : null}
+    <View style={styles.brand} accessible accessibilityLabel={name}>
+      <BrandLogo key={JSON.stringify([tenant?.id, logo])} logo={logo} />
+      <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.brandName, compact && styles.brandNameCompact]}>{name}</Text>
     </View>
   );
 }
@@ -237,11 +237,9 @@ const styles = StyleSheet.create({
   iconPressed: { backgroundColor: palette.track },
   body: { ...typography.body, color: palette.textSecondary },
   brand: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, minWidth: 0 },
-  brandMark: { width: 32, height: 32, borderRadius: 10, backgroundColor: palette.primarySoft, alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" },
+  brandMark: { width: 32, height: 32, borderRadius: 10, backgroundColor: palette.surface, alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" },
   brandImageMark: { backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
   brandLogo: { width: 28, height: 28 },
   brandName: { color: palette.navy, fontSize: 23, lineHeight: 30, fontWeight: "800", letterSpacing: -1, flexShrink: 1 },
   brandNameCompact: { fontSize: 14, lineHeight: 20, fontWeight: "700", letterSpacing: 0 },
-  brandTag: { borderWidth: 1, borderColor: "#C8E3DF", backgroundColor: palette.primarySoft, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, marginLeft: 2 },
-  brandTagText: { ...typography.overline, color: palette.primary, fontSize: 9, letterSpacing: 1.4 },
 });

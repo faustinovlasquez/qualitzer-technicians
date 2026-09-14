@@ -1,8 +1,52 @@
-# Distribuciones de Qualitzer Field por empresa
+# Marca de Qualitzer técnicos y distribuciones por empresa
+
+## Actualización 1.0.3
+
+La entrega vigente es **1.0.3 / código 4**, con la misma firma y assets base. El acceso empresarial ya abre sin el aviso previo y se solicita automáticamente una vez tras la sesión verificada, siempre con confirmación Android. No modifica el icono principal ni cambia de empresa al abrir. La sección 1.0.2 siguiente conserva el contexto de la marca de sucursal. Detalles y límites: [ACTUALIZACION-1.0.3.md](ACTUALIZACION-1.0.3.md).
+
+## Entrega integrada 1.0.2
+
+El APK final se llama **Qualitzer técnicos**, versión **1.0.2**, código Android **3**. Usa los PNG Qualitzer descritos abajo; conserva `com.qualitzer.field` y el certificado de las versiones 1.0.0/1.0.1 para instalar mediante **Actualizar**, sin desinstalar. Se verificaron el nombre nativo, 15 recursos de iconos empaquetados, la firma y el bundle.
+
+Dentro de la app se muestra el nombre/logo configurado por empresa. Para el escritorio Android, **Mi perfil → Añadir empresa a pantalla de inicio** solicita un acceso empresarial con confirmación del sistema. Es un acceso directo a la misma app, no un cambio automático del icono principal ni una segunda instalación. Más detalles en [ANDROID-COMPANY-BRANDING.md](ANDROID-COMPANY-BRANDING.md).
+
+Consulta pública del servidor el 10-09-2026: Heavytech devuelve un PNG base64; Grupoeliseo devuelve nombre pero `logo: null`. Esa lectura general **no determina** si una sucursal tiene logo. El gateway 1.0.1 empaquetado consulta el detalle protegido de la sucursal elegida y actualiza el nombre/logo de presentación. Su despliegue sigue pendiente; el APK 1.0.2 incorpora también descarga HTTPS segura para la marca del acceso Android.
+
+La compilación conserva la corrección del reloj al seleccionar empresa y añade la del cierre nativo de Agenda, verificada en emulador Android API 36. No se realizó login ni prueba en el teléfono físico. Resumen y pasos del servidor en [ACTUALIZACION-1.0.2.md](ACTUALIZACION-1.0.2.md). Las secciones históricas sobre preparadores por empresa no describen un renombrado dinámico del launcher.
+
+## Marca base y assets reproducibles (2026-09-10)
+
+La identidad base de la UI es **Qualitzer técnicos**. `Brand` muestra la Q original y ese nombre antes del login; cuando recibe `Tenant`, usa su nombre y logo configurados, sin etiquetas `FIELD`. Un logo ausente, inválido o que falla al cargar vuelve a la Q local, no a una herramienta ni a una empresa fija. El estado de fallo se reinicia al cambiar URI o empresa, incluso en una secuencia A → B → A. El nombre tiene una sola línea con elipsis y su valor completo permanece en la etiqueta accesible. Los parámetros anteriores `showTag` y `singleLine` se conservan por compatibilidad de llamadas, pero ya no habilitan etiquetas ni varias líneas.
+
+- Fuente real, frontend **sólo lectura**: `C:/Users/faust/Desktop/www/Qualitzer2.0-Frontend/public/icon-512x512.png`.
+- Copia exacta incorporada: [../assets/qualitzer-source.png](../assets/qualitzer-source.png), 512 × 512 RGBA.
+- SHA-256 fuente/copia: `c5e47a2c49a8fb40d4f57500a2c9ad7aff077cf9d3b7624d19972596d6a1f309`.
+- Se inspeccionaron los iconos públicos de 16/32/192/256/384/512 y las variantes compartidas: la Q independiente de mayor resolución encontrada es la pública de 512. La versión simplificada tiene 88 × 88; los logotipos con texto no aportan una Q mayor. El original ya es rasterizado: ampliarlo no crea detalle vectorial.
+- Generador: [../scripts/generate-qualitzer-brand.cjs](../scripts/generate-qualitzer-brand.cjs), usa el `sharp` instalado (verificado con 0.35.4), sin dependencias nuevas ni acceso a red. Una ejecución sin argumentos regenera desde la copia móvil. `--source` permite reimportar el original y exige el SHA-256 aprobado antes de escribir.
+- Sólo se recortan márgenes transparentes (rectángulo original: x=16, y=37, ancho=484, alto=430); se conservan colores, forma y proporciones. No se redibuja el logo. No se eliminan los assets anteriores.
+
+| Recurso | Tamaño | Tratamiento | SHA-256 |
+| --- | --- | --- | --- |
+| [../assets/qualitzer-icon.png](../assets/qualitzer-icon.png) | 1024 × 1024 | RGB opaco, blanco, Q centrada en 800 × 800 | `0dc9f8a9873cef42819f2f6a34f0dbf0b76e51c5c540ff7ec5eb25395ebb452c` |
+| [../assets/qualitzer-adaptive.png](../assets/qualitzer-adaptive.png) | 1024 × 1024 | RGBA transparente, Q dentro de 560 × 560; píxeles dentro del círculo seguro 66/108 | `7c553dffa5c85a6f2f0c63c52e82a261f8dadf1d51f12916c45f46f55e42b9de` |
+| [../assets/qualitzer-logo.png](../assets/qualitzer-logo.png) | 512 × 512 | RGBA, Q dentro de 480 × 480, UI con `contain` | `c16fdd1b6a34a2708c69b733c7af8ba27a6bd1864de50c8009c590384c8b73ab` |
+| [../assets/qualitzer-favicon.png](../assets/qualitzer-favicon.png) | 64 × 64 | RGBA, Q dentro de 60 × 60 | `e10084e8d8ff909312c07e32e0e7ac724bae9c6370a2bb0505a52adcaa232537` |
+
+### Integración y límites
+
+La UI reutiliza [../src/domain/branding.ts](../src/domain/branding.ts) (`QUALITZER_APP_NAME`, `brandName`, `safeBrandLogo`) y [../src/ui/components.tsx](../src/ui/components.tsx) (`Brand`, logo interno con clave por empresa/URI). La validación local de URL mantiene el comportamiento anterior; la política restrictiva del branding recibido sigue perteneciendo al servidor. No se modifican autenticación, sesión, identidad offline ni destinos.
+
+El servidor consulta `/companies/branding` para la marca general, con caché por tenant. Desde el gateway 1.0.1, `/api/auth/me?companyBranchId=N` valida la pertenencia fresca a N y consulta `/branches/N` sin caché de sucursal; usa su nombre/logo válidos sin cambiar la identidad del `Tenant`. No depende de que el listado `Branch` incluya logo. Mientras se espera `/me`, `Brand` muestra la marca recibida; un logo ausente o rechazado conserva el general, nunca el de otra sucursal. Contrato: [GATEWAY-BRANCH-BRANDING.md](GATEWAY-BRANCH-BRANDING.md).
+
+El cambio de nombre/versión en la configuración Expo y el cableado de iconos nativos/favicon quedan a cargo de la integración principal/nativa. Estos assets no cambian por sí solos el launcher de un APK instalado. Tampoco se modifica [../App.tsx](../App.tsx), [../src/screens/ProfileScreen.tsx](../src/screens/ProfileScreen.tsx), el selector de empresas ni el hook de autenticación. El login conserva su `SafeAreaView`, scroll y controles; usa la nueva marca compartida sin refactorizar el formulario.
+
+Pruebas específicas: [../tests/branding.test.ts](../tests/branding.test.ts) y [../tests/branding-assets.test.cjs](../tests/branding-assets.test.cjs). Cubren identidad, URLs, ausencia de FIELD, elipsis, fallo/reinicio del logo, copia SHA-256, regeneración exacta, no destrucción de assets y círculo seguro adaptativo. No equivalen a instalación o validación física Android/iOS.
+
+Validación ejecutada: **9/9 pruebas**, TypeScript del grafo propio incluyendo la prueba TS con tipos Node explícitos **0 errores** y smoke [../tests/e2e/branding-smoke.cjs](../tests/e2e/branding-smoke.cjs) **PASS** en 320/360/390/1280 px. Este último monta `Brand` e `IconButton` reales con React Native Web, sustituye sólo los glifos decorativos, bloquea toda red y comprueba una sola identidad, elipsis, targets ≥44 px y recuperación de `Image` tras URL rota/válida/rota/válida. Capturas e informe de esta ejecución: carpeta temporal `qualitzer-brand-ui-PuA0aJ`; se inspeccionaron visualmente las capturas a 320 px y los PNG generados. **No es una prueba del header completo ni del login/safe area en dispositivo**: Metro no estaba disponible en la comprobación inicial y no se inició ni reinició ningún servicio. Sin build, lint ni pruebas backend/frontend globales.
 
 ## Marca dentro de la app
 
-La interfaz adapta automáticamente nombre y logo al branding válido que la pasarela obtiene de `/companies/branding` para la empresa coincidente/autenticada. Antes de comprobar las credenciales no se presupone una empresa. Si hay varias coincidencias, el selector sólo muestra esas empresas; si falta el nombre o el logo, se conserva el nombre configurado y/o la imagen genérica. El branding es presentación, no autorización ni configuración de destinos.
+La interfaz adapta automáticamente nombre y logo al branding válido de la empresa autenticada y, con gateway 1.0.1, al detalle de la sucursal autorizada seleccionada. Antes de comprobar las credenciales no se presupone una empresa. Si hay varias coincidencias, el selector sólo muestra esas empresas; si falta el nombre o el logo, se conserva el nombre configurado y/o la imagen genérica. El branding es presentación, no autorización ni configuración de destinos.
 
 Esto es independiente de la marca de una distribución instalada: no requiere recompilar para mostrar los datos internos de la empresa, pero **no modifica el icono ni el nombre nativos del launcher**.
 
@@ -32,7 +76,7 @@ Preparar la empresa local ya existente en la allowlist:
 .\node_modules\node\bin\node.exe scripts/prepare-company-brand.cjs --tenant grupo-eliseo-local
 ```
 
-La única empresa actualmente configurada es `grupo-eliseo-local`, un entorno de **desarrollo local**, no un destino de producción. El comando consulta el endpoint real de branding de ese tenant y requiere que su backend esté disponible; **no necesita usuario, contraseña ni sesión**. El último dato conocido devuelve **Grupoeliseo**, sin logo (`HasLogo: false`). Mientras siga así, el script generará el JSON con ese nombre y conservará los iconos genéricos existentes, emitiendo `BRANDING_LOGO_MISSING`. No inventa ni dibuja un logo corporativo. Un fallo HTTP, JSON inválido o un nombre inválido detiene la preparación, en lugar de simular una consulta satisfactoria.
+El ejemplo histórico `grupo-eliseo-local` corresponde a **desarrollo local**, no a un destino de producción ni al catálogo remoto actual. Este preparador usa la allowlist local legacy, a diferencia del descubrimiento de empresas en runtime. El comando consulta el endpoint real de branding de ese registro y requiere que su backend esté disponible; **no necesita usuario, contraseña ni sesión**. La comprobación histórica devolvió **Grupoeliseo**, sin logo (`HasLogo: false`). Con una respuesta sin logo, el script genera el JSON con ese nombre y conserva los iconos genéricos existentes, emitiendo `BRANDING_LOGO_MISSING`. No inventa ni dibuja un logo corporativo. Un fallo HTTP, JSON inválido o un nombre inválido detiene la preparación, en lugar de simular una consulta satisfactoria.
 
 Si un administrador dispone de un logo revisado, puede proporcionarlo explícitamente. Sustituir la ruta siguiente por un archivo real:
 
@@ -107,8 +151,8 @@ No se necesita editar código ni la configuración base para preparar otra empre
 - Comprueba MIME declarado, firma binaria y decodificación completa con `sharp`. Rechaza SVG, formatos distintos, base64 no canónico, discrepancias de MIME, imágenes corruptas, animaciones y más de 16 megapíxeles (16 × 1024 × 1024). No recurre al icono genérico ante una imagen corrupta: falla para que el administrador la revise.
 - Las escrituras se limitan a salidas locales por tenant, rechazan directorios/archivos desviados mediante enlaces y sustituyen cada archivo mediante un temporal. La preparación no debe ejecutarse simultáneamente para el mismo tenant ni mientras se construye su distribución.
 
-## Estado de verificación
+## Verificación histórica del preparador por empresa
 
-Se ejecutó el preparador para `grupo-eliseo-local`: nombre **Grupoeliseo**, sin logo disponible, conservando los iconos genéricos. Se verificó la resolución de nombre e identificadores Android/iOS mediante Expo config. La versión genérica fue exportada para Android, iOS y web. **No hay APK/IPA compilado ni firmado.** Antes de distribuir, revisar las salidas reales de la empresa y validar la aplicación firmada en dispositivos físicos.
+Durante la preparación original se ejecutó el preparador para `grupo-eliseo-local`: nombre **Grupoeliseo**, sin logo disponible, conservando los iconos genéricos. Se verificó la resolución de nombre e identificadores Android/iOS mediante Expo config y se exportó la versión genérica. Esta sección histórica no acredita el branding del catálogo remoto actual ni el estado de APK posteriores. La generación de assets base descrita arriba no compila ni firma un nuevo APK/IPA. Antes de distribuir, revisar las salidas reales y validar la aplicación firmada en dispositivos físicos.
 
 Referencia: [configuración de Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/config/app/) y [resolución de configuración dinámica](https://docs.expo.dev/workflow/configuration/).
