@@ -3,6 +3,8 @@ import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
 import type { LocalPhoto } from "../../domain/models";
 import { errorMessage } from "./detailRules";
+import type { TrustedNativePicker } from "../../security/contracts";
+import { CameraPermissionError, NativeCameraUnavailableError, NativeSelectionError } from "../../domain/cameraErrors";
 
 export const MAX_PHOTOS = 4;
 export const MAX_PHOTO_BYTES = 25 * 1024 * 1024;
@@ -34,19 +36,31 @@ export async function deleteLocalPhotoDirectory(storageKey: string): Promise<voi
   if (directory.exists) directory.delete();
 }
 
-export async function pickPhotos(source: "camera" | "library", remaining: number): Promise<ImagePicker.ImagePickerResult> {
+export async function pickPhotos(source: "camera" | "library", remaining: number, runNativePicker: TrustedNativePicker = operation => operation(), isInteractionAllowed: () => boolean = () => true): Promise<ImagePicker.ImagePickerResult> {
   if (remaining <= 0) throw new Error("Puedes tener hasta 4 fotos pendientes por trabajo.");
   const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 1, allowsEditing: false, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current };
   if (source === "camera") {
     if (Platform.OS !== "web") {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) throw new Error(permission.canAskAgain ? "Permite el acceso a la cámara para tomar una foto. También puedes elegir una imagen de la galería." : "La cámara está bloqueada. Habilita el permiso en Ajustes del dispositivo o utiliza la galería.");
+      let permission: ImagePicker.CameraPermissionResponse;
+      try {
+        permission = await ImagePicker.getCameraPermissionsAsync();
+        if (!isInteractionAllowed()) throw new NativeSelectionError();
+        if (!permission.granted && permission.canAskAgain) permission = await runNativePicker(() => ImagePicker.requestCameraPermissionsAsync());
+      } catch { throw new NativeSelectionError(); }
+      if (!isInteractionAllowed()) throw new NativeSelectionError();
+      if (!permission.granted) throw new CameraPermissionError(permission.canAskAgain);
     }
-    try { return await ImagePicker.launchCameraAsync(options); }
-    catch (error) { throw new Error(`No se pudo abrir la cámara. Comprueba los permisos en Ajustes o utiliza la galería. ${errorMessage(error)}`); }
+    try { return await runNativePicker(() => ImagePicker.launchCameraAsync(options)); }
+    catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && (error.code === "ERR_MISSING_ACTIVITY_TO_HANDLE_INTENT" || error.code === "ERR_CAMERA_UNAVAILABLE")) throw new NativeCameraUnavailableError();
+      throw new NativeSelectionError();
+    }
   }
-  try { return await ImagePicker.launchImageLibraryAsync({ ...options, allowsMultipleSelection: true, selectionLimit: remaining }); }
-  catch (error) { throw new Error(`No se pudo abrir la galería. Revisa los permisos de fotos del dispositivo o vuelve a abrir el selector. ${errorMessage(error)}`); }
+  try { return await runNativePicker(() => ImagePicker.launchImageLibraryAsync({ ...options, allowsMultipleSelection: true, selectionLimit: remaining })); }
+  catch (error) {
+    if (error instanceof Error && error.message.startsWith("TRUSTED_NATIVE_")) throw new NativeSelectionError();
+    throw new Error(`No se pudo abrir la galería. Revisa los permisos de fotos del dispositivo o vuelve a abrir el selector. ${errorMessage(error)}`);
+  }
 }
 
 function assetMetadata(asset: ImagePicker.ImagePickerAsset): { size: number; mimeType: string; name: string } {

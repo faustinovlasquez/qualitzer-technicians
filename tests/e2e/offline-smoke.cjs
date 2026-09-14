@@ -226,7 +226,10 @@ async function main() {
     await page.getByText("Procesando… Espera la confirmación antes de realizar otra acción.", { exact: true }).waitFor({ state: "hidden" });
     assert.equal(await page.getByText("0 de 4 respuestas obligatorias con requisitos confirmados · 0%", { exact: true }).count(), 1);
     assert.equal(await page.getByRole("button", { name: "Pausar trabajo", exact: true }).isDisabled(), true);
-    assert.equal(await page.getByRole("button", { name: "Entregar trabajo", exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole("button", { name: "Entregar trabajo", exact: true }).isEnabled(), true);
+    await page.getByRole("button", { name: "Entregar trabajo", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "Confirmar y entregar", exact: true }).isDisabled(), true);
+    await page.getByRole("button", { name: "Seguir trabajando", exact: true }).click();
     report("FOUR_PENDING_OK", queued.states.flatMap((state) => state.operations).map(({ id, kind, status }) => ({ id, kind, status })));
     await page.getByRole("button", { name: "Volver conservando el borrador", exact: true }).click();
     await page.getByRole("button", { name: "Cerrar sesión", exact: true }).click();

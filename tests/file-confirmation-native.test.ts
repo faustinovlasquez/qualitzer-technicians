@@ -12,6 +12,7 @@ import { isConfirmedAttachment, offlineAttachment, pendingDocumentAttachment, ty
 import * as offlineUi from "../src/screens/offline/offlineUi";
 import type { FileWorkspaceProps } from "../src/screens/workDetail/FileWorkspace";
 import { loadSource, reactFixture } from "./helpers/tenant-challenge";
+import { uiModule } from "./helpers/durable-ui";
 
 const remote: Attachment = { id: 41, name: "synthetic.pdf", url: "https://files.example.com/41" };
 const pending: PendingDocument = {
@@ -61,10 +62,13 @@ test("actual FileWorkspace labels demo listings separately, retains review copie
   const jsx = (type: unknown, props: object): unknown => typeof type === "function" ? type(props) : { type, props };
   const store = {};
   const module = loadSource<typeof import("../src/screens/workDetail/FileWorkspace")>("screens/workDetail/FileWorkspace.tsx", (id) => {
-    if (id === "react") return hooks.react;
+    if (id === "react") return { ...hooks.react, useContext: () => null };
     if (id === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (id === "react-native") return { Platform: { OS: "android" }, ActivityIndicator: "ActivityIndicator", Modal: "Modal", ScrollView: "ScrollView", Text: "Text", View: "View" };
-    if (id === "../../security/DeviceSecurityContext") return { PrivateModal: "Modal" };
+    if (id === "../../security/DeviceSecurityContext") return { PrivateModal: "Modal", DeviceSecurityContext: {} };
+    if (id === "./files/CameraPermissionGuide") return { CameraPermissionGuide: "CameraPermissionGuide" };
+    if (id === "./files/useCameraPermissionGuide") return uiModule("screens/workDetail/files/useCameraPermissionGuide.ts", hooks);
+    if (id === "../../security/useTrustedNativePicker") return { useTrustedNativePicker: () => <T>(operation: () => Promise<T>) => operation() };
     if (id === "../offline/offlineUi") return offlineUi;
     if (id === "../offline/OfflineFileCard") return { OfflineFileCard: "OfflineFileCard" };
     if (id === "../../ui/components") return { BodyText: "BodyText", Button: "Button", IconButton: "IconButton", SectionTitle: "SectionTitle" };

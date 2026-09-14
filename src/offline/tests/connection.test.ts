@@ -40,7 +40,7 @@ for (const status of [502, 503]) test(`HTTP ${status} is service_error with netw
   const e = new OfflineEngine(f.dependencies); await e.enqueue([comment()]); await e.syncNow();
   assert.equal(e.getSnapshot().connection?.networkConnected, true);
   assert.equal(e.getSnapshot().connection?.status, "service_error"); assert.equal(e.getSnapshot().online, false);
-  assert.equal(connectionPresentation(e.getSnapshot()).title, "Servidor no disponible");
+  assert.equal(connectionPresentation(e.getSnapshot()).title, "Sincronización no disponible");
   assert.equal(e.getSnapshot().operations[0]?.status, "pending");
 });
 
@@ -195,7 +195,7 @@ test("explicit connection overrides an inconsistent legacy online fixture withou
   const f = fixture(); const e = new OfflineEngine(f.dependencies);
   const snapshot: OfflineSnapshot = { ...e.getSnapshot(), online: true, connection: { status: "service_error", networkConnected: true, foreground: true, checkedAt: 1, errorCode: "UPSTREAM_UNAVAILABLE" }, coverage: [{ date: "2026-09-08", branchId: 1, fetchedAt: 1 }] };
   const ui = connectionPresentation(snapshot);
-  assert.equal(ui.title, "Servidor no disponible"); assert.equal(ui.ready, false); assert.match(ui.secondary, /Agenda disponible offline/);
+  assert.equal(ui.title, "Sincronización no disponible"); assert.equal(ui.ready, false); assert.match(ui.secondary, /Agenda disponible offline/);
 });
 
 test("compact status separates connection from pending counts into two lines without duplicating the company", async () => {
@@ -213,7 +213,7 @@ test("compact labels retain offline, service, auth and pause distinctions", () =
   const titleFor = (status: "offline" | "unreachable" | "service_error" | "auth_required") => compactConnectionPresentation({ ...snapshot, connection: { status, networkConnected: true, foreground: true, checkedAt: 1 } }).title;
   assert.equal(titleFor("offline"), "Sin red");
   assert.equal(titleFor("unreachable"), "Sin acceso a Qualitzer");
-  assert.equal(titleFor("service_error"), "Servidor no disponible");
+  assert.equal(titleFor("service_error"), "Sincronización no disponible");
   assert.equal(titleFor("auth_required"), "Verificar sesión");
   assert.equal(compactConnectionPresentation({ ...snapshot, connection: { status: "ready", networkConnected: true, foreground: false, checkedAt: 1 } }).detail, "En pausa · vuelve a la app");
   assert.equal(compactConnectionPresentation(snapshot).detail, "Sin pendientes · sin copia offline");

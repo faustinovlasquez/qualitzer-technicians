@@ -15,7 +15,7 @@ export const loginResult = { nextStep: "DONE", token: `qzm_${"b".repeat(43)}`, u
 
 export function loadSource<T>(relative: string, imports: (id: string) => unknown, globals: object = {}): T {
   const filename = resolve(__dirname, "../../src", relative);
-  const code = ts.transpileModule(readFileSync(filename, "utf8"), { compilerOptions: {
+  const code = ts.transpileModule(readFileSync(filename, "utf8"), { fileName: filename, compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText;
   const module = { exports: {} };

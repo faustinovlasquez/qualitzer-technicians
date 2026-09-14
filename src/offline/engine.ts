@@ -9,6 +9,7 @@ import { cloneState, emptyState, hasPendingChanges, pendingOperation, receiptSch
 import { resourceCacheKey, sameResource } from "./cacheSchemas";
 import { connectionErrorCode as errorCode, failedConnection, isServiceFailure, requiresDeployment } from "./connection";
 import { prepareQueuedIntention } from "./queueIntentions";
+import { awaitingDeploymentCounts, canAdvanceManualRetry, deploymentKinds, deploymentWaits, protectDeploymentCooldown, runnableOperations } from "./syncScheduling";
 
 export function canUseCache(error: unknown): boolean { return error instanceof NetworkError; }
 export function backoffMs(attempts: number): number { return Math.min(OFFLINE_LIMITS.maxBackoffMs, 2_000 * 2 ** Math.min(8, Math.max(0, attempts - 1))); }
@@ -79,6 +80,9 @@ export class OfflineEngine {
   private authBlockComplete = false;
   private wakeRequested = false;
   private retryTransportOnWake = false;
+  private manualRequest?: Promise<void>;
+  private lastManualRequestAt?: number;
+  private manualRetryGeneration?: number;
   constructor(readonly dependencies: EngineDependencies) {}
 
   getSnapshot = (): OfflineSnapshot => this.snapshot;
@@ -94,6 +98,7 @@ export class OfflineEngine {
       lastSyncedAt: this.state.lastSyncedAt,
       cachedAt: this.state.cache.length ? Math.max(...this.state.cache.map((entry) => entry.fetchedAt)) : undefined,
       coverage: this.state.cache.flatMap((entry) => entry.coverage ? [entry.coverage] : []),
+      awaitingDeploymentByKind: awaitingDeploymentCounts(this.state.operations),
       operations: cloneState(this.state).operations,
     };
     for (const listener of this.listeners) {
@@ -292,6 +297,24 @@ export class OfflineEngine {
     await this.dependencies.onVerified?.(user);
     return user;
   }
+  requestSync(): Promise<void> {
+    if (this.manualRequest) return this.manualRequest;
+    if (this.stopped || !this.foreground || this.state.authBlocked) return Promise.resolve();
+    const now = this.dependencies.now();
+    if (this.lastManualRequestAt !== undefined && now - this.lastManualRequestAt < 30_000) return this.cycle ?? Promise.resolve();
+    this.lastManualRequestAt = now;
+    const generation = this.generation;
+    const current = this.cycle;
+    const request = async (): Promise<void> => {
+      // A user request during a send gets one pass after its receipt and lease have settled.
+      if (current) await current;
+      if (generation !== this.generation || this.stopped || !this.foreground || this.state.authBlocked) return;
+      this.manualRetryGeneration = generation;
+      await this.syncNow();
+    };
+    this.manualRequest = request().finally(() => { this.manualRequest = undefined; });
+    return this.manualRequest;
+  }
   syncNow(): Promise<void> {
     if (this.cycle) return this.cycle;
     if (this.stopped || !this.foreground) return Promise.resolve();
@@ -301,15 +324,17 @@ export class OfflineEngine {
     this.cycle = cycle.finally(() => {
       this.cycle = undefined;
       this.publish({ syncing: false });
-      const pending = this.state.operations.filter((op) => (op.status === "pending" || op.status === "syncing")
-        && (!op.dependencyId || this.state.operations.some((parent) => parent.id === op.dependencyId && parent.status === "applied")));
-      const soonest = this.probeFailures ? backoffMs(this.probeFailures) : pending.length ? Math.min(...pending.map((op) => Math.max(2_000, op.nextAttemptAt - this.dependencies.now()))) : 30_000;
+      const pending = runnableOperations(this.state.operations);
+      const waits = deploymentWaits(this.state.operations);
+      const soonest = this.probeFailures ? backoffMs(this.probeFailures) : pending.length ? Math.min(...pending.map((op) => Math.max(2_000, Math.max(op.nextAttemptAt, waits.get(op.kind) ?? 0) - this.dependencies.now()))) : 30_000;
       this.schedule(this.wakeRequested ? 0 : Math.min(OFFLINE_LIMITS.maxBackoffMs, Math.max(2_000, soonest)));
     });
     return this.cycle;
   }
   private async flush(generation: number): Promise<void> {
     const { store, namespace, now, uuid, connectivity } = this.dependencies;
+    const manualRetry = this.manualRetryGeneration === generation;
+    if (manualRetry) this.manualRetryGeneration = undefined;
     await this.refresh();
     if (this.state.authBlocked || generation !== this.generation) return;
     if (this.dependencies.canAccessLocal && !await this.dependencies.canAccessLocal()) { await this.blockAuth(); return; }
@@ -325,9 +350,10 @@ export class OfflineEngine {
     const retryTransport = this.retryTransportOnWake;
     this.state = await updateState(store, namespace, (state) => {
       acquired = false;
-      if (state.authBlocked || (state.lease && state.lease.until > now())) return;
+      if (generation !== this.generation || state.authBlocked || (state.lease && state.lease.until > now())) return;
       state.lease = { owner, until: now() + OFFLINE_LIMITS.leaseMs };
       for (const op of state.operations) {
+        if (manualRetry && canAdvanceManualRetry(op)) op.nextAttemptAt = 0;
         if (op.kind === "document" && op.status === "needs_review" && !op.receipt
           && (op.lastError === "OFFLINE_SYNC_UNEXPECTED_RESPONSE" || recoverableDirectDocument(op, state.operations))) {
           op.status = "pending";
@@ -352,6 +378,7 @@ export class OfflineEngine {
       if (generation !== this.generation) return;
       this.probeFailures = 0;
       this.noteConnectionSuccess(generation);
+      const skippedKinds = new Set<OfflineOperation["kind"]>();
       for (let count = 0; count < OFFLINE_LIMITS.cycleOperations; count++) {
         if (generation !== this.generation) break;
         let selected: OfflineOperation | undefined;
@@ -359,8 +386,9 @@ export class OfflineEngine {
           selected = undefined;
           if (state.lease?.owner !== owner || state.authBlocked) return;
           state.lease.until = now() + OFFLINE_LIMITS.leaseMs;
-          selected = state.operations.find((op) => (op.status === "pending" || op.status === "syncing") && op.nextAttemptAt <= now()
-            && (!op.dependencyId || state.operations.some((parent) => parent.id === op.dependencyId && parent.status === "applied")));
+          const waits = deploymentWaits(state.operations);
+          selected = runnableOperations(state.operations).find((op) => !skippedKinds.has(op.kind)
+            && Math.max(op.nextAttemptAt, waits.get(op.kind) ?? 0) <= now());
           if (selected) { selected.status = "syncing"; selected.attempts++; }
         });
         if (!selected) break;
@@ -397,6 +425,8 @@ export class OfflineEngine {
           this.publish();
         } catch (error) {
           if (error instanceof ApiError && error.status === 401) { await this.blockAuth(); break; }
+          const unsupported = error instanceof ApiError && (error.status === 503 || error.status === 409 && selected.kind === "create" && error.code === "MOBILE_CREATION_SCHEMA_NOT_READY")
+            ? deploymentKinds({ ...selected, lastError: error.code }) : undefined;
           this.state = await updateState(store, namespace, (state) => {
             if (state.lease?.owner !== owner) return;
             const current = state.operations.find((entry) => entry.id === selected?.id);
@@ -411,9 +441,14 @@ export class OfflineEngine {
               : error instanceof ApiError && error.status === 409 ? "conflict"
                 : error instanceof ApiError && [400, 403, 404, 422].includes(error.status) ? "blocked" : "needs_review";
             current.nextAttemptAt = now() + Math.max(deployment ? 60_000 : inProgress ? 5_000 : 0, backoffMs(current.attempts));
+            if (unsupported) protectDeploymentCooldown(state.operations, current);
           });
           if (error instanceof NetworkError || isServiceFailure(error)) this.noteConnectionFailure(error, generation);
           this.publish({ lastError: errorCode(error) });
+          if (unsupported) {
+            for (const kind of unsupported) skippedKinds.add(kind);
+            continue;
+          }
           if (error instanceof NetworkError || isServiceFailure(error)) break;
         }
       }

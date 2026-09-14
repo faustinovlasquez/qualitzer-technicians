@@ -8,6 +8,7 @@ import * as progress from "../src/domain/checklistProgress";
 import * as format from "../src/domain/format";
 import * as rules from "../src/screens/workDetail/detailRules";
 import * as presentation from "../src/screens/workDetail/checklist/checklistPresentation";
+import * as syncUserPresentation from "../src/screens/offline/syncUserPresentation";
 import type { Checklist, ChecklistStep, StepAnswer } from "../src/domain/models";
 import type { ChecklistTabProps } from "../src/screens/workDetail/ChecklistTab";
 import { step, work } from "../server/tests/fixtures";
@@ -83,6 +84,7 @@ async function fixture(confirmed = 20) {
     throw new Error(`UNEXPECTED_IMPORT ${id}`);
   });
   const childrenImports = (id: string): unknown => {
+    if (id === "../../offline/syncUserPresentation") return syncUserPresentation;
     if (id === "react/jsx-runtime") return jsx;
     if (id === "react-native") return native;
     if (id === "../../../domain/checklistProgress") return progress;

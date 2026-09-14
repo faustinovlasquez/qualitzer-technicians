@@ -57,7 +57,7 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
   const localRequire = createRequire(resolve(__dirname, "../../src", relative));
   return loadSource<T>(relative, (id) => {
     if (Object.hasOwn(overrides, id)) return overrides[id];
-    if (id === "react") return hooks.react;
+    if (id === "react") return new Proxy(hooks.react, { get: (target, property) => Reflect.get(target, property) ?? (property === "useContext" ? () => null : undefined) });
     if (id === "react/jsx-runtime") return jsx;
     if (id === "react-native") return { Platform: { OS: "web" }, StyleSheet: { create: (styles: object) => styles },
       View: "View", Text: "Text", Image: "Image", ScrollView: "ScrollView", Pressable: "Pressable", RefreshControl: "RefreshControl", KeyboardAvoidingView: "KeyboardAvoidingView", ActivityIndicator: "ActivityIndicator" };
@@ -65,10 +65,15 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id === "expo-linear-gradient") return { LinearGradient: "LinearGradient" };
     if (id === "react-native-safe-area-context") return { SafeAreaView: "SafeAreaView", useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
     if (id.endsWith("/ui/components")) return { Badge: "Badge", BodyText: "BodyText", Button: "Button", Card: "Card", Field: "Field", IconButton: "IconButton", SectionTitle: "SectionTitle" };
+    if (id.endsWith("/ui/time/TimeField")) return { TimeField: "TimeField" };
+    if (id.endsWith("/ui/time/NumericSelectField")) return { NumericSelectField: "NumericSelectField", DayOffsetField: "DayOffsetField" };
     if (id.endsWith("/DetailUi")) return { Notice: "Notice", AttachmentList: "AttachmentList" };
     if (id.endsWith("/detailStyles")) return { styles: {} };
     if (id.endsWith("/workspaceStyles")) return { workspaceStyles: {} };
-    if (id.endsWith("/DeviceSecurityContext")) return { PrivateModal: "Modal" };
+    if (id.endsWith("/DeviceSecurityContext")) return { PrivateModal: "Modal", DeviceSecurityContext: {} };
+    if (id.endsWith("/files/useCameraPermissionGuide")) return uiModule("screens/workDetail/files/useCameraPermissionGuide.ts", hooks, overrides);
+    if (id.endsWith("/files/CameraPermissionGuide")) return { CameraPermissionGuide: "CameraPermissionGuide" };
+    if (id.endsWith("/security/useTrustedNativePicker")) return { useTrustedNativePicker: () => <T>(operation: () => Promise<T>) => operation() };
     if (id.endsWith("/OfflineFileCard")) return { OfflineFileCard: "OfflineFileCard" };
     if (id === "./fileRules" || id === "./files/fileRules") return uiModule("screens/workDetail/files/fileRules.ts", hooks, {
       "expo-file-system": {}, "../localPhotos": { MAX_PHOTO_BYTES: 25 * 1024 * 1024, MAX_TOTAL_BYTES: 40 * 1024 * 1024 },

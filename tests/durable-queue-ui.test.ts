@@ -97,7 +97,7 @@ test("confirmed answer does not duplicate hook refresh and a queued response aft
   assert.equal(abandoned.advances(), 0); assert.equal(abandoned.refreshes(), 0);
 });
 
-test("detail timer changes visible intent after one commit and finalization modal unmounts when pending work appears", async () => {
+test("detail timer changes visible intent after one commit and delivery review remains mounted when pending work appears", async () => {
   const f = await detailFixture(); const commit = deferred<void>(); let changes = 0;
   f.props.onStatus = async () => { changes++; await commit.promise; };
   action(f.render(), "Trabajo").onPress();
@@ -106,14 +106,15 @@ test("detail timer changes visible intent after one commit and finalization moda
   commit.reject(queued("timer")); await settle();
   assert.equal(action(f.render(), "Pausar trabajo").disabled, false); assert.equal(f.refreshes(), 0);
   assert.equal(f.props.work.status, "pending");
-  assert.equal(action(f.render(), "Entregar trabajo").disabled, true);
+  assert.equal(action(f.render(), "Entregar trabajo").disabled, false);
   f.props.offline = { ...uiSnapshot([{ ...uiOperation, kind: "timer", status: "applied", payload: { status: "in_progress", baseStatus: "pending" } }]), online: true };
   f.props.work = { ...f.props.work, status: "in_progress", ...{ offlineTimerRead: { scope: uiScope, appliedOperationIds: [uiOperation.id] } } }; f.render();
   action(f.render(), "Entregar trabajo").onPress();
   assert.equal(elements(f.render(), "CompletionDialog").length, 1);
   f.props.offline = { ...uiSnapshot([{ ...uiOperation, kind: "comment", text: "Pendiente" }]), online: true };
-  assert.equal(elements(f.render(), "CompletionDialog").length, 0);
-  assert.equal(action(f.render(), "Entregar trabajo").disabled, true);
+  assert.equal(elements(f.render(), "CompletionDialog").length, 1);
+  assert.equal(elements<{ canSubmit: boolean }>(f.render(), "CompletionDialog")[0].props.canSubmit, false);
+  assert.equal(action(f.render(), "Entregar trabajo").disabled, false);
   f.editorHooks.unmount(); f.hooks.unmount();
 });
 
@@ -148,9 +149,10 @@ test("timer UI waits for durable commit, deduplicates synchronous presses, then 
   start.onPress();
   assert.equal(f.calls.length, 1, "same gesture before React rerenders cannot enqueue again");
   const tree = f.render();
-  assert.ok(JSON.stringify(tree).includes("En cola · tiempo pendiente de confirmar"));
+  assert.equal(action(tree, "Pausar").title, "Pausar · Guardando…");
+  assert.ok(!JSON.stringify(tree).includes("En cola · tiempo pendiente de confirmar"));
   assert.equal(action(tree, "Pausar").disabled, false);
-  assert.equal(action(tree, "Entregar").disabled, true);
+  assert.equal(action(tree, "Entregar").disabled, false);
   action(tree, "Pausar").onPress(); action(tree, "Pausar").onPress();
   assert.equal(f.calls.length, 2);
   assert.equal(f.calls[1].status, "paused");
@@ -193,13 +195,15 @@ test("timer helper isolates dates, work and branch and includes attention states
   assert.equal(pendingTimerForWork(null, uiScope), null);
 });
 
-test("restored timer uses optional prop, blocks review and delivery, never overrides canonical badge", () => {
+test("restored timer uses optional prop, allows delivery review, never overrides canonical badge", () => {
   const f = cardFixture();
   f.props.pendingTimer = { ...uiOperation, kind: "timer", status: "conflict", payload: { status: "in_progress", baseStatus: "pending" }, lastError: "MOBILE_SYNC_OPERATION_REUSED" };
   f.props.online = true; f.props.offline = { ...uiSnapshot([f.props.pendingTimer]), online: true };
   const tree = f.render();
   assert.equal(action(tree, "Pausar").disabled, true);
-  assert.equal(action(tree, "Entregar").disabled, true);
+  assert.equal(action(tree, "Entregar").disabled, false);
+  action(tree, "Entregar").onPress();
+  assert.equal(f.opened.length, 1); assert.equal(f.calls.length, 0);
   assert.ok(JSON.stringify(tree).includes("Conflicto"));
   assert.ok(elements<{ label: string }>(tree, "Badge").some((badge) => badge.props.label === "Pendiente"));
   f.hooks.unmount();

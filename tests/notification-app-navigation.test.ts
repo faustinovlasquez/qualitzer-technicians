@@ -104,8 +104,8 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
   const rootHooks = reactFixture();
   const profileHooks = reactFixture();
   let activeHooks = hooks;
-  const security: Pick<DeviceSecurityUi, "blocked" | "isUnlocked"> & { controller: { offer(): void } } = {
-    blocked: false, isUnlocked: () => !security.blocked, controller: { offer: noop },
+  const security: Pick<DeviceSecurityUi, "blocked" | "isUnlocked"> & { controller: { offer(): void; invalidateTrustedNativeInteraction(): void } } = {
+    blocked: false, isUnlocked: () => !security.blocked, controller: { offer: noop, invalidateTrustedNativeInteraction: noop },
   };
   const branding: CompanyBrandingUi = { available: false, busy: false, canPin: false, message: "", logoMessage: "", onPin: noop };
   const brandingCalls: Array<{ input: CompanyBrandingInput; busy: boolean; automatic: boolean }> = [];

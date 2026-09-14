@@ -29,6 +29,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   stop = () => this.engine.stop();
   setForeground = (active: boolean) => this.engine.setForeground(active);
   syncNow = () => this.engine.syncNow();
+  requestSync = () => this.engine.requestSync();
   retry = (id: string) => this.engine.retry(id);
   hasPendingChanges = () => this.engine.hasPendingChanges();
   readLocalFile = (id: string) => this.engine.readLocalFile(id);

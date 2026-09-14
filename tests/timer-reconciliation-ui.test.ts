@@ -61,10 +61,10 @@ test("actual card keeps intent and freezes canonical elapsed across queued to ap
     f.props.offline = { ...uiSnapshot([applied]), online: true };
     const tree = f.render();
     assert.equal(action(tree, "Pausar").disabled, true);
-    assert.equal(action(tree, "Entregar").disabled, true);
+    assert.equal(action(tree, "Entregar").disabled, false, "unproven applied intent allows review, not submission");
     initial.onPress(); pause.onPress(); action(tree, "Pausar").onPress();
     assert.equal(f.calls.length, 1, "old and current callbacks cannot repeat a confirmed operation");
-    assert.ok(JSON.stringify(tree).includes("Envío confirmado"));
+    assert.equal(action(tree, "Pausar").title, "Pausar · Actualizando…");
     assert.ok(elements<{ label: string }>(tree, "Badge").some((badge) => badge.props.label === "Pendiente"));
     assert.equal(clockProps(tree)?.pending, true); assert.equal(clockProps(tree)?.work.elapsedSeconds, 45);
     f.props.work = readWork({ ...f.props.work, status: "paused", elapsedSeconds: 63 });
@@ -72,19 +72,19 @@ test("actual card keeps intent and freezes canonical elapsed across queued to ap
     assert.equal(action(fresh, "Reanudar").disabled, false);
     assert.equal(action(fresh, "Entregar").disabled, false);
     assert.equal(clockProps(fresh)?.pending, false); assert.equal(clockProps(fresh)?.work.elapsedSeconds, 63);
-    assert.ok(!JSON.stringify(fresh).includes("Envío confirmado"));
+    assert.ok(!JSON.stringify(fresh).includes("Actualizando…"));
   } finally { f.hooks.unmount(); }
 });
 
-test("read failure stays visible without authorizing duplicate timer; supplied null cannot erase durable applied intent", () => {
+test("read failure retains compact updating state without authorizing duplicate timer; supplied null cannot erase durable applied intent", () => {
   const f = cardFixture();
   try {
     f.props.pendingTimer = null;
     f.props.offline = { ...uiSnapshot([applied]), online: false, lastError: "OFFLINE_NETWORK_UNAVAILABLE" };
     const tree = f.render();
     assert.equal(action(tree, "Pausar").disabled, true);
-    assert.ok(JSON.stringify(tree).includes("No se pudo actualizar la ficha"));
-    assert.ok(JSON.stringify(tree).includes("actualización manual desde el detalle"));
+    assert.equal(action(tree, "Pausar").title, "Pausar · Actualizando…");
+    assert.ok(!JSON.stringify(tree).includes("No se pudo actualizar la ficha"));
     assert.equal(f.calls.length, 0);
   } finally { f.hooks.unmount(); }
 });
@@ -100,9 +100,9 @@ test("overdue card uses query date for pending, applied reconciliation and deliv
     f.props.offline = { ...uiSnapshot([overdueStart]), online: true };
     const pending = f.render();
     assert.equal(action(pending, "Pausar").disabled, false);
-    assert.equal(action(pending, "Entregar").disabled, true);
+    assert.equal(action(pending, "Entregar").disabled, false);
     assert.equal(clockProps(pending)?.pending, true);
-    assert.ok(JSON.stringify(pending).includes("En cola · tiempo pendiente de confirmar"));
+    assert.equal(action(pending, "Pausar").title, "Pausar · Guardando…");
     const overdueApplied: PendingTimer = { ...overdueStart, status: "applied", receipt: applied.receipt };
     f.props.offline = { ...uiSnapshot([overdueApplied]), online: true };
     assert.equal(action(f.render(), "Pausar").disabled, true);
@@ -133,10 +133,10 @@ test("overdue card never borrows timers from another query date, work, group or 
     }
     const checklist = { ...uiOperation, scope, kind: "checklist" as const, payload: { checklistId: 17 } };
     f.props.offline = { ...uiSnapshot([checklist]), online: true };
-    assert.equal(action(f.render(), "Entregar").disabled, true, "query-day checklist also blocks delivery");
+    assert.equal(action(f.render(), "Entregar").disabled, false, "query-day checklist allows delivery review");
     f.props.offline = { ...uiSnapshot([{ ...uiOperation, scope: { ...scope, workId: undefined }, kind: "document",
       file: { id: "root-file", namespace: "ui", name: "proof.png", mimeType: "image/png", size: 10, sha256: "a".repeat(64) } }]), online: true };
-    assert.equal(action(f.render(), "Entregar").disabled, true, "query-day root operation also blocks delivery");
+    assert.equal(action(f.render(), "Entregar").disabled, false, "query-day root operation allows delivery review");
   } finally { f.hooks.unmount(); }
 });
 
@@ -209,7 +209,9 @@ test("actual detail holds applied intent, allows manual refresh, shows failure, 
     f.props.offline = { ...uiSnapshot([applied]), online: true };
     const waiting = f.render(); pause.onPress(); action(waiting, "Pausar trabajo").onPress(); await settle();
     assert.equal(f.mutations(), 0); assert.equal(action(waiting, "Pausar trabajo").disabled, true);
-    assert.equal(action(waiting, "Entregar trabajo").disabled, true);
+    assert.equal(action(waiting, "Entregar trabajo").disabled, false);
+    action(waiting, "Entregar trabajo").onPress();
+    assert.equal(elements<{ canSubmit: boolean }>(f.render(), "CompletionDialog")[0].props.canSubmit, false);
     assert.equal(clockProps(waiting)?.pending, true); assert.equal(clockProps(waiting)?.work.elapsedSeconds, 45);
     const refresh = action(waiting, "Actualizar asignación y evidencias"); assert.equal(refresh.disabled, false);
     refresh.onPress(); await settle(); assert.equal(f.refreshes(), 1);
@@ -293,12 +295,12 @@ test("actual card reconciles day 14 only after all seven fresh reads and uses ex
     f.props.queryDate = "2026-09-19";
     assert.ok(JSON.stringify(f.render()).includes("entregado"));
     f.props.queryDate = "2030-01-15";
-    assert.equal(action(f.render(), "Iniciar").disabled, true); assert.equal(action(f.render(), "Entregar").disabled, true);
+    assert.equal(action(f.render(), "Iniciar").disabled, true); assert.equal(action(f.render(), "Entregar").disabled, false);
     f.props.queryDate = weekScope.startDate;
     f.props.work = mergeDailyAssignments(weekSnapshots(false), weekRange.startDate).groups[0].works[0];
     f.props.offline = { ...uiSnapshot([weekApplied]), lastError: "OFFLINE_NETWORK_UNAVAILABLE" };
     assert.equal(action(f.render(), "Pausar").disabled, true);
-    assert.ok(JSON.stringify(f.render()).includes("No se pudo actualizar la ficha"));
+    assert.equal(action(f.render(), "Pausar").title, "Pausar · Actualizando…");
   } finally { f.hooks.unmount(); }
 });
 

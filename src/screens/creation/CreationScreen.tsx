@@ -10,6 +10,7 @@ import { queuedCreationOutcomeSchema, queuedOutcomeData } from "../offline/offli
 import { scheduleClock } from "../../domain/weeklySchedule";
 import { useDeviceSecurity } from "../../security/DeviceSecurityContext";
 import { Badge, Button, Card, Field, IconButton } from "../../ui/components";
+import { TimeField } from "../../ui/time/TimeField";
 import { palette, radius, typography } from "../../ui/theme";
 import { CreationCatalogSelector, type CreationCatalogCache } from "./CreationCatalogSelector";
 import { CreationDatePicker } from "./CreationDatePicker";
@@ -318,8 +319,8 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Field label="Fecha *" value={form.date} maxLength={10} autoCapitalize="none" placeholder="YYYY-MM-DD" editable={!frozen} error={errors.date}
                 onChangeText={(value) => change("date", value)} hint="Formato año-mes-día; por ejemplo 2026-09-10." />
               <Button title="Elegir fecha en calendario" icon="calendar-outline" variant="secondary" disabled={frozen} onPress={() => setCalendar(true)} />
-              <Field label="Hora de inicio *" value={form.startTime} maxLength={5} placeholder="09:00" autoCapitalize="none" editable={!frozen} error={errors.startTime} onChangeText={(value) => change("startTime", value)} hint="Formato de 24 horas (HH:mm)." />
-              <Field label="Hora de fin *" value={form.endTime} maxLength={5} placeholder="10:30" autoCapitalize="none" editable={!frozen} error={errors.endTime} onChangeText={(value) => change("endTime", value)} hint="Debe ser posterior al inicio." />
+              <TimeField label="Hora de inicio *" value={form.startTime} disabled={frozen} error={errors.startTime} onChange={(value) => change("startTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Formato de 24 horas (HH:mm)." />
+              <TimeField label="Hora de fin *" value={form.endTime} disabled={frozen} error={errors.endTime} onChange={(value) => change("endTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Debe ser posterior al inicio." />
               <Text accessibilityLiveRegion="polite" style={styles.body}>Duración prevista: {minutes === null ? "completa un horario válido" : `${minutes} min (${Math.floor(minutes / 60)} h ${minutes % 60} min)`}</Text>
               <Text style={styles.body}>Zona horaria de la sucursal: {options.timezone}</Text>
               <Text style={styles.hint}>Un solo día, sin pausas automáticas. Para cruzar medianoche o repetir, divide la planificación desde la web. El servidor verifica los cambios de horario.</Text>

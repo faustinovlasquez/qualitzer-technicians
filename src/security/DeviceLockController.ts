@@ -2,7 +2,10 @@ import type {
   DeviceLockPreference,
   DeviceLockSnapshot,
   DeviceSecurityAdapter,
+  NativeInteractionClock,
+  NativeInteractionPrivacyBarrier,
 } from "./contracts";
+import { nativeInteractionClock, nativeResultOrRevocation, NATIVE_INTERACTION_TIMEOUT_MS, waitForSecurityCondition } from "./trustedNativeInteraction";
 
 const messages = {
   load: "No se pudo leer la configuración de seguridad. Reintenta para continuar.",
@@ -17,6 +20,15 @@ const messages = {
 interface AuthenticationGrant {
   generation: number;
   backgroundEpoch: number;
+}
+
+interface NativeInteractionLease {
+  generation: number;
+  startedAt: number;
+  lastObservedAt: number;
+  stage: "preparing" | "native" | "settled";
+  cancellation: AbortController;
+  cancelTimer(): void;
 }
 
 function authenticationMessage(error: string): string {
@@ -51,8 +63,9 @@ export class DeviceLockController {
   private offerSeen = false;
   private disposed = false;
   private authenticating = false;
+  private nativeInteraction: NativeInteractionLease | null = null;
 
-  constructor(private readonly adapter: DeviceSecurityAdapter) {
+  constructor(private readonly adapter: DeviceSecurityAdapter, private readonly clock: NativeInteractionClock = nativeInteractionClock) {
     this.snapshot = Object.freeze({
       ready: !adapter.platformSupported,
       enabled: false,
@@ -103,6 +116,12 @@ export class DeviceLockController {
 
   setForeground = (foreground: boolean): void => {
     if (this.disposed || this.snapshot.foreground === foreground) return;
+    const lease = this.nativeInteraction;
+    // Solo el SDK aún pendiente admite rebotes; primer plano por sí solo nunca concede acceso.
+    if (lease && (!this.validNativeInteraction(lease) || (!foreground && lease.stage !== "native"))) {
+      if (!foreground) this.update({ foreground, locked: this.snapshot.enabled || this.snapshot.locked });
+      this.revokeNativeInteraction();
+    }
     if (!foreground) {
       this.backgroundEpoch += 1;
       this.pendingGrant = null;
@@ -124,6 +143,7 @@ export class DeviceLockController {
   };
 
   unlock = (): Promise<void> => {
+    this.revokeNativeInteraction();
     if (this.flight) return this.flight;
     if (!this.canAct() || !this.snapshot.locked || this.pendingGrant) return Promise.resolve();
     return this.run(async () => {
@@ -133,6 +153,7 @@ export class DeviceLockController {
   };
 
   enable = (): Promise<void> => {
+    this.revokeNativeInteraction();
     if (this.flight) return this.flight;
     if (!this.canAct() || this.snapshot.enabled || this.snapshot.locked) return Promise.resolve();
     return this.run(async () => {
@@ -160,6 +181,7 @@ export class DeviceLockController {
   };
 
   disable = (): Promise<void> => {
+    this.revokeNativeInteraction();
     if (this.flight) return this.flight;
     if (!this.canAct() || !this.snapshot.enabled) return Promise.resolve();
     return this.run(async () => {
@@ -177,12 +199,73 @@ export class DeviceLockController {
     });
   };
 
-  dispose = (): void => {
-    if (this.disposed) return;
-    this.disposed = true;
+  invalidateTrustedNativeInteraction = (): void => {
     this.generation += 1;
     this.pendingGrant = null;
+    this.revokeNativeInteraction();
+  };
+
+  runTrustedNativePicker = async <T>(
+    operation: () => Promise<T>,
+    waitForPrivacy: NativeInteractionPrivacyBarrier = async () => {},
+    preparePrivacy?: NativeInteractionPrivacyBarrier,
+  ): Promise<T> => {
+    if (this.disposed || !this.snapshot.ready || !this.snapshot.foreground || this.snapshot.locked
+      || this.snapshot.busy || this.snapshot.offered || this.flight || this.pendingGrant || this.nativeInteraction) {
+      throw new Error("TRUSTED_NATIVE_INTERACTION_NOT_ALLOWED");
+    }
+    if (!this.snapshot.supported) return operation();
+    const now = this.clock.now();
+    if (!Number.isFinite(now)) throw new Error("TRUSTED_NATIVE_INTERACTION_CLOCK_INVALID");
+    const lease: NativeInteractionLease = {
+      generation: this.generation, startedAt: now, lastObservedAt: now, stage: preparePrivacy ? "preparing" : "native",
+      cancellation: new AbortController(), cancelTimer: () => {},
+    };
+    this.nativeInteraction = lease;
+    lease.cancelTimer = this.clock.schedule(() => {
+      if (this.nativeInteraction === lease) this.revokeNativeInteraction();
+    }, NATIVE_INTERACTION_TIMEOUT_MS);
+    this.update({ nativeInteractionPending: true });
+    try {
+      if (preparePrivacy) {
+        try {
+          await nativeResultOrRevocation(() => preparePrivacy(lease.cancellation.signal), lease.cancellation.signal);
+        } catch {
+          throw new Error("TRUSTED_NATIVE_INTERACTION_PRIVACY_UNAVAILABLE");
+        }
+      }
+      if (!this.validNativeInteraction(lease) || !this.snapshot.foreground || this.snapshot.busy || this.snapshot.offered) {
+        throw new Error("TRUSTED_NATIVE_INTERACTION_REVOKED");
+      }
+      lease.stage = "native";
+      const result = await nativeResultOrRevocation(operation, lease.cancellation.signal, () => { lease.stage = "settled"; });
+      await waitForSecurityCondition(() => {
+        if (!this.validNativeInteraction(lease)) throw new Error("TRUSTED_NATIVE_INTERACTION_REVOKED");
+        return this.snapshot.foreground;
+      }, this.subscribe, lease.cancellation.signal);
+      if (!this.validNativeInteraction(lease) || !this.snapshot.foreground) throw new Error("TRUSTED_NATIVE_INTERACTION_REVOKED");
+      this.update({ locked: false, nativeInteractionPending: false, error: null });
+      await nativeResultOrRevocation(() => waitForPrivacy(lease.cancellation.signal), lease.cancellation.signal);
+      if (!this.validNativeInteraction(lease) || !this.snapshot.foreground || this.snapshot.locked || this.snapshot.busy) {
+        throw new Error("TRUSTED_NATIVE_INTERACTION_REVOKED");
+      }
+      this.nativeInteraction = null;
+      return result;
+    } catch (error) {
+      if (!this.validNativeInteraction(lease)) throw new Error("TRUSTED_NATIVE_INTERACTION_REVOKED");
+      throw error;
+    } finally {
+      lease.cancelTimer();
+      if (this.nativeInteraction === lease) this.revokeNativeInteraction();
+      lease.cancellation.abort();
+    }
+  };
+
+  dispose = (): void => {
+    if (this.disposed) return;
     this.listeners.clear();
+    this.invalidateTrustedNativeInteraction();
+    this.disposed = true;
     if (this.authenticating) {
       try {
         void this.adapter.cancel().catch(() => {});
@@ -191,7 +274,25 @@ export class DeviceLockController {
   };
 
   private canAct(): boolean {
-    return !this.disposed && this.snapshot.supported && this.snapshot.ready && this.snapshot.foreground && !this.flight;
+    return !this.disposed && !this.nativeInteraction && this.snapshot.supported && this.snapshot.ready && this.snapshot.foreground && !this.flight;
+  }
+
+  private validNativeInteraction(lease: NativeInteractionLease): boolean {
+    const now = this.clock.now();
+    const valid = !this.disposed && this.nativeInteraction === lease && lease.generation === this.generation
+      && !lease.cancellation.signal.aborted && Number.isFinite(now) && now >= lease.lastObservedAt
+      && now - lease.startedAt < NATIVE_INTERACTION_TIMEOUT_MS;
+    lease.lastObservedAt = now;
+    return valid;
+  }
+
+  private revokeNativeInteraction(): void {
+    const lease = this.nativeInteraction;
+    if (!lease) return;
+    this.nativeInteraction = null;
+    lease.cancelTimer();
+    lease.cancellation.abort();
+    this.update({ nativeInteractionPending: false, locked: this.snapshot.enabled || this.snapshot.locked, error: null });
   }
 
   private run(operation: () => Promise<void>): Promise<void> {
@@ -210,9 +311,10 @@ export class DeviceLockController {
   }
 
   private async authenticate(): Promise<AuthenticationGrant | null> {
+    const generation = this.generation;
     try {
       const available = await this.adapter.available();
-      if (this.disposed) return null;
+      if (this.disposed || generation !== this.generation) return null;
       if (available !== true) {
         this.update({ error: messages.configuration });
         return null;
@@ -223,13 +325,13 @@ export class DeviceLockController {
       }
       this.authenticating = true;
       const result = await this.adapter.authenticate();
-      if (this.disposed) return null;
+      if (this.disposed || generation !== this.generation) return null;
       if (result.success !== true) {
         this.update({ error: authenticationMessage(result.error) });
         return null;
       }
       // El PIN del sistema puede devolver éxito antes de que la actividad vuelva a primer plano.
-      return { generation: this.generation, backgroundEpoch: this.backgroundEpoch };
+      return { generation, backgroundEpoch: this.backgroundEpoch };
     } catch {
       this.update({ error: messages.failed });
       return null;
@@ -270,6 +372,7 @@ export class DeviceLockController {
     if (next.ready === this.snapshot.ready && next.enabled === this.snapshot.enabled
       && next.locked === this.snapshot.locked && next.offered === this.snapshot.offered
       && next.busy === this.snapshot.busy && next.foreground === this.snapshot.foreground
+      && next.nativeInteractionPending === this.snapshot.nativeInteractionPending
       && next.error === this.snapshot.error && next.supported === this.snapshot.supported) return;
     this.snapshot = Object.freeze(next);
     for (const listener of [...this.listeners]) {

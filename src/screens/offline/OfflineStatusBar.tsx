@@ -1,9 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { OfflineSnapshot } from "../../domain/offline";
 import { palette } from "../../ui/theme";
-import { errorMessage } from "../workDetail/detailRules";
+import { captureSyncAttempt, syncAttemptMessage, syncAttemptPresentation, syncSnapshotKey, type SyncAttempt } from "./syncAttemptPresentation";
 import { compactConnectionPresentation, connectionPresentation } from "../../offline/connectionPresentation";
 
 export interface OfflineStatusBarProps {
@@ -16,29 +16,43 @@ export interface OfflineStatusBarProps {
 export function OfflineStatusBar({ snapshot, onOpen, onSync, embedded = false }: OfflineStatusBarProps) {
   const lock = useRef(false);
   const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState<SyncAttempt | null>(null);
+  const [result, setResult] = useState<{ attempt: SyncAttempt; key: string } | null>(null);
+  const presented = useRef<SyncAttempt | null>(null);
+  const key = syncSnapshotKey(snapshot);
+  useEffect(() => {
+    if (!attempt || presented.current === attempt) return;
+    presented.current = attempt;
+    setResult({ attempt, key });
+  }, [attempt, key]);
+  useEffect(() => {
+    setResult((previous) => previous && previous.key !== key ? null : previous);
+  }, [key]);
+  const feedback = result?.key === key ? syncAttemptPresentation(result.attempt, snapshot) : null;
   const syncing = working || snapshot?.syncing === true;
   const presentation = connectionPresentation(snapshot);
   const compact = compactConnectionPresentation(snapshot);
   const disabled = !presentation.canSync || syncing;
   const color = presentation.tone === "success" ? palette.success : presentation.tone === "error" ? palette.danger : presentation.tone === "warning" ? palette.amber : palette.info;
   const backgroundColor = presentation.tone === "success" ? palette.successSoft : presentation.tone === "error" ? palette.dangerSoft : presentation.tone === "warning" ? palette.amberSoft : palette.infoSoft;
-  const label = error ? "No se pudo sincronizar · ver centro" : presentation.label;
+  const label = feedback ? syncAttemptMessage(feedback) : presentation.label;
   async function sync(): Promise<void> {
     if (lock.current || disabled) return;
     lock.current = true;
     setWorking(true);
-    setError(null);
-    try { await onSync(); }
-    catch (failure) { setError(errorMessage(failure)); }
+    setResult(null);
+    setAttempt(null);
+    const before = captureSyncAttempt(snapshot);
+    try { await onSync(); setAttempt({ before }); }
+    catch (error) { setAttempt({ before, failure: { error } }); }
     finally { lock.current = false; setWorking(false); }
   }
   return <View testID="connection-status-bar" style={[styles.bar, embedded && styles.embedded, { backgroundColor }]}>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityHint={`${error ? `${error}. ` : ""}${presentation.secondary} Abre el centro offline: cobertura, pendientes y detalles de sincronización.`} onPress={() => { setError(null); onOpen(); }} style={styles.summary}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityHint={`${compact.detail}. ${presentation.secondary} Abre el centro offline: cobertura, pendientes y detalles de sincronización.`} onPress={() => { setResult(null); onOpen(); }} style={styles.summary}>
       <Ionicons name={presentation.ready ? "cloud-done-outline" : presentation.tone === "error" ? "cloud-offline-outline" : "cloud-outline"} size={18} color={color} accessible={false} />
       <View style={styles.text}>
-        <Text testID="connection-status-title" numberOfLines={1} ellipsizeMode="tail" style={[styles.label, { color }]}>{error ? "No se pudo sincronizar" : compact.title}</Text>
-        <Text testID="connection-status-detail" numberOfLines={1} ellipsizeMode="tail" style={styles.secondary}>{compact.detail}</Text>
+        <Text testID="connection-status-title" numberOfLines={1} ellipsizeMode="tail" style={[styles.label, { color: feedback?.tone === "error" ? palette.danger : color }]}>{feedback?.title ?? compact.title}</Text>
+        <Text testID="connection-status-detail" numberOfLines={1} ellipsizeMode="tail" style={styles.secondary}>{feedback?.detail ?? compact.detail}</Text>
       </View>
     </TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sincronizar ahora" accessibilityState={{ disabled, busy: syncing }} disabled={disabled} onPress={() => void sync()} style={[styles.sync, disabled && styles.disabled]}>

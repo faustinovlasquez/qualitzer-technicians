@@ -3,6 +3,7 @@ import type { SyncStepAnswer } from "./offlineProtocol";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, DateRange, GroupScope, LocalPhoto, StepAnswer, User, WorkScope } from "./models";
 
 export type OfflineOperationKind = "create" | "comment" | "answer" | "document" | "timer" | "checklist";
+export type OfflineDeploymentCounts = { [Kind in OfflineOperationKind]: number };
 export type OfflineOperationStatus = "pending" | "syncing" | "applied" | "blocked" | "auth_required" | "needs_review" | "conflict";
 export type OfflineScope = GroupScope & { workId?: string };
 export interface OfflineResourceMetadata { operationId?: string; status?: OfflineOperationStatus; downloaded: boolean; confirmed: boolean; localFileId?: string; }
@@ -87,6 +88,7 @@ export interface OfflineSnapshot {
   cachedAt?: number;
   coverage: OfflineCoverage[];
   missingDates?: string[];
+  awaitingDeploymentByKind?: OfflineDeploymentCounts;
   operations: OfflineOperation[];
 }
 export interface OfflineController {
@@ -96,6 +98,7 @@ export interface OfflineController {
   stop(): void;
   setForeground(active: boolean): void;
   syncNow(): Promise<void>;
+  requestSync?(): Promise<void>;
   retry(operationId: string): Promise<void>;
   hasPendingChanges(): Promise<boolean>;
   prepareWeek(range: DateRange, branchId: number, options?: OfflinePreparationOptions): Promise<void>;

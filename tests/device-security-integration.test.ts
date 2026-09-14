@@ -279,6 +279,124 @@ function assertBlocked(f: ReturnType<typeof providerFixture>, retained = false):
 
 test("integration runner uses Node 22+", () => { assert.ok(Number(process.versions.node.split(".")[0]) >= 22); });
 
+for (const order of ["result-first", "active-first"] as const) {
+  for (const canceled of [false, true]) {
+    test(`real lock screen ${order} canceled=${canceled}: pending picker shows only a neutral spinner, then ordinary Home still authenticates`, async t => {
+      const f = providerFixture({ preference: "enabled" });
+      t.after(() => f.close());
+      await f.settle();
+      assert.equal(f.prompts.length, 1);
+      f.prompts[0].result.resolve({ success: true });
+      await f.settle();
+      assert.equal(f.security.isUnlocked(), true);
+      assert.ok(f.security.runTrustedNativePicker);
+      const native = deferred<{ canceled: boolean }>();
+      const result = f.security.runTrustedNativePicker(() => native.promise);
+      const neutral = () => {
+        assertBlocked(f, true);
+        assert.equal(f.security.state.nativeInteractionPending, true);
+        assert.match(text(f.tree), /Esperando selección…/);
+        assert.doesNotMatch(text(f.tree), /huella|desbloque|vincular|protegido/i);
+        assert.equal(nodes(f.tree, "Button").length, 0);
+        assert.equal(nodes(f.tree, "Ionicons").length, 0);
+        assert.equal(nodes(f.tree, "SectionTitle").length, 0);
+        assert.equal(nodes(f.tree, "ActivityIndicator").filter(node => node.props.accessibilityLabel === "Esperando selección").length, 1);
+        assert.equal(f.prompts.length, 1);
+      };
+      await f.settle(); neutral();
+      for (let bounce = 0; bounce < 3; bounce += 1) {
+        f.emit("background"); f.emit("active"); await f.settle(); neutral();
+        assert.equal(f.privacy.captureBlocked, true);
+      }
+      f.emit("background"); await f.settle(); neutral();
+      if (order === "result-first") native.resolve({ canceled });
+      else f.emit("active");
+      await f.settle(); neutral();
+      if (order === "result-first") f.emit("active");
+      else native.resolve({ canceled });
+      assert.equal((await result).canceled, canceled);
+      await f.settle();
+      assert.equal(f.security.isUnlocked(), true);
+      assert.equal(f.security.state.nativeInteractionPending, false);
+      assert.equal(f.prompts.length, 1);
+      assert.equal(f.lifecycle.mounts, 1);
+      assert.equal(f.lifecycle.unmounts, 0);
+      f.emit("background"); f.emit("active"); await f.settle();
+      assertBlocked(f, true);
+      assert.equal(f.prompts.length, 2);
+      assert.match(text(f.tree), /huella/);
+      assert.doesNotMatch(text(f.tree), /Esperando selección/);
+    });
+  }
+}
+
+for (const preference of ["enabled", "declined"] as const) {
+  test(`real provider and cover ${preference}: deferred protection prevents launch and keeps disabled security neutral`, async t => {
+    const preparation = deferred<void>();
+    const restoration = deferred<void>();
+    let deferPrivacy = false;
+    const f = providerFixture({
+      preference,
+      capture: () => deferPrivacy ? preparation.promise : Promise.resolve(),
+      allow: () => deferPrivacy ? restoration.promise : Promise.resolve(),
+    });
+    t.after(() => f.close());
+    await f.settle();
+    if (preference === "enabled") { f.prompts[0].result.resolve({ success: true }); await f.settle(); }
+    const prompts = f.prompts.length;
+    assert.equal(f.security.isUnlocked(), true);
+    assert.ok(f.security.runTrustedNativePicker);
+    deferPrivacy = true;
+    let launches = 0;
+    const native = deferred<string>();
+    const result = f.security.runTrustedNativePicker(() => {
+      assert.equal(f.privacy.captureBlocked, true);
+      launches += 1;
+      f.emit("background");
+      return native.promise;
+    });
+    await f.settle();
+    assert.equal(launches, 0);
+    assertBlocked(f, true);
+    assert.doesNotMatch(text(f.tree), /huella|desbloque|vincular/i);
+    assert.equal(nodes(f.tree, "Button").length, 0);
+    preparation.resolve(); await f.settle();
+    assert.equal(launches, 1);
+    f.emit("active"); native.resolve("photo"); await f.settle();
+    assertBlocked(f, true);
+    if (preference === "declined") {
+      assert.doesNotMatch(text(f.tree), /huella|desbloque|vincular/i);
+      assert.equal(nodes(f.tree, "Button").length, 0);
+      assert.equal(nodes(f.tree, "Ionicons").length, 0);
+    }
+    restoration.resolve(); assert.equal(await result, "photo"); await f.settle();
+    assert.equal(f.security.isUnlocked(), true);
+    assert.equal(f.prompts.length, prompts);
+    assert.equal(f.lifecycle.mounts, 1);
+    assert.equal(f.lifecycle.unmounts, 0);
+  });
+}
+
+test("iOS preflight waits for app switcher protection after prevent, before invoking native SDK", async t => {
+  const switcher = deferred<void>();
+  let deferSwitcher = false;
+  const f = providerFixture({ os: "ios", preference: "enabled", switcher: () => deferSwitcher ? switcher.promise : Promise.resolve() });
+  t.after(() => f.close());
+  await f.settle(); f.prompts[0].result.resolve({ success: true }); await f.settle();
+  assert.ok(f.security.runTrustedNativePicker);
+  deferSwitcher = true;
+  let launches = 0;
+  const result = f.security.runTrustedNativePicker(async () => { launches += 1; return "photo"; });
+  await f.settle();
+  assert.equal(f.privacy.captureBlocked, true);
+  assert.equal(launches, 0);
+  assertBlocked(f, true);
+  switcher.resolve();
+  assert.equal(await result, "photo");
+  assert.equal(launches, 1);
+  assert.equal(f.prompts.length, 1);
+});
+
 test("native adapter reads/writes only the exact preference key and device-only unlocked accessibility", async () => {
   const f = nativeFixture({ preference: "enabled" });
   const adapter = f.adapterModule.createDeviceSecurityAdapter();

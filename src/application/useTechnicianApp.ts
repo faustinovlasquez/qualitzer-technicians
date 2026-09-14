@@ -424,7 +424,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (offline?.authBlocked && repository.current === offlineController) unauthorized();
   }, [offline?.authBlocked, offlineController, unauthorized]);
 
-  const refreshAssignments = useCallback(async (background = false): Promise<void> => {
+  const refreshAssignments = useCallback(async (background = false, reportError = true): Promise<void> => {
     const { session: current, range: currentRange } = state.current;
     const repo = repository.current;
     if (!isAccessAllowed() || !current || current.branchId === null || !repo) return;
@@ -464,7 +464,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     } catch (caught) {
       if (version !== requestVersion.current || generation !== sessionVersion.current) return;
       if (controller.signal.aborted || (caught instanceof Error && caught.name === "AbortError")) return;
-      setError(errorText(caught));
+      if (reportError) setError(errorText(caught));
       throw caught;
     } finally {
       if (assignmentRead.current?.controller === controller) assignmentRead.current = null;
@@ -619,20 +619,33 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const repo = repository.current;
     if (!currentContext() || actionLock.current || !(repo instanceof OfflineTechnicianRepository)) throw new Error("La sincronización no está disponible en este momento.");
     const version = sessionVersion.current;
-    const action = beginAction();
+    const appliedBefore = new Set(repo.getSnapshot().operations.filter((operation) => operation.status === "applied").map((operation) => operation.id));
+    const action = Symbol();
+    actionLock.current = action;
+    setBusy(true);
+    let refreshConfirmed = false;
     try {
-      await repo.syncNow();
+      await (repo.requestSync ? repo.requestSync() : repo.syncNow());
       if (version !== sessionVersion.current || repository.current !== repo) return;
       const snapshot = repo.getSnapshot();
-      if (snapshot.authBlocked) throw new Error("Vuelve a ingresar con la misma cuenta para continuar. La cola se conserva.");
-      if (!snapshot.online) throw new Error("No se pudo verificar la conexión con Qualitzer. Los pendientes siguen guardados en el dispositivo.");
-      await refreshAssignments();
-      if (version !== sessionVersion.current || repository.current !== repo) return;
-      if (snapshot.lastError || snapshot.pending) setError(`Quedan ${snapshot.pending} operaciones sin confirmar. Revisa su estado en Sin conexión.${snapshot.lastError ? ` ${snapshot.lastError}` : ""}`);
+      if (snapshot.authBlocked || snapshot.connection?.status === "auth_required") {
+        unauthorized();
+        throw new Error("Vuelve a ingresar con la misma cuenta para continuar. La cola se conserva.");
+      }
+      refreshConfirmed = snapshot.operations.some((operation) => operation.status === "applied" && !appliedBefore.has(operation.id));
     } catch (caught) {
-      if (version === sessionVersion.current && repository.current === repo) setError(errorText(caught));
+      if (version === sessionVersion.current && repository.current === repo) {
+        const snapshot = repo.getSnapshot();
+        if (snapshot.authBlocked || snapshot.connection?.status === "auth_required" || caught instanceof ApiError && caught.status === 401) unauthorized();
+        else refreshConfirmed = snapshot.operations.some((operation) => operation.status === "applied" && !appliedBefore.has(operation.id));
+      }
       throw caught;
-    } finally { endAction(action); }
+    } finally {
+      endAction(action);
+      if (refreshConfirmed && version === sessionVersion.current && repository.current === repo && isAccessAllowed()) {
+        void refreshAssignments(true, false).catch(() => undefined);
+      }
+    }
   }
 
   async function prepareOfflineWeek(): Promise<void> {
@@ -1223,6 +1236,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     getSnapshot: offlineController.getSnapshot, subscribe: offlineController.subscribe,
     start: offlineController.start, stop: offlineController.stop, setForeground: offlineController.setForeground,
     syncNow: () => repository.current === offlineController ? offlineActions.current.syncOffline() : Promise.reject(new Error("La sesión offline cambió.")),
+    requestSync: () => repository.current === offlineController ? offlineActions.current.syncOffline() : Promise.reject(new Error("La sesión offline cambió.")),
     retry: (id) => repository.current === offlineController ? offlineActions.current.retryOffline(id) : Promise.reject(new Error("La sesión offline cambió.")),
     hasPendingChanges: offlineController.hasPendingChanges, readLocalFile: offlineController.readLocalFile,
     prepareWeek: (nextRange, branchId, options) => isAccessAllowed() && repository.current === offlineController ? offlineController.prepareWeek(nextRange, branchId, options) : Promise.reject(new Error("Desbloquea la app y verifica la sesión offline.")),

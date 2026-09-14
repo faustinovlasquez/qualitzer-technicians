@@ -77,7 +77,7 @@ export function ProfileScreen({ session, companyBranding, deviceSecurity, onNoti
       <Button title="Comprobar pendientes y cerrar sesión" variant="danger" onPress={onLogout} loading={busy} />
       <Button title="Seguir trabajando" variant="secondary" disabled={busy} onPress={() => setConfirmLogout(false)} />
     </Card> : <Button title="Cerrar sesión / cambiar empresa" icon="log-out-outline" variant="secondary" onPress={() => setConfirmLogout(true)} disabled={busy} />}
-    <BodyText style={{ textAlign: "center" }}>Qualitzer técnicos · Versión 1.0.11</BodyText>
+    <BodyText style={{ textAlign: "center" }}>Qualitzer técnicos · Versión 1.0.14</BodyText>
   </ScrollView>;
 }
 const styles = StyleSheet.create({

@@ -15,7 +15,7 @@ const controlOrigin = "http://127.0.0.1:8788";
 const artifacts = mkdtempSync(path.join(tmpdir(), "qualitzer-header-layout-"));
 const results = [];
 const accessibilityFindings = new Set();
-const statusNames = /^(Conectado a Qualitzer|Sin red|Sin acceso a Qualitzer|Verificar sesión|Servidor requiere actualización|Configuración del servidor incompatible|Servidor no disponible|Verificando conexión con Qualitzer|Recuperando estado local|No se pudo sincronizar)/;
+const statusNames = /^(Conectado a Qualitzer|Sin red|Sin acceso a Qualitzer|Verificar sesión|Sincronización no disponible|Verificando conexión con Qualitzer|Recuperando estado local|No se pudo sincronizar)/;
 const button = (page, name) => page.getByRole("button", { name, exact: typeof name === "string" });
 const statusButton = (page) => button(page, statusNames);
 

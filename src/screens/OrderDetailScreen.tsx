@@ -148,7 +148,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
 
   function openWork(selectedGroup: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions): void {
     if (actionRef.current !== null || busyRef.current || leaving.current) return;
-    if (options?.action && (!executionAvailable || work.id.startsWith("local-") || work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT"))) return;
+    if (options?.action && (!mounted.current || latest.current.offline === null || latest.current.offline?.authBlocked || latest.current.offline?.connection?.foreground === false)) return;
     onOpenWork(selectedGroup, work, options);
   }
 

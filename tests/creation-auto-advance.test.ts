@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { CreationInput, CreationOptions, CreationResult } from "../src/domain/creation";
 import { OfflineQueuedError, type OfflineQueuedOutcome } from "../src/domain/offline";
 import type { CreationScreenProps } from "../src/screens/creation/CreationScreen";
+import type { TimeFieldProps } from "../src/ui/time/TimeField";
 import { creationDraftSchema, creationPayload, emptyCreationForm, type CreationDraft } from "../src/screens/creation/creationForm";
 import { user } from "../server/tests/fixtures";
 import { reactFixture, tenant } from "./helpers/tenant-challenge";
@@ -274,4 +275,26 @@ test("wizard Next still validates synchronously and never calls submission", asy
   action(f.render(), "Continuar a horario").onPress();
   assert.match(alerts(f.render()), /Revisa los campos/);
   assert.ok(action(f.render(), "Continuar a horario")); assert.equal(f.submitted.length, 0);
+});
+
+test("clock onChange edits the creation draft only; invalid end time still blocks review and valid times require explicit create", async t => {
+  const f = await creationFixture(); t.after(() => f.hooks.unmount());
+  action(f.render(), "Continuar a horario").onPress();
+  let fields = elements<TimeFieldProps>(f.render(), "TimeField");
+  assert.equal(fields.length, 2);
+  assert.equal(fields[0].props.value, "09:00");
+  fields[0].props.onChange("23:00"); fields[1].props.onChange("00:07");
+  assert.equal(f.submitted.length, 0); assert.equal(f.queued.length + f.created.length, 0);
+  action(f.render(), "Revisar solicitud").onPress();
+  assert.match(alerts(f.render()), /Revisa los campos/);
+  fields = elements<TimeFieldProps>(f.render(), "TimeField");
+  assert.equal(fields.length, 2); assert.equal(fields[1].props.value, "00:07");
+  fields[1].props.onChange("23:59");
+  action(f.render(), "Revisar solicitud").onPress();
+  assert.equal(f.submitted.length, 0);
+  const confirm = action(f.render(), "Confirmar y crear"); confirm.onPress(); confirm.onPress(); await settle();
+  assert.equal(f.submitted.length, 1);
+  assert.deepEqual(f.submitted[0], { ...input, schedule: { date, startTime: "23:00", endTime: "23:59" } });
+  f.submit.reject(new OfflineQueuedError(outcome)); await settle();
+  assert.equal(f.queued.length, 1);
 });

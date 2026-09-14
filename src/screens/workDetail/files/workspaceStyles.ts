@@ -7,6 +7,7 @@ export const workspaceStyles = StyleSheet.create({
   title: { ...typography.label, color: palette.text, flex: 1, minWidth: 0 },
   controls: { flexDirection: "row", gap: 6, alignItems: "center" },
   compactPicker: { flex: 1, minWidth: 0, minHeight: 48, paddingHorizontal: 4, paddingVertical: 8, gap: 4 },
+  compactPickerText: { minWidth: 0 },
   list: { flex: 1, minHeight: 0 },
   listContent: { padding: 12, gap: 12 },
   dock: { paddingHorizontal: 12, paddingVertical: 8, gap: 4, backgroundColor: palette.surface, borderTopWidth: 1, borderTopColor: palette.border, flexShrink: 0 },

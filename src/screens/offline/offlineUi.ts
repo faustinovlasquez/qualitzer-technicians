@@ -14,9 +14,12 @@ export type PendingDocument = Extract<OfflineOperation, { kind: "document" }>;
 export type PendingTimer = Extract<OfflineOperation, { kind: "timer" }>;
 export type PendingChecklist = Extract<OfflineOperation, { kind: "checklist" }>;
 export interface QueuedTimerMarker { operationId: string; status: "in_progress" | "paused"; }
-export const PENDING_TIMER_LABEL = "En cola · tiempo pendiente de confirmar";
+export const PENDING_TIMER_LABEL = "Guardando…";
 export function timerPendingLabel(timer: PendingTimer | null): string {
-  return timer?.status === "applied" ? "Envío confirmado · esperando actualizar estado y tiempo. Si no se actualiza, abre el detalle y actualiza la ficha; no repitas el envío" : PENDING_TIMER_LABEL;
+  return timer?.status === "applied" ? "Actualizando…"
+    : timer?.status === "conflict" ? "Conflicto · revisar"
+    : timer?.status === "needs_review" || timer?.status === "blocked" ? "Requiere revisión"
+    : timer?.status === "auth_required" ? "Verificar sesión" : PENDING_TIMER_LABEL;
 }
 export const queuedCreationOutcomeSchema = z.object({
   operationId: mobileUuidSchema, operationIds: z.array(mobileUuidSchema).length(1), kind: z.literal("create"),

@@ -1,5 +1,14 @@
 export type DeviceLockPreference = "enabled" | "declined";
 
+export type TrustedNativePicker = <T>(operation: () => Promise<T>) => Promise<T>;
+
+export type NativeInteractionPrivacyBarrier = (signal: AbortSignal) => Promise<void>;
+
+export interface NativeInteractionClock {
+  now(): number;
+  schedule(callback: () => void, milliseconds: number): () => void;
+}
+
 export type DeviceAuthenticationResult =
   | { success: true }
   | { success: false; error: string };
@@ -23,4 +32,5 @@ export interface DeviceLockSnapshot {
   readonly foreground: boolean;
   readonly error: string | null;
   readonly supported: boolean;
+  readonly nativeInteractionPending?: boolean;
 }

@@ -29,6 +29,7 @@ export interface ButtonProps {
   loading?: boolean;
   icon?: IconName;
   style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
   accessibilityLabel?: string;
 }
 
@@ -48,7 +49,7 @@ const badgeColors: { [K in BadgeTone]: { background: string; foreground: string 
   info: { background: palette.infoSoft, foreground: palette.info },
 };
 
-export function Button({ title, onPress, variant = "primary", disabled = false, loading = false, icon, style, accessibilityLabel }: ButtonProps) {
+export function Button({ title, onPress, variant = "primary", disabled = false, loading = false, icon, style, textStyle, accessibilityLabel }: ButtonProps) {
   const colors = buttonColors[variant];
   const unavailable = disabled || loading;
 
@@ -68,7 +69,7 @@ export function Button({ title, onPress, variant = "primary", disabled = false, 
       ]}
     >
       {loading ? <ActivityIndicator color={colors.foreground} /> : icon ? <Ionicons name={icon} size={20} color={colors.foreground} accessible={false} /> : null}
-      <Text style={[styles.buttonText, { color: colors.foreground }]}>{title}</Text>
+      <Text style={[styles.buttonText, { color: colors.foreground }, textStyle]}>{title}</Text>
     </Pressable>
   );
 }

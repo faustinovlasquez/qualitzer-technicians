@@ -6,7 +6,7 @@ import type { ChecklistStep, StepAnswer } from "../../../domain/models";
 import { Badge, BodyText, Button, Field, IconButton } from "../../../ui/components";
 import type { ChecklistTabProps } from "../ChecklistTab";
 import { AttachmentList, Notice } from "../DetailUi";
-import { errorMessage } from "../detailRules";
+import { userActionError as errorMessage } from "../../offline/syncUserPresentation";
 import { styles } from "../detailStyles";
 import { displayedAnswer } from "../useWorkDraft";
 import { checklistAnswerLabel, checklistStepStatus } from "./checklistPresentation";
@@ -73,7 +73,7 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
           {step.isFilesRequired ? <Badge label="Evidencia obligatoria" tone="warning" /> : null}
           {pendingFiles > 0 ? <Badge label={`${pendingFiles} archivos sin confirmar`} tone="warning" /> : null}
           {step.tag.trim() ? <Badge label={plainText(step.tag)} /> : null}
-          {queued ? <Badge label="En cola · sin confirmar" tone="warning" /> : dirty ? <Badge label="Borrador · no enviado" tone="warning" /> : <Badge {...status} />}
+          {queued ? <Badge label="Respuesta registrada en el teléfono" tone="neutral" /> : dirty ? <Badge label="Borrador · no enviado" tone="warning" /> : <Badge {...status} />}
         </View>
         {plainText(step.description) ? <BodyText>{plainText(step.description)}</BodyText> : null}
       </View>
@@ -107,14 +107,13 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
       {!context.readOnly ? <View style={styles.tight}>
         {onNext && dirty && !queued ? <Button title="Guardar sin avanzar" accessibilityLabel="Guardar respuesta sin avanzar" variant="secondary" style={checklistStyles.compactButton} disabled={disabled || !supported} onPress={() => { void save(false); }} /> : null}
         {dirty && !queued ? <Button title="Descartar borrador de este paso" variant="ghost" style={checklistStyles.compactButton} disabled={disabled} onPress={() => { setValidation(null); context.onDiscard(step); }} /> : null}
-        {queued ? <Notice message="Esta versión ya está registrada. Consulta su estado en el centro offline; no se volverá a enviar desde este botón. Puedes editar la respuesta para preparar un nuevo cambio." tone="warning" /> : null}
         {dirty && !queued ? <Text style={styles.caption}>Las flechas y el resumen no envían respuestas. Pulsa Guardar para enviarlas.</Text> : null}
       </View> : null}
       {notices}
       </ScrollView>
       <View style={checklistStyles.dock} testID="checklist-step-dock">
         <IconButton name="chevron-back-outline" label="Paso anterior sin guardar" disabled={!onPrevious || context.disabled || saving} onPress={() => onPrevious?.()} />
-        {context.readOnly ? <Text style={checklistStyles.dockHint}>Solo lectura</Text> : <Button title={queued ? "En cola" : onNext ? "Guardar y seguir" : "Guardar respuesta"} accessibilityLabel={queued ? "Respuesta ya registrada en cola" : onNext ? "Guardar y siguiente" : "Guardar respuesta"} style={checklistStyles.dockSave} loading={saving || context.savingStep === id} disabled={disabled || !dirty || !supported || queued} onPress={() => { void save(Boolean(onNext)); }} />}
+        {context.readOnly ? <Text style={checklistStyles.dockHint}>Solo lectura</Text> : <Button title={queued ? "Registrada" : onNext ? "Guardar y seguir" : "Guardar respuesta"} accessibilityLabel={queued ? "Respuesta ya registrada en cola" : onNext ? "Guardar y siguiente" : "Guardar respuesta"} style={checklistStyles.dockSave} loading={saving || context.savingStep === id} disabled={disabled || !dirty || !supported || queued} onPress={() => { void save(Boolean(onNext)); }} />}
         <IconButton name="chevron-forward-outline" label="Paso siguiente sin guardar" disabled={!onNext || context.disabled || saving} onPress={() => onNext?.()} />
       </View>
     </View>

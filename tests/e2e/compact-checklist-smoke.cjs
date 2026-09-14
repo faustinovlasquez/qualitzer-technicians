@@ -197,7 +197,7 @@ async function main() {
       await button("Guardar y siguiente").click();
       await heading("Pregunta 2").waitFor();
       await button("Paso anterior sin guardar").click();
-      await page.getByText("En cola · sin confirmar", { exact: true }).waitFor();
+      await page.getByText("Respuesta registrada en el teléfono", { exact: true }).waitFor();
       assert.equal(await button("Respuesta ya registrada en cola").isDisabled(), true);
       assert.match(await page.getByTestId("connection-status-bar").innerText(), /1/);
       await page.screenshot({ path: path.join(output, "390-queued.png") });

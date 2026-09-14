@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { BackHandler, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { assignmentCodes } from "../domain/assignmentCodes";
-import { clock, duration, plainText, shortDate, STATUS_LABELS } from "../domain/format";
+import { answerFromStep, clock, duration, plainText, shortDate, STATUS_LABELS } from "../domain/format";
 import type { AssignmentGroup, AssignmentWork, Attachment, ChecklistStep, CommentPage, DateRange, LocalPhoto, StatusInput, StepAnswer, Tenant, WorkDetailTab, WorkStatus } from "../domain/models";
 import { Badge, BodyText, Button, Card, IconButton, SectionTitle, type BadgeTone, type IconName } from "../ui/components";
 import { palette } from "../ui/theme";
@@ -12,7 +12,7 @@ import { SessionContextBar } from "../ui/SessionContextBar";
 import { ChecklistTab } from "./workDetail/ChecklistTab";
 import { CompletionDialog } from "./workDetail/CompletionDialog";
 import { Notice } from "./workDetail/DetailUi";
-import { answerError, completionReasons, errorMessage, executionDate, readOnlyWork, withinRange } from "./workDetail/detailRules";
+import { answerError, completionReasons, executionDate, manualCompletion, readOnlyWork, withinRange } from "./workDetail/detailRules";
 import { styles } from "./workDetail/detailStyles";
 import { EvidenceTab } from "./workDetail/EvidenceTab";
 import { deleteLocalPhoto, MAX_PHOTOS, openLocalPhotoScope, pickPhotos, preparePhotos, validateLocalPhotos } from "./workDetail/localPhotos";
@@ -21,12 +21,18 @@ import { useWorkDraft, workDetailDraftKey } from "./workDetail/useWorkDraft";
 import { EquipmentTab, WorkTab } from "./workDetail/WorkInformation";
 import { FileWorkspace } from "./workDetail/FileWorkspace";
 import { CommentsTab } from "./workDetail/CommentsTab";
-import { isExecutionFinalization, executionDateAllowed } from "../domain/workExecution";
+import { automaticExecutionTiming, canTransitionExecution, executionElapsedSeconds, isExecutionFinalization, executionDateAllowed, executionDatesAllowed } from "../domain/workExecution";
 import { isOfflineQueuedError, type OfflineController, type OfflineSnapshot } from "../domain/offline";
-import { answerKey, confirmedEvidenceWork, isConfirmedAttachment, offlineAttachment, operationsForWork, pendingTimerForWork, timerPendingLabel, operationErrorReason, operationStatusLabels, queueOwnsDocument, registeredAnswerKey, type PendingAnswer, type PendingChecklist, type PendingComment, type PendingDocument, type QueuedTimerMarker } from "./offline/offlineUi";
+import { answerKey, confirmedEvidenceWork, isConfirmedAttachment, offlineAttachment, operationsForWork, pendingTimerForWork, timerPendingLabel, queueOwnsDocument, registeredAnswerKey, type PendingAnswer, type PendingChecklist, type PendingComment, type PendingDocument, type QueuedTimerMarker } from "./offline/offlineUi";
+import { operationNeedsAttention, syncUserError, userActionError as errorMessage, userErrorText, workActionError } from "./offline/syncUserPresentation";
 import { QueuedNotice } from "./offline/QueuedNotice";
 import { ChecklistAssociationPanel } from "./workDetail/checklist/ChecklistAssociationPanel";
 import type { ChecklistAssignmentResult, ChecklistCatalogPage, ChecklistCatalogQuery } from "../domain/checklistAssignment";
+import { useTrustedNativePicker } from "../security/useTrustedNativePicker";
+import { DeviceSecurityContext } from "../security/DeviceSecurityContext";
+import { CameraPermissionError } from "../domain/cameraErrors";
+import { CameraPermissionGuide } from "./workDetail/files/CameraPermissionGuide";
+import { useCameraPermissionGuide } from "./workDetail/files/useCameraPermissionGuide";
 
 export { clearWorkDetailDrafts, workDetailDraftKey } from "./workDetail/useWorkDraft";
 
@@ -90,7 +96,7 @@ function ElapsedTimer({ work, generatedAt, online = true, pending = false }: Pic
   return <View style={styles.timerBox}>
     <Text style={styles.heroOverline}>TIEMPO DE EJECUCIÓN</Text>
     <Text style={styles.timer} accessibilityLabel={`Tiempo de ejecución: ${clock(baseline + extra)}`}>{clock(baseline + extra)}</Text>
-    <Text style={styles.heroText}>{pending ? "Último tiempo recibido, sin incremento local mientras se confirma o actualiza el estado." : !online ? "Último tiempo recibido. Sin conexión no se simula ni confirma el cronómetro." : work.status === "in_progress" ? "Tiempo recibido + transcurrido desde la última actualización. El servidor confirma el tiempo final." : "Tiempo acumulado informado en la asignación."}</Text>
+    <Text style={styles.heroText}>{pending || !online ? "Último tiempo recibido" : work.status === "in_progress" ? "Tiempo recibido + transcurrido desde la última actualización. El servidor confirma el tiempo final." : "Tiempo acumulado informado en la asignación."}</Text>
   </View>;
 }
 
@@ -101,6 +107,10 @@ export function WorkDetailScreen(props: WorkDetailScreenProps) {
 
 function WorkDetailContent(props: WorkDetailScreenProps) {
   const { group, work, generatedAt, mode, range, busy, onBack, onRefresh, onStatus, onSaveStep, onUpload, onReport, storageKey } = props;
+  const runNativePicker = useTrustedNativePicker();
+  const security = useContext(DeviceSecurityContext);
+  const securityRef = useRef(security);
+  securityRef.current = security;
   const insets = useSafeAreaInsets();
   const codes = assignmentCodes(group, work);
   const draftGroupId = props.draftIdentity?.groupId ?? group.id;
@@ -136,8 +146,10 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const desiredStatus = unobservedTimer?.status ?? pendingTimer?.payload.status ?? work.status;
   const timerPending = Boolean(pendingTimer || unobservedTimer);
   const timerNeedsAttention = props.offline?.connection?.foreground === false || pendingTimer !== null && pendingTimer.status !== "pending" && pendingTimer.status !== "syncing";
-  const hasPendingOperations = timerPending || scopedOperations.some((operation) => operation.status !== "applied")
-    || operationsForWork(props.offline, { groupId: group.id, ...range, companyBranchId: props.companyBranchId }).some((operation) => operation.status !== "applied");
+  const pendingDeliveryOperations = [...scopedOperations, ...operationsForWork(props.offline, { groupId: group.id, ...range, companyBranchId: props.companyBranchId })]
+    .filter((operation) => operation.status !== "applied");
+  const pendingDeliveryCount = new Set(pendingDeliveryOperations.map((operation) => operation.id)).size;
+  const hasPendingOperations = timerPending || pendingDeliveryCount > 0;
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "work");
   const [target, setTarget] = useState<string | undefined>();
   const allPendingDocuments = scopedOperations.filter((operation): operation is PendingDocument => operation.kind === "document" && operation.status !== "applied");
@@ -145,7 +157,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const [queuedAnswers, setQueuedAnswers] = useState<{ [stepId: string]: { signature: string; operationId: string } }>({});
   const queuedAnswersRef = useRef(queuedAnswers);
   const [action, setAction] = useState<string | null>(null);
-  const [operationError, setOperationError] = useState<string | null>(props.error);
+  const [operationError, setOperationError] = useState<string | null>(workActionError(props.error));
   const [message, setMessage] = useState<string | null>(null);
   const [exitWarning, setExitWarning] = useState(false);
   const [completing, setCompleting] = useState(props.initialAction === "deliver");
@@ -165,19 +177,39 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   executionGates.current = { readOnly, disabled, online, hasPendingOperations, desiredStatus, timerNeedsAttention };
   const selectedDate = executionDate(work, range);
   const reasons = completionReasons(group, evidenceWork, files.files?.filter(isConfirmedAttachment) ?? null, files.error);
-  if (!online) reasons.push("La entrega requiere conexión. No se encola ni simula offline.");
-  if (hasPendingOperations) reasons.push("Hay operaciones pendientes de confirmación del servidor. Deben resolverse antes de entregar.");
+  if (pendingDeliveryCount > 0) reasons.unshift(`Envía ${pendingDeliveryCount === 1 ? "el cambio pendiente" : `los ${pendingDeliveryCount} cambios pendientes`} de este trabajo y sus archivos compartidos.`);
+  if (pendingDeliveryOperations.some(operationNeedsAttention)) reasons.push("Revisa los cambios que requieren atención en el centro de sincronización.");
+  if (timerPending && pendingDeliveryCount === 0) reasons.push("Actualiza la ficha para confirmar el último cambio del cronómetro.");
+  if (!online) reasons.push("Conéctate a Qualitzer para confirmar la entrega.");
+  if (localWork) reasons.push("Sincroniza la creación de este trabajo para poder entregarlo.");
+  if (staleReadOnly) reasons.push("Actualiza la ficha para verificar los datos y permisos del trabajo.");
+  if (work.missingRequiredInfo.length > 0 && !staleReadOnly) reasons.push("Completa la información requerida del trabajo y actualiza la ficha.");
+  if (work.checklists.some((checklist) => checklist.required === undefined)) reasons.push("Actualiza el checklist para verificar sus requisitos de entrega.");
+  if (evidenceWork.checklists.some((checklist) => checklist.required === true && checklist.steps.some((step) => answerError(step, answerFromStep(step)) !== null))) reasons.push("Completa y guarda respuestas válidas y sus evidencias en el checklist obligatorio.");
   const currentStepIds = new Set(work.checklists.flatMap((checklist) => checklist.steps.map((step) => String(step.stepId))));
+  const photoScope = JSON.stringify([identity, resourceKey, target]);
+  const photoContext = useRef({ key: photoScope, identity: Symbol() });
+  if (photoContext.current.key !== photoScope) photoContext.current = { key: photoScope, identity: Symbol() };
+  const photoIdentity = photoContext.current.identity;
+  const photoGates = useRef(false);
+  photoGates.current = !readOnly && draft.hydrated && !awaitingConfirmation && (target === undefined || currentStepIds.has(target));
+  const photoCallbacks = useRef(choosePhotos);
+  photoCallbacks.current = choosePhotos;
+  const cameraGuide = useCameraPermissionGuide(photoScope, () => mounted.current && photoGates.current && !callbacks.current.busy && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.offline?.connection?.foreground !== false);
   if (draft.data.report.trim() && draft.data.report.trim() !== draft.data.savedReport) reasons.push("Guarda el reporte pendiente o vacía el texto antes de cerrar.");
   if (Object.entries(draft.data.answers).some(([id, answer]) => currentStepIds.has(id) && !answer.saved)) reasons.push("Guarda o descarta las respuestas que aún están en borrador antes de cerrar.");
   if (draft.data.photos.some((item) => !item.uploaded)) reasons.push("Sube o quita las fotos pendientes antes de cerrar el trabajo.");
+  const canReviewDelivery = !disabled && props.offline?.connection?.foreground !== false;
+  const canSubmitDelivery = !readOnly && online && !hasPendingOperations && work.canExecute === true && reasons.length === 0;
+  const deliveryGates = useRef({ canReviewDelivery, canSubmitDelivery });
+  deliveryGates.current = { canReviewDelivery, canSubmitDelivery };
 
   useEffect(() => {
     mounted.current = true;
     openLocalPhotoScope(storageKey);
     return () => { mounted.current = false; };
   }, [storageKey]);
-  useEffect(() => { if (props.error) setOperationError(props.error); }, [props.error]);
+  useEffect(() => { const error = workActionError(props.error); if (error) setOperationError(error); }, [props.error]);
   useEffect(() => { if (awaitingStatus === work.status) setAwaitingStatus(null); }, [awaitingStatus, work.status]);
   useEffect(() => {
     if (!queuedTimerRef.current || !scopedOperations.some((operation) => operation.id === queuedTimerRef.current?.operationId)) return;
@@ -255,11 +287,33 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     });
   }
 
+  function openDeliveryReview(): void {
+    if (!mounted.current || running.current || parentBusy.current || !deliveryGates.current.canReviewDelivery) return;
+    setCompleting(true);
+  }
+
+  function refreshDeliveryReview(): void {
+    if (!mounted.current || running.current || parentBusy.current || !deliveryGates.current.canReviewDelivery) return;
+    refresh();
+  }
+
+  function deliveryInputAllowed(input: StatusInput): boolean {
+    const current = callbacks.current;
+    if (!deliveryGates.current.canSubmitDelivery || current.busy || current.offline?.connection?.foreground === false || queuedTimerRef.current) return false;
+    if (!canTransitionExecution(current.work, input.status) || !input.executionDates || !executionDatesAllowed(current.work, current.range, input.executionDates, current.group.type === "internal_maintenance")) return false;
+    if (input.isManual) return current.allowEditExecutionTime && manualCompletion(input.executionDates, input.executionStartTime ?? "", input.executionEndTime ?? "", input.endDateOffset ?? 0, current.range, input.status === "completed" ? "completed" : "delivered", current.work).input !== null;
+    if (current.group.type === "internal_maintenance") return true;
+    const date = [...input.executionDates].sort()[0];
+    const snapshot = current.work.schedules?.find((entry) => date !== undefined && entry.queryDates.includes(date));
+    const anchor = date === current.range.startDate ? current.work : snapshot?.work;
+    return anchor === undefined || (automaticExecutionTiming(anchor, executionElapsedSeconds(anchor, date === current.range.startDate ? current.generatedAt : snapshot?.generatedAt, Date.now()))?.minutes ?? 0) > 0;
+  }
+
   function updateStatus(input: StatusInput): void {
     const finalizing = isExecutionFinalization(input.status);
     const gates = executionGates.current;
     if (!mounted.current || gates.readOnly || gates.disabled || callbacks.current.offline?.authBlocked || callbacks.current.offline === null || (!gates.online && props.offline === undefined)) return;
-    if (finalizing && (!gates.online || gates.hasPendingOperations || queuedTimerRef.current)) return;
+    if (finalizing && !deliveryInputAllowed(input)) return;
     if (!finalizing && (gates.timerNeedsAttention || queuedTimerRef.current?.status === input.status || gates.desiredStatus === input.status)) return;
     void runAction("status", async () => {
       if (input.status === "in_progress" && !work.canExecute) throw new Error("Qualitzer no habilita la ejecución de este trabajo.");
@@ -268,7 +322,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       await draft.store.flush();
       if (!mounted.current || callbacks.current.offline === null || callbacks.current.offline?.authBlocked || callbacks.current.staleReadOnly || readOnlyWork(callbacks.current.group, callbacks.current.work)) return;
       if (!finalizing && executionGates.current.timerNeedsAttention) return;
-      if (finalizing && (!executionGates.current.online || executionGates.current.hasPendingOperations || queuedTimerRef.current)) return;
+      if (finalizing && !deliveryInputAllowed(input)) return;
       try { await onStatus(input); }
       catch (error) {
         if (!finalizing && isOfflineQueuedError(error) && error.kind === "timer" && (input.status === "in_progress" || input.status === "paused")) {
@@ -291,7 +345,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     const id = String(step.stepId);
     const signature = answerKey(step, answer);
     if (registeredAnswerKey(answerOperations, step, queuedAnswersRef.current[id]) === signature) {
-      setMessage("Esta respuesta ya está registrada en la cola local. No se ha vuelto a enviar; consulta su estado en el centro offline.");
+      setMessage("Respuesta registrada en el teléfono.");
       return;
     }
     running.current = true;
@@ -312,7 +366,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         if (mounted.current) {
           setQueuedAnswers(queuedAnswersRef.current);
           setOperationError(null);
-          setMessage("Respuesta guardada en este dispositivo · en cola. El progreso del servidor no ha cambiado.");
+          setMessage("Guardado en el teléfono");
         }
         return;
       }
@@ -340,18 +394,34 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     });
   }
 
-  function choosePhotos(source: "camera" | "library"): void {
-    if (readOnly || disabled) return;
+  async function choosePhotos(source: "camera" | "library", isCurrent: () => boolean = () => true): Promise<void> {
+    const securityBoundResult = securityRef.current !== null;
+    const allowed = (): boolean => isCurrent() && mounted.current && photoContext.current.identity === photoIdentity && photoGates.current && (securityBoundResult ? securityRef.current?.isUnlocked() === true : (securityRef.current?.isUnlocked() ?? true)) && !callbacks.current.busy && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.offline?.connection?.foreground !== false;
+    if (!allowed() || running.current || parentBusy.current) return;
     const selectedTarget = target;
     const selection = ++pickerEpoch.current;
-    void runAction("photos", async () => {
-      const pending = draft.store.getSnapshot().data.photos.filter((item) => !item.uploaded);
-      const result = await pickPhotos(source, MAX_PHOTOS - pending.length);
-      if (result.canceled || !mounted.current || selection !== pickerEpoch.current) return;
-      const photos = await preparePhotos(storageKey, result.assets, pending.map((item) => item.photo));
-      if (Platform.OS === "web" && selection !== pickerEpoch.current) return;
-      draft.store.addPhotos(photos, selectedTarget);
-      await draft.store.flush();
+    const canContinue = (): boolean => selection === pickerEpoch.current && allowed();
+    let permissionError: CameraPermissionError | null = null;
+    await runAction("photos", async () => {
+      try {
+        const pending = draft.store.getSnapshot().data.photos.filter((item) => !item.uploaded);
+        const result = await pickPhotos(source, MAX_PHOTOS - pending.length, runNativePicker, canContinue);
+        if (result.canceled || !canContinue() || result.assets.length === 0) return;
+        const photos = await preparePhotos(storageKey, result.assets, pending.map((item) => item.photo));
+        if (!canContinue()) {
+          for (const photo of photos) deleteLocalPhoto(storageKey, photo);
+          return;
+        }
+        draft.store.addPhotos(photos, selectedTarget);
+        await draft.store.flush();
+      } catch (error) {
+        if (source === "camera" && error instanceof CameraPermissionError) permissionError = error;
+        else if (canContinue()) throw error;
+      }
+    });
+    if (permissionError && canContinue()) cameraGuide.handleError(permissionError, {
+      onRetry: current => photoCallbacks.current("camera", current),
+      onGallery: current => photoCallbacks.current("library", current),
     });
   }
 
@@ -423,14 +493,12 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const checklistNotices = <View style={styles.tight}>
     {mode === "demo" ? <Text style={styles.caption}>Demostración · cambios locales</Text> : null}
     {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
-    {message ? <Notice message={message} onDismiss={() => setMessage(null)} /> : null}
-    {draft.error ? <><Notice message={draft.error} tone="error" /><Button title="Reintentar almacenamiento local" variant="secondary" disabled={locked} onPress={() => { void runAction("draft", draft.store.retry); }} /></> : null}
+    {message ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{message}</Text> : null}
+    {draft.error ? <><Notice message={userErrorText(draft.error)} tone="error" /><Button title="Reintentar almacenamiento local" variant="secondary" disabled={locked} onPress={() => { void runAction("draft", draft.store.retry); }} /></> : null}
     {!draft.hydrated || draft.saving ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{storageMessage}</Text> : null}
-    {!online ? <Notice message={offlineReady ? "Sin conexión verificada. Las respuestas se guardan en la cola local; no cuentan como confirmadas. Eliminar y entregar requieren conexión." : "Recuperando la cola local. Espera antes de guardar."} tone="warning" /> : null}
     {staleReadOnly ? <Notice message="Ficha sin verificar. Actualiza antes de responder; los borradores se conservan." tone="warning" /> : null}
     {localWork ? <Notice message="Trabajo pendiente de sincronizar. Las respuestas se habilitarán después de la confirmación del servidor." tone="warning" /> : null}
-    {awaitingConfirmation ? <Notice message="Cambio aceptado. Actualiza la ficha para habilitar nuevas acciones." tone="warning" /> : null}
-    {timerPending ? <Notice message={`${timerPendingLabel(pendingTimer)} · solicitado: ${STATUS_LABELS[desiredStatus]}.${pendingTimer?.lastError ? ` ${operationErrorReason(pendingTimer.lastError)}` : ""}${pendingTimer?.status === "applied" && props.offline?.lastError ? " No se pudo actualizar la ficha. Reintenta la actualización manual." : ""}`} tone="warning" /> : null}
+    {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
     <QueuedNotice answers={pendingAnswers} count={pendingAnswers.length + Object.values(queuedAnswers).filter((entry) => !answerOperations.some((operation) => operation.id === entry.operationId)).length} />
     {exitWarning ? <View style={styles.tight}>
       <Notice message="No se pudo proteger el borrador. Volver ahora puede perder cambios al cerrar la aplicación." tone="warning" />
@@ -449,7 +517,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     headerAction={target !== undefined ? <IconButton name="folder-open-outline" label="Archivos del trabajo" onPress={() => setTarget(undefined)} /> : undefined}
     notices={<>
       {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
-      {draft.error ? <Notice message={draft.error} tone="error" /> : null}
+      {draft.error ? <Notice message={userErrorText(draft.error)} tone="error" /> : null}
       {target !== undefined && !currentStepIds.has(target) ? <Notice message="El paso ya no está en este trabajo. Vuelve al checklist; el borrador se conserva." tone="warning" /> : null}
       {staleReadOnly ? <Notice message="Ficha sin verificar. Actualiza; los borradores se conservan." tone="warning" /> : null}
       {exitWarning ? <><Notice message="No se pudo proteger el borrador del trabajo." tone="warning" /><Button title="Seguir aquí y conservar los cambios" variant="secondary" onPress={() => setExitWarning(false)} /><Button title="Volver sin copia duradera" variant="danger" onPress={onBack} /></> : null}
@@ -512,9 +580,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           </Card> : null}
           {message ? <Notice message={message} tone={props.offline !== undefined ? "info" : "success"} onDismiss={() => setMessage(null)} /> : null}
           {readOnly ? <Notice message={localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o completado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
-          {!online ? <Notice message={offlineReady ? "Sin conexión verificada: iniciar y pausar se guardan en cola, sin confirmar tiempos. Reportar, eliminar y entregar requieren conexión." : "Recupera la cola local y verifica tu sesión antes de guardar cambios. Los borradores se conservan."} tone="warning" /> : null}
-          {timerPending ? <Notice message={`${timerPendingLabel(pendingTimer)} · solicitado: ${STATUS_LABELS[desiredStatus]}. Estado recibido: ${STATUS_LABELS[work.status]}.${pendingTimer ? ` ${operationStatusLabels[pendingTimer.status]}.` : ""}${pendingTimer?.lastError ? ` ${operationErrorReason(pendingTimer.lastError)}` : ""}${pendingTimer?.status === "applied" && props.offline?.lastError ? " No se pudo actualizar la ficha. Reintenta la actualización manual." : ""}`} tone="warning" /> : null}
-          {awaitingConfirmation ? <Notice message="El cambio fue aceptado. Esperando la ficha actualizada para habilitar nuevas acciones. Si la actualización falló, pulsa Actualizar." tone="warning" /> : null}
+          {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
           {!compactDetail ? <>
           <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
             <Text style={styles.heroOverline}>{maintenance ? "MANTENIMIENTO INTERNO" : group.type === "external_ot" ? "ORDEN DE TRABAJO" : "ASIGNACIÓN DIRECTA"}</Text>
@@ -527,19 +593,19 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
               <View style={styles.metric}><Text style={styles.heroText}>Prioridad</Text><Text style={styles.metricValue}>{work.priority === "high" ? "Alta" : work.priority === "medium" ? "Media" : "Baja"}</Text></View>
             </View>
           </LinearGradient>
-          {!readOnly ? <Card style={styles.stack}>
+          <Card style={styles.stack}>
             <SectionTitle title="Control de ejecución" subtitle={`Fecha para iniciar o pausar: ${shortDate(selectedDate)} · ${selectedDate}`} />
             {!work.canExecute ? <Notice message="La ejecución no está habilitada por Qualitzer. Puedes revisar los requisitos y guardar la información pendiente." tone="warning" /> : null}
-            {work.missingRequiredInfo.length > 0 ? <View style={styles.tight}>{work.missingRequiredInfo.map((item, index) => <BodyText key={`${index}:${item}`}>• {plainText(item)}</BodyText>)}</View> : null}
+            {work.missingRequiredInfo.length > 0 ? <BodyText>Revisa la información requerida en la ficha antes de confirmar la entrega.</BodyText> : null}
             <View style={styles.row}>
-              {desiredStatus === "in_progress" ? <Button title="Pausar trabajo" variant="secondary" icon="pause-outline" disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null}
-              <Button title="Entregar trabajo" icon="checkmark-circle-outline" variant="secondary" disabled={disabled || !online || !work.canExecute || hasPendingOperations} onPress={() => { if (mounted.current && !executionGates.current.disabled && !executionGates.current.readOnly && !executionGates.current.hasPendingOperations && !queuedTimerRef.current && executionGates.current.online) setCompleting(true); }} />
+              {!readOnly && (desiredStatus === "in_progress" ? <Button title={`Pausar trabajo${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={`${desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
+              <Button title="Entregar trabajo" icon="checkmark-circle-outline" variant="secondary" disabled={!canReviewDelivery} onPress={openDeliveryReview} />
             </View>
             {busy || action === "status" ? <BodyText>Protegiendo el cambio… Espera al guardado local antes de realizar otra acción.</BodyText> : null}
-          </Card> : null}
+          </Card>
           <View style={styles.tight}>
             <Text accessibilityLiveRegion="polite" style={styles.caption}>{draft.error ? "El borrador aún no está protegido" : storageMessage}</Text>
-            {draft.error ? <View style={styles.tight}><Notice message={draft.error} tone="error" /><Button title="Reintentar almacenamiento local" variant="secondary" disabled={locked} onPress={() => { void runAction("draft", draft.store.retry); }} /></View> : null}
+            {draft.error ? <View style={styles.tight}><Notice message={userErrorText(draft.error)} tone="error" /><Button title="Reintentar almacenamiento local" variant="secondary" disabled={locked} onPress={() => { void runAction("draft", draft.store.retry); }} /></View> : null}
             <Text style={styles.caption}>Última carga: {loadedAt}</Text>
           </View>
           <View style={styles.tabs} accessibilityRole="tablist">
@@ -553,7 +619,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           {tab === "equipment" ? <EquipmentTab group={group} work={work} /> : null}
         </ScrollView>}
       </KeyboardAvoidingView>
-      {completing && online && !readOnly && !hasPendingOperations ? <CompletionDialog work={evidenceWork} allowEditExecutionTime={props.allowEditExecutionTime} generatedAt={generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} error={operationError} busy={locked} mode={mode} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null}
+      <CameraPermissionGuide guide={cameraGuide} />
+      {completing ? <CompletionDialog work={evidenceWork} allowEditExecutionTime={props.allowEditExecutionTime} generatedAt={generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} canSubmit={canSubmitDelivery && canReviewDelivery} error={operationError} busy={locked} mode={mode} onRefresh={offlineReady && props.offline?.connection?.foreground !== false ? refreshDeliveryReview : undefined} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null}
     </SafeAreaView>
   );
 }

@@ -1,5 +1,4 @@
 import type { OfflineConnection, OfflineSnapshot } from "../domain/offline";
-import { requiresDeployment } from "./connection";
 
 export function snapshotConnection(snapshot: OfflineSnapshot): OfflineConnection {
   return snapshot.connection ?? {
@@ -18,8 +17,7 @@ export function connectionPresentation(snapshot: OfflineSnapshot | null): {
     : status === "offline" ? "Sin red"
     : status === "unreachable" ? "Sin acceso a Qualitzer"
     : status === "auth_required" ? "Verificar sesión"
-    : status === "service_error" ? requiresDeployment(connection.errorCode) ? "Servidor requiere actualización"
-      : /INVALID_RESPONSE|UNEXPECTED_RESPONSE|CONTRACT_UNAVAILABLE|RESULT_MISMATCH|RECEIPT_ID_MISMATCH/.test(connection.errorCode ?? "") ? "Configuración del servidor incompatible" : "Servidor no disponible"
+    : status === "service_error" ? "Sincronización no disponible"
     : "Verificando conexión con Qualitzer…";
   const cachedAt = snapshot.coverage.reduce<number | null>((latest, entry) => Number.isFinite(entry.fetchedAt) ? Math.max(latest ?? entry.fetchedAt, entry.fetchedAt) : latest, null);
   const secondary = [!connection.foreground ? "Sincronización en pausa: vuelve a la app para continuar." : snapshot.syncing ? "Sincronizando pendientes…" : "",
@@ -35,8 +33,7 @@ export function compactConnectionPresentation(snapshot: OfflineSnapshot | null):
   if (!snapshot) return { title: "Recuperando estado local…", detail: "Comprobando pendientes" };
   const connection = snapshotConnection(snapshot);
   const title = presentation.title === "Verificando conexión con Qualitzer…" ? "Verificando conexión…"
-    : presentation.title === "Configuración del servidor incompatible" ? "Servidor incompatible"
-    : presentation.title === "Servidor requiere actualización" ? "Actualizar servidor" : presentation.title;
+    : presentation.title;
   const pending = snapshot.pending === 1 ? "1 pendiente" : `${snapshot.pending} pendientes`;
   const counts = snapshot.conflicts > 0 ? `${pending} · ${snapshot.conflicts} por revisar` : pending;
   const detail = snapshot.pending > 0 || snapshot.conflicts > 0 ? counts

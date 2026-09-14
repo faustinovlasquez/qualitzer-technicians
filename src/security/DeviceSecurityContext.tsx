@@ -1,16 +1,25 @@
 import { createContext, useContext } from "react";
 import { Modal as NativeModal, View, type ModalProps } from "react-native";
 import type { DeviceLockController } from "./DeviceLockController";
-import type { DeviceLockSnapshot } from "./contracts";
+import type { DeviceLockSnapshot, TrustedNativePicker } from "./contracts";
 
 export interface DeviceSecurityUi {
   controller: DeviceLockController;
   state: DeviceLockSnapshot;
   blocked: boolean;
   isUnlocked(): boolean;
+  runTrustedNativePicker?: TrustedNativePicker;
 }
 
 export const DeviceSecurityContext = createContext<DeviceSecurityUi | null>(null);
+
+const directPicker: TrustedNativePicker = operation => operation();
+const unavailablePicker: TrustedNativePicker = async () => { throw new Error("TRUSTED_NATIVE_PICKER_PROVIDER_REQUIRED"); };
+
+export function useTrustedNativePicker(): TrustedNativePicker {
+  const context = useContext(DeviceSecurityContext);
+  return context === null ? directPicker : context.runTrustedNativePicker ?? unavailablePicker;
+}
 
 export function useDeviceSecurity(): DeviceSecurityUi {
   const context = useContext(DeviceSecurityContext);

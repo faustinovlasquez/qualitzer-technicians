@@ -9,9 +9,9 @@ import { isOfflineQueuedError, type OfflineSnapshot } from "../../domain/offline
 import { Badge, Button, Card, type BadgeTone } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import { Notice } from "../workDetail/DetailUi";
-import { errorMessage } from "../workDetail/detailRules";
 import { isPendingLocalWork } from "../offline/offlineDashboardUi";
-import { operationsForWork, pendingTimerForWork, timerPendingLabel, operationErrorReason, operationStatusLabels, type PendingTimer, type QueuedTimerMarker } from "../offline/offlineUi";
+import { operationsForWork, pendingTimerForWork, timerPendingLabel, type PendingTimer, type QueuedTimerMarker } from "../offline/offlineUi";
+import { operationNeedsAttention, syncUserError, userActionError as errorMessage } from "../offline/syncUserPresentation";
 import { AssignmentMetadataRow } from "./AssignmentMetadataRow";
 import { equipmentLabel, fullDate, safeCount, scheduleTime, statusTones } from "./assignmentPresentation";
 
@@ -69,8 +69,7 @@ function WorkExecution({ work, generatedAt, online = true, pending = false }: Pi
     </View>
     {timing.overtimeMinutes > 0 ? <Text style={styles.overtime}>{duration(timing.overtimeMinutes)} sobre lo planificado</Text> : null}
     {running ? <Text style={styles.note}>En ejecución · el servidor confirma el tiempo final.</Text> : null}
-    {pending ? <Text style={styles.note}>Último tiempo recibido, sin incremento local mientras se confirma o actualiza el estado.</Text> : null}
-    {!online ? <Text style={styles.note}>Último tiempo recibido · no se simula el cronómetro sin conexión o sin ficha verificada.</Text> : null}
+    {pending || !online ? <Text style={styles.note}>Último tiempo recibido</Text> : null}
   </View>;
 }
 
@@ -104,8 +103,6 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const offlineReady = offline !== null && !offline?.authBlocked;
   const verifiedOnline = online && (offline === undefined || offline?.online === true) && offlineReady;
   const executionAvailable = offlineReady && (verifiedOnline || offline !== undefined) && !localWork && !staleReadOnly && !work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT");
-  const pendingOperations = timerPending || scopedOperations.some((operation) => operation.status !== "applied")
-    || operationsForWork(offline, { groupId: group.id, startDate: date, endDate: date, companyBranchId }).some((operation) => operation.status !== "applied");
   const codeLabels = localWork ? [] : [codes.workCode, codes.workOrderCode, codes.negotiationCode].filter((code) => code !== null);
   const plannedDates = [...new Set((work.plannedDates ?? []).map(assignmentDay).filter(Boolean))].sort();
   const customer = work.workCustomerName ?? group.customerName;
@@ -119,8 +116,9 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const pausing = desiredStatus === "in_progress";
   const actionTitle = pausing ? "Pausar" : desiredStatus === "paused" ? "Reanudar" : "Iniciar";
   const canChangeStatus = executionAvailable && !finished && !timerNeedsAttention && (pausing || work.canExecute);
-  const gates = useRef({ canChangeStatus, canDeliver: false, desiredStatus });
-  gates.current = { canChangeStatus, canDeliver: executionAvailable && verifiedOnline && !pendingOperations && !finished && work.canExecute, desiredStatus };
+  const canReviewDelivery = offlineReady && offline?.connection?.foreground !== false;
+  const gates = useRef({ canChangeStatus, canReviewDelivery, desiredStatus });
+  gates.current = { canChangeStatus, canReviewDelivery, desiredStatus };
 
   useEffect(() => {
     mounted.current = true;
@@ -154,7 +152,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
 
   function openWork(options?: WorkOpenOptions): void {
     if (!mounted.current || actionRef.current || busyRef.current) return;
-    if (options?.action && !gates.current.canDeliver) return;
+    if (options?.action && !gates.current.canReviewDelivery) return;
     try { onOpenWork(group, work, options); }
     catch (error) { setOperationError(errorMessage(error)); }
   }
@@ -193,7 +191,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       <AssignmentMetadataRow icon="time-outline" text={scheduleTime(work)} />
       {plannedDates.length > 1 ? <AssignmentMetadataRow icon="calendar-outline" text={`Fechas planificadas: ${plannedDates.map(shortDate).join(" · ")}`} /> : null}
     </View>
-    {timerPending ? <Notice message={`${timerPendingLabel(pendingTimer)} · solicitado: ${STATUS_LABELS[desiredStatus]}. Estado recibido: ${STATUS_LABELS[work.status]}.${pendingTimer ? ` ${operationStatusLabels[pendingTimer.status]}.` : ""}${pendingTimer?.lastError ? ` ${operationErrorReason(pendingTimer.lastError)}` : ""}${pendingTimer?.status === "applied" && offline?.lastError ? " No se pudo actualizar la ficha. Reintenta la actualización manual desde el detalle." : ""}`} tone="warning" /> : null}
+    {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
     <WorkExecution work={work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending} />
     {total > 0 ? <View style={styles.execution}>
       <View style={styles.between}><Text style={styles.note}>Verificación completada</Text><Text style={styles.count}>{done}/{total}</Text></View>
@@ -203,10 +201,10 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     </View> : null}
     <View style={styles.footer}>
       {!finished ? <View style={styles.actions}>
-        <Button title={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={styles.action} />
-        <Button title="Entregar" icon="checkmark-done-outline" variant="secondary" disabled={locked || !gates.current.canDeliver} onPress={() => openWork({ action: "deliver" })} style={styles.action} />
+        <Button title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={styles.action} />
+        <Button title="Entregar" accessibilityLabel="Entregar: abrir revisión de requisitos, sin confirmar todavía" icon="checkmark-done-outline" variant="secondary" disabled={locked || !canReviewDelivery} onPress={() => openWork({ action: "deliver" })} style={styles.action} />
       </View> : <Text style={styles.note}>Trabajo {work.status === "delivered" ? "entregado" : "completado"} · archivos, checklist y comentarios disponibles para consulta.</Text>}
-      {!finished && !work.canExecute ? <Text style={styles.note}>Qualitzer no habilita iniciar, reanudar o entregar este trabajo. Consulta los requisitos en su detalle.</Text> : null}
+      {!finished && !work.canExecute ? <Text style={styles.note}>La ejecución aún no está habilitada. Pulsa Entregar para revisar los requisitos pendientes.</Text> : null}
       <View style={styles.actions}>
         <Button title={`Archivos (${safeCount(work.filesCount)})`} icon="attach-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.shortcut} />
         <Button title={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.shortcut} />

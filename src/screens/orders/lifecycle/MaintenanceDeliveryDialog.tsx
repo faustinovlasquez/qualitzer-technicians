@@ -4,6 +4,7 @@ import { PrivateModal as Modal } from "../../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../../../domain/orderLifecycle";
 import { BodyText, Button, Field, SectionTitle } from "../../../ui/components";
+import { NumericSelectField } from "../../../ui/time/NumericSelectField";
 import { ChoiceButton, Notice } from "../../workDetail/DetailUi";
 import { DELIVERY_NOTE_LIMIT, DELIVERY_RECEIVER_LIMIT, deliveryDraftErrors, deliveryInput, lifecycleError, requiresClientSignature, type DeliveryDraft, type DeliveryErrors } from "./lifecycleRules";
 import { styles } from "./lifecycleStyles";
@@ -111,8 +112,8 @@ export function MaintenanceDeliveryDialog(props: MaintenanceDeliveryDialogProps)
             <View style={styles.tight}>
               <Text style={styles.label}>Duración total de la OT</Text>
               <View style={styles.row}>
-                <Field label="Horas (0–99)" value={draft.hours} onChangeText={(hours) => update({ hours })} editable={!blocked} maxLength={2} keyboardType="number-pad" containerStyle={styles.number} />
-                <Field label="Minutos (0–59)" value={draft.minutes} onChangeText={(minutes) => update({ minutes })} editable={!blocked} maxLength={2} keyboardType="number-pad" containerStyle={styles.number} />
+                <NumericSelectField label="Horas (0–99)" value={draft.hours} max={99} onChange={(hours) => update({ hours })} disabled={blocked} scopeKey={context.groupId} containerStyle={styles.number} />
+                <NumericSelectField label="Minutos (0–59)" value={draft.minutes} max={59} onChange={(minutes) => update({ minutes })} disabled={blocked} scopeKey={context.groupId} containerStyle={styles.number} />
               </View>
               {errors.duration ? <Text accessibilityRole="alert" style={styles.error}>{errors.duration}</Text> : null}
               <BodyText>Sugerida según el tiempo registrado, sin duplicar cronómetros. Puedes corregirla; cero se envía como duración no informada.</BodyText>

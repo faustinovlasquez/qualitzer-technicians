@@ -65,7 +65,7 @@ test("branch brand readiness requires the selected enabled branch, not any membe
 test("App wires branding eligibility without changing auth or forwarding token to branding", () => {
   const source = readFileSync(resolve(__dirname, "../../../App.tsx"), "utf8");
   assert.match(source, /companyBrandingContext\(app\)/);
-  assert.match(source, /useCompanyBranding\(brandingContext\.input, app\.busy, brandingContext\.automaticPinEligible\)/);
+  assert.match(source, /useCompanyBranding\(brandingContext\.input, app\.busy \|\| security\.blocked, allowAutomaticPin && brandingContext\.automaticPinEligible && !security\.blocked\)/);
   const session = { ...fixture().session!, token: "synthetic-not-forwarded" };
   const result = companyBrandingContext({ ...fixture(), session });
   assert.doesNotMatch(JSON.stringify(result), /synthetic-not-forwarded|"token"|"user"/);

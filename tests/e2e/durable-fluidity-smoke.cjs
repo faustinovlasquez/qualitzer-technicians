@@ -151,7 +151,7 @@ async function main() {
         await page.clock.runFor(3100); await settle();
         assert.equal(await page.locator("body").innerText(), before, "Pending timer does not simulate elapsed progress");
         await page.evaluate(() => window.durableFluidity.applied()); await settle();
-        await page.getByText(/Envío confirmado · esperando actualizar estado y tiempo/).waitFor();
+        await page.getByText(`${names[2]} · Actualizando…`, { exact: true }).waitFor();
         assert.equal(await button(names[2]).isDisabled(), true);
         assert.equal(await button(names[3]).isDisabled(), true);
         await screenshot(`${width}-${screen}-applied-stale`);
@@ -160,7 +160,7 @@ async function main() {
         await page.evaluate(() => window.durableFluidity.publishWork("pending", true)); await settle();
         await button(names[0]).waitFor();
         assert.equal(await button(names[0]).isEnabled(), true, "Fresh authoritative status wins over desired paused state");
-        assert.equal(await page.getByText(/Envío confirmado · esperando actualizar estado y tiempo/).count(), 0);
+        assert.equal(await page.getByText(`${names[2]} · Actualizando…`, { exact: true }).count(), 0);
         assert.equal((await metrics()).attempts.length, 2, "Reconciliation never resubmits");
         await screenshot(`${width}-${screen}-reconciled`);
       });
@@ -181,7 +181,7 @@ async function main() {
         assert.equal((await metrics()).work.checklistDone, 0);
         assert.equal((await metrics()).refreshes, 0);
         await button("Paso anterior sin guardar").click();
-        await page.getByText("En cola · sin confirmar", { exact: true }).waitFor();
+        await page.getByText("Respuesta registrada en el teléfono", { exact: true }).waitFor();
         assert.equal(await button("Respuesta ya registrada en cola").isDisabled(), true);
         assert.equal((await metrics()).attempts.length, 1);
         await screenshot(`${width}-answer-queued-no-progress`);
@@ -258,7 +258,7 @@ async function main() {
         assert.equal(await button("Cancelar").isDisabled(), true);
         await screenshot(`${width}-association-commit-held`);
         await release(1); await button("Confirmar asociación").waitFor({ state: "detached" });
-        await page.getByText("Asociación en cola · pasos pendientes de confirmar.", { exact: true }).waitFor();
+        await page.getByText(/^Checklist \d+ · Pendiente$/, { exact: true }).waitFor();
         assert.equal(await page.getByRole("textbox", { name: "Buscar por nombre o código", exact: true }).count(), 0);
         assert.equal(await button("Agregar checklist").isEnabled(), true);
         assert.equal((await metrics()).refreshes, 0, "Queued association does not await a remote detail refresh");

@@ -113,6 +113,27 @@
 			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
 			"isBackground": true,
 			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de camara y mensajes",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK permisos y entrega",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de horas y sincronizacion",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"isBackground": true,
+			"problemMatcher": []
 		}
 	]
 }

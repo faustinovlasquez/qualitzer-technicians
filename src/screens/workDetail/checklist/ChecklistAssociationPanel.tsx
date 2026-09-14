@@ -4,7 +4,8 @@ import { checklistAssociationBlocked, type ChecklistAssignmentResult, type Check
 import { plainText } from "../../../domain/format";
 import type { AssignmentGroup, AssignmentWork, Session } from "../../../domain/models";
 import { isOfflineQueuedError } from "../../../domain/offline";
-import { operationErrorReason, operationStatusLabels, type PendingChecklist } from "../../offline/offlineUi";
+import { operationStatusLabels, type PendingChecklist } from "../../offline/offlineUi";
+import { syncUserError, userErrorText } from "../../offline/syncUserPresentation";
 import { Badge, BodyText, Button, Card, Field, SectionTitle } from "../../../ui/components";
 import { palette } from "../../../ui/theme";
 
@@ -107,15 +108,14 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
       <SectionTitle title="Checklists de la empresa" subtitle="Agrega un checklist existente sin cambiar respuestas ni borradores de los demás." />
       {mode === "demo" ? <Badge label="Catálogo de demostración" tone="info" /> : null}
       <Button title="Agregar checklist" icon="add-circle-outline" disabled={disabled || loading} onPress={() => { setOpened(true); setConfirmed(null); void load(0, search); }} />
-      {blocked ? <BodyText>{blocked}</BodyText> : <BodyText>{online ? "La asociación se valida en el servidor al sincronizar." : "Solo están disponibles las búsquedas guardadas en este dispositivo."} La selección queda pendiente hasta la confirmación; no se inventan pasos ni respuestas.</BodyText>}
+      {blocked ? <BodyText>{blocked}</BodyText> : !online && opened ? <BodyText>Solo búsquedas guardadas en el teléfono.</BodyText> : null}
       {pending.filter((operation) => operation.status !== "applied").map((operation) => <View key={operation.id} style={styles.panel}>
         <Badge label={`Checklist ${operation.payload.checklistId} · ${operationStatusLabels[operation.status]}`} tone="warning" />
-        <BodyText>Asociación en cola · pasos pendientes de confirmar.</BodyText>
-        {operation.lastError ? <BodyText>{operationErrorReason(operation.lastError)}</BodyText> : null}
+        {operation.lastError ? <BodyText>{syncUserError(operation.lastError)}</BodyText> : null}
       </View>)}
       {localQueued.filter((entry) => !pending.some((operation) => operation.id === entry.operationId)).map((entry) => <Badge key={entry.operationId} label={`Checklist ${entry.checklistId} · asociación en cola`} tone="warning" />)}
       {confirmed ? <Badge label={confirmed.alreadyAssigned ? "El checklist ya estaba asociado" : "Checklist asociado"} tone="success" /> : null}
-      {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
+      {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{userErrorText(error)}</Text> : null}
       {refreshPending && confirmed ? <Button title="Actualizar detalle" variant="secondary" disabled={disabled} onPress={() => { void refresh(confirmed); }} /> : null}
       {opened && !blocked ? <View style={styles.panel}>
         <Field label="Buscar por nombre o código" value={search} onChangeText={setSearch} maxLength={120} editable={!saving && !busy} onSubmitEditing={() => { void load(0, search); }} />

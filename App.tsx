@@ -225,6 +225,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
 function ApplicationRoot() {
   const security = useDeviceSecurity();
   const app = useTechnicianApp({ allowed: !security.blocked, isAllowed: security.isUnlocked });
+  useEffect(() => () => security.controller.invalidateTrustedNativeInteraction(), [security.controller, app.storageKey, app.session?.token, app.session?.user.workerId]);
   const [securityConsidered, setSecurityConsidered] = useState<string | null>(null);
   const previousBlocked = useRef(security.blocked);
   useEffect(() => {

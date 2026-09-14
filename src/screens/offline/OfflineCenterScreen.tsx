@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { DateRange } from "../../domain/models";
 import type { OfflineController, OfflineOperation, OfflineSnapshot } from "../../domain/offline";
 import { OFFLINE_LIMITS } from "../../offline/contracts";
+import { requiresDeployment } from "../../offline/connection";
 import { connectionPresentation } from "../../offline/connectionPresentation";
 import { Badge, BodyText, Button, Card, IconButton, SectionTitle } from "../../ui/components";
 import { Notice } from "../workDetail/DetailUi";
@@ -12,6 +13,8 @@ import { styles } from "../workDetail/detailStyles";
 import { fileSizeLabel } from "../workDetail/files/fileRules";
 import { OfflineFileCard } from "./OfflineFileCard";
 import { canRetryOperation, coverageDates, dependencyInfo, operationErrorReason, operationStatusLabels, operationTitle, pendingDocumentAttachment } from "./offlineUi";
+import { PENDING_CHANGES_MESSAGE, syncUserError, userErrorText } from "./syncUserPresentation";
+import { captureSyncAttempt, deploymentPendingCount, requestManualSync, syncAttemptMessage, syncAttemptPresentation, syncSnapshotKey, type SyncAttempt } from "./syncAttemptPresentation";
 
 export interface OfflineCenterScreenProps {
   controller: OfflineController;
@@ -29,6 +32,7 @@ function OperationDetails({ operation, title = "Ver detalles técnicos" }: { ope
     <Button title={expanded ? "Ocultar detalles" : title} variant="ghost" onPress={() => setExpanded(!expanded)} />
     {expanded ? <>
     <Text selectable style={styles.caption}>Operación: {operation.id}</Text>
+    {operation.lastError ? <Text selectable style={styles.caption}>{operation.lastError} · {operationErrorReason(operation.lastError)}</Text> : null}
     <BodyText>{new Date(operation.createdAt).toLocaleString("es-CL")} · {operation.attempts} intento(s)</BodyText>
     {operation.kind === "create" ? <>
       <Text selectable style={styles.label}>{JSON.stringify(operation.input, null, 2)}</Text>
@@ -53,6 +57,26 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
   const lock = useRef(false);
   const [action, setAction] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [technicalDetails, setTechnicalDetails] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ attempt: SyncAttempt; key: string } | null>(null);
+  const [now, setNow] = useState(Date.now);
+  const syncKey = syncSnapshotKey(snapshot);
+  const feedback = syncResult?.key === syncKey ? syncAttemptPresentation(syncResult.attempt, snapshot) : null;
+  useEffect(() => {
+    setSyncResult((previous) => previous && previous.key !== syncKey ? null : previous);
+  }, [syncKey]);
+  const nextAttemptAt = feedback?.nextAttemptAt;
+  useEffect(() => {
+    if (nextAttemptAt === undefined || nextAttemptAt <= Date.now()) return;
+    setNow(Date.now());
+    const timer = setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= nextAttemptAt) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [nextAttemptAt]);
+  const awaitingDeployment = snapshot ? deploymentPendingCount(snapshot) : 0;
   const presentation = connectionPresentation(snapshot);
   const dependencies = useMemo(() => new Map(snapshot?.operations.map((operation) => [operation.id, operation]) ?? []), [snapshot?.operations]);
   const dates = coverageDates(range);
@@ -62,9 +86,18 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
     lock.current = true;
     setAction(name);
     setMessage(null);
+    setSyncResult(null);
     try { await task(); }
     catch (error) { setMessage(errorMessage(error)); }
     finally { lock.current = false; setAction(null); }
+  }
+  async function sync(): Promise<void> {
+    const before = captureSyncAttempt(controller.getSnapshot());
+    let attempt: SyncAttempt = { before };
+    try { await requestManualSync(controller); }
+    catch (error) { attempt = { before, failure: { error } }; }
+    setNow(Date.now());
+    setSyncResult({ attempt, key: syncSnapshotKey(controller.getSnapshot()) });
   }
   const files = new Map((snapshot?.operations ?? []).flatMap((operation) => operation.kind === "document" ? [[operation.file.id, operation.file.size] as const] : []));
   return <SafeAreaView style={styles.safe}>
@@ -77,9 +110,18 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         <BodyText>Datos locales al: {snapshot?.cachedAt ? new Date(snapshot.cachedAt).toLocaleString("es-CL") : "No disponible"}</BodyText>
         <BodyText>Última confirmación: {snapshot?.lastSyncedAt ? new Date(snapshot.lastSyncedAt).toLocaleString("es-CL") : "No disponible"}</BodyText>
         {snapshot?.authBlocked ? <Notice message="La sincronización está bloqueada hasta verificar de nuevo la sesión. Los pendientes se conservan; esta pantalla no cambia la autenticación." tone="warning" /> : null}
-        {snapshot?.lastError ? <Notice message={`${operationErrorReason(snapshot.lastError)} (${snapshot.lastError})`} tone="warning" /> : null}
-        <Button title="Sincronizar ahora" loading={action === "sync" || snapshot?.syncing} disabled={!presentation.canSync || !!action} onPress={() => void run("sync", () => controller.syncNow())} />
-        <BodyText>Sincroniza con la app abierta. No se garantiza envío con la app cerrada. Iniciar, pausar y asociar checklists se guardan en cola; no confirman tiempos ni pasos. Reporte, eliminación y entrega requieren conexión. Entrega solo cuando no queden operaciones pendientes.</BodyText>
+        {snapshot && snapshot.pending > 0 ? <BodyText>{PENDING_CHANGES_MESSAGE}</BodyText> : null}
+        {!feedback && awaitingDeployment > 0 ? <BodyText>{awaitingDeployment} {awaitingDeployment === 1 ? "cambio requiere" : "cambios requieren"} actualizar el servicio. Contacta a soporte.</BodyText> : null}
+        {!feedback && (snapshot?.lastError || snapshot?.connection?.errorCode) && !requiresDeployment(snapshot.lastError ?? snapshot.connection?.errorCode) ? <Notice message={syncUserError(snapshot.lastError ?? snapshot.connection?.errorCode)} tone="warning" /> : null}
+        <Button title={technicalDetails ? "Ocultar diagnóstico de sincronización" : "Ver detalles técnicos de sincronización"} variant="ghost" onPress={() => setTechnicalDetails(!technicalDetails)} />
+        {technicalDetails ? <>
+          {snapshot?.lastError ? <Text selectable style={styles.caption}>{snapshot.lastError} · {operationErrorReason(snapshot.lastError)}</Text> : null}
+          {snapshot?.connection?.errorCode ? <Text selectable style={styles.caption}>{snapshot.connection.errorCode}</Text> : null}
+          {message ? <Text selectable style={styles.caption}>{message}</Text> : null}
+        </> : null}
+        <Button title="Sincronizar ahora" loading={action === "sync" || snapshot?.syncing} disabled={!presentation.canSync || !!action} onPress={() => void run("sync", sync)} />
+        {feedback ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{syncAttemptMessage(feedback, now)}</Text> : null}
+        <BodyText>Mantén la app abierta para enviar los cambios. La entrega requiere conexión y no tener pendientes.</BodyText>
       </Card>
       <Card style={styles.stack}>
         <SectionTitle title="Preparar hasta 7 fechas" subtitle={`${range.startDate} — ${range.endDate}`} />
@@ -97,7 +139,7 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         <BodyText>Límites: {fileSizeLabel(OFFLINE_LIMITS.fileBytes)} por archivo · {fileSizeLabel(OFFLINE_LIMITS.totalFileBytes)} globales · caché de datos {fileSizeLabel(OFFLINE_LIMITS.cacheBytes)}. Espacio libre y descargas confirmadas: no informados por este controlador.</BodyText>
         <Notice message="No se borran pendientes para liberar espacio. Borrar los datos del navegador, desinstalar o perder el dispositivo puede destruir las copias locales aún no sincronizadas." tone="warning" />
       </Card>
-      {message ? <Notice message={message} tone="error" onDismiss={() => setMessage(null)} /> : null}
+      {message ? <Notice message={userErrorText(message)} tone="error" onDismiss={() => setMessage(null)} /> : null}
       <SectionTitle title="Registro de operaciones" subtitle="El texto local, la base y los recibos se conservan para revisión." />
       {[...(snapshot?.operations ?? [])].sort((a, b) => b.createdAt - a.createdAt).map((operation) => {
         const dependency = dependencyInfo(operation, dependencies);
@@ -107,13 +149,10 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         <Badge label={dependency.status === "ready" ? operationStatusLabels[operation.status] : dependency.title} tone={operation.status === "applied" ? "success" : "warning"} />
         {operation.kind === "comment" ? <Text selectable style={styles.label}>{operation.text}</Text> : null}
         {operation.kind === "create" ? <BodyText>{operation.input.kind === "work" ? operation.input.work.summary : operation.input.kind === "maintenance" ? operation.input.maintenance.motive : operation.input.nonProductive.initialComment ?? operation.input.nonProductive.reasonText ?? "Tiempo no productivo"}</BodyText> : null}
-        {operation.kind === "answer" ? <Text selectable style={styles.label}>Respuesta local: {JSON.stringify(operation.answer.responseValue)}{operation.answer.comment ? ` · ${operation.answer.comment}` : ""}</Text> : null}
-        {operation.kind === "timer" && operation.status !== "applied" ? <BodyText>En cola · tiempo pendiente de confirmar</BodyText> : null}
-        {operation.kind === "checklist" && operation.status !== "applied" ? <BodyText>Asociación pendiente. No se crean pasos ni aumenta el progreso hasta recibir la ficha del servidor.</BodyText> : null}
-        {operation.lastError ? <Notice message={`${operationErrorReason(operation.lastError)} (${operation.lastError})`} tone="warning" /> : null}
+        {operation.lastError && !requiresDeployment(operation.lastError) ? <Notice message={syncUserError(operation.lastError)} tone="warning" /> : null}
         {dependency.status !== "ready" ? <View style={styles.tight}>
-          <BodyText>{dependency.reason}</BodyText>
-          {parent ? <><BodyText>{operationTitle(parent)}</BodyText>{parent.lastError ? <Text selectable style={styles.caption}>{parent.lastError}</Text> : null}<OperationDetails operation={parent} title="Ver detalles de la operación anterior" /></> : null}
+          <BodyText>{parent?.lastError ? syncUserError(parent.lastError) : dependency.reason}</BodyText>
+          {parent ? <><BodyText>{operationTitle(parent)}</BodyText><OperationDetails operation={parent} title="Ver detalles de la operación anterior" /></> : null}
           {parent && canRetryOperation(parent) ? <Button title="Reintentar operación anterior" variant="secondary" loading={action === parent.id} disabled={!presentation.canSync || !!action} onPress={() => void run(parent.id, () => controller.retry(parent.id))} /> : null}
         </View> : null}
         <OperationDetails operation={operation} />

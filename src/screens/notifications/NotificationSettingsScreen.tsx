@@ -6,7 +6,8 @@ import { notificationPreferencesSchema, type NotificationPreferences } from "../
 import { DEFAULT_NOTIFICATION_PREFERENCES } from "../../notifications/notificationSafety";
 import type { MobileNotificationsModel } from "../../notifications/useMobileNotifications";
 import { DeviceSecurityContext, PrivateModal } from "../../security/DeviceSecurityContext";
-import { BodyText, Button, Card, Field, IconButton, SectionTitle, type IconName } from "../../ui/components";
+import { BodyText, Button, Card, IconButton, SectionTitle, type IconName } from "../../ui/components";
+import { TimeField } from "../../ui/time/TimeField";
 import { palette, radius, typography } from "../../ui/theme";
 import { notificationErrorMessage, notificationNoticeMessage, sameNotificationPreferences } from "./notificationPresentation";
 import { NotificationStatusCard } from "./NotificationStatusCard";
@@ -182,8 +183,8 @@ function NotificationSettingsContent({ notifications, onBack }: NotificationSett
           <ToggleRow icon="moon-outline" title="Horario silencioso" description="Un espacio sin avisos, según la hora de tu sucursal." value={quietEnabled} disabled={!editable} onChange={changeQuiet} />
           {quietEnabled ? <>
             <View style={styles.hours}>
-              <Field label="Desde" hint="HH:mm" value={preferences.quietHoursStart} onChangeText={(quietHoursStart) => update({ quietHoursStart })} editable={editable} maxLength={5} autoCapitalize="none" autoCorrect={false} placeholder="22:00" containerStyle={styles.hourField} />
-              <Field label="Hasta" hint="HH:mm" value={preferences.quietHoursEnd} onChangeText={(quietHoursEnd) => update({ quietHoursEnd })} editable={editable} maxLength={5} autoCapitalize="none" autoCorrect={false} placeholder="07:00" containerStyle={styles.hourField} />
+              <TimeField label="Desde" hint="HH:mm" value={preferences.quietHoursStart} onChange={(quietHoursStart) => update({ quietHoursStart })} disabled={!editable} scopeKey={notifications.storageKey} containerStyle={styles.hourField} />
+              <TimeField label="Hasta" hint="HH:mm" value={preferences.quietHoursEnd} onChange={(quietHoursEnd) => update({ quietHoursEnd })} disabled={!editable} scopeKey={notifications.storageKey} containerStyle={styles.hourField} />
             </View>
             <Text style={styles.caption}>Puede continuar al día siguiente; por ejemplo, de 22:00 a 07:00.</Text>
           </> : <Text style={styles.caption}>Desactivado: permites avisos a cualquier hora. Se guardará inicio y fin a las 00:00 al desactivarlo.</Text>}

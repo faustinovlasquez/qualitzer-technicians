@@ -7,6 +7,10 @@ import type { DeviceSecurityUi } from "./DeviceSecurityContext";
 
 export function DeviceLockScreen({ security, privacyError }: { security: DeviceSecurityUi; privacyError: string | null }) {
   const { state, controller } = security;
+  if (!privacyError && (state.nativeInteractionPending || state.ready && !state.enabled && !state.offered && !state.error)) return <SafeAreaView style={[styles.screen, styles.picker]}>
+    <ActivityIndicator accessibilityLabel={state.nativeInteractionPending ? "Esperando selección" : "Preparando privacidad"} color={palette.primary} size="large" />
+    <BodyText>{state.nativeInteractionPending ? "Esperando selección…" : "Preparando privacidad…"}</BodyText>
+  </SafeAreaView>;
   const choosing = state.offered && !state.locked;
   const error = privacyError ?? state.error;
   return <SafeAreaView style={styles.screen}>
@@ -32,6 +36,7 @@ export function DeviceLockScreen({ security, privacyError }: { security: DeviceS
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
+  picker: { alignItems: "center", justifyContent: "center", gap: 16 },
   content: { flexGrow: 1, justifyContent: "center", width: "100%", maxWidth: 540, alignSelf: "center", padding: 24, gap: 28 },
   card: { gap: 18 },
   symbol: { width: 80, height: 80, borderRadius: 26, backgroundColor: palette.primarySoft, alignItems: "center", justifyContent: "center" },
