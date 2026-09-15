@@ -4,12 +4,16 @@ import type { AssignmentReadOptions } from "../../src/domain/assignmentRead";
 import type { Assignments, DateRange, Tenant, User, WorkScope } from "../../src/domain/models";
 import type { OfflineSnapshot } from "../../src/domain/offline";
 import * as creation from "../../src/domain/creation";
+import * as workActivities from "../../src/domain/workActivities";
 import * as progress from "../../src/domain/assignmentChecklistProgress";
 import * as schedule from "../../src/domain/assignmentSchedule";
 import * as format from "../../src/domain/format";
 import * as weeklySchedule from "../../src/domain/weeklySchedule";
 import * as tenantSession from "../../src/domain/tenantSession";
 import * as tenantSchemas from "../../src/infrastructure/tenantSchemas";
+import * as notificationSafety from "../../src/notifications/notificationSafety";
+import type { UseMobileNotificationsOptions } from "../../src/notifications/useMobileNotifications";
+import type { NotificationData } from "../../src/domain/notifications";
 import * as connection from "../../src/infrastructure/gatewayConnection";
 import * as errors from "../../src/infrastructure/errors";
 import { bindForegroundSource } from "../../src/offline/foregroundBinding";
@@ -141,11 +145,14 @@ export function agendaFixture(options: { online?: boolean } = {}) {
   let answerGate: (() => Promise<void>) | undefined;
   let localGate: (() => Promise<Assignments>) | undefined;
   let statusGate: (() => Promise<void>) | undefined;
+  let notificationData: Assignments | undefined;
+  let notificationOptions: UseMobileNotificationsOptions | undefined;
   const account: User = { ...user(), accessBranchs: [...user().accessBranchs, { id: 2, name: "Secundaria", main: false }] };
   const snapshot = (): OfflineSnapshot => ({ online: options.online ?? false, preparing: false, syncing: false, authBlocked: false,
     pending: 0, conflicts: 0, lastSyncedAt: null, lastError: null, coverage: [], operations: [] });
 
   function assignments(range: DateRange, branchId: number, readOptions?: AssignmentReadOptions): Promise<Assignments> {
+    if (!readOptions && notificationData) return Promise.resolve(structuredClone(notificationData));
     assert.ok(readOptions?.signal, "assignments must receive third-argument options.signal");
     const signal = readOptions.signal;
     const ignoreAbort = ignoreNextAbort;
@@ -233,8 +240,10 @@ export function agendaFixture(options: { online?: boolean } = {}) {
     if (id === "../domain/assignmentSchedule") return schedule;
     if (id === "../domain/format") return format;
     if (id === "../domain/creation") return creation;
+    if (id === "../domain/workActivities") return workActivities;
     if (id === "../domain/weeklySchedule") return weeklySchedule;
-    if (id === "../notifications") return { useMobileNotifications: () => ({ client: null, revokeForSession: noop }), bindNotificationApi: () => null };
+    if (id === "../notifications") return { useMobileNotifications: (options: UseMobileNotificationsOptions) => { notificationOptions = options; return { client: null, revokeForSession: noop }; }, bindNotificationApi: () => null };
+    if (id === "../notifications/notificationSafety") return notificationSafety;
     if (id === "../offline") return {
       OfflineTechnicianRepository: OfflineRepository,
       createOfflineRepository: async (remote: HttpRepository) => { const wrapped = new OfflineRepository(remote); wrappers.push(wrapped); return wrapped; },
@@ -279,6 +288,11 @@ export function agendaFixture(options: { online?: boolean } = {}) {
     setAnswerGate: (gate: () => Promise<void>) => { answerGate = gate; },
     setLocalAssignments: (gate: () => Promise<Assignments>) => { localGate = gate; },
     setStatusGate: (gate: () => Promise<void>) => { statusGate = gate; },
+    setNotificationAssignments: (value: Assignments) => { notificationData = value; },
+    async openNotification(payload: NotificationData): Promise<boolean> {
+      assert.ok(notificationOptions?.session);
+      return notificationOptions.onOpen(payload, { session: notificationOptions.session, storageKey: notificationOptions.storageKey, isCurrent: () => true });
+    },
     foreground(active: boolean): void { foreground = active; for (const listener of listeners) listener(active); },
     async restore(): Promise<AgendaApp> {
       const loaded = await flush();

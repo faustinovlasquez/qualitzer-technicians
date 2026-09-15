@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { checklistResumeTarget } from "../../domain/checklistResume";
 import { plainText } from "../../domain/format";
@@ -14,6 +14,7 @@ import { errorMessage } from "./detailRules";
 import type { WorkDraft } from "./useWorkDraft";
 
 export interface ChecklistTabProps {
+  initialChecklistId?: number;
   work: AssignmentWork;
   draft: WorkDraft;
   maintenance: boolean;
@@ -40,6 +41,13 @@ export function ChecklistTab(props: ChecklistTabProps) {
 
 function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
   const navigation = useChecklistNavigation(props.scopeKey, props.work.checklists);
+  const initialOpened = useRef(false);
+  useEffect(() => {
+    if (initialOpened.current || navigation.restoring || props.initialChecklistId === undefined) return;
+    const checklist = props.work.checklists.find(item => item.checklistId === props.initialChecklistId);
+    initialOpened.current = true;
+    if (checklist) navigation.open(checklist);
+  }, [navigation.restoring, props.initialChecklistId, props.work.checklists]);
   const [overview, setOverview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);

@@ -63,7 +63,7 @@ async function main() {
     report.sourceHashes = Object.fromEntries(Object.entries(current).map(([file, text]) => [file, hash(text)]));
     report.testSourceHashes = Object.fromEntries(["tests/e2e/compact-overview-fixture.tsx", "tests/e2e/compact-overview-smoke.cjs"].map(file => [file, hash(fs.readFileSync(path.join(root, file)))]));
     const bundles = { after: await bundle(current) };
-    if (report.baseline.comparable) bundles.before = await bundle(baseline.sources);
+    if (report.baseline.comparable && !process.argv.includes("--parent-orders")) bundles.before = await bundle(baseline.sources);
     report.bundleInputs = Object.keys(bundles.after.metafile.inputs);
     for (const file of runtimeFiles) assert.ok(report.bundleInputs.includes(file), `Missing real screen: ${file}`);
     assert.ok(!report.bundleInputs.some(file => /(^|\/)App\.tsx$|HttpTechnicianRepository|sessionStorage|expo-secure-store|(?:^|\/)\.env$/.test(file)), "Forbidden runtime imported");
@@ -192,7 +192,7 @@ async function main() {
         new MutationObserver(apply).observe(document.body, { childList: true, subtree: true }); apply();
       }, factor);
     }
-    for (const phase of Object.keys(bundles).sort().reverse()) {
+    if (!process.argv.includes("--parent-orders")) for (const phase of Object.keys(bundles).sort().reverse()) {
       for (const [width, height] of [[320, 740], [360, 740], [390, 740], [1024, 800]]) for (const scale of phase === "before" ? [1] : [1, 2]) {
         const label = `${phase}-${width}x${height}-text${scale * 100}`;
         await page.setViewportSize({ width, height });
@@ -260,7 +260,7 @@ async function main() {
     }
     await page.setViewportSize({ width: 390, height: 740 }); await page.goto(`${origin}/after`);
     await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
-    await check("login-credentials-visibility-validation-and-busy-guards", async () => {
+    if (!process.argv.includes("--parent-orders")) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
       await fresh("login");
       const username = page.getByRole("textbox", { name: "Correo o usuario", exact: true });
       const password = page.getByLabel("Contraseña", { exact: true });
@@ -285,6 +285,36 @@ async function main() {
       assert.equal(await username.isEditable(), false); assert.equal(await password.isEditable(), false);
       assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).gatewayChanges, 0);
     });
+    for (const width of [360, 1024]) for (const scale of [1, 2]) for (const scenario of ["empty-maintenance", "empty-ot"]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${origin}/after`);
+      await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
+      await scaleText(scale);
+      await check(`parent-${width}-text${scale * 100}-${scenario}`, async () => {
+        await fresh("dashboard", scenario);
+        const open = page.getByRole("button", { name: scenario === "empty-maintenance" ? "Ver mantenimiento" : "Ver orden", exact: true });
+        await reachable(open);
+        assert.equal(await page.getByRole("button", { name: /^(Iniciar|Pausar|Entregar)$/ }).count(), 0);
+        assert.match((await overview("dashboard")).heroText, /1 orden asignada/);
+        await open.click();
+        assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).openCalls, 1);
+        const search = page.getByRole("textbox", { name: "Buscar tareas", exact: true });
+        await search.fill("bateria");
+        await open.waitFor();
+        await page.getByRole("tab", { name: /^OTs/ }).click();
+        await open.waitFor();
+        await search.fill("no corresponde");
+        await page.getByText("No encontramos coincidencias", { exact: true }).waitFor();
+        await search.fill("");
+        await page.getByRole("button", { name: "Completados", exact: true }).click();
+        assert.equal(await open.count(), 0);
+        await page.getByRole("button", { name: "Pendientes", exact: true }).click();
+        await open.waitFor();
+        await open.scrollIntoViewIfNeeded();
+        await shot(`parent-${width}-text${scale * 100}-${scenario}`);
+        await readable("dashboard");
+      });
+    }
     report.reductions = report.measurements.filter(item => item.phase === "after" && item.scale === 1 && item.scenario === "full").map(after => {
       const before = report.measurements.find(item => item.phase === "before" && item.width === after.width && item.screen === after.screen);
       if (!before) return { width: after.width, screen: after.screen, baselineUnavailable: true };

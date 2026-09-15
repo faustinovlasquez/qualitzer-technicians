@@ -1,9 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
-import { Image, Pressable, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Image, Platform, Pressable, Text, View } from "react-native";
 import { PrivateModal as Modal } from "../../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { Attachment } from "../../../domain/models";
+import type { OfflineController } from "../../../domain/offline";
+import { offlineAttachment, trustedLocalFile } from "../../offline/offlineUi";
+import { OfflineFileCard } from "../../offline/OfflineFileCard";
 import { BodyText, Button, IconButton } from "../../../ui/components";
 import { palette } from "../../../ui/theme";
 import { AttachmentList, Notice } from "../DetailUi";
@@ -40,9 +43,30 @@ export function PendingFileList({ files, disabled, onRemove }: { files: Workspac
   </View>;
 }
 
-export function SavedFileList({ files, mode, canDelete, onDelete }: { files: Attachment[]; mode: WorkspaceMode; canDelete: boolean; onDelete?: (file: Attachment) => void }) {
-  return <View style={workspaceStyles.grid}>{sortedAttachments(files).map((file) => <View key={`${file.id}:${file.url}`} style={workspaceStyles.tile}>
-    <AttachmentList files={[presentAttachment(file, mode)]} />
+interface SavedFileProps { file: Attachment; mode: WorkspaceMode; canDelete: boolean; onDelete?: (file: Attachment) => void; readLocalFile?: OfflineController["readLocalFile"]; }
+
+function SavedFileTile({ file, mode, canDelete, onDelete, readLocalFile }: SavedFileProps) {
+  const localFile = offlineAttachment(file);
+  const localId = localFile?.offline.downloaded ? localFile.offline.localFileId : undefined;
+  const [localPreview, setLocalPreview] = useState<{ id: string; uri: string; reader: OfflineController["readLocalFile"] } | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (localId && readLocalFile && isImageType(file.type)) {
+      void readLocalFile(localId).then((local) => {
+        if (active && isImageType(local.mimeType) && trustedLocalFile(localId, local, Platform.OS)) setLocalPreview({ id: localId, uri: local.uri, reader: readLocalFile });
+      }).catch(() => { if (active) setLocalPreview(null); });
+    } else setLocalPreview(null);
+    return () => { active = false; };
+  }, [localId, readLocalFile, file.type]);
+  const presented = presentAttachment(file, mode);
+  const preview = localPreview?.id === localId && localPreview?.reader === readLocalFile ? localPreview?.uri : undefined;
+  return <View style={workspaceStyles.tile}>
+    <AttachmentList key={preview ?? presented.url} files={[preview ? { ...presented, url: presented.url || preview, thumbnailUrl: preview } : presented]} />
+    {localFile && localId && !isImageType(file.type) ? <OfflineFileCard file={localFile} readLocalFile={readLocalFile} actionsOnly /> : null}
     {onDelete ? <Button title="Eliminar archivo" accessibilityLabel={`Eliminar archivo guardado: ${file.name}`} icon="trash-outline" variant="secondary" disabled={!canDelete} onPress={() => onDelete(file)} /> : null}
-  </View>)}</View>;
+  </View>;
+}
+
+export function SavedFileList({ files, ...props }: Omit<SavedFileProps, "file"> & { files: Attachment[] }) {
+  return <View style={workspaceStyles.grid}>{sortedAttachments(files).map((file) => <SavedFileTile key={`${file.id}:${file.url}`} {...props} file={file} />)}</View>;
 }

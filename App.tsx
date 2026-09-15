@@ -129,6 +129,8 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       onBack={app.closeWork}
       onRefresh={app.refresh}
       onStatus={app.changeStatus}
+      onReopen={app.reopenWork}
+      activityActions={{ load: app.loadActivities, create: app.createActivity, complete: app.completeActivity, files: app.loadActivityFiles, upload: app.uploadActivityFiles }}
       onSaveStep={app.saveAnswer}
       onLoadChecklistOptions={app.loadChecklistOptions}
       onAttachChecklist={app.attachChecklist}

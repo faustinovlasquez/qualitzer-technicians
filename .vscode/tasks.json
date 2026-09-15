@@ -2,6 +2,48 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: comprobar entrega de asignaciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.101:8791/"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de asignaciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8791" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: empaquetar gateway de asignaciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\pack-mobile-gateway.cjs"],
+			"options": { "env": { "npm_execpath": "C:\\Users\\faust\\AppData\\Local\\nvm\\v20.12.2\\node_modules\\npm\\bin\\npm-cli.js" } },
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: verificar gateway de asignaciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\fluidity-package-validation.cjs", "--copy"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar asignaciones completas",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-validation.cjs"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
 			"label": "Qualitzer Field: iniciar app y pasarela",
 			"type": "shell",
 			"command": "& '.\\node_modules\\node\\bin\\node.exe' 'scripts/start.cjs'",
@@ -11,7 +53,7 @@
 		{
 			"label": "Qualitzer Field: compilar actualizacion APK firmada",
 			"type": "shell",
-			"command": "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\Build-Standalone.ps1'",
+			"command": "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\Build-Standalone.ps1' -Architectures 'arm64-v8a,armeabi-v7a,x86_64'",
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
@@ -129,9 +171,10 @@
 			"problemMatcher": []
 		},
 		{
-			"label": "Qualitzer: descargar APK de horas y sincronizacion",
-			"type": "shell",
-			"command": "$ErrorActionPreference = 'Stop'; $ownerIds = @(Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($ownerId in $ownerIds) { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerId); if ($owner.Name -eq 'node.exe' -and $owner.CommandLine -match 'Qualitzer-Mobile' -and $owner.CommandLine -match 'serve-apk\\.cjs') { Stop-Process -Id $owner.ProcessId } else { throw 'PORT_8790_BELONGS_TO_ANOTHER_PROCESS' } }; & 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe' 'C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs'",
+			"label": "Qualitzer: descargar APK de actividades y reapertura",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
 			"isBackground": true,
 			"problemMatcher": []
 		}

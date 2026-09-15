@@ -85,3 +85,11 @@ export function matchesAssignmentSearch(group: AssignmentGroup, work: Assignment
     equipment?.label, equipment?.identifier, equipment?.internalNumber,
   ].filter(Boolean).join(" ")).includes(normalize(query));
 }
+
+export function matchesOrderSearch(group: AssignmentGroup, query: string): boolean {
+  return normalize([
+    group.id, group.code, group.negotiationCode, assignmentWorkOrderCode(group), assignmentNegotiationCode(group),
+    group.title, group.locationName, group.locationAddress, group.customerName,
+    group.equipment?.label, group.equipment?.identifier, group.equipment?.internalNumber,
+  ].filter(Boolean).join(" ")).includes(normalize(query));
+}

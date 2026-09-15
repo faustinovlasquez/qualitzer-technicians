@@ -5,7 +5,7 @@ const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "../..");
 const backend = path.resolve(root, "../Qualitzer2.0-Backend");
-const version = "1.0.4";
+const version = "1.0.6";
 const archiveName = `qualitzer-mobile-gateway-${version}.tgz`;
 const packageName = "@qualitzer/mobile-gateway";
 const files = ["LICENSE", "README.md", "SOURCE-MANIFEST.json", "THIRD-PARTY-LICENSES.md", "embedded-contract.d.ts", "index.cjs", "index.d.ts", "package.json"];
@@ -211,6 +211,7 @@ async function main() {
       }
       for (const [name, major] of [["express", "5"], ["multer", "2"]]) ensure(manifest.dependencies.some((item) => item.name === name && item.version.split(".")[0] === major), "BUNDLED_DEPENDENCY_REQUIRED");
       const required = ["server/embedded.ts", "server/embedded-contract.ts", "server/gateway-runtime.ts", "server/offline/routes.ts", "server/upstream.ts",
+        "server/assignments/workActions.ts", "src/domain/workActivities.ts",
         "server/checklists/routes.ts", "server/notifications/routes.ts", "src/domain/offlineProtocol.ts", "src/domain/notifications.ts", "src/domain/assignmentSchedule.ts", "scripts/pack-mobile-gateway.cjs", "docs/EMBEDDED-GATEWAY.md"];
       for (const file of required) ensure(seen.has(file), "CRITICAL_SOURCE_MISSING");
       return { sourcesVerified: seen.size, dependenciesVerified: manifest.dependencies.length, criticalSources: required };

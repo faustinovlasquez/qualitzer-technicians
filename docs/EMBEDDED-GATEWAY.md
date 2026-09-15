@@ -1,8 +1,10 @@
-# @qualitzer/mobile-gateway 1.0.4
+# @qualitzer/mobile-gateway 1.0.6
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
-**Preparación solo de fuentes para 1.0.4.** El gateway 1.0.3 fue generado, no entregado, e incluye assignmentSchedule anterior a la corrección crítica de reconciliación semanal. Conservar sus bytes, checksum y manifiesto como históricos inmutables; no instalarlo, recomendarlo ni sobrescribirlo. El nuevo paquete debe acreditar las fuentes corregidas mediante su propio manifiesto y hash, pendientes del coordinador.
+**1.0.5 agrega actividades y reapertura.** Rutas de lectura, creación, completado y archivos de actividades, más reapertura explícita de trabajos entregados. Requiere los endpoints PanelWorkActions del backend. Conserva timer, checklist, notificaciones y todos los recibos existentes. No transforma reapertura ni actividades en comandos offline. 1.0.4 y sus artefactos se conservan intactos; 1.0.3 permanece descartado.
+
+**1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
 
@@ -44,7 +46,7 @@ Un bloqueo exclusivo `.writer.lock` por directorio impide dos inicializaciones s
 
 ## Empaquetado verificable
 
-Ejecutar el script desde Mobile con Node que disponga de npm CLI (o `npm_execpath` apuntando al npm-cli.js instalado); usa esbuild y TypeScript ya instalados, sin npm install ni scripts de lifecycle. Genera dos builds y dos `npm pack --ignore-scripts`, exige igualdad byte a byte y copia exclusivamente `qualitzer-mobile-gateway-1.0.4.tgz` a `Mobile/artifacts/mobile-gateway`. No toca el backend ni sobrescribe los archivos históricos 1.0.0/1.0.1/1.0.2/1.0.3. Si ya existe 1.0.4 con otro hash, falla sin reemplazarlo. No ejecutar mientras otros agentes sigan modificando las entradas: dos builds iguales no bloquean cambios concurrentes. El estado de esta preparación es solo fuentes; tarball, hash y validación 1.0.4 pendientes del coordinador.
+Ejecutar el script desde Mobile con Node que disponga de npm CLI (o `npm_execpath` apuntando al npm-cli.js instalado); usa esbuild y TypeScript ya instalados. Genera dos builds y dos `npm pack --ignore-scripts`, exige igualdad byte a byte y copia exclusivamente `qualitzer-mobile-gateway-1.0.6.tgz` a `Mobile/artifacts/mobile-gateway`. No instala el backend ni sobrescribe archivos históricos. Si ya existe 1.0.6 con otro hash, falla sin reemplazarlo. No modificar las entradas durante el empaquetado.
 
 Este documento se incorpora como README y es una entrada del SOURCE-MANIFEST, igual que el empaquetador y assignmentSchedule. Su contenido queda cerrado en esta preparación: no editarlo después del pack para registrar resultados. Mantener todas las entradas congeladas durante empaquetado, validación y copia; registrar la evidencia posterior en reportes externos al paquete. El principal actualizará dependencia y lockfile Backend únicamente después de comprobar el hash del nuevo TGZ.
 

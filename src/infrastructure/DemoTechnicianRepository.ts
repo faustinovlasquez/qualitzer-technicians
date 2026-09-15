@@ -15,9 +15,43 @@ import { DemoCreationStore, demoCreationOptions } from "./creationDemo";
 import { DemoNotifications } from "./notificationsDemo";
 import { DemoChecklistAssignments } from "./checklistAssignmentDemo";
 import type { ChecklistCatalogQuery } from "../domain/checklistAssignment";
+import { workActivityInputSchema, type WorkActivitiesPort } from "../domain/workActivities";
 
 export class DemoTechnicianRepository implements TechnicianRepository {
   private data = makeDemoData();
+  private activityFilesById = new Map<string, Attachment[]>();
+  activities: WorkActivitiesPort["activities"] = async scope => structuredClone((this.find(scope).work.activities ?? []).filter(activity => !activity.activity.startsWith("__WORK_CHECKLIST__")));
+  createActivity: WorkActivitiesPort["createActivity"] = async (scope, input) => {
+    const work = this.find(scope).work;
+    if (work.status === "completed" || work.status === "delivered") throw new Error("El trabajo es de solo lectura.");
+    const value = workActivityInputSchema.parse(input);
+    const id = ++this.nextFileId;
+    work.activities = [...(work.activities ?? []), { ...value, id, isStarted: false, isCompleted: false, technicalDocuments: [] }];
+    return { id };
+  };
+  completeActivity: WorkActivitiesPort["completeActivity"] = async (scope, id) => {
+    const work = this.find(scope).work;
+    const activity = work.activities?.find(item => item.id === id);
+    if (!activity || work.status === "completed" || work.status === "delivered") throw new Error("No se puede completar esta actividad.");
+    activity.isStarted = true; activity.isCompleted = true;
+  };
+  activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => {
+    if (!(await this.activities(scope)).some(activity => activity.id === id)) throw new Error("Actividad no encontrada.");
+    return structuredClone(this.activityFilesById.get(`${this.key(scope)}:${id}`) ?? []);
+  };
+  uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = async (scope, id, files) => {
+    await this.activityFiles(scope, id);
+    const work = this.find(scope).work;
+    if (work.status === "completed" || work.status === "delivered") throw new Error("El trabajo es de solo lectura.");
+    const key = `${this.key(scope)}:${id}`;
+    for (const file of files) this.activityFilesById.set(key, [...(this.activityFilesById.get(key) ?? []), { id: ++this.nextFileId, name: file.name, type: file.mimeType, url: await photoDataUri(file) }]);
+  };
+  reopenWork: WorkActivitiesPort["reopenWork"] = async scope => {
+    const { group, work } = this.find(scope);
+    if (work.status !== "delivered") throw new Error("Solo se puede reabrir un trabajo entregado.");
+    work.status = group.type === "internal_maintenance" ? "paused" : "pending";
+    if (group.type !== "internal_maintenance") { work.elapsedSeconds = 0; work.firstInProgressTime = null; }
+  };
   private checklistAssignments = new DemoChecklistAssignments(this.data.groups.flatMap((group) => group.works.flatMap((work) => work.checklists)));
   async checklistOptions(scope: WorkScope, query: ChecklistCatalogQuery) {
     if (!demoUser.accessBranchs.some((branch) => branch.id === scope.companyBranchId)) throw new Error("Sucursal no autorizada.");

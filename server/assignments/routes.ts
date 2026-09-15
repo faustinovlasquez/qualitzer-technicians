@@ -6,6 +6,7 @@ import type { Upstream } from "../upstream";
 import { resourceParamsSchema } from "../validation";
 import { ownedStep } from "./authorization";
 import { AssignmentService } from "./service";
+import { registerWorkActions } from "./workActions";
 
 export interface UploadConcurrency { active: number; }
 
@@ -13,6 +14,7 @@ export function assignmentRouter(upstream: Upstream, uploadLimiter: RequestHandl
   const router = Router();
   const service = new AssignmentService(upstream);
   router.use((req, _res, next) => { bearer(req); next(); });
+  registerWorkActions(router, upstream, uploadLimiter, uploads);
   router.get("/", async (req, res) => { res.json(await service.authorization.list(req)); });
   const base = "/:groupId/works/:workId";
   router.get(`${base}/files`, async (req, res) => { res.json(await service.files(req)); });

@@ -11,6 +11,7 @@ import { palette } from "../ui/theme";
 import { SessionContextBar } from "../ui/SessionContextBar";
 import { ChecklistTab } from "./workDetail/ChecklistTab";
 import { CompletionDialog } from "./workDetail/CompletionDialog";
+import { DeliverySuccess } from "./workDetail/DeliverySuccess";
 import { Notice } from "./workDetail/DetailUi";
 import { answerError, completionReasons, executionDate, manualCompletion, readOnlyWork, withinRange } from "./workDetail/detailRules";
 import { styles } from "./workDetail/detailStyles";
@@ -33,10 +34,14 @@ import { DeviceSecurityContext } from "../security/DeviceSecurityContext";
 import { CameraPermissionError } from "../domain/cameraErrors";
 import { CameraPermissionGuide } from "./workDetail/files/CameraPermissionGuide";
 import { useCameraPermissionGuide } from "./workDetail/files/useCameraPermissionGuide";
+import { WorkActivities, type WorkActivityActions } from "./workDetail/WorkActivities";
+import { PrivateModal } from "../security/DeviceSecurityContext";
 
 export { clearWorkDetailDrafts, workDetailDraftKey } from "./workDetail/useWorkDraft";
 
 export interface WorkDetailScreenProps {
+  activityActions?: WorkActivityActions;
+  onReopen?: () => Promise<void>;
   tenant: Tenant;
   branchName: string;
   connectionStatus?: ReactNode;
@@ -96,7 +101,7 @@ function ElapsedTimer({ work, generatedAt, online = true, pending = false }: Pic
   return <View style={styles.timerBox}>
     <Text style={styles.heroOverline}>TIEMPO DE EJECUCIÓN</Text>
     <Text style={styles.timer} accessibilityLabel={`Tiempo de ejecución: ${clock(baseline + extra)}`}>{clock(baseline + extra)}</Text>
-    <Text style={styles.heroText}>{pending || !online ? "Último tiempo recibido" : work.status === "in_progress" ? "Tiempo recibido + transcurrido desde la última actualización. El servidor confirma el tiempo final." : "Tiempo acumulado informado en la asignación."}</Text>
+    {pending || !online ? <Text style={styles.heroText}>Último tiempo recibido</Text> : null}
   </View>;
 }
 
@@ -107,6 +112,11 @@ export function WorkDetailScreen(props: WorkDetailScreenProps) {
 
 function WorkDetailContent(props: WorkDetailScreenProps) {
   const { group, work, generatedAt, mode, range, busy, onBack, onRefresh, onStatus, onSaveStep, onUpload, onReport, storageKey } = props;
+  const [deliverySucceeded, setDeliverySucceeded] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const [reopened, setReopened] = useState(false);
+  useEffect(() => { if (work.status !== "delivered") setReopened(false); }, [work.status]);
+  const [initialChecklistId, setInitialChecklistId] = useState<number>();
   const runNativePicker = useTrustedNativePicker();
   const security = useContext(DeviceSecurityContext);
   const securityRef = useRef(security);
@@ -197,7 +207,10 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   photoCallbacks.current = choosePhotos;
   const cameraGuide = useCameraPermissionGuide(photoScope, () => mounted.current && photoGates.current && !callbacks.current.busy && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.offline?.connection?.foreground !== false);
   if (draft.data.report.trim() && draft.data.report.trim() !== draft.data.savedReport) reasons.push("Guarda el reporte pendiente o vacía el texto antes de cerrar.");
-  if (Object.entries(draft.data.answers).some(([id, answer]) => currentStepIds.has(id) && !answer.saved)) reasons.push("Guarda o descarta las respuestas que aún están en borrador antes de cerrar.");
+  if (work.checklists.some((checklist) => checklist.steps.some((step) => {
+    const answer = draft.data.answers[String(step.stepId)];
+    return answer && !answer.saved && answerKey(step, answer.answer) !== answerKey(step, answerFromStep(step));
+  }))) reasons.push("Guarda o descarta las respuestas que aún están en borrador antes de cerrar.");
   if (draft.data.photos.some((item) => !item.uploaded)) reasons.push("Sube o quita las fotos pendientes antes de cerrar el trabajo.");
   const canReviewDelivery = !disabled && props.offline?.connection?.foreground !== false;
   const canSubmitDelivery = !readOnly && online && !hasPendingOperations && work.canExecute === true && reasons.length === 0;
@@ -335,6 +348,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       if (mounted.current) {
         setAwaitingStatus(input.status);
         setCompleting(false);
+        if (finalizing) setDeliverySucceeded(true);
         setMessage(mode === "demo" ? "Estado guardado localmente en demostración." : "Cambio de estado confirmado por Qualitzer.");
       }
     });
@@ -568,7 +582,11 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
       </View>
       </>}
-      {tab === "evidence" ? evidenceContent : tab === "checklist" ? <ChecklistTab work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => { setTarget(id); setTab("evidence"); }} notices={checklistNotices} catalogHeader={
+      {work.status === "delivered" || work.status === "completed" ? <View style={styles.closedBanner} testID="work-closed-banner">
+        <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
+        <Text style={styles.label}>{work.status === "delivered" ? "Trabajo entregado" : "Trabajo finalizado"}</Text>
+      </View> : null}
+      {tab === "evidence" ? evidenceContent : tab === "checklist" ? <ChecklistTab initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => { setTarget(id); setTab("evidence"); }} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /> : <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
           {mode === "demo" ? <Notice message="Modo demostración · los cambios y confirmaciones son locales, no se envían a Qualitzer." /> : null}
@@ -599,7 +617,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             {work.missingRequiredInfo.length > 0 ? <BodyText>Revisa la información requerida en la ficha antes de confirmar la entrega.</BodyText> : null}
             <View style={styles.row}>
               {!readOnly && (desiredStatus === "in_progress" ? <Button title={`Pausar trabajo${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={`${desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
-              <Button title="Entregar trabajo" icon="checkmark-circle-outline" variant="secondary" disabled={!canReviewDelivery} onPress={openDeliveryReview} />
+              <Button title={work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" disabled={!canReviewDelivery} onPress={openDeliveryReview} />
+              {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
             </View>
             {busy || action === "status" ? <BodyText>Protegiendo el cambio… Espera al guardado local antes de realizar otra acción.</BodyText> : null}
           </Card>
@@ -614,12 +633,25 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             </Pressable>)}
           </View>
           </> : null}
-          {tab === "work" ? <WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} /> : null}
+          {tab === "work" ? <WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => { setInitialChecklistId(id); setTab("checklist"); }} activitiesPanel={<WorkActivities key={resourceKey} scopeKey={`${storageKey}:${resourceKey}`} mode={mode} activities={work.activities ?? []} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} />} /> : null}
             {tab === "comments" ? <CommentsTab scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:comments`} resourceKey={resourceKey} mode={mode} busy={locked || staleReadOnly} pending={props.offline !== undefined ? pendingComments : undefined} offlineReady={offlineReady} onLoad={props.onLoadComments} onSubmit={props.onAddComment} /> : null}
           {tab === "equipment" ? <EquipmentTab group={group} work={work} /> : null}
         </ScrollView>}
       </KeyboardAvoidingView>
       <CameraPermissionGuide guide={cameraGuide} />
+      {reopening ? <PrivateModal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setReopening(false); }}><View style={styles.modalOverlay}><View style={[styles.modalCard, styles.modalContent]}>
+        <SectionTitle title="¿Reabrir trabajo?" />
+        <BodyText>Se conservarán las actividades, respuestas, archivos y horas ya registradas. Podrás continuar el trabajo y entregarlo nuevamente.</BodyText>
+        <Button title="Confirmar reapertura" icon="refresh-outline" loading={locked} disabled={disabled || !online || staleReadOnly || hasPendingOperations || work.status !== "delivered"} onPress={() => void runAction("reopen", async () => {
+          await draft.store.flush();
+          if (reopened || callbacks.current.busy || !executionGates.current.online || executionGates.current.hasPendingOperations || callbacks.current.work.status !== "delivered" || callbacks.current.staleReadOnly || callbacks.current.offline === null || callbacks.current.offline?.authBlocked || callbacks.current.offline?.connection?.foreground === false || !(securityRef.current?.isUnlocked() ?? true) || !callbacks.current.onReopen) return;
+          await callbacks.current.onReopen();
+          if (mounted.current) { setReopened(true); setReopening(false); setMessage("Trabajo reabierto. Las horas anteriores se conservaron."); }
+        })} />
+        <Button title="Cancelar" variant="ghost" disabled={locked} onPress={() => setReopening(false)} />
+        {operationError ? <Notice message={operationError} tone="error" /> : null}
+      </View></View></PrivateModal> : null}
+      {deliverySucceeded ? <DeliverySuccess title={maintenance ? "Mantenimiento entregado" : "Trabajo entregado"} name={plainText(work.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
       {completing ? <CompletionDialog work={evidenceWork} allowEditExecutionTime={props.allowEditExecutionTime} generatedAt={generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} canSubmit={canSubmitDelivery && canReviewDelivery} error={operationError} busy={locked} mode={mode} onRefresh={offlineReady && props.offline?.connection?.foreground !== false ? refreshDeliveryReview : undefined} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null}
     </SafeAreaView>
   );

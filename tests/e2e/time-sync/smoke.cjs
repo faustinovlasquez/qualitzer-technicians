@@ -3,6 +3,8 @@ const path = require("node:path");
 const Module = require("node:module");
 const root = path.resolve(__dirname, "../../..");
 const shared = path.join(root, "tests/e2e/picker-messages-smoke.cjs");
+const deliveryFilesOnly = process.argv.includes("--delivery-files");
+const workActionsOnly = process.argv.includes("--work-actions");
 let runner = fs.readFileSync(shared, "utf8");
 function replace(before, after) {
   if (runner.split(before).length !== 2) throw new Error(`STALE_HARNESS: ${before.slice(0, 100)}`);
@@ -34,6 +36,10 @@ replace('builder.onResolve({ filter: /.*/ }, args => {', `builder.onLoad({filter
         builder.onResolve({ filter: /.*/ }, args => {`);
 replace('file === "tests/e2e/picker-messages-fixture.tsx"', 'file.startsWith("tests/e2e/time-sync/") || file === "src/offline/tests/fakes.ts"');
 const components = ["src/ui/time/TimeField.tsx", "src/ui/time/TimePickerPanel.tsx", "src/ui/time/useSelectionSession.ts", "src/ui/time/SelectorUi.tsx", "src/ui/time/NumericSelectField.tsx", "src/screens/creation/CreationScreen.tsx", "src/screens/workDetail/CompletionDialog.tsx", "src/screens/notifications/NotificationSettingsScreen.tsx", "src/screens/orders/lifecycle/MaintenanceDeliveryDialog.tsx", "src/screens/offline/OfflineCenterScreen.tsx", "src/screens/offline/OfflineStatusBar.tsx", "src/screens/offline/syncAttemptPresentation.ts", "src/offline/engine.ts", "src/offline/syncScheduling.ts", "src/offline/state.ts", "src/offline/tests/fakes.ts", "src/security/DeviceSecurityProvider.tsx", "src/security/DeviceSecurityContext.tsx", "src/security/DeviceLockController.ts"];
+components.push("src/screens/workDetail/FileWorkspace.tsx", "src/screens/workDetail/files/WorkspaceFileList.tsx", "src/screens/workDetail/DetailUi.tsx");
+components.push("src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/WorkActivities.tsx", "src/screens/workDetail/DeliverySuccess.tsx");
+if (workActionsOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/work-actions/.test(name)) return;');
+if (deliveryFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/completion|blocked-stays|confirmed-files/.test(name)) return;');
 const componentStart = runner.indexOf('    report.realComponents = [');
 const componentEnd = runner.indexOf(';', componentStart);
 if(componentStart<0||componentEnd<0)throw new Error("STALE_COMPONENT_LIST");

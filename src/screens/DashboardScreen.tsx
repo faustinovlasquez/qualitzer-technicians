@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
-import { matchesAssignmentSearch } from "../domain/assignmentCodes";
+import { matchesAssignmentSearch, matchesOrderSearch } from "../domain/assignmentCodes";
 import { assignmentDay, assignmentIncludesDay, assignmentPlannedMinutes, assignmentWorkForDay, assignmentWorkQueryRange, dailyRange } from "../domain/assignmentSchedule";
 import { dateKey, duration, isFinished, shiftDate, shortDate, weekRange } from "../domain/format";
 import type { AssignmentGroup, Assignments, AssignmentWork, DateRange, StatusInput, User, WorkOpenOptions } from "../domain/models";
@@ -65,9 +65,9 @@ function groupKey(group: AssignmentGroup): string {
   return JSON.stringify([group.type, group.id]);
 }
 
-function matchesStatus(work: AssignmentWork, filter: StatusFilter): boolean {
+function matchesStatus(work: Pick<AssignmentWork, "status">, filter: StatusFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "completed") return isFinished(work);
+  if (filter === "completed") return work.status === "completed" || work.status === "delivered";
   if (filter === "in_progress") return work.status === "in_progress" || work.status === "paused";
   return work.status === "pending";
 }
@@ -165,6 +165,15 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
   }, [scopedEntries, selectedDay]);
 
   const filteredEntries = useMemo(() => scopedEntries.filter(({ group, work }) => matchesStatus(work, filter) && matchesAssignmentSearch(group, work, query)), [scopedEntries, query, filter]);
+  const emptyOrders = (data?.groups ?? []).filter((group) => {
+    if (group.type === "direct_assignment" || group.works.length > 0) return false;
+    const day = assignmentDay(group.scheduledDate);
+    const start = selectedDay ?? range.startDate;
+    const end = selectedDay ?? range.endDate;
+    const open = group.status !== "completed" && group.status !== "delivered";
+    return !day || (day >= start && day <= end) || (day < start && open);
+  });
+  const filteredEmptyOrders = emptyOrders.filter((group) => matchesStatus(group, filter) && matchesOrderSearch(group, query));
   const filteredGroups = useMemo(() => {
     const groups = new Map<string, { group: AssignmentGroup; matchingWorkCount: number }>();
     for (const { group } of filteredEntries) {
@@ -175,7 +184,7 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
     }
     return Array.from(groups.values());
   }, [filteredEntries]);
-  const filteredGroupCount = filteredGroups.length;
+  const filteredGroupCount = filteredGroups.length + filteredEmptyOrders.length;
 
   const sections = useMemo(() => buildSections(filteredEntries, view === "agenda"), [filteredEntries, view]);
   const remaining = counts.total - counts.completed;
@@ -183,14 +192,14 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
   const isFiltered = query.trim().length > 0 || filter !== "all";
   const heroTitle = coveragePending ? "Verificando datos locales" : partial ? "Cobertura parcial" : !hasData
     ? loading ? "Preparando tu jornada" : "Tu jornada, en un solo lugar"
-    : counts.total === 0 ? "Todo listo para tu próxima tarea"
-      : remaining === 0 ? "Buen trabajo. Todo completado."
+    : counts.total === 0 ? emptyOrders.length > 0 ? `${emptyOrders.length} ${emptyOrders.length === 1 ? "orden asignada" : "órdenes asignadas"}` : "Todo listo para tu próxima tarea"
+      : remaining === 0 ? emptyOrders.some((group) => group.status !== "completed" && group.status !== "delivered") ? "Órdenes pendientes de trabajos" : "Buen trabajo. Todo completado."
         : `${remaining} ${remaining === 1 ? "tarea por completar" : "tareas por completar"}`;
   const heroDescription = coveragePending ? "La cobertura y los pendientes aún no están verificados."
     : partial ? "Faltan días por descargar; no significan cero tareas."
     : !hasData
     ? "Consulta tus asignaciones y organiza tu trabajo en campo."
-    : counts.total === 0 ? "No hay tareas asignadas para el período seleccionado."
+    : counts.total === 0 ? emptyOrders.length > 0 ? "Pendientes de incorporar trabajos." : "No hay tareas asignadas para el período seleccionado."
       : `${counts.completed} de ${counts.total} ${counts.total === 1 ? "tarea completada" : "tareas completadas"}.`;
 
   function navigateWeek(offset: number): void {
@@ -252,6 +261,7 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
     {loading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={styles.loadingText}>Actualizando agenda…</Text></View> : null}
     {runningTimersFromSnapshot(data).length > 0 ? <Pressable accessibilityRole="button" onPress={() => setAgendaLayout("list")} style={styles.textButton}><Text style={styles.textButtonLabel}>Hay cronómetros activos · revisar en Lista</Text></Pressable> : null}
     {data && !coveragePending ? <WeeklySchedule data={data} range={range} unavailableDates={unavailableDates} selectedDate={focusDate} onSelectDate={onFocusDate} onOpenWork={onOpenWork} busy={busy || loading} timezone={user.system.timezone} /> : !loading && !coveragePending ? <EmptyState title="Horario no disponible" message="Actualiza para cargar tus trabajos planificados de la semana." /> : null}
+    {filteredEmptyOrders.map((group) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={0} busy={busy} onOpenGroup={onOpenGroup} />)}
     </>;
     return compact ? <ScrollView style={styles.screen} contentContainerStyle={styles.mobileSchedule} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>{content}</ScrollView> : <View style={styles.desktopSchedule}>{content}</View>;
   }
@@ -409,6 +419,9 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
         </View>
       ) : null}
 
+      {hasData && filteredEmptyOrders.length > 0 ? <View style={styles.section}>
+        {filteredEmptyOrders.map((group) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={0} busy={busy} onOpenGroup={onOpenGroup} />)}
+      </View> : null}
       {hasData && filteredEntries.length > 0 ? listView === "orders" ? <View style={styles.section}>
         {filteredGroups.map(({ group, matchingWorkCount }) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={matchingWorkCount} busy={busy} onOpenGroup={onOpenGroup} />)}
       </View> : sections.map((section) => (
@@ -422,7 +435,7 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
           ) : null}
           {section.entries.map(({ group, work }) => <AssignmentWorkCard key={JSON.stringify([group.type, group.id, work.workType, work.id, work.scheduledDate])} group={group} work={work} queryDate={assignmentWorkQueryRange(work, range).startDate} companyBranchId={companyBranchId} onOpenWork={onOpenWork} onWorkStatus={onWorkStatus} busy={busy} generatedAt={data.generatedAt} offline={offline} online={offline?.online ?? !coveragePending} staleReadOnly={coveragePending || offline?.authBlocked === true || isPendingLocalWork(work)} />)}
         </View>
-      )) : hasData && !loading && !error ? (
+      )) : hasData && filteredEmptyOrders.length === 0 && !loading && !error ? (
         <Card>
           <EmptyState title={coveragePending ? "Verificando copia local" : partial ? "Sin tareas en la copia disponible" : isFiltered ? "No encontramos coincidencias" : "Sin tareas para este período"} message={coveragePending ? "Espera a recuperar el estado local; no se presume vacío." : partial ? "Cobertura parcial: faltan días por descargar. No se puede confirmar que no haya asignaciones." : isFiltered ? "Prueba otro estado o busca por código, equipo o cliente." : selectedDay ? "No tienes asignaciones para este día. Puedes consultar el resto de la semana." : "Aquí aparecerán tus próximas asignaciones. Puedes revisar otra semana o actualizar la información."} icon={isFiltered ? "search-outline" : "calendar-clear-outline"} />
           {isFiltered ? <Button title="Limpiar filtros" variant="secondary" onPress={clearFilters} /> : selectedDay && view === "agenda" ? <Button title="Ver toda la semana" variant="secondary" onPress={() => setDaySelection(null)} /> : <Button title="Actualizar" variant="secondary" icon="refresh-outline" onPress={onRefresh} />}

@@ -334,16 +334,18 @@ test("legacy range-specific file and comment cache keys migrate losslessly", asy
   assert.equal((await f.repository.comments(changed, 0)).totalRows, 0);
 });
 
-test("confirmed upload binds receipt file ID and replaces canonical URL with own offline copy", async () => {
+test("confirmed upload binds receipt file ID, preserves its remote URL and keeps the local copy accessible", async () => {
   const f = repositoryFixture();
   f.upstream.offlineDocument = async (metadata) => ({ operationId: metadata.operationId, state: "applied", fileId: 88 });
   await queued(f.repository.uploadDocuments(scope, [{ id: "draft", uri: "source:", name: "same.png", mimeType: "image/png" }]));
   await f.repository.engine.syncNow();
   f.remote.files = async () => [{ id: 88, name: "server.png", url: "https://files.invalid/88" }, { id: 89, name: "same.png", url: "https://files.invalid/89" }];
-  let files = await f.repository.files(scope); assert.equal(files.length, 2); assert.match(files[0]!.url, /^memory:/); assert.equal(files[0]!.name, "server.png");
+  let files = await f.repository.files(scope); assert.equal(files.length, 2); assert.equal(files[0]!.url, "https://files.invalid/88"); assert.equal(files[0]!.name, "server.png");
   assert.equal((await f.store.read("a")).attachments[0]!.attachmentId, "88");
   f.connect(false); files = await f.repository.files({ ...scope, startDate: "2026-09-09", endDate: "2026-09-09" });
-  assert.equal(files.length, 2); assert.match(files[0]!.url, /^memory:/); assert.match(files[1]!.url, /^https:/); assert.equal(f.files.removes.length, 0);
+  assert.equal(files.length, 2); assert.equal(files[0]!.url, "https://files.invalid/88"); assert.match(files[1]!.url, /^https:/); assert.equal(f.files.removes.length, 0);
+  const op = (await f.store.read("a")).operations[0]!; assert.ok(op.kind === "document");
+  assert.match((await f.repository.readLocalFile(op.file.id)).uri, /^memory:/);
 });
 
 test("applied response without file ID remains queued, keeps bytes and never binds by name", async () => {

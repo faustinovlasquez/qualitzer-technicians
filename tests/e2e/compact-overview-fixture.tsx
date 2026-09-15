@@ -5,7 +5,7 @@ import type { OfflineSnapshot } from "../../src/domain/offline";
 import { DashboardScreen, type DashboardScreenProps } from "../../src/screens/DashboardScreen";
 import { LoginScreen } from "../../src/screens/LoginScreen";
 
-type Scenario = "full" | "supplemental" | "partial" | "partial-empty" | "null-coverage" | "no-data";
+type Scenario = "full" | "supplemental" | "partial" | "partial-empty" | "null-coverage" | "no-data" | "empty-maintenance" | "empty-ot";
 type Screen = "login" | "dashboard";
 const range: DateRange = { startDate: "2026-09-12", endDate: "2026-09-12" };
 const user: User = { id: 1, workerId: 1, name: "Alex", lastnames: "Fixture", email: "alex@example.invalid", role: { name: "Técnico" },
@@ -14,7 +14,7 @@ const user: User = { id: 1, workerId: 1, name: "Alex", lastnames: "Fixture", ema
 function assignments(scenario: Scenario): Assignments {
   const states: AssignmentWork["status"][] = scenario === "supplemental" ? ["pending", "pending", "paused", "delivered"] : ["pending", "pending", "in_progress", "completed"];
   const minutes = [120, 90, 135, 60];
-  const works: AssignmentWork[] = scenario === "partial-empty" ? [] : states.map((status, index) => ({
+  const works: AssignmentWork[] = scenario === "partial-empty" || scenario.startsWith("empty-") ? [] : states.map((status, index) => ({
     id: String(index + 1), workType: "productive", title: `Tarea de prueba ${index + 1}`, summary: "Trabajo de fixture", specialty: "Mantenimiento",
     status, priority: "medium", scheduledDate: range.startDate, scheduledStartTime: "08:00", scheduledEndTime: "10:00", plannedMinutes: minutes[index],
     executedMinutes: 0, elapsedSeconds: 0, isManualExecution: true, commentsCount: 0, filesCount: 0, checklistDone: 0, checklistTotal: 0,
@@ -22,7 +22,7 @@ function assignments(scenario: Scenario): Assignments {
   }));
   return { generatedAt: "2026-09-12T08:00:00Z", technician: { id: 1, name: "Alex", allowEditExecutionTime: false },
     summary: { totalGroups: 1, totalWorks: works.length, activeWorks: 1, overdueWorks: 0, plannedMinutes: 405 },
-    groups: [{ id: "101", type: "direct_assignment", code: "AS-101", title: "Asignación ficticia", status: "pending", customerName: "Cliente ficticio",
+    groups: [{ id: scenario === "empty-maintenance" ? "maintenance-101" : scenario === "empty-ot" ? "external-101" : "101", type: scenario === "empty-maintenance" ? "internal_maintenance" : scenario === "empty-ot" ? "external_ot" : "direct_assignment", code: "AS-101", title: scenario.startsWith("empty-") ? "Revisión de batería del equipo de transporte" : "Asignación ficticia", status: "pending", customerName: "Cliente ficticio",
       locationName: "Taller", locationAddress: null, scheduledDate: range.startDate, scheduledStartTime: "08:00", scheduledEndTime: "15:00",
       plannedMinutes: 405, isOverdue: false, isResponsible: true, canManage: false, equipment: null, products: [], works }] };
 }

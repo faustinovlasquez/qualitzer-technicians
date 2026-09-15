@@ -157,7 +157,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     catch (error) { setOperationError(errorMessage(error)); }
   }
 
-  return <Card style={styles.card}>
+  return <Card style={[styles.card, finished && styles.closedCard]}>
     <View style={styles.between}>
       <View style={styles.codes}>
         {localWork ? <Badge label="Guardado local · pendiente" tone="warning" /> : null}
@@ -217,6 +217,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
 
 const styles = StyleSheet.create({
   card: { gap: 13 },
+  closedCard: { backgroundColor: palette.successSoft, borderLeftWidth: 4, borderLeftColor: palette.primary },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
   codes: { flexDirection: "row", flexWrap: "wrap", gap: 6, flexShrink: 1 },
   code: { ...typography.caption, fontWeight: "800", color: palette.primary, letterSpacing: 0.5, flexShrink: 1, backgroundColor: palette.primarySoft, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.sm, overflow: "hidden" },

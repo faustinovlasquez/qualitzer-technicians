@@ -54,14 +54,15 @@ function AttachmentItem({ file, onPreview }: { file: Attachment; onPreview: (fil
   const url = httpUrl(file.url);
   const original = imageUri(file.url);
   const thumbnail = imageUri(file.thumbnailUrl) ?? original;
+  const localPreview = thumbnail !== null && /^(?:file:\/\/\/|blob:)/.test(thumbnail) ? thumbnail : null;
   const image = file.type?.toLowerCase().startsWith("image/") === true;
   return (
     <View style={styles.attachment}>
-      {image && thumbnail && !imageFailed ? <Pressable accessibilityRole="button" accessibilityLabel={`Ampliar imagen: ${file.name}`} onPress={() => onPreview(file)} disabled={original === null} style={styles.previewPress}><Image source={{ uri: thumbnail }} resizeMode="contain" style={styles.photo} accessibilityLabel={file.name} onError={() => setImageFailed(true)} /></Pressable> : null}
+      {image && thumbnail && !imageFailed ? <Pressable accessibilityRole="button" accessibilityLabel={`Ampliar imagen: ${file.name}`} onPress={() => onPreview(localPreview ? { ...file, url: localPreview } : file)} disabled={original === null && localPreview === null} style={styles.previewPress}><Image source={{ uri: thumbnail }} resizeMode="contain" style={styles.photo} accessibilityLabel={file.name} onError={() => setImageFailed(true)} /></Pressable> : null}
       <Text selectable style={styles.label}>{file.name}</Text>
       {file.responsible?.name ? <Text style={styles.caption}>Adjuntado por {file.responsible.name}</Text> : null}
       {imageFailed ? <BodyText>Vista previa no disponible. Puedes intentar abrir el archivo original.</BodyText> : null}
-      {url ? <HttpLink url={url} label={`Abrir ${file.name}`} onError={setLinkError} /> : <BodyText>Este archivo no tiene un enlace HTTP/HTTPS disponible.</BodyText>}
+      {url ? <HttpLink url={url} label={`Abrir ${file.name}`} onError={setLinkError} /> : image && original ? <Button title={`Abrir ${file.name}`} icon="open-outline" variant="secondary" onPress={() => onPreview(file)} /> : <BodyText>El enlace estará disponible al actualizar la lista.</BodyText>}
       {linkError ? <Notice message={linkError} tone="error" onDismiss={() => setLinkError(null)} /> : null}
     </View>
   );

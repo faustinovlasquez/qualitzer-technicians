@@ -1,6 +1,6 @@
     const wiring = [
       ["src/screens/creation/CreationScreen.tsx", [["Hora de inicio *", 'form.startTime', '(value) => change("startTime", value)'], ["Hora de fin *", 'form.endTime', '(value) => change("endTime", value)']]],
-      ["src/screens/workDetail/CompletionDialog.tsx", [["Inicio real (HH:mm)", "start", "setStart"], ["Término real (HH:mm)", "end", "setEnd"]]],
+      ["src/screens/workDetail/CompletionDialog.tsx", [["Inicio real (HH:mm)", "start", "(value) => { edited.current = true; setStart(value); }"], ["Término real (HH:mm)", "end", "(value) => { edited.current = true; setEnd(value); }"]]],
       ["src/screens/notifications/NotificationSettingsScreen.tsx", [["Desde", "preferences.quietHoursStart", "(quietHoursStart) => update({ quietHoursStart })"], ["Hasta", "preferences.quietHoursEnd", "(quietHoursEnd) => update({ quietHoursEnd })"]]],
     ];
     report.clockIntegration = [];
@@ -55,7 +55,7 @@
       assert.equal(await trigger(label).getAttribute("aria-label"),label+": "+hour+":"+minute);
       assert.deepEqual((await metrics()).clockCalls,[...previous,{label,value:hour+":"+minute}],"exactly one original consumer onChange after confirmation");
     }
-    for (const width of [360,390]) for(const scale of [1,2]) {
+    for (const width of [360,390,1280]) for(const scale of [1,2]) {
       const label=`${width}x844-font${scale*100}`;await page.setViewportSize({width,height:844});
       await check(label+"-widget-six-values",async()=>{
         await fresh("widget",scale);
@@ -114,10 +114,11 @@
       });
       await check(label+"-completion-two-clocks-offset49",async()=>{
         await fresh("completion",scale);await page.getByRole("checkbox",{name:"Editar horas de ejecución manualmente",exact:true}).click();
+        await radio("Inicio y término").click();
         await trigger("Día de término").waitFor();assert.match(await trigger("Día de término").getAttribute("aria-label"),/Día siguiente/);
-        await page.getByText(/Duración: 24 h 49 min/).waitFor();
+        await page.getByText("24 h 49 min",{exact:true}).waitFor();
         await trigger("Día de término").click();await radio("Mismo día").click();await button("Confirmar selección").click();
-        await page.getByText(/Duración: 49 min/).waitFor();assert.match(await trigger("Inicio real (HH:mm)").getAttribute("aria-label"),/08:00$/);assert.match(await trigger("Término real (HH:mm)").getAttribute("aria-label"),/08:49$/);
+        await page.getByText("49 min",{exact:true}).waitFor();assert.match(await trigger("Inicio real (HH:mm)").getAttribute("aria-label"),/08:00$/);assert.match(await trigger("Término real (HH:mm)").getAttribute("aria-label"),/08:49$/);
         await screenshot(label+"-offset49");
         await clockChange("Inicio real (HH:mm)","00","07");await clockChange("Término real (HH:mm)","23","59");
         assert.deepEqual((await metrics()).submitted,[]);await button("Confirmar y entregar").click();await settle();
@@ -125,9 +126,66 @@
       });
       await check(label+"-blocked-stays-blocked",async()=>{
         await fresh("blocked",scale);await page.getByRole("checkbox",{name:"Editar horas de ejecución manualmente",exact:true}).click();
+        await radio("Inicio y término").click();
         await trigger("Día de término").click();await radio("Mismo día").click();await button("Confirmar selección").click();
-        await page.getByText(/Duración: 49 min/).waitFor();assert.equal(await button("Confirmar y entregar").isDisabled(),true);assert.deepEqual((await metrics()).submitted,[]);
+        await page.getByText("49 min",{exact:true}).waitFor();assert.equal(await button("Confirmar y entregar").isDisabled(),true);assert.deepEqual((await metrics()).submitted,[]);
         await screenshot(label+"-cannot-submit");
+      });
+      await check(label+"-completion-total-correction",async()=>{
+        await fresh("completion",scale);
+        await tapTarget(button("Confirmar y entregar"),"delivery footer");
+        await screenshot(label+"-completion-automatic");
+        await page.getByRole("checkbox",{name:"Editar horas de ejecución manualmente",exact:true}).click();
+        assert.match(await trigger("Horas trabajadas").getAttribute("aria-label"),/24$/);
+        await trigger("Horas trabajadas").click();await radio("8 h").click();await button("Confirmar selección").click();
+        await trigger("Minutos trabajados").click();await button("Elegir cero").click();await button("Confirmar selección").click();
+        await page.getByText("8 h",{exact:true}).waitFor();await screenshot(label+"-completion-eight-hours");
+        await tapTarget(button("Confirmar y entregar"),"corrected footer");
+        const box=await button("Confirmar y entregar").boundingBox();assert.ok(box.y+box.height<=844);
+        await button("Confirmar y entregar").click();await settle();
+        assert.deepEqual((await metrics()).submitted,[{status:"delivered",executionDates:["2026-09-14"],isManual:true,executionStartTime:"08:00",executionEndTime:"16:00",endDateOffset:0}]);
+      });
+      await check(label+"-confirmed-files-normal-preview",async()=>{
+        await fresh("files",scale);
+        await button("Ampliar imagen: Evidencia.png").waitFor();
+        assert.equal(await button("Ampliar imagen: Evidencia.png").count(),1);
+        assert.equal(await page.getByText("Adjuntado por Técnico de prueba",{exact:true}).count(),2);
+        assert.equal(await button("Eliminar archivo guardado: Evidencia.png").count(),1);
+        const image=page.getByRole("img",{name:"Evidencia.png",exact:true});
+        await page.waitForFunction(()=>[...document.images].some(image=>image.complete&&image.naturalWidth>1));
+        await screenshot(label+"-confirmed-files");
+        await button("Ampliar imagen: Evidencia.png").click();await button("Cerrar imagen").waitFor();
+        await screenshot(label+"-confirmed-local-fullscreen");
+        await button("Cerrar imagen").click();
+        await button("Eliminar archivo guardado: Evidencia.png").click();await button("Cancelar").click();
+        assert.deepEqual((await metrics()).submitted,[]);assert.deepEqual((await metrics()).calls,[]);
+      });
+      await check(label+"-work-actions-complete-create-deliver-reopen",async()=>{
+        await fresh("detail",scale);
+        await screenshot(label+"-work-compact");
+        await page.getByRole("checkbox",{name:"Revisar cierre",exact:true}).click();
+        await page.waitForFunction(()=>window.timeSync.metrics().calls.some(call=>call.name==="complete"));
+        assert.equal(await page.getByRole("checkbox",{name:"Revisar cierre",exact:true}).getAttribute("aria-checked"),"true");
+        await button("Archivos de actividad").click();await page.getByText("Manual del supervisor",{exact:true}).waitFor();
+        await screenshot(label+"-activity-supervisor-document");
+        await button("Agregar actividad").click();await page.getByRole("textbox",{name:"Nombre de la actividad",exact:true}).fill("Lubricar bisagras");
+        await trigger("Horas de actividad").click();await radio("1 h").click();await button("Confirmar selección").click();
+        await button("Guardar actividad y añadir archivos").click();
+        await page.getByRole("checkbox",{name:"Lubricar bisagras",exact:true}).waitFor();
+        assert.deepEqual((await metrics()).calls.filter(call=>call.name==="activity"),[{name:"activity",value:{activity:"Lubricar bisagras",executionTime:60}}]);
+        await screenshot(label+"-activity-created");
+        await button("Entregar trabajo").click();await button("Confirmar y entregar").click();
+        await page.getByTestId("delivery-success").waitFor();await page.clock.runFor(500);await screenshot(label+"-delivery-success");
+        assert.equal((await metrics()).submitted.length,1);
+        await button("Consultar detalle").click();await page.getByTestId("work-closed-banner").waitFor();
+        await page.getByRole("tab",{name:"Archivos",exact:true}).click();
+        assert.equal(await page.getByTestId("work-closed-banner").isVisible(),true);await screenshot(label+"-delivered-files-status");
+        await button("Ver detalle del trabajo, archivos y comentarios").click();
+        await button("Reabrir trabajo").click();await button("Confirmar reapertura").click();
+        await page.getByTestId("work-closed-banner").waitFor({state:"hidden"});
+        assert.equal((await metrics()).calls.filter(call=>call.name==="reopen").length,1);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+        await screenshot(label+"-work-reopened");
       });
       await check(label+"-notification-two-clocks-no-autosave",async()=>{
         await fresh("notification",scale);await trigger("Desde").waitFor();

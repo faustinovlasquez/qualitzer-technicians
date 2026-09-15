@@ -1,5 +1,9 @@
 # Fluidez móvil — app 1.0.11 y gateway 1.0.4
 
+Actualización 15 de septiembre: gateway 1.0.5 añade actividades y reapertura y conserva timer/checklist de 1.0.4. La sincronización anterior fue confirmada por el usuario; la nueva funcionalidad requiere desplegar PanelWorkActions y el paquete nuevo. El resto de este documento registra la entrega histórica 1.0.4.
+
+Actualización posterior: gateway 1.0.6 conserva timer/checklist y admite avisos de mantenimiento completo sin trabajo hijo. Usar con Backend de asignaciones completas y [APK 1.0.17](ACTUALIZACION-1.0.17.md). No añade migraciones ni cambia los recibos de sincronización.
+
 ## Estado — 14 de septiembre de 2026
 
 La implementación está integrada: UI, hook, repositorio offline, cola durable, HTTP/demo y comandos Backend. **APK 1.0.11/código 12 y gateway 1.0.4 publicados en los artefactos locales**, con copia idéntica del gateway en Backend. La verificación nativa acotada se completó en DEMO sobre emulador propio API 36. **El usuario debe instalar y desplegar Backend compatible + gateway 1.0.4 ANTES de instalar la app; producción sigue sin este despliegue.** Publicación local no equivale a descarga HTTP habilitada ni a validación de cuenta real.

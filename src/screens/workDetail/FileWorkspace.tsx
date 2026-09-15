@@ -10,7 +10,7 @@ import { syncUserError, userErrorText } from "../offline/syncUserPresentation";
 import { BodyText, Button, IconButton, SectionTitle } from "../../ui/components";
 import { palette } from "../../ui/theme";
 import { Notice } from "./DetailUi";
-import { errorMessage, httpUrl } from "./detailRules";
+import { errorMessage } from "./detailRules";
 import { styles } from "./detailStyles";
 import { pickWorkspaceFiles } from "./files/filePicker";
 import { fileSizeLabel, MAX_FILES, type FileSource } from "./files/fileRules";
@@ -89,8 +89,8 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     const file = pendingDocumentAttachment(operation);
     displayedFiles.set(String(file.id), file);
   }
-  const localFiles = [...displayedFiles.values()].flatMap((file) => { const local = offlineAttachment(file); return local && (local.offline.downloaded || !local.offline.confirmed) ? [local] : []; });
-  const remoteFiles = [...displayedFiles.values()].filter((file) => isConfirmedAttachment(file) && !String(file.id).startsWith("local-") && (!offlineAttachment(file) || httpUrl(file.url) !== null));
+  const localFiles = [...displayedFiles.values()].flatMap((file) => { const local = offlineAttachment(file); return local && !local.offline.confirmed ? [local] : []; });
+  const remoteFiles = [...displayedFiles.values()].filter((file) => isConfirmedAttachment(file) && !String(file.id).startsWith("local-"));
   useEffect(() => { if (message || draft.error || loadError) list.current?.scrollTo({ y: 0, animated: false }); }, [message, draft.error, loadError]);
 
   const load = useCallback(async (): Promise<boolean> => {
@@ -253,7 +253,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
         {error ? <Notice message={syncUserError(error)} tone="warning" /> : null}
         {props.onDelete ? <Button title="Eliminar archivo" variant="secondary" disabled={unavailable || deletionDisabled || !file.offline.confirmed || String(file.id).startsWith("local-") || loading || !!loadError} onPress={() => setDeleting(file)} /> : null}
       </View>; })}
-      {remoteFiles.length > 0 ? <SavedFileList files={remoteFiles} mode={props.mode} canDelete={!unavailable && !loading && !loadError && !deletionDisabled} onDelete={props.onDelete ? setDeleting : undefined} /> : displayedFiles.size === 0 && files !== null && !loadError && !loading ? <BodyText>No hay archivos guardados en este destino.</BodyText> : null}
+      {remoteFiles.length > 0 ? <SavedFileList files={remoteFiles} mode={props.mode} readLocalFile={!loadError && !props.offline?.authBlocked ? props.readLocalFile : undefined} canDelete={!unavailable && !loading && !loadError && !deletionDisabled} onDelete={props.onDelete ? setDeleting : undefined} /> : displayedFiles.size === 0 && files !== null && !loadError && !loading ? <BodyText>No hay archivos guardados en este destino.</BodyText> : null}
       {props.listFooter}
     </View>;
   const connection = props.offline === null ? "Recuperando cola…" : props.offline?.authBlocked ? "Verifica tu sesión · pendientes conservados" : props.mode === "demo" ? "Demostración · guardado local" : props.offline === undefined ? "Carga manual · espera confirmación" : "Guarda los archivos seleccionados";

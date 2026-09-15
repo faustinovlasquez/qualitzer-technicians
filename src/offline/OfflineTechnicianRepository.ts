@@ -17,6 +17,7 @@ import { assignmentsWithTimerRead, canonicalIntentionScopeSchema, checklistCatal
 import { isServiceFailure, requiresDeployment } from "./connection";
 import type { AssignmentReadOptions } from "../domain/assignmentRead";
 import { withAssignmentReadBatch, type AssignmentReadBatch } from "../infrastructure/assignmentReadBatch";
+import { workActions, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
 
 export class OfflineTechnicianRepository implements TechnicianRepository, OfflineController {
   readonly engine: OfflineEngine;
@@ -33,6 +34,18 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   retry = (id: string) => this.engine.retry(id);
   hasPendingChanges = () => this.engine.hasPendingChanges();
   readLocalFile = (id: string) => this.engine.readLocalFile(id);
+  activities: WorkActivitiesPort["activities"] = async scope => {
+    this.checklistScope(scope);
+    return this.read(`activities:${JSON.stringify(scope)}`, () => workActions(this.remote).activities(scope), json => workActivitySchema.array().parse(JSON.parse(json)));
+  };
+  createActivity: WorkActivitiesPort["createActivity"] = (scope, input) => this.onlineOnly(() => workActions(this.remote).createActivity(scope, input), scope);
+  completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id) => this.onlineOnly(() => workActions(this.remote).completeActivity(scope, id), scope);
+  activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => {
+    this.checklistScope(scope);
+    return this.read(`activity-files:${JSON.stringify([scope, id])}`, () => workActions(this.remote).activityFiles(scope, id), json => cachedAttachmentSchema.array().parse(JSON.parse(json)));
+  };
+  uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = (scope, id, files) => this.onlineOnly(() => workActions(this.remote).uploadActivityFiles(scope, id, files), scope);
+  reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.onlineOnly(() => workActions(this.remote).reopenWork(scope), scope);
   private branch(branchId: number): void {
     if (branchId !== this.dependencies.branchId) throw new OfflineUnavailableError("OFFLINE_BRANCH_NAMESPACE_MISMATCH");
   }
@@ -352,7 +365,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       const canonical = canonicalId === undefined ? undefined : files.find((file) => String(file.id) === String(canonicalId));
       if (canonical) {
         const index = files.indexOf(canonical);
-        const bound: OfflineAttachment = { ...canonical, url: await this.dependencies.fileStore.resolveURI(op.file), offline: { operationId: op.id, status: op.status, downloaded: true, confirmed: true, localFileId: op.file.id } };
+        const bound: OfflineAttachment = { ...canonical, type: canonical.type ?? op.file.mimeType, size: canonical.size ?? op.file.size, offline: { operationId: op.id, status: op.status, downloaded: true, confirmed: true, localFileId: op.file.id } };
         files[index] = bound;
         continue;
       }
@@ -365,7 +378,8 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       const cached = state.attachments.find((entry) => entry.attachmentId === String(file.id) && sameResource(entry.scope, scope) && entry.stepId === stepId);
       const attachment: OfflineAttachment = { ...file, offline: { downloaded: false, confirmed: true } };
       if (cached) {
-        attachment.url = await this.dependencies.fileStore.resolveURI(cached.file);
+        attachment.size = file.size ?? cached.file.size;
+        attachment.type = file.type ?? cached.file.mimeType;
         attachment.offline = { downloaded: true, confirmed: true, localFileId: cached.file.id };
       }
       return attachment;

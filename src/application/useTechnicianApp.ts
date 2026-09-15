@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
+import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
 import { dateKey, weekRange } from "../domain/format";
@@ -514,7 +515,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
         : payload.groupType === "negotiation"
           ? item.type === "external_ot" && item.id === `external-${payload.groupId}`
           : payload.groupType === "work" && item.type === "direct_assignment" && (item.id === `direct-${payload.groupId}` || item.id === `direct-np-${payload.groupId}`));
-      if (!group || !group.works.length) throw new Error("La orden ya no está disponible para este trabajador en la fecha del aviso.");
+      if (!group) throw new Error("La orden ya no está disponible para este trabajador en la fecha del aviso.");
       let nextWork: SelectedWork | null = null;
       if (payload.workId !== null) {
         const work = group.works.find((item) => item.id === String(payload.workId) && (payload.groupType !== "work"
@@ -524,7 +525,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
         const snapshot = snapshots?.find((item) => assignmentDay(item.work.scheduledDate) === day) ?? snapshots?.[0];
         if (!work || (work.schedules && !snapshot)) throw new Error("La orden o el trabajo ya no está disponible en la fecha del aviso.");
         nextWork = { groupId: group.id, workId: work.id, queryDate: day, scheduledDate: assignmentDay(snapshot?.work.scheduledDate ?? work.scheduledDate), initialTab: "work" };
-      } else if (payload.groupType !== "negotiation") {
+      } else if (payload.groupType !== "negotiation" && payload.groupType !== "maintenance") {
         throw new Error("La notificación no identifica un trabajo disponible.");
       }
       const nextOrder: SelectedOrder = { id: group.id, queryDate: day, initialTab: "works" };
@@ -1036,7 +1037,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     return { ...dailyRange(selectedOrder.queryDate), groupId: group.id, companyBranchId: session.branchId };
   }
 
-  async function performMutation<T extends GroupScope>(value: T, operation: (repo: TechnicianRepository, value: T) => Promise<void>, refreshAfter = false): Promise<void> {
+  async function performMutation<T extends GroupScope, Result = void>(value: T, operation: (repo: TechnicianRepository, value: T) => Promise<Result>, refreshAfter = false): Promise<Result> {
     if (!isAccessAllowed()) throw new Error("Desbloquea la aplicación antes de continuar.");
     if (actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
     const repo = repository.current;
@@ -1048,13 +1049,14 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     requestVersion.current += 1;
     setLoading(false);
     try {
-      await operation(repo, value);
+      const result = await operation(repo, value);
       if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la operación. Verifica el resultado antes de repetir el envío.");
       if (refreshAfter) {
         void refreshAssignments(true).catch((caught: unknown) => {
           if (version === sessionVersion.current && repository.current === repo) setError(`El cambio fue confirmado, pero no se pudo actualizar la información. No repitas el envío; actualiza las asignaciones. ${errorText(caught)}`);
         });
       }
+      return result;
     } finally { endAction(action); }
   }
 
@@ -1253,6 +1255,12 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     login, demo, changePassword, retrySessionSetup, branch, logout, checkConnection, refresh, changeRange, agendaFocusDate, focusAgendaDay, openGroup, closeOrder, openWork, closeWork, onWorkStatus,
     openCreate, closeCreate, creationOptions, createRecord, onCreated, onOfflineQueuedCreate,
     changeStatus: (input: StatusInput) => performMutation(scope(), (repo, value) => repo.status(value, input), true),
+    reopenWork: () => performMutation(scope(), (repo, value) => workActions(repo).reopenWork(value), true),
+    loadActivities: () => readWork((repo, value) => workActions(repo).activities(value)),
+    createActivity: (input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).createActivity(value, input), true),
+    completeActivity: (id: number) => performMutation(scope(), (repo, value) => workActions(repo).completeActivity(value, id), true),
+    loadActivityFiles: (id: number) => readWork((repo, value) => workActions(repo).activityFiles(value, id)),
+    uploadActivityFiles: (id: number, files: LocalPhoto[]) => performMutation(scope(), (repo, value) => workActions(repo).uploadActivityFiles(value, id, files)),
     saveAnswer,
     loadChecklistOptions: (query: ChecklistCatalogQuery) => readWork(async (repo, value) => {
       if (!repo.checklistOptions) throw new Error("El catálogo de checklists no está disponible.");

@@ -22,7 +22,7 @@ export function clockFromPickerDate(date: Date): string | null {
 }
 
 export function parseSelectionNumber(value: string, max: number): number | null {
-  if (!/^\d{1,2}$/.test(value)) return null;
+  if (!(max > 99 ? /^\d{1,3}$/ : /^\d{1,2}$/).test(value)) return null;
   const number = Number(value);
   return number <= max ? number : null;
 }

@@ -25,6 +25,7 @@ test("references distinguish OT, maintenance, root work and parent-only assignme
   assert.equal(notificationWorkReference(item({ groupType: "negotiation", groupId: 8, workId: 9 })), "OT #8 · Trabajo #9");
   assert.equal(notificationWorkReference(item({ groupType: "negotiation", groupId: 8, workId: null })), "OT #8");
   assert.equal(notificationWorkReference(item({ groupType: "maintenance", groupId: 8, workId: 9 })), "Mantenimiento #8 · Trabajo #9");
+  assert.equal(notificationWorkReference(item({ groupType: "maintenance", groupId: 8, workId: null })), "Mantenimiento #8");
   assert.equal(notificationWorkReference({ ...item(), kind: "MOBILE_PUSH_TEST" }), null);
 });
 

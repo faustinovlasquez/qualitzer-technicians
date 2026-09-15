@@ -6,7 +6,7 @@ import { dayOffsetLabel, parseSelectionNumber } from "./timeValues";
 import { useSelectionSession, type SelectionFieldProps, type SelectionSession } from "./useSelectionSession";
 
 export interface NumericSelectFieldProps extends SelectionFieldProps, SelectorPresentation {
-  max: 30 | 59 | 99;
+  max: 30 | 59 | 99 | 743;
   dayOffset?: boolean;
 }
 
@@ -31,6 +31,7 @@ function NumericSelection({ label, value, max, dayOffset, session }: NumericSele
     {parseSelectionNumber(value, max) === null ? <Text style={timeStyles.hint}>Valor anterior: {value || "vacío"}. Elige un valor; no cambia hasta confirmar.</Text> : null}
     {dayOffset ? <View style={timeStyles.grid}>{[0, 1].map((number) => <SelectionChip key={number} label={dayOffsetLabel(number)}
       selected={selected === number} onPress={() => choose(number)} />)}</View> : null}
+    {max === 743 ? <View style={timeStyles.grid}>{[1, 2, 4, 8, 12, 24, 40].map((number) => <SelectionChip key={number} label={`${number} h`} selected={selected === number} onPress={() => choose(number)} />)}</View> : null}
     <Text style={timeStyles.hint}>{dayOffset ? "Para más días, usa los botones − y +. Una hora de término menor no añade un día automáticamente." : `Selecciona de 0 a ${max}, sin escribir.`}</Text>
     <View style={timeStyles.stepper}>
       <IconButton name="remove" label={`Reducir ${label}`} disabled={selected === null || selected === 0} onPress={() => { if (selected !== null) choose(selected - 1); }} />

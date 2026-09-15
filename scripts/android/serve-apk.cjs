@@ -36,12 +36,12 @@ const sha256 = createHash("sha256").update(apkContent).digest("hex");
 if (sha256 !== report.sha256 || report.debuggable !== false || report.variant !== "release") throw new Error("APK_RELEASE_VERIFICATION_REQUIRED");
 const size = apkContent.length;
 if (size !== report.bytes) throw new Error("APK_RELEASE_SIZE_MISMATCH");
-const gatewayVersion = "1.0.4";
+const gatewayVersion = "1.0.6";
 const gatewayArchiveName = `qualitzer-mobile-gateway-${gatewayVersion}.tgz`;
 const gatewayArchivePath = `artifacts/mobile-gateway/${gatewayArchiveName}`;
 const gatewayContent = readPublicFile(root, gatewayArchivePath, 32 * 1024 * 1024);
 const gatewaySha256 = createHash("sha256").update(gatewayContent).digest("hex");
-if (gatewaySha256 !== "b908c95b785b4d4d402f74ad7facb80ed20806dc166a59026b3ec40e2a2319ae") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
+if (gatewaySha256 !== "769448926b4a75f2efcb6ddea8c383d7959b862d711c0c8d229d0daa6e487bf3") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
 const validationDirectory = "artifacts/logs/fluidity-package";
 const validationName = readdirSync(publicPath(root, validationDirectory, true), { withFileTypes: true })
   .filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-zA-Z0-9]{6}$/.test(entry.name))
@@ -54,7 +54,7 @@ if (gatewayValidation.passed !== true || gatewayValidation.version !== gatewayVe
   || gatewayValidation.package?.path !== gatewayArchivePath || gatewayValidation.package?.sha256 !== gatewaySha256
   || gatewayValidation.package?.bytes !== gatewayContent.length || !Array.isArray(gatewayValidation.checks)
   || !requiredGatewayChecks.every(name => gatewayValidation.checks.some(check => check.name === name && check.passed === true))) throw new Error("GATEWAY_DELIVERY_VERIFICATION_REQUIRED");
-const deploymentGuide = readPublicFile(resolve(root, "../Qualitzer2.0-Backend"), "docs/ACTUALIZACION-FLUIDEZ-MOVIL.md");
+const deploymentGuide = readPublicFile(resolve(root, "../Qualitzer2.0-Backend"), "docs/ACTUALIZACION-ASIGNACIONES-MOVILES.md");
 const fluidityGuide = readPublicFile(root, "docs/ACTUALIZACION-FLUIDEZ-MOVIL.md");
 const releaseGuide = readPublicFile(root, `docs/ACTUALIZACION-${version}.md`);
 const logo = readPublicFile(root, "assets/qualitzer-logo.png");
@@ -65,7 +65,9 @@ if (requestedHost && !addresses.some(address => address.address === requestedHos
 const host = requestedHost ?? addresses.find(address => /^(?:wi-?fi|wlan|en0)/i.test(address.network))?.address
   ?? addresses.find(address => /^(?:ethernet|eth\d|en\d)/i.test(address.network) && !/virtual|vethernet|vpn|tun|tap/i.test(address.network))?.address;
 if (!host) throw new Error("PRIVATE_LAN_REQUIRED_FOR_APK_DOWNLOAD");
-const url = `http://${host}:8790/${name}`;
+const port = Number(process.env.QUALITZER_APK_PORT ?? "8790");
+if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error("APK_PORT_INVALID");
+const url = `http://${host}:${port}/${name}`;
 
 async function main() {
   const qr = await QRCode.toString(url, { type: "svg", margin: 2, width: 260 });
@@ -74,15 +76,14 @@ async function main() {
 <main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
 <p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
 <a href="/${name}">Descargar actualización ${version}</a><img src="/qr.svg" width="260" height="260" alt="QR para descargar la actualización en el teléfono">
-<p><strong>Selección de horas sin teclear y sincronización con resultados claros.</strong></p>
-<ul><li>Rueda horaria nativa de 24 horas en seis campos: inicio y fin al crear, inicio y término reales al entregar, y Desde/Hasta del horario silencioso. La duración de mantenimiento y el día de término también usan selectores sin escribir.</li><li>La sincronización automática puede avanzar con operaciones independientes compatibles mientras los tipos conocidos no soportados esperan al servidor. No salta dependencias ni bloquea por ese motivo las operaciones legacy independientes; conserva conflictos y pendientes.</li><li>El envío manual informa cuántos cambios se confirmaron, cuáles siguen pendientes y si requieren soporte o revisión. Pulsar sincronizar no significa que todo se haya enviado.</li></ul>
-<p><strong>La causa de servidor sigue requiriendo instalar gateway ${gatewayVersion} y un Backend compatible con timer/checklist.</strong> Esta preparación móvil no instala ni despliega el servidor. La auditoría principal debe confirmar la vigencia del artefacto existente; nunca se sobrescribe el gateway publicado. No se garantiza que los siete pendientes remotos terminen aplicados.</p>
-<p>Soporte debe confirmar el despliegue mediante el procedimiento existente antes de instalar. Conserva la app 1.0.13 instalada hasta esa confirmación y la publicación verificada de esta actualización. Descargar archivos no despliega ni verifica el servidor.</p>
-<p>Después, elige <strong>Actualizar</strong> sobre la app instalada. No desinstales ni borres datos o pendientes.</p>
+<p><strong>Asignaciones de mantenimiento, trabajos y OTs.</strong></p>
+<ul><li>Mantenimientos y OTs asignados visibles aunque todavía no tengan trabajos.</li><li>Acceso al mantenimiento completo desde la notificación.</li><li>Trabajos disponibles por la asignación del mantenimiento, sin copiarlos.</li><li>Avisos con el título y el nombre del asignador cuando existe un registro verificable.</li><li>Se conservan checklists, actividades, archivos, horas y pendientes.</li></ul>
+<p><strong>Requiere desplegar el backend actualizado y gateway ${gatewayVersion}</strong> para asignaciones completas. Descargar esta APK no instala el servidor.</p>
+<p>Elige <strong>Actualizar</strong> sobre la app instalada. No desinstales ni borres datos o pendientes.</p>
 <p>Guardado local no significa envío confirmado ni ficha actualizada. La sincronización requiere conexión, sesión válida y la app en primer plano y desbloqueada. El cronómetro conserva el tiempo oficial del servidor.</p>
 <a href="/actualizacion.txt">Detalles de esta actualización</a>
 <a href="/fluidez.txt">Guía de fluidez y preparación del gateway</a>
-<details><summary>Requisitos de servidor para soporte</summary><a href="/${gatewayArchiveName}">Gateway ${gatewayVersion} · artefacto existente inmutable</a><a href="/actualizacion-servidor.txt">Requisitos Backend y despliegue de fluidez</a><small>SHA-256 gateway: ${gatewaySha256}</small><p>Se conserva el paquete existente y su informe histórico de validación; la auditoría de esta release debe comprobar la procedencia actual antes de publicar. No instalar ni sobrescribir el gateway 1.0.3, generado antes de la corrección semanal. Las migraciones históricas que falten siguen sujetas al procedimiento autorizado. La verificación local no acredita despliegue, sincronización real ni push remoto.</p></details>
+<details><summary>Requisitos de servidor para soporte</summary><a href="/${gatewayArchiveName}">Gateway ${gatewayVersion}</a><a href="/actualizacion-servidor.txt">Despliegue de asignaciones completas</a><small>SHA-256 gateway: ${gatewaySha256}</small><p>Paquete reproducible verificado en Node 20.12.2. También deben desplegarse las fuentes de asignaciones y notificaciones del backend. Sin migración nueva. Se conservan los paquetes anteriores; no se borran sesiones ni pendientes. La verificación local no acredita el despliegue remoto.</p></details>
 <p>La misma Wi-Fi se necesita solo para descargar. La app instalada no necesita Expo Go, Metro ni el computador.</p><small>SHA-256 APK: ${sha256}</small></main></html>`;
   const server = createServer((req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -124,7 +125,7 @@ async function main() {
   server.headersTimeout = 10000;
   server.maxHeadersCount = 30;
   server.on("error", () => { console.error("APK_DOWNLOAD_SERVER_UNAVAILABLE"); process.exitCode = 1; });
-  server.listen(8790, host, () => console.log(`APK_DOWNLOAD_PID ${process.pid}\nAPK_DOWNLOAD_PAGE http://${host}:8790/\nAPK_DOWNLOAD ${url}\nAPK_QR http://${host}:8790/qr.svg\nVERSION ${version} CODE ${versionCode}\nSHA256 ${sha256}`));
+  server.listen(port, host, () => console.log(`APK_DOWNLOAD_PID ${process.pid}\nAPK_DOWNLOAD_PAGE http://${host}:${port}/\nAPK_DOWNLOAD ${url}\nAPK_QR http://${host}:${port}/qr.svg\nVERSION ${version} CODE ${versionCode}\nSHA256 ${sha256}`));
   for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => server.close());
 }
 

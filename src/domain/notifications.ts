@@ -16,7 +16,7 @@ export const notificationOriginSchema = z.string().max(2048).refine((value) => {
 export const notificationDataSchema = z.object({ recipient: z.object({ userId: positiveCreationIdSchema, workerId: positiveCreationIdSchema }).optional(), tenantOrigin: notificationOriginSchema, companyBranchId: positiveCreationIdSchema, eventId: mobileUuidSchema, kind: notificationKindSchema, groupType: z.enum(["work", "negotiation", "maintenance"]).nullable(), groupId: positiveCreationIdSchema.nullable(), workId: positiveCreationIdSchema.nullable(), date: notificationDateSchema.nullable() }).refine((value) => {
   if (value.kind === "MOBILE_PUSH_TEST") return value.groupType === null && value.groupId === null && value.workId === null && value.date === null;
   if (value.groupType === null || value.groupId === null) return false;
-  return value.workId !== null || (value.kind === "WORK_TECHNICIAN_ASSIGNED" && value.groupType === "negotiation");
+  return value.workId !== null || (value.kind === "WORK_TECHNICIAN_ASSIGNED" && (value.groupType === "negotiation" || value.groupType === "maintenance"));
 }, "MOBILE_PUSH_INVALID_DATA");
 const isoDate = z.iso.datetime({ offset: true });
 const reason = z.string().max(100).regex(/^(MOBILE_PUSH_[A-Z_]+|EXPO_[A-Z0-9_]+|DEVICE_NOT_REGISTERED|DEMO)$/);

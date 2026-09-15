@@ -68,6 +68,8 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id.endsWith("/ui/time/TimeField")) return { TimeField: "TimeField" };
     if (id.endsWith("/ui/time/NumericSelectField")) return { NumericSelectField: "NumericSelectField", DayOffsetField: "DayOffsetField" };
     if (id.endsWith("/DetailUi")) return { Notice: "Notice", AttachmentList: "AttachmentList" };
+    if (id.endsWith("/DeliverySuccess")) return { DeliverySuccess: "DeliverySuccess" };
+    if (id.endsWith("/WorkActivities")) return { WorkActivities: "WorkActivities" };
     if (id.endsWith("/detailStyles")) return { styles: {} };
     if (id.endsWith("/workspaceStyles")) return { workspaceStyles: {} };
     if (id.endsWith("/DeviceSecurityContext")) return { PrivateModal: "Modal", DeviceSecurityContext: {} };

@@ -4,12 +4,14 @@ import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { clock, duration, shiftDate, shortDate } from "../../domain/format";
 import type { AssignmentWork, DateRange, StatusInput } from "../../domain/models";
-import { automaticExecutionTiming, availableExecutionDates, canTransitionExecution, executionDatesAllowed, executionElapsedSeconds, executionStartTime, MAX_EXECUTION_DATES } from "../../domain/workExecution";
-import { BodyText, Button, Field, SectionTitle } from "../../ui/components";
+import { automaticExecutionTiming, availableExecutionDates, canTransitionExecution, executionDatesAllowed, executionElapsedSeconds, executionIntervalCovered, executionStartTime, MAX_EXECUTION_DATES } from "../../domain/workExecution";
+import { BodyText, Button, SectionTitle } from "../../ui/components";
 import { TimeField } from "../../ui/time/TimeField";
-import { DayOffsetField } from "../../ui/time/NumericSelectField";
+import { DayOffsetField, NumericSelectField } from "../../ui/time/NumericSelectField";
 import { ChoiceButton, Notice } from "./DetailUi";
 import { manualCompletion } from "./detailRules";
+import { manualDurationCompletion } from "./completionTiming";
+import { assignmentWorkSnapshotForQueryDate } from "../../domain/assignmentSchedule";
 import { styles } from "./detailStyles";
 
 export interface CompletionDialogProps {
@@ -39,8 +41,11 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
   const [start, setStart] = useState(() => executionStartTime(work));
   const [end, setEnd] = useState(() => automaticExecutionTiming(work)?.executionEndTime ?? "");
   const [offset, setOffset] = useState(() => String(automaticExecutionTiming(work)?.endDateOffset ?? 0));
+  const [editMode, setEditMode] = useState<"duration" | "interval">("duration");
+  const [hours, setHours] = useState(() => String(Math.floor(Math.round(work.elapsedSeconds / 60) / 60)));
+  const [minutes, setMinutes] = useState(() => String(Math.round(work.elapsedSeconds / 60) % 60));
+  const edited = useRef(false);
   const [now, setNow] = useState(Date.now);
-  const [attempted, setAttempted] = useState(false);
   useEffect(() => {
     setNow(Date.now());
     if (work.status !== "in_progress" || !submitAllowed || reasons.length > 0) return;
@@ -48,20 +53,33 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
     return () => clearInterval(timer);
   }, [work.status, generatedAt, submitAllowed, reasons.length]);
   const previewNow = submitAllowed && reasons.length === 0 ? now : undefined;
-  const elapsed = executionElapsedSeconds(work, generatedAt, previewNow);
-  const anchorSnapshot = work.schedules?.find((snapshot) => snapshot.queryDates.includes(date));
+  const anchorSnapshot = assignmentWorkSnapshotForQueryDate(work, date);
   const anchorWork = date === range.startDate ? work : anchorSnapshot?.work;
-  const timing = anchorWork ? automaticExecutionTiming(anchorWork, executionElapsedSeconds(anchorWork, date === range.startDate ? generatedAt : anchorSnapshot?.generatedAt, previewNow)) : null;
+  const elapsed = anchorWork ? executionElapsedSeconds(anchorWork, date === range.startDate ? generatedAt : anchorSnapshot?.generatedAt, previewNow) : 0;
+  const timing = anchorWork ? automaticExecutionTiming(anchorWork, elapsed) : null;
   const editing = manual && allowEditExecutionTime;
-  const result = manualCompletion(selectedDates, start, end, /^\d{1,2}$/.test(offset) ? Number(offset) : NaN, range, status, work);
+  const interval = manualCompletion(selectedDates, start, end, /^\d{1,2}$/.test(offset) ? Number(offset) : NaN, range, status, work);
+  const result = editMode === "duration" ? manualDurationCompletion(selectedDates, hours, minutes, start, range, work, status) : interval;
   const canSubmit = submitAllowed && canTransitionExecution(work, status) && work.missingRequiredInfo.length === 0 && executionDatesAllowed(work, range, selectedDates, maintenance);
   const blocked = reasons.length > 0 || !canSubmit;
-  const autoError = !maintenance && anchorWork !== undefined && (timing === null || timing.minutes <= 0)
+  const autoError = selectedDates.length > 1 && timing && !executionIntervalCovered(selectedDates, timing.endDateOffset)
+    ? "Selecciona todos los días que abarca el intervalo o corrige el tiempo trabajado."
+    : !maintenance && anchorWork !== undefined && (timing === null || timing.minutes <= 0)
     ? allowEditExecutionTime
       ? "No hay tiempo de cronómetro suficiente para entregar automáticamente. Inicia el cronómetro o activa la edición manual."
       : "Inicia el cronómetro antes de entregar. La sucursal no permite registrar horas manuales; si acaba de iniciar, espera a que acumule tiempo."
     : null;
-  const validationError = editing ? attempted ? result.error : null : autoError;
+  const validationError = !executionDatesAllowed(work, range, selectedDates, maintenance)
+    ? "Selecciona una fecha disponible o las fechas planificadas que quieres entregar."
+    : editing ? result.error : autoError;
+  useEffect(() => {
+    if (manual || edited.current) return;
+    setStart(timing?.executionStartTime ?? executionStartTime(anchorWork ?? work));
+    setEnd(timing?.executionEndTime ?? "");
+    setOffset(String(timing?.endDateOffset ?? 0));
+    setHours(String(Math.floor((timing?.minutes ?? Math.round(elapsed / 60)) / 60)));
+    setMinutes(String((timing?.minutes ?? Math.round(elapsed / 60)) % 60));
+  }, [date, timing?.executionStartTime, timing?.executionEndTime, timing?.endDateOffset, timing?.minutes, manual]);
   const submitted = useRef(false);
   const mounted = useRef(true);
   const latest = useRef({ busy, blocked, editing, result, autoError, status, selectedDates, onSubmit });
@@ -85,18 +103,31 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
   function toggleManual(): void {
     if (busy || !allowEditExecutionTime) return;
     if (!editing) {
+      edited.current = false;
       setStart(timing?.executionStartTime ?? executionStartTime(work));
       setEnd(timing?.executionEndTime ?? "");
       setOffset(String(timing?.endDateOffset ?? 0));
+      setHours(String(Math.floor((timing?.minutes ?? Math.round(elapsed / 60)) / 60)));
+      setMinutes(String((timing?.minutes ?? Math.round(elapsed / 60)) % 60));
     }
     setManual(!editing);
-    setAttempted(false);
+  }
+
+  function changeEditMode(next: "duration" | "interval"): void {
+    if (busy || next === editMode) return;
+    if (result.input) {
+      setStart(result.input.executionStartTime ?? start);
+      setEnd(result.input.executionEndTime ?? end);
+      setOffset(String(result.input.endDateOffset ?? 0));
+      setHours(String(Math.floor(result.minutes / 60)));
+      setMinutes(String(result.minutes % 60));
+    }
+    setEditMode(next);
   }
 
   function submit(): void {
     const current = latest.current;
     if (!mounted.current || submitted.current || current.busy || current.blocked) return;
-    setAttempted(true);
     const input = current.editing ? current.result.input : current.autoError ? null : { status: current.status, executionDates: [...current.selectedDates].sort(), isManual: false };
     if (!input) return;
     submitted.current = true;
@@ -109,7 +140,7 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
       <SafeAreaView style={styles.modalOverlay}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalCard}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>
-            <SectionTitle title="Entregar trabajo" subtitle="Revisa la ejecución registrada. La entrega cierra el estado y las respuestas, no los comentarios ni los archivos." />
+            <SectionTitle title="Entregar trabajo" />
             {blocked ? <View style={styles.tight}>
               <Text style={styles.label}>Antes de entregar</Text>
               {reasons.map((reason, index) => <BodyText key={`${index}:${reason}`}>• {reason}</BodyText>)}
@@ -118,41 +149,40 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
             </View> : null}
             {mode === "demo" ? <Notice message="Modo demostración: los cambios se guardan solo localmente." /> : null}
             <View style={styles.tight}>
-              <Text style={styles.label}>Tiempo acumulado {work.status === "in_progress" ? "· En curso" : "· Confirmado"}</Text>
-              <Text style={styles.title}>{clock(elapsed)}</Text>
-              <BodyText>Las pausas no suman tiempo. Al confirmar se utiliza una lectura nueva del servidor, no el reloj del dispositivo.</BodyText>
+              <Text style={styles.label}>{editing ? "Tiempo a registrar" : "Tiempo trabajado"}</Text>
+              <Text style={styles.title}>{editing ? duration(result.minutes) : anchorWork ? clock(elapsed) : "Por confirmar"}</Text>
+              {editing && anchorWork ? <BodyText>Registrado por el cronómetro: {clock(elapsed)}</BodyText> : null}
             </View>
             <View style={styles.tight}>
-              <Text style={styles.label}>Fechas de cierre · {selectedDates.length} seleccionada(s)</Text>
+              <Text style={styles.label}>Días trabajados · {selectedDates.length} seleccionado(s)</Text>
               {dates.length > 1 ? <View style={styles.row}>{dates.map((day) => <ChoiceButton key={day} multiple={!maintenance} label={shortDate(day)} selected={selectedDates.includes(day)} disabled={busy || (!selectedDates.includes(day) && selectedDates.length >= MAX_EXECUTION_DATES)} onPress={() => toggleDate(day)} />)}</View> : <BodyText>{shortDate(date)}</BodyText>}
               {!maintenance && plannedDates.length > 1 && plannedDates.length <= MAX_EXECUTION_DATES ? <Button title="Seleccionar todas las fechas planificadas" variant="secondary" disabled={busy} onPress={() => setSelectedDates([...plannedDates])} /> : null}
-              <BodyText>{maintenance ? "Se entrega únicamente este trabajo de mantenimiento, en una fecha. No se cierra la OT ni sus otros trabajos." : `Máximo ${MAX_EXECUTION_DATES} fechas explícitas. Cada fecha debe seguir asignada a ti en esta sucursal; el servidor lo vuelve a comprobar. No se cierran otros trabajos. ${selectedDates.length > 1 ? "No se amplía la selección automáticamente." : "Una ejecución nocturna puede registrar tiempo en su fecha de término."}`}</BodyText>
-              {selectedDates.length > 1 ? <Notice message={`El intervalo se registra UNA sola vez, desde ${shortDate(date)}, no una vez por día. En automático se usa el cronómetro de esa primera fecha; si otros días tienen cronómetros, deben entregarse por separado. Un intervalo nocturno exige seleccionar todos sus días.`} /> : null}
+              {selectedDates.length > 1 ? <BodyText>El tiempo indicado es el total, no una cantidad por día.</BodyText> : null}
             </View>
             {allowEditExecutionTime ? <ChoiceButton multiple label="Editar horas de ejecución manualmente" selected={editing} disabled={busy} onPress={toggleManual} /> : null}
             {editing ? <View style={styles.stack}>
-              <BodyText>Indica el intervalo real TOTAL, no horas por día ni el horario programado. El registro quedará identificado como manual.</BodyText>
-              <View style={styles.columns}>
-                <TimeField label="Inicio real (HH:mm)" value={start} onChange={setStart} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} containerStyle={styles.column} />
-                <TimeField label="Término real (HH:mm)" value={end} onChange={setEnd} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} containerStyle={styles.column} />
+              <View style={styles.row}>
+                <ChoiceButton label="Tiempo total" selected={editMode === "duration"} disabled={busy} onPress={() => changeEditMode("duration")} />
+                <ChoiceButton label="Inicio y término" selected={editMode === "interval"} disabled={busy} onPress={() => changeEditMode("interval")} />
               </View>
-              <DayOffsetField label="Día de término" value={offset} onChange={setOffset} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} hint="0: mismo día · 1: día siguiente. El término puede cruzar el límite del período consultado." />
-              {result.input ? <Notice message={`Duración: ${duration(result.minutes)} · Término: ${shortDate(shiftDate(date, Number(offset)))}`} /> : null}
-            </View> : maintenance ? <BodyText>Se conserva el tiempo acumulado del mantenimiento, incluso si es cero. No se envían horas que lo reemplacen.</BodyText> : <View style={styles.tight}>
+              {editMode === "duration" ? <View style={styles.columns}>
+                <NumericSelectField label="Horas trabajadas" value={hours} max={743} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} onChange={(value) => { edited.current = true; setHours(value); }} containerStyle={styles.column} />
+                <NumericSelectField label="Minutos trabajados" value={minutes} max={59} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} onChange={(value) => { edited.current = true; setMinutes(value); }} containerStyle={styles.column} />
+              </View> : <>
               <View style={styles.columns}>
-                <Field label="Inicio automático (HH:mm)" value={timing?.executionStartTime ?? ""} editable={false} containerStyle={styles.column} />
-                <Field label="Término calculado (HH:mm)" value={timing?.executionEndTime ?? ""} editable={false} containerStyle={styles.column} />
+                <TimeField label="Inicio real (HH:mm)" value={start} onChange={(value) => { edited.current = true; setStart(value); }} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} containerStyle={styles.column} />
+                <TimeField label="Término real (HH:mm)" value={end} onChange={(value) => { edited.current = true; setEnd(value); }} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} containerStyle={styles.column} />
               </View>
-              {timing ? <Notice message={`Duración: ${duration(timing.minutes)} · Término: ${shortDate(shiftDate(date, timing.endDateOffset))}`} /> : null}
-              {!anchorWork ? <Notice message={`El cronómetro de ${shortDate(date)} se consultará al confirmar. No se reutiliza el tiempo de otra fecha.`} /> : null}
-              <BodyText>Vista previa del tiempo efectivo, redondeado al minuto. Las horas definitivas se calculan en el servidor.</BodyText>
-            </View>}
-            <BodyText>El servidor vuelve a validar permisos, respuestas y archivos obligatorios al confirmar. Los borradores del dispositivo no cuentan como evidencia guardada.</BodyText>
-            {validationError ? <Notice message={validationError} tone="error" /> : null}
-            {error ? <Notice message={error} tone="error" /> : null}
+              <DayOffsetField label="Día de término" value={offset} onChange={(value) => { edited.current = true; setOffset(value); }} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} />
+              </>}
+              {result.input ? <BodyText>{shortDate(date)} {result.input.executionStartTime} → {shortDate(shiftDate(date, result.input.endDateOffset ?? 0))} {result.input.executionEndTime}</BodyText> : null}
+            </View> : <BodyText>{timing ? `${shortDate(date)} ${timing.executionStartTime} → ${shortDate(shiftDate(date, timing.endDateOffset))} ${timing.executionEndTime}` : "Se utilizará el tiempo registrado del trabajo."}</BodyText>}
+          </ScrollView>
+          <View style={[styles.tight, { padding: 16 }]}>
+            {error || validationError ? <Text accessibilityRole="alert" style={styles.errorText}>{error ?? validationError}</Text> : blocked ? <Text style={styles.caption}>{reasons[0] ?? "Revisa los requisitos de entrega antes de confirmar."}</Text> : null}
             <Button title={mode === "demo" ? "Entregar en demostración" : "Confirmar y entregar"} icon="checkmark-circle-outline" loading={busy} disabled={busy || blocked || (editing ? result.input === null : autoError !== null)} onPress={submit} />
             <Button title="Seguir trabajando" variant="secondary" disabled={busy} onPress={onClose} />
-          </ScrollView>
+          </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>

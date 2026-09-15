@@ -270,11 +270,15 @@ test("read controls only accept loaded own events and empty snapshots do not inv
   assert.deepEqual(runningTimersFromSnapshot(null), []); stop();
 });
 
-test("parent OT notifications do not invent a child while timer events require one", () => {
+test("parent OT and maintenance notifications do not invent a child while timer events require one", () => {
   const order = { ...payload, groupType: "negotiation", groupId: 12, workId: null };
   assert.deepEqual(notificationForSession(order, session), order);
   assert.equal(notificationForSession({ ...order, kind: "RUNNING_TIMER_REMINDER" }, session), null);
-  assert.equal(notificationForSession({ ...order, groupType: "maintenance" }, session), null);
+  const maintenance = { ...order, groupType: "maintenance" };
+  assert.deepEqual(notificationForSession(maintenance, session), maintenance);
+  assert.equal(notificationForSession({ ...maintenance, kind: "RUNNING_TIMER_REMINDER" }, session), null);
+  assert.equal(notificationForSession({ ...maintenance, companyBranchId: 999 }, session), null);
+  assert.equal(notificationForSession({ ...maintenance, tenantOrigin: "https://other.example" }, session), null);
   assert.equal(notificationForSession({ ...order, groupType: "work" }, session), null);
 });
 

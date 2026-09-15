@@ -70,7 +70,7 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
     <AssignmentOrderSummary group={group} />
     {matchingWorkCount !== group.works.length ? <Text style={styles.caption}>{matchingWorkCount} de {group.works.length} trabajos coinciden con la fecha y los filtros. Al abrir se muestran todos los trabajos asignados de esta orden.</Text> : null}
     <View style={styles.actions}>
-      <Button title={`Ver trabajos (${group.works.length})`} icon="list-outline" disabled={busy} onPress={() => onOpenGroup(group, "works")} style={styles.action} />
+      <Button title={group.works.length > 0 ? `Ver trabajos (${group.works.length})` : group.type === "internal_maintenance" ? "Ver mantenimiento" : "Ver orden"} icon="list-outline" disabled={busy} onPress={() => onOpenGroup(group, "works")} style={styles.action} />
       <Button title={group.type === "direct_assignment" ? "Archivos de la asignación" : "Archivos de la OT"} icon="folder-open-outline" variant="secondary" disabled={busy} onPress={() => onOpenGroup(group, "files")} style={styles.action} />
     </View>
   </Card>;

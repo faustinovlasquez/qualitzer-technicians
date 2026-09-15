@@ -14,9 +14,10 @@ import { operationStatusLabels, trustedLocalFile } from "./offlineUi";
 export interface OfflineFileCardProps {
   file: OfflineAttachment;
   readLocalFile?: OfflineController["readLocalFile"];
+  actionsOnly?: boolean;
 }
 
-export function OfflineFileCard({ file, readLocalFile }: OfflineFileCardProps) {
+export function OfflineFileCard({ file, readLocalFile, actionsOnly = false }: OfflineFileCardProps) {
   const [preview, setPreview] = useState<LocalPhoto | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,11 +45,13 @@ export function OfflineFileCard({ file, readLocalFile }: OfflineFileCardProps) {
     } catch (failure) { if (active.current) setError(`No se pudo abrir la copia local: ${errorMessage(failure)}`); }
     finally { lock.current = false; if (active.current) setBusy(false); }
   }
-  return <View style={styles.attachment}>
+  return <View style={actionsOnly ? styles.tight : styles.attachment}>
+    {!actionsOnly ? <>
     <Text selectable style={styles.label}>{file.name}</Text>
     <Badge label={file.offline.confirmed ? "Confirmado" : `Pendiente · ${operationStatusLabels[file.offline.status ?? "pending"]}`} tone={file.offline.confirmed ? "success" : "warning"} />
     <BodyText>{file.size === undefined ? "Tamaño no informado" : fileSizeLabel(file.size)} · {file.offline.downloaded ? "Copia en este dispositivo" : "Bytes no descargados · requiere conexión"}</BodyText>
     {!file.offline.confirmed ? <BodyText>No cuenta como evidencia confirmada. Su copia pendiente no se puede eliminar desde aquí.</BodyText> : null}
+    </> : null}
     <View style={styles.row}>
       <Button title="Abrir copia local" variant="secondary" loading={busy} disabled={!localId || !readLocalFile || !file.offline.downloaded || busy} onPress={() => void open(false)} />
       {Platform.OS === "web" ? <Button title="Descargar copia" variant="ghost" disabled={!localId || !readLocalFile || !file.offline.downloaded || busy} onPress={() => void open(true)} /> : null}

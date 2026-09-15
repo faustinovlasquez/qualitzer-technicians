@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { plainText } from "../../domain/format";
 import type { Activity, AssignmentGroup, AssignmentWork, Equipment, Material } from "../../domain/models";
@@ -27,6 +27,8 @@ export function Activities({ activities, documents = false }: { activities: Acti
 }
 
 interface WorkTabProps {
+  activitiesPanel?: ReactNode;
+  onChecklist?: (id: number) => void;
   group: AssignmentGroup;
   work: AssignmentWork;
   report: string;
@@ -39,7 +41,7 @@ interface WorkTabProps {
   onReportSubmit: () => void;
 }
 
-export function WorkTab({ group, work, report, savedReport, disabled, readOnly, submitting, mode, onReportChange, onReportSubmit }: WorkTabProps) {
+export function WorkTab({ group, work, report, savedReport, disabled, readOnly, submitting, mode, onReportChange, onReportSubmit, activitiesPanel, onChecklist }: WorkTabProps) {
   const [reportError, setReportError] = useState<string | null>(null);
   const saved = savedReport !== null && savedReport === report.trim();
   return (
@@ -49,14 +51,15 @@ export function WorkTab({ group, work, report, savedReport, disabled, readOnly, 
         <BodyText>{plainText(work.summary) || "No se recibieron instrucciones adicionales para este trabajo."}</BodyText>
       </Card>
       <View style={styles.columns}>
-        <Card style={styles.column}><SectionTitle title="Materiales del trabajo" /><Materials materials={work.materials} /></Card>
-        <Card style={styles.column}>
+        <View style={styles.column}><SectionTitle title={`Materiales · ${work.materials.length}`} /><Materials materials={work.materials} /></View>
+        <View style={styles.column}>
           <SectionTitle title="Responsables" />
           {work.responsibles.length === 0 ? <BodyText>No se informaron responsables.</BodyText> : work.responsibles.map((responsible) => <View key={String(responsible.id)} style={styles.item}><Text style={styles.label}>{responsible.name}</Text></View>)}
-        </Card>
+        </View>
       </View>
       {group.products.length > 0 ? <Card style={styles.stack}><SectionTitle title="Materiales de la asignación" subtitle="Materiales informados a nivel de la orden o asignación, no necesariamente exclusivos de este trabajo." /><Materials materials={group.products} /></Card> : null}
-      <Card style={styles.stack}><SectionTitle title="Actividades asociadas" /><Activities activities={work.activities ?? []} /></Card>
+      <View style={styles.item}><SectionTitle title="Checklists" />{work.checklists.length === 0 ? <BodyText>Sin checklists asociados.</BodyText> : work.checklists.map(checklist => <Button key={checklist.checklistId} title={plainText(checklist.name)} icon="checkbox-outline" variant="secondary" onPress={() => onChecklist?.(checklist.checklistId)} />)}</View>
+      {activitiesPanel ?? <View style={styles.item}><SectionTitle title="Actividades" /><Activities activities={(work.activities ?? []).filter(activity => !activity.activity.startsWith("__WORK_CHECKLIST__"))} documents /></View>}
       <Card style={styles.stack}>
         <SectionTitle title="Reporte técnico" subtitle="Describe lo realizado, los hallazgos y cualquier pendiente." />
         {saved ? <Badge label={mode === "demo" ? "Guardado localmente · demo" : "Guardado en Qualitzer"} tone="info" /> : report.length > 0 ? <Badge label="Borrador en dispositivo" tone="warning" /> : null}
@@ -100,6 +103,6 @@ export function EquipmentTab({ group, work }: { group: AssignmentGroup; work: As
       {group.locationAddress?.trim() ? <View style={styles.tight}><Text style={styles.caption}>Dirección · toca para buscar en Maps</Text><HttpLink label={group.locationAddress} url={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(group.locationAddress)}`} onError={setLinkError} /></View> : <BodyText>No se recibió una dirección para abrir en Maps.</BodyText>}
       {linkError ? <Notice message={linkError} tone="error" onDismiss={() => setLinkError(null)} /> : null}
     </Card>
-    <Card style={styles.stack}><SectionTitle title="Actividades y documentos técnicos" subtitle="Solo se muestran los documentos asociados que incluye la asignación." /><Activities activities={work.activities ?? []} documents /></Card>
+    <View style={styles.stack}><SectionTitle title="Actividades y documentos técnicos" /><Activities activities={(work.activities ?? []).filter(activity => !activity.activity.startsWith("__WORK_CHECKLIST__"))} documents /></View>
   </View>;
 }

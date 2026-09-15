@@ -192,7 +192,7 @@ function source(relative: string) {
   return ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 }
 
-test("AST inventory: all four input locations use selectors, automatic times remain plain read-only Fields", () => {
+test("AST inventory: all four input locations use selectors and automatic time remains a read-only summary", () => {
   const inventory = [
     { path: "screens/workDetail/CompletionDialog.tsx", times: ["start", "end"], numbers: ["offset"] },
     { path: "screens/creation/CreationScreen.tsx", times: ["form.startTime", "form.endTime"], numbers: [] },
@@ -225,7 +225,11 @@ test("AST inventory: all four input locations use selectors, automatic times rem
     }
     visit(file);
     assert.equal(found.size, item.times.length + item.numbers.length, item.path);
-    if (item.path.includes("CompletionDialog")) assert.equal(readOnly, 2);
+    if (item.path.includes("CompletionDialog")) {
+      assert.equal(readOnly, 0);
+      assert.match(file.text, /Tiempo trabajado/);
+      assert.match(file.text, /clock\(elapsed\)/);
+    }
   }
 });
 

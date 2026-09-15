@@ -14,6 +14,7 @@ import { AssignmentOrderSummary } from "./orders/AssignmentOrderCard";
 import { AssignmentWorkCard } from "./orders/AssignmentWorkCard";
 import { OrderMaterialsTab } from "./orders/OrderMaterialsTab";
 import { Notice } from "./workDetail/DetailUi";
+import { DeliverySuccess } from "./workDetail/DeliverySuccess";
 import { errorMessage } from "./workDetail/detailRules";
 import { FileWorkspace } from "./workDetail/FileWorkspace";
 import { OrderLifecyclePanel } from "./orders/OrderLifecyclePanel";
@@ -65,6 +66,7 @@ export function OrderDetailScreen(props: OrderDetailScreenProps) {
 function OrderDetailContent(props: OrderDetailScreenProps) {
   const { group, tenant, branchName, mode, busy, initialTab = "works", onBack, onOpenWork, onWorkStatus, onRefresh } = props;
   const [tab, setTab] = useState<OrderTab>(initialTab);
+  const [deliverySucceeded, setDeliverySucceeded] = useState(false);
   const [filesVisited, setFilesVisited] = useState(initialTab === "files");
   const [action, setAction] = useState<OrderAction | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
@@ -107,7 +109,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     actionRef.current = name;
     setAction(name);
     setOperationError(null);
-    try { await operation(); }
+    try { await operation(); if (name === "deliver" && mounted.current) setDeliverySucceeded(true); }
     finally {
       actionRef.current = null;
       if (mounted.current) setAction(null);
@@ -160,6 +162,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   };
 
   return <SafeAreaView style={styles.safe}>
+    {deliverySucceeded ? <DeliverySuccess title="Mantenimiento entregado" name={plainText(group.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
     <SessionContextBar tenant={tenant} branchName={branchName}>{props.connectionStatus}</SessionContextBar>
     <View style={styles.header}>
       <IconButton name="arrow-back-outline" label="Volver a mis asignaciones" disabled={locked} onPress={goBack} />

@@ -15,6 +15,8 @@ import { registerTenantChallengeClock, tenantChallengeMonotonicNow, type TenantC
 import { assignmentDays, dailyRange, mergeDailyAssignments } from "../domain/assignmentSchedule";
 import { AssignmentReadCancelledError, type AssignmentReadOptions } from "../domain/assignmentRead";
 import { withAssignmentReadBatch } from "./assignmentReadBatch";
+import { workActivityInputSchema, workActivityResultSchema, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
+import { cachedAttachmentSchema } from "../offline/cacheSchemas";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, mobileUuidSchema, positiveCreationIdSchema, type CreationInput, type CreationOptionsQuery } from "../domain/creation";
 import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
 
@@ -23,6 +25,17 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   token = "";
   onUnauthorized: (() => void) | null = null;
   constructor(readonly baseUrl: string, public tenant?: Tenant) {}
+  activities: WorkActivitiesPort["activities"] = async scope => workActivitySchema.array().parse(await this.request<unknown>(this.scopePath(scope, "/activities")));
+  createActivity: WorkActivitiesPort["createActivity"] = async (scope, input) => workActivityResultSchema.parse(await this.request<unknown>(this.scopePath(scope, "/activities"), "POST", workActivityInputSchema.parse(input)));
+  completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/complete`), "POST", {});
+  activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => cachedAttachmentSchema.array().parse(await this.request<unknown>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/files`)));
+  uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = async (scope, id, files) => {
+    for (const file of files) {
+      const body = new FormData(); await appendPhoto(body, file);
+      await this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/files`), "POST", body);
+    }
+  };
+  reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.request<void>(this.scopePath(scope, "/reopen"), "POST", {});
 
   async checklistOptions(scope: WorkScope, input: ChecklistCatalogQuery) {
     const query = checklistCatalogQuerySchema.parse(input);

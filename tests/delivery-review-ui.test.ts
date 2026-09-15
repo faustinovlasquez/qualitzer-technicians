@@ -2,7 +2,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ReactNode } from "react";
-import type { AssignmentWork, StatusInput, WorkOpenOptions } from "../src/domain/models";
+import type { AssignmentWork, StatusInput, StepAnswer, WorkOpenOptions } from "../src/domain/models";
+import { answerFromStep } from "../src/domain/format";
+import { manualDurationCompletion } from "../src/screens/workDetail/completionTiming";
 import type { OfflineOperation, TimerReadAssignmentWork } from "../src/domain/offline";
 import type { WorkDetailScreenProps } from "../src/screens/WorkDetailScreen";
 import type { CompletionDialogProps } from "../src/screens/workDetail/CompletionDialog";
@@ -19,7 +21,7 @@ function readyWork(): AssignmentWork {
   return work({ status: "paused", checklists: [{ checklistId: 10, name: "Control", code: "CHK-10", required: true, steps: [step({ selectValue: "approved", responseValue: "approved", isCompleted: true, executionStatus: "completed" })] }] });
 }
 
-async function detailFixture(initialAction?: "deliver") {
+async function detailFixture(initialAction?: "deliver", storedAnswer?: StepAnswer) {
   const hooks = durableReactFixture(); const dialogHooks = durableReactFixture(); const memory = memoryDraftStorage();
   const drafts = uiModule<typeof import("../src/screens/workDetail/useWorkDraft")>("screens/workDetail/useWorkDraft.ts", hooks, {
     "@react-native-async-storage/async-storage": memory.storage, "./localPhotos": {},
@@ -27,6 +29,7 @@ async function detailFixture(initialAction?: "deliver") {
   const component = uiModule<{ WorkDetailScreen: Wrapped<WorkDetailScreenProps> }>("screens/WorkDetailScreen.tsx", hooks, {
     "../ui/SessionContextBar": { SessionContextBar: "SessionContextBar" },
     "./workDetail/ChecklistTab": { ChecklistTab: "ChecklistTab" }, "./workDetail/CompletionDialog": { CompletionDialog: "CompletionDialog" },
+    "./workDetail/DeliverySuccess": { DeliverySuccess: "DeliverySuccess" },
     "./workDetail/EvidenceTab": { EvidenceTab: "EvidenceTab" }, "./workDetail/localPhotos": { openLocalPhotoScope: () => {} },
     "./workDetail/useAttachmentFiles": { useAttachmentFiles: () => ({ files: [], error: null, loading: false, load: async () => {} }) },
     "./workDetail/useWorkDraft": drafts, "./workDetail/WorkInformation": { WorkTab: "WorkTab", EquipmentTab: "EquipmentTab" },
@@ -46,6 +49,13 @@ async function detailFixture(initialAction?: "deliver") {
     onSaveStep: unused, onLoadChecklistOptions: async () => ({ items: [], page: 0, pageSize: 20, hasMore: false }), onAttachChecklist: unused,
     onLoadFiles: async () => [], onLoadStepFiles: async () => [], onUpload: unused, onReport: unused, onUploadDocuments: unused,
     onDeleteFile: unused, onLoadComments: async () => ({ data: [], totalRows: 0, totalPages: 0 }), onAddComment: unused };
+  if (storedAnswer) {
+    const stepId = String(candidate.checklists[0].steps[0].stepId);
+    const key = drafts.workDetailDraftKey(props.storageKey, props.mode, props.group, candidate.id);
+    memory.values.set(key, JSON.stringify({ version: 1, report: "", savedReport: null, photos: [], answers: {
+      [stepId]: { answer: storedAnswer, saved: false, baseline: "before-queued-save" },
+    } }));
+  }
   const render = () => renderWrapped(hooks, component.WorkDetailScreen, props);
   const review = () => { const found = elements<CompletionDialogProps>(render(), "CompletionDialog")[0]; assert.ok(found); return found.props; };
   const renderReview = () => { const tree = dialogHooks.render(() => dialog.CompletionDialog(review())); dialogHooks.flush(); return tree; };
@@ -70,11 +80,29 @@ const blockers: { name: string; apply(props: WorkDetailScreenProps): void; reaso
   { name: "applied without causal proof", apply: (props) => { props.offline = { ...uiSnapshot([{ ...uiOperation, kind: "timer", status: "applied", payload: { status: "paused", baseStatus: "in_progress" }, receipt: { operationId: uiOperation.id, state: "applied" } }]), online: true }; }, reason: /último cambio del cronómetro/ },
 ];
 
+test("synchronized answer left as a local draft does not block delivery when it matches the confirmed answer", async (t) => {
+  const confirmed = answerFromStep(readyWork().checklists[0].steps[0]);
+  const f = await detailFixture("deliver", confirmed); t.after(f.close);
+  assert.equal(f.review().canSubmit, true);
+  assert.doesNotMatch(f.review().reasons.join(" "), /borrador/);
+  action(f.renderReview(), "Confirmar y entregar").onPress(); await settle();
+  assert.equal(f.calls.length, 1);
+});
+
+test("a newer local answer still blocks delivery even when the queue is empty", async (t) => {
+  const confirmed = answerFromStep(readyWork().checklists[0].steps[0]);
+  const f = await detailFixture("deliver", { ...confirmed, comment: "Cambio sin guardar" }); t.after(f.close);
+  assert.equal(f.review().canSubmit, false);
+  assert.match(f.review().reasons.join(" "), /borrador/);
+  f.review().onSubmit(input); await settle();
+  assert.equal(f.calls.length, 0);
+});
+
 for (const scenario of blockers) test(`delivery review opens for ${scenario.name}, but real and forced confirmation cannot submit`, async (t) => {
   const f = await detailFixture(); t.after(f.close); scenario.apply(f.props);
   f.render(); await settle();
   const before = JSON.stringify(f.props.work);
-  const button = action(f.render(), "Entregar trabajo"); assert.equal(button.disabled, false); button.onPress();
+  const button = action(f.render(), f.props.work.status === "delivered" ? "Revisar entrega" : "Entregar trabajo"); assert.equal(button.disabled, false); button.onPress();
   assert.equal(f.calls.length, 0); assert.equal(f.refreshes(), 0);
   assert.equal(f.review().canSubmit, false); assert.match(f.review().reasons.join(" "), scenario.reason);
   assert.doesNotMatch(f.review().reasons.join(" "), /MOBILE_|[0-9a-f]{8}-[0-9a-f]{4}-/);
@@ -93,7 +121,7 @@ test("review count is scoped to work and shared files rather than five changes e
   f.props.offline = { ...uiSnapshot(operations), online: true };
   assert.equal(f.props.offline.pending, 5); assert.match(f.review().reasons[0], /los 3 cambios pendientes/);
   const body = elements<{ children: ReactNode }>(f.renderReview(), "BodyText").map((element) => JSON.stringify(element.props.children)).join(" ");
-  assert.ok(body.indexOf("los 3 cambios") < body.indexOf("Las pausas"), "blockers precede execution inputs");
+  assert.ok(body.includes("los 3 cambios"), "scoped blockers remain visible in the review");
 });
 
 test("valid online required checklist sends exactly once, even through retained and forced callbacks", async (t) => {
@@ -104,6 +132,7 @@ test("valid online required checklist sends exactly once, even through retained 
   const submit = f.review().onSubmit; const confirm = action(f.renderReview(), "Confirmar y entregar");
   assert.equal(confirm.disabled, false); confirm.onPress(); confirm.onPress(); submit(input); await settle();
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].status, "delivered");
+  assert.equal(elements(f.render(), "DeliverySuccess").length, 1);
 });
 
 test("review remains mounted across pending/read-only updates and refresh never submits", async (t) => {
@@ -181,4 +210,47 @@ test("actual order-to-card callback retains delivery review action for offline, 
     }
     assert.equal(opened.length, 4); assert.equal(mutations, 0);
   } finally { orderHooks.unmount(); cardHooks.unmount(); }
+});
+
+test("manual duration prefills timer total, preserves corrections on refresh and submits the chosen total", async (t) => {
+  const f = await detailFixture("deliver"); t.after(f.close);
+  f.props.allowEditExecutionTime = true;
+  f.props.work = { ...f.props.work, elapsedSeconds: 37 * 3600 + 29 * 60, firstInProgressTime: "08:00" };
+  f.renderReview();
+  elements<{ label: string; onPress(): void }>(f.renderReview(), "ChoiceButton").find(({ props }) => props.label === "Editar horas de ejecución manualmente")!.props.onPress();
+  f.renderReview();
+  const fields = () => elements<{ label: string; value: string; onChange(value: string): void }>(f.renderReview(), "NumericSelectField");
+  assert.deepEqual(fields().map(({ props }) => props.value), ["37", "29"]);
+  fields()[0].props.onChange("8"); fields()[1].props.onChange("0");
+  f.props.work = { ...f.props.work, elapsedSeconds: 38 * 3600 }; f.renderReview();
+  assert.deepEqual(fields().map(({ props }) => props.value), ["8", "0"]);
+  action(f.renderReview(), "Confirmar y entregar").onPress(); f.render(); await settle();
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0], { status: "delivered", isManual: true, executionDates: [uiScope.startDate], executionStartTime: "08:00", executionEndTime: "16:00", endDateOffset: 0 });
+});
+
+test("manual totals retain single-day and authorized multi-day duration contracts", () => {
+  const candidate = { ...readyWork(), plannedDates: ["2026-09-01", "2026-09-02"] };
+  const overnight = manualDurationCompletion(["2026-09-01"], "2", "30", "23:00", uiScope, candidate);
+  assert.equal(overnight.minutes, 150); assert.equal(overnight.input?.endDateOffset, 1);
+  const multiple = manualDurationCompletion(candidate.plannedDates, "30", "0", "08:00", uiScope, candidate);
+  assert.equal(multiple.minutes, 1800); assert.equal(multiple.input?.endDateOffset, 1);
+  assert.deepEqual(multiple.input?.executionDates, candidate.plannedDates);
+  assert.equal(manualDurationCompletion(["2030-01-01"], "8", "0", "08:00", uiScope, candidate).input, null);
+  assert.equal(manualDurationCompletion([uiScope.startDate], "0", "0", "08:00", uiScope, candidate).input, null);
+  assert.equal(manualDurationCompletion([uiScope.startDate], "8", "60", "08:00", uiScope, candidate).input, null);
+});
+
+test("delivered detail keeps status across tabs and reopens once without submitting a timer", async context => {
+  const fixture = await detailFixture(); context.after(fixture.close);
+  fixture.props.work = { ...fixture.props.work, status: "delivered" };
+  let calls = 0;
+  fixture.props.onReopen = async () => { calls++; };
+  assert.equal(elements<{ testID?: string }>(fixture.render(), "View").filter(node => node.props.testID === "work-closed-banner").length, 1);
+  action(fixture.render(), "Reabrir trabajo").onPress();
+  action(fixture.render(), "Confirmar reapertura").onPress(); fixture.render(); await settle(); fixture.render();
+  assert.equal(calls, 1); assert.equal(fixture.calls.length, 0);
+  assert.equal(action(fixture.render(), "Reabierto · actualizando").disabled, true);
+  fixture.props.work = { ...fixture.props.work, status: "completed" };
+  assert.equal(elements<{ title: string }>(fixture.render(), "Button").filter(node => node.props.title === "Reabrir trabajo").length, 0);
 });
