@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { z } from "zod";
 import type { Activity, Attachment, LocalPhoto } from "../../domain/models";
 import { plainText } from "../../domain/format";
@@ -25,12 +25,13 @@ import { useCameraPermissionGuide } from "./files/useCameraPermissionGuide";
 export interface WorkActivityActions {
   load(): Promise<Activity[]>;
   create(input: WorkActivityInput): Promise<{ id: number }>;
-  complete(id: number): Promise<void>;
+  update?(id: number, input: WorkActivityInput): Promise<void>;
+  complete(id: number, isCompleted?: boolean): Promise<void>;
   remove?(id: number): Promise<void>;
   files(id: number): Promise<Attachment[]>;
   upload(id: number, files: LocalPhoto[]): Promise<void>;
 }
-interface Props { onCreated?: () => void; backHandler?: { current: ((home?: boolean) => boolean) | null }; scopeKey: string; mode: "live" | "demo"; activities: Activity[]; actions?: WorkActivityActions; disabled: boolean; readOnly: boolean; }
+interface Props { canContinueWrite?: () => boolean; onPanelChange?: (open: boolean) => void; onCreated?: () => void; backHandler?: { current: ((home?: boolean) => boolean) | null }; scopeKey: string; mode: "live" | "demo"; activities: Activity[]; actions?: WorkActivityActions; disabled: boolean; readOnly: boolean; }
 const formSchema = z.object({ activity: z.string().max(240), hours: z.string().optional(), minutes: z.string(), createdId: z.number().int().positive().optional() })
   .transform(value => ({ activity: value.activity, minutes: value.hours === undefined ? value.minutes : String(Number(value.hours) * 60 + Number(value.minutes)), createdId: value.createdId }));
 const emptyForm: z.infer<typeof formSchema> = { activity: "", minutes: "0", createdId: undefined };
@@ -42,6 +43,7 @@ export function WorkActivities(props: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const [recentId, setRecentId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<Activity | null>(null);
+  const [editing, setEditing] = useState<Activity | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
@@ -52,11 +54,15 @@ export function WorkActivities(props: Props) {
   const securityRef = useRef(security); securityRef.current = security;
   const runNativePicker = useTrustedNativePicker();
   const canWrite = () => mounted.current && !latest.current.disabled && !latest.current.readOnly && (securityRef.current?.isUnlocked() ?? true);
+  const canContinueWrite = () => mounted.current && !latest.current.readOnly && (securityRef.current?.isUnlocked() ?? true) && (latest.current.canContinueWrite?.() ?? !latest.current.disabled);
   const cameraGuide = useCameraPermissionGuide(props.scopeKey, canWrite);
   const parsed = (() => { try { return formSchema.safeParse(draft.text ? JSON.parse(draft.text) : emptyForm); } catch { return formSchema.safeParse(null); } })();
   const form = parsed.success ? parsed.data : emptyForm;
   const disabled = props.disabled || props.readOnly || busy || !props.actions;
   const filesBack = useRef<((home?: boolean) => boolean) | null>(null);
+  const panelOpen = creating || editing !== null || selected !== null;
+  useEffect(() => { latest.current.onPanelChange?.(panelOpen); }, [panelOpen]);
+  useEffect(() => () => { latest.current.onPanelChange?.(false); }, []);
   useEffect(() => {
     const handler = props.backHandler;
     if (!handler) return;
@@ -64,13 +70,14 @@ export function WorkActivities(props: Props) {
       if (lock.current || draft.store.getSnapshot().saving || draft.store.getSnapshot().fileBusy || filesBack.current?.(home)) return true;
       if (home) return false;
       if (deleting) { setDeleting(null); return true; }
+      if (editing) { setEditing(null); return true; }
       if (creating) { setCreating(false); return true; }
       if (selected !== null) { setSelected(null); return true; }
       return false;
     };
     handler.current = back;
     return () => { if (handler.current === back) handler.current = null; };
-  }, [props.backHandler, deleting, creating, selected, draft.store]);
+  }, [props.backHandler, deleting, editing, creating, selected, draft.store]);
   async function load(): Promise<void> {
     const current = latest.current;
     if (!current.actions) return;
@@ -106,7 +113,7 @@ export function WorkActivities(props: Props) {
       const lease = draft.store.beginFiles();
       if (!lease) throw new Error("Los archivos están ocupados. El registro de actividad se conserva.");
       try {
-        const result = await saveFileBatch({ store: draft.store, upload: files => props.actions!.upload(activityId, files), canContinue: canWrite, requireSource: true, onProgress: () => {} });
+        const result = await saveFileBatch({ store: draft.store, upload: files => props.actions!.upload(activityId, files), canContinue: canContinueWrite, requireSource: true, onProgress: () => {} });
         if (result.failure) throw new Error(result.failure);
       } finally { draft.store.endFiles(lease); }
       if (!mounted.current) return;
@@ -145,16 +152,26 @@ export function WorkActivities(props: Props) {
       {!props.readOnly ? <IconButton label="Agregar actividad" name="add-outline" disabled={disabled || !draft.hydrated} onPress={() => void openForm()} /> : null}
     </View>
     {error || draft.error || !parsed.success ? <Notice message={error ?? draft.error ?? "No se pudo leer el borrador de actividad."} tone="error" /> : null}
-    {activities.length === 0 ? <BodyText>Sin actividades registradas.</BodyText> : orderedActivities.map((activity, index) => <View key={activity.id} style={[styles.activityCard, activity.id === recentId && styles.activityRecent]} testID={`activity-card-${activity.id}`}>
-      <View style={styles.between}><Text style={styles.activityIndex}>ACTIVIDAD {String(index + 1).padStart(2, "0")}</Text>{activity.id === recentId ? <Badge label="Recién añadida" tone="teal" /> : null}<Badge label={`${activity.executionTime} min`} /></View>
-      <View style={styles.between}>
+    {activities.length === 0 ? <BodyText>Sin actividades registradas.</BodyText> : orderedActivities.map(activity => <View key={activity.id} style={[styles.activityCard, activity.isCompleted && styles.activityComplete, activity.id === recentId && styles.activityRecent]} testID={`activity-card-${activity.id}`}>
+      <View style={styles.activityHeading}>
         <Text accessibilityRole="header" style={styles.activityTitle}>{plainText(activity.activity)}</Text>
+        <Text style={styles.activityMinutes}>{activity.executionTime} min</Text>
       </View>
-      <Badge label={activity.isCompleted ? "Completada" : "Pendiente"} tone={activity.isCompleted ? "success" : "warning"} />
+      {activity.id === recentId ? <Text style={styles.activityNew}>Recién añadida</Text> : null}
       <View style={styles.activityActions}>
-        <Button title="Archivos" accessibilityLabel={`Archivos de actividad: ${plainText(activity.activity)}`} icon="folder-open-outline" variant="ghost" disabled={busy} onPress={() => setSelected(activity.id)} style={styles.grow} />
-        {!activity.isCompleted && !props.readOnly ? <IconButton name="checkmark-circle-outline" label={`Completar actividad: ${plainText(activity.activity)}`} disabled={disabled} onPress={() => void run(async () => { await props.actions!.complete(activity.id); await load(); })} /> : null}
+        <Pressable accessibilityRole="checkbox" aria-checked={activity.isCompleted} accessibilityState={{ checked: activity.isCompleted, disabled }} accessibilityLabel={`${activity.isCompleted ? "Marcar pendiente" : "Marcar lista"}: ${plainText(activity.activity)}`} disabled={disabled} onPress={() => void run(async () => {
+          await props.actions!.complete(activity.id, !activity.isCompleted);
+          if (mounted.current) setActivities(current => current.map(row => row.id === activity.id ? { ...row, isCompleted: !activity.isCompleted } : row));
+          await load();
+        })} style={[styles.activityCheck, disabled && styles.disabled]}>
+          <Ionicons name={activity.isCompleted ? "checkbox" : "square-outline"} size={23} color={activity.isCompleted ? palette.primary : palette.textSecondary} />
+          <Text style={styles.activityCheckText}>{activity.isCompleted ? "Lista" : "Marcar lista"}</Text>
+        </Pressable>
+        <View style={styles.activityTools}>
+        <IconButton label={`Archivos de actividad: ${plainText(activity.activity)}`} name="folder-open-outline" disabled={busy} onPress={() => setSelected(activity.id)} />
+        {props.actions?.update && !props.readOnly ? <IconButton name="create-outline" label={`Editar actividad: ${plainText(activity.activity)}`} disabled={disabled} onPress={() => setEditing(activity)} /> : null}
         {props.actions?.remove && !props.readOnly ? <IconButton name="trash-outline" label={`Eliminar actividad: ${plainText(activity.activity)}`} disabled={disabled} onPress={() => setDeleting(activity)} /> : null}
+        </View>
       </View>
     </View>)}
     {selectedActivity ? <PrivateModal visible animationType="slide" onRequestClose={closeFiles}><SafeAreaView style={styles.safe}>
@@ -194,6 +211,52 @@ export function WorkActivities(props: Props) {
       })} />
       <Button title="Cancelar" variant="ghost" disabled={busy} onPress={() => setDeleting(null)} />
     </View></View></PrivateModal> : null}
+    {editing ? <ActivityEditor key={editing.id} activity={editing} scopeKey={props.scopeKey} mode={props.mode} disabled={disabled} onClose={() => setEditing(null)} onSave={async input => {
+      if (lock.current || !canWrite() || !props.actions?.update) throw new Error("La actividad no se puede editar en este momento.");
+      lock.current = true; setBusy(true);
+      try {
+        await props.actions.update(editing.id, input);
+        if (mounted.current) {
+          setActivities(current => current.map(activity => activity.id === editing.id ? { ...activity, ...input } : activity));
+          setEditing(null);
+          await load();
+        }
+      } finally { lock.current = false; if (mounted.current) setBusy(false); }
+    }} /> : null}
     <CameraPermissionGuide guide={cameraGuide} />
   </View>;
+}
+
+function ActivityEditor({ activity, scopeKey, mode, disabled, onClose, onSave }: { activity: Activity; scopeKey: string; mode: "live" | "demo"; disabled: boolean; onClose(): void; onSave(input: WorkActivityInput): Promise<void> }) {
+  const draft = useWorkspaceDraft(`${scopeKey}:activity-edit:${activity.id}`, mode);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const flight = useRef(false);
+  const value = (() => { try { return formSchema.safeParse(draft.text ? JSON.parse(draft.text) : { activity: activity.activity, minutes: String(activity.executionTime) }); } catch { return formSchema.safeParse(null); } })();
+  const form = value.success ? value.data : emptyForm;
+  async function change(update: Partial<typeof form>): Promise<void> {
+    try { await draft.store.setText(JSON.stringify({ ...form, ...update })); }
+    catch (failure) { setError(errorMessage(failure)); }
+  }
+  async function save(): Promise<void> {
+    if (flight.current || disabled || !draft.hydrated) return;
+    const input = workActivityInputSchema.safeParse({ activity: form.activity, executionTime: /^\d+$/.test(form.minutes) ? Number(form.minutes) : NaN });
+    if (!value.success || !input.success) { setError("Indica el nombre y minutos enteros válidos."); return; }
+    flight.current = true; setSaving(true); setError(null);
+    try { await draft.store.flush(); await onSave(input.data); await draft.store.setText(""); }
+    catch (failure) { setError(errorMessage(failure)); }
+    finally { flight.current = false; setSaving(false); }
+  }
+  return <PrivateModal visible transparent animationType="fade" onRequestClose={() => { if (!saving && !draft.saving) onClose(); }}>
+    <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === "ios" ? "padding" : undefined}><View style={styles.modalCard} accessibilityViewIsModal>
+      <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+        <SectionTitle title="Editar actividad" />
+        {error || draft.error ? <Notice message={error ?? draft.error ?? ""} tone="error" /> : null}
+        <Field label="Nombre de la actividad" value={form.activity} editable={!disabled && !saving && draft.hydrated} maxLength={240} onChangeText={activity => void change({ activity })} />
+        <Field label="Minutos de actividad" value={form.minutes} editable={!disabled && !saving && draft.hydrated} keyboardType="number-pad" maxLength={5} onChangeText={minutes => void change({ minutes })} />
+        <Button title="Guardar cambios" icon="save-outline" disabled={disabled || !draft.hydrated || draft.saving || !!draft.error} loading={saving} onPress={() => void save()} />
+        <Button title="Cancelar" variant="ghost" disabled={saving || draft.saving} onPress={onClose} />
+      </ScrollView>
+    </View></KeyboardAvoidingView>
+  </PrivateModal>;
 }

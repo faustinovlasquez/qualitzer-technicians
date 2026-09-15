@@ -1,5 +1,5 @@
 import type { Request, RequestHandler, Router } from "express";
-import { workActivityInputSchema, workActivityResultSchema, workActivitySchema } from "../../src/domain/workActivities";
+import { workActivityCompletionSchema, workActivityInputSchema, workActivityResultSchema, workActivitySchema } from "../../src/domain/workActivities";
 import { attachmentSchema, parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
 import { readDocuments, releaseDocuments } from "../files/documents";
@@ -32,10 +32,17 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
     res.status(201).json(parseUpstream(workActivityResultSchema, await upstream.request(`${prefix}/activities`, { token: scope.token, query, method: "POST", json: input })));
   });
   router.post(`${base}/activities/:activityId/complete`, async (req, res) => {
-    emptySchema.parse(req.body ?? {});
+    const input = workActivityCompletionSchema.parse(req.body ?? {});
     const id = activityId(req);
     const { scope, query, prefix } = await owned(req, true);
-    await upstream.request(`${prefix}/activities/${id}/complete`, { token: scope.token, query, method: "POST", json: {} });
+    await upstream.request(`${prefix}/activities/${id}/complete`, { token: scope.token, query, method: "POST", json: input });
+    res.json({ success: true });
+  });
+  router.patch(`${base}/activities/:activityId`, async (req, res) => {
+    const input = workActivityInputSchema.parse(req.body);
+    const id = activityId(req);
+    const { scope, query, prefix } = await owned(req, true);
+    await upstream.request(`${prefix}/activities/${id}`, { token: scope.token, query, method: "PATCH", json: input });
     res.json({ success: true });
   });
   router.get(`${base}/activities/:activityId/files`, async (req, res) => {
@@ -60,8 +67,8 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
       const { scope, query, prefix } = await owned(req, true);
       const form = new FormData();
       for (const file of files) form.append("files", new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }), file.originalname);
-      await upstream.request(`${prefix}/activities/${id}/files`, { token: scope.token, query, method: "POST", form });
-      res.status(201).json({ success: true });
+      const result = parseUpstream(workActivityResultSchema, await upstream.request(`${prefix}/activities/${id}/files`, { token: scope.token, query, method: "POST", form }));
+      res.status(201).json({ success: true, id: result.id });
     } finally { releaseDocuments(req); uploads.active--; }
   });
   router.post(`${base}/reopen`, async (req, res) => {

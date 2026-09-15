@@ -17,6 +17,7 @@ import { DayOffsetField, NumericSelectField } from "../../../src/ui/time/Numeric
 import { CompletionDialog } from "../../../src/screens/workDetail/CompletionDialog";
 import { FileWorkspace } from "../../../src/screens/workDetail/FileWorkspace";
 import { WorkDetailScreen } from "../../../src/screens/WorkDetailScreen";
+import { WorkTab } from "../../../src/screens/workDetail/WorkInformation";
 import { CreationScreen } from "../../../src/screens/creation/CreationScreen";
 import { creationDraftKey, openCreationDraftStore } from "../../../src/screens/creation/creationDrafts";
 import { emptyCreationForm } from "../../../src/screens/creation/creationForm";
@@ -30,7 +31,7 @@ import { updateState } from "../../../src/offline/state";
 import { fixture, assignmentsWithStep, uuid, user } from "../../../src/offline/tests/fakes";
 import { ApiError } from "../../../src/infrastructure/errors";
 
-type Screen = "widget" | "invalid" | "creation" | "completion" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail";
+type Screen = "widget" | "invalid" | "creation" | "completion" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary";
 const date = "2026-09-14";
 const range = { startDate: date, endDate: date };
 const scope = { ...range, companyBranchId: 1, groupId: "direct-80", workId: "80" };
@@ -122,13 +123,24 @@ function Fixture({ screen, client }: { screen: Screen; client: MobileNotificatio
   const work: AssignmentWork = { ...assignmentsWithStep().groups[0].works[0], scheduledDate: date, plannedDates: [date], status: "paused", canExecute: true,
     firstInProgressTime: "08:00", elapsedSeconds: 1489 * 60, executedMinutes: 1489, missingRequiredInfo: [], checklists: [] };
   const record = (name: string, next: string, setter: (value: string) => void) => { calls.push({ name, value: next }); setter(next); };
+  if (screen === "checklist-summary") {
+    const base = assignmentsWithStep().groups[0].works[0].checklists[0];
+    const steps = Array.from({ length: 47 }, (_, index) => ({ ...base.steps[0], stepId: String(index + 1), type: index === 0 ? "text" as const : "approval" as const, isRequired: true, isFilesRequired: false, attachments: [], selectValue: index === 1 || index === 2 ? "approved" : "", responseValue: "" }));
+    const checklists = [
+      { ...base, checklistId: 81, name: "Check List de equipos", required: true, steps },
+      { ...base, checklistId: 82, name: "Revisión de seguridad y condiciones del equipo de transporte", required: false, steps: [steps[1]] },
+      { ...base, checklistId: 83, name: "Inspección pendiente de definir", required: false, steps: [] },
+    ];
+    return <ScrollView contentContainerStyle={{ padding: 16, width: "100%", maxWidth: 900, alignSelf: "center" }}><WorkTab group={{ ...assignmentsWithStep().groups[0], products: [] }} work={{ ...work, materials: [], responsibles: [], checklists }} report="" savedReport={null} disabled={false} readOnly={false} submitting={false} mode="demo" activitiesPanel={<View />} onReportChange={() => {}} onReportSubmit={() => {}} onChecklist={id => calls.push({ name: "checklist", value: id })} /></ScrollView>;
+  }
   if (screen === "detail") return <WorkDetailScreen tenant={session.tenant} branchName="Taller" group={{ ...assignmentsWithStep().groups[0], id: "external-80", type: "external_ot", code: "OT-COR-0053" }} work={{ ...work, status: workStatus, title: "Reparación de puerta", activities: activityRows, checklists: assignmentsWithStep().groups[0].works[0].checklists.map(checklist => ({ ...checklist, required: false, steps: checklist.steps.map(step => ({ ...step, isFilesRequired: false })) })) }} generatedAt={`${date}T12:00:00Z`} mode="live" range={range} busy={false} error={null} storageKey={`activity-${revision}`} allowEditExecutionTime onBack={() => calls.push({ name: "back", value: null })} onRefresh={async () => {}} onStatus={async input => { submitted.push(input); setWorkStatus(input.status); }} onReopen={async () => { calls.push({ name: "reopen", value: null }); setWorkStatus("pending"); }} onSaveStep={async () => {}} onLoadChecklistOptions={async () => ({ items: [], page: 0, pageSize: 20, hasMore: false })} onAttachChecklist={async id => ({ checklistId: id, alreadyAssigned: false })} onLoadFiles={async () => []} onLoadStepFiles={async () => []} onUpload={async () => {}} onReport={async () => {}} onUploadDocuments={async () => {}} onDeleteFile={async () => {}} onLoadComments={async () => ({ data: [], totalRows: 0, totalPages: 0 })} onAddComment={async () => {}} activityActions={{
     load: async () => structuredClone(activityRows),
     create: async input => { const id = 72; activityRows.push({ ...input, id, isStarted: false, isCompleted: false, technicalDocuments: [] }); calls.push({ name: "activity", value: input }); return { id }; },
-    complete: async id => { const activity = activityRows.find(item => item.id === id)!; activity.isCompleted = true; calls.push({ name: "complete", value: id }); },
+    update: async (id, input) => { Object.assign(activityRows.find(item => item.id === id)!, input); calls.push({ name: "edit-activity", value: { id, ...input } }); },
+    complete: async (id, isCompleted = true) => { const activity = activityRows.find(item => item.id === id)!; activity.isCompleted = isCompleted; calls.push({ name: "complete", value: { id, isCompleted } }); },
     remove: async id => { activityRows = activityRows.filter(activity => activity.id !== id); calls.push({ name: "delete-activity", value: id }); },
     files: async () => activityFiles,
-    upload: async (id, files) => { calls.push({ name: "upload", value: { id, count: files.length } }); activityFiles = files.map((file, index) => ({ id: index + 400, name: file.name, type: file.mimeType, url: "https://files.invalid/evidence.png" })); }
+    upload: async (id, files) => { calls.push({ name: "upload", value: { id, count: files.length } }); activityFiles = [...activityFiles, ...files.map((file, index) => ({ id: index + 400 + activityFiles.length, name: file.name, type: file.mimeType, url: "https://files.invalid/evidence.txt" }))]; }
   }} />;
   if (screen === "completion" || screen === "blocked") return <CompletionDialog maintenance={false} work={work} allowEditExecutionTime generatedAt={`${date}T12:00:00Z`} initialDate={date} range={range} reasons={screen === "blocked" ? ["Completa el checklist obligatorio."] : []} canSubmit={screen !== "blocked"} busy={false} error={null} mode="live" onClose={() => {}} onSubmit={input => { submitted.push(input); }} />;
   if (screen === "files") return <FileWorkspace compact scopeKey={`files-${revision}`} resourceKey="fixture-files" mode="live" readOnly={false} readLocalFile={readLocalFile} onLoad={async () => listedFiles} onUpload={async () => { throw new Error("UNEXPECTED_UPLOAD"); }} onDelete={async () => { throw new Error("UNEXPECTED_DELETE"); }} />;

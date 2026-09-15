@@ -39,7 +39,8 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     return this.read(`activities:${JSON.stringify(scope)}`, () => workActions(this.remote).activities(scope), json => workActivitySchema.array().parse(JSON.parse(json)));
   };
   createActivity: WorkActivitiesPort["createActivity"] = (scope, input) => this.onlineOnly(() => workActions(this.remote).createActivity(scope, input), scope);
-  completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id) => this.onlineOnly(() => workActions(this.remote).completeActivity(scope, id), scope);
+  updateActivity: WorkActivitiesPort["updateActivity"] = (scope, id, input) => this.onlineOnly(() => workActions(this.remote).updateActivity(scope, id, input), scope);
+  completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id, isCompleted = true) => this.onlineOnly(() => workActions(this.remote).completeActivity(scope, id, isCompleted), scope);
   deleteActivity: WorkActivitiesPort["deleteActivity"] = (scope, id) => this.onlineOnly(() => workActions(this.remote).deleteActivity(scope, id), scope);
   activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => {
     this.checklistScope(scope);

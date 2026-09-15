@@ -3,6 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { plainText } from "../../domain/format";
 import { isWorkActivity } from "../../domain/workActivities";
+import { workChecklistProgress } from "../../domain/assignmentChecklistProgress";
 import type { Activity, AssignmentGroup, AssignmentWork, Equipment, Material } from "../../domain/models";
 import { Badge, BodyText, Button, Card, EmptyState, Field, SectionTitle } from "../../ui/components";
 import { AttachmentList, Fact, HttpLink, Notice } from "./DetailUi";
@@ -51,12 +52,25 @@ export function WorkTab({ group, work, report, savedReport, disabled, readOnly, 
   return (
     <View style={styles.workSections}>
       {activitiesPanel ?? <View style={styles.detailSection}><SectionTitle title="Actividades" /><Activities activities={(work.activities ?? []).filter(isWorkActivity)} documents /></View>}
-      {work.checklists.length > 0 ? <View style={styles.detailSection} testID="work-checklist-section">
-        <View style={styles.sectionHeading}><Ionicons name="checkbox-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Checklists</Text><Badge label={String(work.checklists.length)} /></View>
-        {work.checklists.map(checklist => <Pressable key={checklist.checklistId} accessibilityRole="button" accessibilityLabel={plainText(checklist.name)} disabled={!onChecklist} onPress={() => onChecklist?.(checklist.checklistId)} style={styles.checklistLink}>
-          <View style={styles.grow}><Text style={styles.label}>{plainText(checklist.name)}</Text><Text style={styles.caption}>{checklist.steps.length} pasos{checklist.required ? " · Obligatorio" : ""}</Text></View>
-          <Ionicons name="chevron-forward-outline" size={22} color={palette.primary} accessible={false} />
-        </Pressable>)}
+      {work.checklists.length > 0 ? <View style={styles.checklistSection} testID="work-checklist-section">
+        <View style={styles.checklistSectionHeading}><Ionicons name="checkbox-outline" size={20} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Checklists</Text><Badge label={String(work.checklists.length)} /></View>
+        {work.checklists.map(checklist => {
+          const progress = workChecklistProgress({ checklists: [checklist] });
+          const summary = progress.total > 0
+            ? `${progress.completed}/${progress.total} confirmados · ${progress.remaining > 0 ? `${progress.remaining} ${progress.remaining === 1 ? "pendiente" : "pendientes"}` : "Completado"}`
+            : checklist.steps.length > 0 ? "Sin requisitos obligatorios" : "Sin pasos";
+          return <Pressable key={checklist.checklistId} testID={`work-checklist-card-${checklist.checklistId}`} accessibilityRole="button" accessibilityLabel={plainText(checklist.name)} accessibilityHint={`${summary}${progress.total > 0 ? `, ${progress.percentage}% de avance` : ""}`} accessibilityState={{ disabled: !onChecklist }} disabled={!onChecklist} onPress={() => onChecklist?.(checklist.checklistId)} style={({ pressed }) => [styles.checklistLink, pressed && styles.checklistLinkPressed]}>
+            <View style={styles.checklistTitleRow}>
+              <Text style={styles.checklistTitle}>{plainText(checklist.name)}</Text>
+              {progress.total > 0 ? <Text style={styles.checklistPercentage}>{progress.percentage}%</Text> : null}
+              <Ionicons name="chevron-forward-outline" size={18} color={palette.primary} accessible={false} />
+            </View>
+            <Text style={styles.checklistSummary}>{summary}{checklist.required ? " · Obligatorio" : ""}</Text>
+            {progress.total > 0 ? <View style={styles.checklistProgressTrack} accessibilityRole="progressbar" accessibilityLabel={`Avance de ${plainText(checklist.name)}`} accessibilityValue={{ min: 0, max: progress.total, now: progress.completed, text: `${progress.percentage}% · ${progress.completed} de ${progress.total} requisitos confirmados` }}>
+              <View style={[styles.checklistProgressFill, { width: `${progress.percentage}%` }]} />
+            </View> : null}
+          </Pressable>;
+        })}
       </View> : null}
       {work.materials.length > 0 ? <View style={styles.detailSection} testID="work-materials-section"><View style={styles.sectionHeading}><Ionicons name="cube-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Materiales</Text><Badge label={String(work.materials.length)} /></View><Materials materials={work.materials} /></View> : null}
       {group.products.length > 0 ? <View style={styles.detailSection} testID="shared-materials-section"><View style={styles.sectionHeading}><Ionicons name="layers-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Materiales compartidos</Text></View><Materials materials={group.products} /></View> : null}

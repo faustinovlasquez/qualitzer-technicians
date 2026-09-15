@@ -27,13 +27,14 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   constructor(readonly baseUrl: string, public tenant?: Tenant) {}
   activities: WorkActivitiesPort["activities"] = async scope => workActivitySchema.array().parse(await this.request<unknown>(this.scopePath(scope, "/activities")));
   createActivity: WorkActivitiesPort["createActivity"] = async (scope, input) => workActivityResultSchema.parse(await this.request<unknown>(this.scopePath(scope, "/activities"), "POST", workActivityInputSchema.parse(input)));
-  completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/complete`), "POST", {});
+  updateActivity: WorkActivitiesPort["updateActivity"] = (scope, id, input) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}`), "PATCH", workActivityInputSchema.parse(input));
+  completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id, isCompleted = true) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/complete`), "POST", { isCompleted });
   deleteActivity: WorkActivitiesPort["deleteActivity"] = (scope, id) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}`), "DELETE");
   activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => cachedAttachmentSchema.array().parse(await this.request<unknown>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/files`)));
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = async (scope, id, files) => {
     for (const file of files) {
       const body = new FormData(); await appendPhoto(body, file);
-      await this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/files`), "POST", body);
+      workActivityResultSchema.parse(await this.request<unknown>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/files`), "POST", body));
     }
   };
   reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.request<void>(this.scopePath(scope, "/reopen"), "POST", {});

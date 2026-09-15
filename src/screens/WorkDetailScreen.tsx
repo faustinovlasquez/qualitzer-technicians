@@ -162,6 +162,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const pendingDeliveryCount = new Set(pendingDeliveryOperations.map((operation) => operation.id)).size;
   const hasPendingOperations = timerPending || pendingDeliveryCount > 0;
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "work");
+  const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [target, setTarget] = useState<string | undefined>();
   const viewHistory = useRef<Array<{ tab: Tab; target?: string; checklistId?: number }>>([]);
   const childBack = useRef<((home?: boolean) => boolean) | null>(null);
@@ -621,7 +623,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Ionicons name={item.icon} size={17} color={tab === item.id ? palette.primary : palette.textSecondary} accessible={false} /><Text style={[styles.tabText, tab === item.id && styles.activeTabText]}>{item.label}</Text>
           </Pressable>)}
         </ScrollView>
-        <IconButton name="list-outline" label="Volver a mis asignaciones" disabled={locked} onPress={leaveDetails} />
+        <IconButton name="ellipsis-horizontal" label="Más secciones del trabajo" disabled={locked} onPress={() => setSectionsOpen(true)} />
       </View>
       {work.status === "delivered" || work.status === "completed" ? <View style={styles.closedBanner} testID="work-closed-banner">
         <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
@@ -661,19 +663,31 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Text style={styles.caption}>Última carga: {loadedAt}</Text>
           </View>
           </> : null}
-          {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities onCreated={() => { scrollPositions.current.work = workTabOffset.current; detailScroll.current?.scrollTo({ y: workTabOffset.current, animated: true }); }} backHandler={childBack} key={resourceKey} scopeKey={`${storageKey}:${resourceKey}`} mode={mode} activities={work.activities ?? []} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} />} /></View> : null}
+          {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities
+            canContinueWrite={() => executionGates.current.online && !executionGates.current.readOnly && callbacks.current.offline?.connection?.foreground !== false}
+            onPanelChange={setActivityPanelOpen}
+            onCreated={() => { scrollPositions.current.work = workTabOffset.current; detailScroll.current?.scrollTo({ y: workTabOffset.current, animated: true }); }} backHandler={childBack} key={resourceKey} scopeKey={`${storageKey}:${resourceKey}`} mode={mode} activities={work.activities ?? []} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} />} /></View> : null}
             {tab === "comments" ? <CommentsTab scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:comments`} resourceKey={resourceKey} mode={mode} busy={locked || staleReadOnly} pending={props.offline !== undefined ? pendingComments : undefined} offlineReady={offlineReady} onLoad={props.onLoadComments} onSubmit={props.onAddComment} /> : null}
           {tab === "equipment" ? <EquipmentTab group={group} work={work} /> : null}
         </ScrollView>}
-        <View style={styles.executionFooter} testID="work-execution-footer">
+        {tab !== "checklist" && tab !== "evidence" && !activityPanelOpen ? <View style={styles.executionFooter} testID="work-execution-footer">
           <View style={styles.executionButtons}>
             {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
             <Button title={work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" style={styles.executionButton} disabled={!canReviewDelivery} onPress={openDeliveryReview} />
             {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" style={styles.executionButton} disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
           </View>
           {busy || action === "status" || timerPending ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{timerPending ? timerPendingLabel(pendingTimer) : "Guardando cambio…"}</Text> : null}
-        </View>
+        </View> : null}
       </KeyboardAvoidingView>
+      {sectionsOpen ? <PrivateModal visible transparent animationType="fade" onRequestClose={() => setSectionsOpen(false)}>
+        <View style={styles.modalOverlay}><View style={styles.modalCard} accessibilityViewIsModal>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <View style={styles.between}><SectionTitle title="Secciones del trabajo" /><IconButton name="close-outline" label="Cerrar secciones" onPress={() => setSectionsOpen(false)} /></View>
+            {tabs.map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); navigateTab(item.id); }} />)}
+            <Button title="Volver a mis asignaciones" icon="list-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(); }} />
+          </ScrollView>
+        </View></View>
+      </PrivateModal> : null}
       <CameraPermissionGuide guide={cameraGuide} />
       {reopening ? <PrivateModal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setReopening(false); }}><View style={styles.modalOverlay}><View style={[styles.modalCard, styles.modalContent]}>
         <SectionTitle title="¿Reabrir trabajo?" />

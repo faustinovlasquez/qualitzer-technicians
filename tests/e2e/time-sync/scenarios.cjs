@@ -57,6 +57,42 @@
     }
     for (const width of [360,390,1280]) for(const scale of [1,2]) {
       const label=`${width}x844-font${scale*100}`;await page.setViewportSize({width,height:844});
+      await check(label+"-checklist-summary", async () => {
+        await fresh("checklist-summary", scale);
+        const partial = page.getByTestId("work-checklist-card-81");
+        const complete = page.getByTestId("work-checklist-card-82");
+        const empty = page.getByTestId("work-checklist-card-83");
+        await partial.waitFor();
+        assert.match(await partial.textContent(), /4%/);
+        assert.match(await partial.textContent(), /2\/46 confirmados · 44 pendientes · Obligatorio/);
+        assert.match(await complete.textContent(), /100%/);
+        assert.match(await complete.textContent(), /1\/1 confirmados · Completado/);
+        assert.match(await empty.textContent(), /Sin pasos/);
+        assert.doesNotMatch(await empty.textContent(), /%/);
+        if (scale === 1) assert.ok((await partial.boundingBox()).height <= 110, "Compact checklist height");
+        for (const card of [partial, complete, empty]) {
+          await card.scrollIntoViewIfNeeded();
+          const overflow = await card.evaluate(element => {
+            const cardBox = element.getBoundingClientRect();
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            const outside = [];
+            while (walker.nextNode()) {
+              const node = walker.currentNode;
+              if (!node.textContent.trim() || getComputedStyle(node.parentElement).fontFamily.includes("ionicons")) continue;
+              const range = document.createRange(); range.selectNodeContents(node);
+              for (const rect of range.getClientRects()) if (rect.left < cardBox.left - 1 || rect.right > cardBox.right + 1 || rect.top < cardBox.top - 1 || rect.bottom > cardBox.bottom + 1) outside.push(node.textContent);
+            }
+            return outside;
+          });
+          assert.deepEqual(overflow, []);
+        }
+        await partial.scrollIntoViewIfNeeded();
+        await screenshot(label+"-checklist-summary-partial");
+        await partial.click();
+        assert.deepEqual((await metrics()).calls, [{ name: "checklist", value: 81 }]);
+        await complete.scrollIntoViewIfNeeded();
+        await screenshot(label+"-checklist-summary-complete");
+      });
       await check(label+"-widget-six-values",async()=>{
         await fresh("widget",scale);
         for(const value of ["00:00","00:07","07:07","12:07","23:07","23:59"]) {
@@ -169,15 +205,35 @@
         assert.equal(await page.getByText("Ruedas y torque pernos", {exact:true}).count(), 0);
         assert.equal(await page.getByText("Instrucciones del trabajo", {exact:true}).count(), 0);
         assert.equal(await page.getByTestId("work-materials-section").count(), 0);
+        await button("Más secciones del trabajo").click();
+        await button("Equipo").click();
+        await page.getByRole("tab",{name:"Equipo",exact:true}).waitFor();
+        assert.equal((await metrics()).calls.filter(call=>call.name==="back").length,0);
+        await button("Más secciones del trabajo").click();
+        await button("Checklist").click();
+        assert.equal(await footer.count(),0);
         await page.getByRole("tab",{name:"Archivos",exact:true}).click();
-        await button("Volver conservando el borrador").click();
+        assert.equal(await footer.count(),0);
+        await button("Ir al inicio del trabajo").click();
         await page.getByTestId("work-activities").waitFor();
         assert.equal((await metrics()).calls.filter(call=>call.name==="back").length,0);
-        await button("Completar actividad: Revisar cierre").click();
+        await page.getByRole("checkbox",{name:"Marcar lista: Revisar cierre",exact:true}).click();
         await page.waitForFunction(()=>window.timeSync.metrics().calls.some(call=>call.name==="complete"));
-        assert.equal(await button("Completar actividad: Revisar cierre").count(),0);
+        const checked = page.getByRole("checkbox",{name:"Marcar pendiente: Revisar cierre",exact:true});
+        assert.equal(await checked.getAttribute("aria-checked"),"true");
+        await checked.click();
+        await page.getByRole("checkbox",{name:"Marcar lista: Revisar cierre",exact:true}).waitFor();
+        await button("Editar actividad: Revisar cierre").click();
+        await page.getByRole("textbox",{name:"Nombre de la actividad",exact:true}).fill("Revisar cierre ajustado");
+        await page.getByRole("textbox",{name:"Minutos de actividad",exact:true}).fill("45");
+        await button("Guardar cambios").click();
+        await page.getByText("Revisar cierre ajustado",{exact:true}).waitFor();
+        assert.deepEqual((await metrics()).calls.filter(call=>call.name==="edit-activity"),[{name:"edit-activity",value:{id:71,activity:"Revisar cierre ajustado",executionTime:45}}]);
+        await screenshot(label+"-activity-compact-edited");
+        if(scale===1) assert.ok((await page.getByTestId("activity-card-71").boundingBox()).height < 150);
         assert.equal((await footer.boundingBox()).y, footerBefore.y);
-        await button("Archivos de actividad: Revisar cierre").click();await page.getByText("Manual del supervisor",{exact:true}).waitFor();
+        await button("Archivos de actividad: Revisar cierre ajustado").click();await page.getByText("Manual del supervisor",{exact:true}).waitFor();
+        assert.equal(await footer.count(),0);
         await screenshot(label+"-activity-supervisor-document");
         await button("Volver a actividades").click();
         await button("Agregar actividad").click();await page.getByRole("textbox",{name:"Nombre de la actividad",exact:true}).fill("Lubricar bisagras");
@@ -196,6 +252,13 @@
         assert.ok((await createdCard.boundingBox()).y < oldCard.y);
         assert.deepEqual((await metrics()).calls.filter(call=>call.name==="activity"),[{name:"activity",value:{activity:"Lubricar bisagras",executionTime:90}}]);
         assert.deepEqual((await metrics()).calls.filter(call=>call.name==="upload"),[{name:"upload",value:{id:72,count:1}}]);
+        await button("Archivos de actividad: Lubricar bisagras").click();
+        assert.equal(await footer.count(),0);
+        await page.getByText("Ficha.txt",{exact:true}).waitFor();
+        await button("Volver a actividades").click();
+        await button("Archivos de actividad: Lubricar bisagras").click();
+        await page.getByText("Ficha.txt",{exact:true}).waitFor();
+        await button("Volver a actividades").click();
         await button("Eliminar actividad: Lubricar bisagras").click();
         await button("Cancelar").click();
         assert.equal((await metrics()).calls.filter(call=>call.name==="delete-activity").length,0);

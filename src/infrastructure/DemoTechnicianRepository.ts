@@ -29,11 +29,17 @@ export class DemoTechnicianRepository implements TechnicianRepository {
     work.activities = [...(work.activities ?? []), { ...value, id, isStarted: false, isCompleted: false, technicalDocuments: [] }];
     return { id };
   };
-  completeActivity: WorkActivitiesPort["completeActivity"] = async (scope, id) => {
+  updateActivity: WorkActivitiesPort["updateActivity"] = async (scope, id, input) => {
+    const work = this.find(scope).work;
+    const activity = work.activities?.find(item => item.id === id && isWorkActivity(item));
+    if (!activity || work.status === "completed" || work.status === "delivered") throw new Error("No se puede editar esta actividad.");
+    Object.assign(activity, workActivityInputSchema.parse(input));
+  };
+  completeActivity: WorkActivitiesPort["completeActivity"] = async (scope, id, isCompleted = true) => {
     const work = this.find(scope).work;
     const activity = work.activities?.find(item => item.id === id);
     if (!activity || work.status === "completed" || work.status === "delivered") throw new Error("No se puede completar esta actividad.");
-    activity.isStarted = true; activity.isCompleted = true;
+    activity.isStarted = true; activity.isCompleted = isCompleted;
   };
   activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => {
     if (!(await this.activities(scope)).some(activity => activity.id === id)) throw new Error("Actividad no encontrada.");

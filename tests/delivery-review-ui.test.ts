@@ -86,14 +86,17 @@ test("back returns through files and checklist before leaving the work", async t
   fixture.props.onBack = () => { exits++; };
   const workTab = elements<{ onChecklist(id: number): void }>(fixture.render(), "WorkTab")[0];
   workTab.props.onChecklist(10);
+  assert.doesNotMatch(JSON.stringify(fixture.render()), /work-execution-footer/);
   const checklist = elements<{ onEvidence(id?: string): void }>(fixture.render(), "ChecklistTab")[0];
   checklist.props.onEvidence("102");
   assert.equal(elements(fixture.render(), "FileWorkspace").length, 1);
+  assert.doesNotMatch(JSON.stringify(fixture.render()), /work-execution-footer/);
   action(fixture.render(), "Volver conservando el borrador").onPress(); await settle();
   assert.equal(exits, 0);
   assert.equal(elements(fixture.render(), "ChecklistTab").length, 1);
   action(fixture.render(), "Ir al inicio del trabajo").onPress(); await settle();
   assert.equal(elements(fixture.render(), "WorkTab").length, 1);
+  assert.match(JSON.stringify(fixture.render()), /work-execution-footer/);
   action(fixture.render(), "Volver conservando el borrador").onPress(); await settle();
   assert.equal(exits, 1);
 });
@@ -111,6 +114,84 @@ test("work summary omits instructions and empty materials while keeping activiti
   hooks.unmount();
 });
 
+test("work checklist cards summarize confirmed requirements and preserve exact navigation", () => {
+  const hooks = durableReactFixture();
+  const module = uiModule<typeof import("../src/screens/workDetail/WorkInformation")>("screens/workDetail/WorkInformation.tsx", hooks);
+  const checklist = { checklistId: 10, name: "Control del equipo", code: "CHK-10", required: true, steps: [
+    step({ type: "text", responseValue: "" }),
+    step({ type: "approval", selectValue: "approved", isFilesRequired: false }),
+    step({ type: "validation", isCompleted: false, isFilesRequired: false }),
+    step({ type: "approval", selectValue: "approved", isFilesRequired: true, attachments: [{ id: "local-pending", name: "Foto", url: "" }] }),
+    step({ type: "approval", isRequired: false, selectValue: "" }),
+  ] };
+  const opened: number[] = [];
+  const props: Parameters<typeof module.WorkTab>[0] = { group: group({ products: [] }), work: work({ checklists: [checklist] }), report: "", savedReport: null, disabled: false, readOnly: false, submitting: false, mode: "demo", onReportChange() {}, onReportSubmit() {}, onChecklist: id => opened.push(id), activitiesPanel: "ACTIVITY_PANEL" };
+  const render = () => hooks.render(() => module.WorkTab(props));
+  const progress = () => elements<{ accessibilityRole?: string; accessibilityValue?: { min: number; max: number; now: number; text: string } }>(render(), "View").find(({ props }) => props.accessibilityRole === "progressbar");
+  try {
+    assert.deepEqual({ ...progress()?.props.accessibilityValue }, { min: 0, max: 3, now: 2, text: "67% · 2 de 3 requisitos confirmados" });
+    assert.match(JSON.stringify(render()), /2\/3 confirmados · 1 pendiente/);
+    elements<{ accessibilityLabel?: string; onPress(): void }>(render(), "Pressable").find(({ props }) => props.accessibilityLabel === checklist.name)!.props.onPress();
+    assert.deepEqual(opened, [10]);
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: [step({ type: "text" })] }] };
+    assert.equal(progress(), undefined);
+    assert.match(JSON.stringify(render()), /Sin requisitos obligatorios/);
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: [] }] };
+    assert.match(JSON.stringify(render()), /Sin pasos/);
+    assert.equal(progress(), undefined);
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: [step({ type: "approval", selectValue: "approved", isFilesRequired: false })] }] };
+    assert.equal(progress()?.props.accessibilityValue?.now, 1);
+    assert.match(JSON.stringify(render()), /1\/1 confirmados · Completado/);
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: [step({ type: "approval", selectValue: "" })] }] };
+    assert.equal(progress()?.props.accessibilityValue?.now, 0);
+  } finally { hooks.unmount(); }
+});
+
+test("work checklist cards summarize confirmed progress and preserve checklist navigation", () => {
+  const hooks = durableReactFixture();
+  const module = uiModule<typeof import("../src/screens/workDetail/WorkInformation")>("screens/workDetail/WorkInformation.tsx", hooks);
+  const opened: number[] = [];
+  const checklist = { checklistId: 53, name: "Check List de equipos", code: "CHK-53", required: true, steps: [
+    step({ stepId: "1", type: "approval", isRequired: true, selectValue: "approved", isFilesRequired: false, attachments: [] }),
+    step({ stepId: "2", type: "approval", isRequired: true, selectValue: "approved", isFilesRequired: true, attachments: [{ id: "local-photo", name: "Pendiente.jpg", url: "", type: "image/jpeg" }] }),
+    step({ stepId: "3", type: "approval", isRequired: true, selectValue: "", isFilesRequired: false, attachments: [] }),
+    step({ stepId: "4", type: "text" }),
+    step({ stepId: "5", type: "approval", isRequired: false, selectValue: "" }),
+  ] };
+  const props: Parameters<typeof module.WorkTab>[0] = { group: group({ products: [] }), work: work({ checklists: [checklist] }), report: "", savedReport: null, disabled: false, readOnly: false, submitting: false, mode: "demo", onReportChange() {}, onReportSubmit() {}, onChecklist: id => opened.push(id), activitiesPanel: "ACTIVITY_PANEL" };
+  const render = () => hooks.render(() => module.WorkTab(props));
+  const progress = () => elements<{ accessibilityRole?: string; accessibilityValue?: { min: number; max: number; now: number; text: string } }>(render(), "View").find(({ props }) => props.accessibilityRole === "progressbar")?.props.accessibilityValue;
+  try {
+    assert.equal(progress()?.min, 0);
+    assert.equal(progress()?.max, 3);
+    assert.equal(progress()?.now, 1);
+    assert.equal(progress()?.text, "33% · 1 de 3 requisitos confirmados");
+    const link = elements<{ accessibilityLabel: string; accessibilityHint: string; onPress(): void }>(render(), "Pressable").find(({ props }) => props.accessibilityLabel === checklist.name);
+    assert.ok(link);
+    assert.match(link.props.accessibilityHint, /1\/3 confirmados · 2 pendientes/);
+    link.props.onPress(); assert.deepEqual(opened, [53]);
+    assert.match(JSON.stringify(render()), /Obligatorio/);
+
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: checklist.steps.map(current => ({ ...current, selectValue: "approved", attachments: [{ id: 8, name: "Confirmada.jpg", url: "https://files.invalid/photo.jpg" }] })) }] };
+    assert.equal(progress()?.max, 3);
+    assert.equal(progress()?.now, 3);
+    assert.equal(progress()?.text, "100% · 3 de 3 requisitos confirmados");
+    assert.match(JSON.stringify(render()), /Completado/);
+
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: [step({ type: "approval", isRequired: true, selectValue: "", isFilesRequired: false })] }] };
+    assert.equal(progress()?.now, 0);
+    assert.match(progress()?.text ?? "", /0%/);
+
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: [step({ type: "text" })] }] };
+    assert.equal(progress(), undefined);
+    assert.match(JSON.stringify(render()), /Sin requisitos obligatorios/);
+    props.work = { ...props.work, checklists: [{ ...checklist, steps: [] }] };
+    assert.equal(progress(), undefined);
+    assert.match(JSON.stringify(render()), /Sin pasos/);
+    assert.doesNotMatch(JSON.stringify(render()), /NaN|Infinity/);
+  } finally { hooks.unmount(); }
+});
+
 test("explicit list exit bypasses section history, but not a busy child", async t => {
   const fixture = await detailFixture(); t.after(fixture.close);
   let exits = 0;
@@ -119,9 +200,14 @@ test("explicit list exit bypasses section history, but not a busy child", async 
   tabs.find(({ props }) => props.accessibilityLabel === "Archivos")!.props.onPress();
   const panel = elements<{ backHandler: { current: ((home?: boolean) => boolean) | null } }>(fixture.render(), "FileWorkspace")[0];
   panel.props.backHandler.current = () => true;
+  action(fixture.render(), "Más secciones del trabajo").onPress();
+  assert.equal(exits, 0);
+  assert.ok(action(fixture.render(), "Comentarios"));
+  assert.ok(action(fixture.render(), "Equipo"));
   action(fixture.render(), "Volver a mis asignaciones").onPress(); await settle();
   assert.equal(exits, 0);
   panel.props.backHandler.current = () => false;
+  action(fixture.render(), "Más secciones del trabajo").onPress();
   action(fixture.render(), "Volver a mis asignaciones").onPress(); await settle();
   assert.equal(exits, 1);
 });

@@ -36,12 +36,12 @@ const sha256 = createHash("sha256").update(apkContent).digest("hex");
 if (sha256 !== report.sha256 || report.debuggable !== false || report.variant !== "release") throw new Error("APK_RELEASE_VERIFICATION_REQUIRED");
 const size = apkContent.length;
 if (size !== report.bytes) throw new Error("APK_RELEASE_SIZE_MISMATCH");
-const gatewayVersion = "1.0.7";
+const gatewayVersion = "1.0.8";
 const gatewayArchiveName = `qualitzer-mobile-gateway-${gatewayVersion}.tgz`;
 const gatewayArchivePath = `artifacts/mobile-gateway/${gatewayArchiveName}`;
 const gatewayContent = readPublicFile(root, gatewayArchivePath, 32 * 1024 * 1024);
 const gatewaySha256 = createHash("sha256").update(gatewayContent).digest("hex");
-if (gatewaySha256 !== "c0b8de858f06e65852cf0f1033b743d33a6c23582bcf7d4660d9238ae93525f7") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
+if (gatewaySha256 !== "f02562722c884db9046b54009a77dcbb8e06bd168246360e23fb248f4b8bbe85") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
 const validationDirectory = "artifacts/logs/fluidity-package";
 const validationName = readdirSync(publicPath(root, validationDirectory, true), { withFileTypes: true })
   .filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-zA-Z0-9]{6}$/.test(entry.name))
@@ -76,9 +76,9 @@ async function main() {
 <main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
 <p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
 <a href="/${name}">Descargar actualización ${version}</a><img src="/qr.svg" width="260" height="260" alt="QR para descargar la actualización en el teléfono">
-<p><strong>Navegación por pasos y ficha de trabajo ordenada.</strong></p>
-<ul><li>Atrás vuelve a la vista anterior; Inicio y Listado son acciones separadas.</li><li>Archivos de checklist y actividades conservan el contexto del trabajo.</li><li>Pestañas siempre visibles y acciones de ejecución fijas abajo.</li><li>Actividades en tarjetas propias, con minutos, estado y archivos.</li><li>La actividad recién añadida queda destacada y visible.</li><li>Sin instrucciones duplicadas ni secciones de materiales vacías.</li></ul>
-<p><strong>No requiere cambios nuevos de servidor respecto de 1.0.18.</strong> Conserva el gateway ${gatewayVersion} y las funciones de actividades anteriores.</p>
+<p><strong>Checklists compactos con avance visible dentro del trabajo.</strong></p>
+<ul><li>Nombre, porcentaje y barra de avance en cada tarjeta.</li><li>Resumen de requisitos confirmados y pendientes.</li><li>Acceso al checklist tocando la tarjeta.</li><li>Se conservan actividades, respuestas, archivos y pendientes.</li></ul>
+<p><strong>No requiere cambios nuevos de servidor respecto de 1.0.20.</strong> Conserva gateway ${gatewayVersion} para las funcionalidades anteriores. Sin migración nueva ni cambios de Firebase.</p>
 <p>Elige <strong>Actualizar</strong> sobre la app instalada. No desinstales ni borres datos o pendientes.</p>
 <p>Guardado local no significa envío confirmado ni ficha actualizada. La sincronización requiere conexión, sesión válida y la app en primer plano y desbloqueada. El cronómetro conserva el tiempo oficial del servidor.</p>
 <a href="/actualizacion.txt">Detalles de esta actualización</a>

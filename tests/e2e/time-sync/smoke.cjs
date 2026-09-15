@@ -5,6 +5,7 @@ const root = path.resolve(__dirname, "../../..");
 const shared = path.join(root, "tests/e2e/picker-messages-smoke.cjs");
 const deliveryFilesOnly = process.argv.includes("--delivery-files");
 const workActionsOnly = process.argv.includes("--work-actions");
+const checklistSummaryOnly = process.argv.includes("--checklist-summary");
 let runner = fs.readFileSync(shared, "utf8");
 function replace(before, after) {
   if (runner.split(before).length !== 2) throw new Error(`STALE_HARNESS: ${before.slice(0, 100)}`);
@@ -40,6 +41,7 @@ const components = ["src/ui/time/TimeField.tsx", "src/ui/time/TimePickerPanel.ts
 components.push("src/screens/workDetail/FileWorkspace.tsx", "src/screens/workDetail/files/WorkspaceFileList.tsx", "src/screens/workDetail/DetailUi.tsx");
 components.push("src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/WorkActivities.tsx", "src/screens/workDetail/DeliverySuccess.tsx");
 if (workActionsOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/work-actions/.test(name)) return;');
+if (checklistSummaryOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/checklist-summary/.test(name)) return;');
 if (deliveryFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/completion|blocked-stays|confirmed-files/.test(name)) return;');
 const componentStart = runner.indexOf('    report.realComponents = [');
 const componentEnd = runner.indexOf(';', componentStart);

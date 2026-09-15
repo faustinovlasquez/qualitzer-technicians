@@ -1,5 +1,7 @@
 # Fluidez móvil — app 1.0.11 y gateway 1.0.4
 
+Actualización vigente: gateway 1.0.8 y APK 1.0.20 conservan timer/checklist y permiten editar actividades y devolverlas a pendiente. Los adjuntos exigen ID confirmado; el lote no se interrumpe por su propio bloqueo temporal. Desplegar el backend PanelWorkActions actualizado antes del gateway y la APK. Sin migración nueva.
+
 Actualización actual: gateway 1.0.7 y APK 1.0.18 separan Trabajos, Mantenimientos y OTs; conservan timer/checklist e incorporan eliminación lógica de actividades. El formulario de actividad usa minutos y archivos en un diálogo. Requiere desplegar PanelWorkActions actualizado; no hay migración nueva.
 
 Actualización 15 de septiembre: gateway 1.0.5 añade actividades y reapertura y conserva timer/checklist de 1.0.4. La sincronización anterior fue confirmada por el usuario; la nueva funcionalidad requiere desplegar PanelWorkActions y el paquete nuevo. El resto de este documento registra la entrega histórica 1.0.4.
