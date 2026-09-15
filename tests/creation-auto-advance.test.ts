@@ -101,6 +101,21 @@ function alerts(tree: ReactNode): string {
     .filter(({ props }) => props.accessibilityRole === "alert").map(({ props }) => String(props.children)).join(" ");
 }
 
+test("header back traverses creation steps while list exit retains the draft guard", async t => {
+  const fixture = await creationFixture(); t.after(() => fixture.hooks.unmount());
+  fixture.review();
+  action(fixture.render(), "Volver conservando borrador").onPress();
+  assert.ok(action(fixture.render(), "Revisar solicitud"));
+  assert.equal(fixture.backs(), 0);
+  action(fixture.render(), "Volver conservando borrador").onPress();
+  assert.ok(action(fixture.render(), "Continuar a horario"));
+  assert.equal(fixture.backs(), 0);
+  action(fixture.render(), "Volver a mis asignaciones").onPress();
+  assert.equal(elements(fixture.render(), "CreationModal").length > 0, true);
+  assert.equal(fixture.backs(), 0);
+  assert.deepEqual(fixture.submitted, []);
+});
+
 for (const phase of ["queued", "confirmed"] as const) {
   const label = phase === "queued" ? "Ver trabajo local" : "Ver en mi agenda";
   const complete = (f: Awaited<ReturnType<typeof creationFixture>>): void => {

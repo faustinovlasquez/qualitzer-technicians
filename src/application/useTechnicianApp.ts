@@ -1147,8 +1147,11 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     setAgendaFocusDate(day);
   }
 
-  function changeTab(next: AppTab): void {
+  const mainHistory = useRef<{ version: number; branchId: number | null; entries: Array<{ tab: AppTab; range: DateRange }> }>({ version: -1, branchId: null, entries: [] });
+  function changeTab(next: AppTab, remember = true): void {
     if (!currentContext() || actionLock.current || selected || selectedOrder || selectedCreationKind || next === state.current.tab) return;
+    if (mainHistory.current.version !== sessionVersion.current || mainHistory.current.branchId !== state.current.session?.branchId) mainHistory.current = { version: sessionVersion.current, branchId: state.current.session?.branchId ?? null, entries: [] };
+    if (remember) mainHistory.current.entries.push({ tab: state.current.tab, range: state.current.range });
     const currentRange = state.current.range;
     if (next === "agenda") updateRange(weekRange(currentRange.startDate));
     else if (next === "today" && currentRange.startDate !== currentRange.endDate) {
@@ -1157,6 +1160,19 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     }
     state.current = { ...state.current, tab: next };
     setTab(next);
+  }
+
+  function backTab(): void {
+    if (!currentContext() || actionLock.current || selected || selectedOrder || selectedCreationKind) return;
+    const previous = mainHistory.current.version === sessionVersion.current && mainHistory.current.branchId === state.current.session?.branchId ? mainHistory.current.entries.pop() : undefined;
+    changeTab(previous?.tab ?? "today", false);
+    if (previous) updateRange(previous.range);
+  }
+
+  function homeTab(): void {
+    if (!currentContext() || actionLock.current || selected || selectedOrder || selectedCreationKind) return;
+    mainHistory.current.entries = [];
+    changeTab("today", false);
   }
 
   function changeGatewayUrl(value: string) {
@@ -1226,6 +1242,12 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     setSelectedOrder(null);
   }
 
+  function closeDetails(): void {
+    if (!currentContext() || actionLock.current) return;
+    state.current = { ...state.current, selected: null, selectedOrder: null };
+    setSelected(null); setSelectedOrder(null);
+  }
+
   const { group: canonicalDetailGroup, work: canonicalDetailWork, schedule } = selectedWorkDetails(data, selected);
   const group = useMemo(() => canonicalDetailGroup && selected?.draftGroupId ? { ...canonicalDetailGroup, id: selected.draftGroupId } : canonicalDetailGroup, [canonicalDetailGroup, selected?.draftGroupId]);
   const work = useMemo(() => canonicalDetailWork && selected?.draftWorkId ? { ...canonicalDetailWork, id: selected.draftWorkId } : canonicalDetailWork, [canonicalDetailWork, selected?.draftWorkId]);
@@ -1252,13 +1274,14 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     canonicalDetailGroup, canonicalDetailWork,
     detailDraftIdentity: selected?.draftGroupId && selected.draftWorkId ? { groupId: selected.draftGroupId, workId: selected.draftWorkId } : undefined,
     storageKey: session ? tenantStorageNamespace(session, gatewayUrl, session.branchId) : "anonymous",
-    login, demo, changePassword, retrySessionSetup, branch, logout, checkConnection, refresh, changeRange, agendaFocusDate, focusAgendaDay, openGroup, closeOrder, openWork, closeWork, onWorkStatus,
+    login, demo, changePassword, retrySessionSetup, branch, logout, checkConnection, refresh, changeRange, agendaFocusDate, focusAgendaDay, openGroup, closeOrder, openWork, closeWork, closeDetails, backTab, homeTab, onWorkStatus,
     openCreate, closeCreate, creationOptions, createRecord, onCreated, onOfflineQueuedCreate,
     changeStatus: (input: StatusInput) => performMutation(scope(), (repo, value) => repo.status(value, input), true),
     reopenWork: () => performMutation(scope(), (repo, value) => workActions(repo).reopenWork(value), true),
     loadActivities: () => readWork((repo, value) => workActions(repo).activities(value)),
     createActivity: (input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).createActivity(value, input), true),
     completeActivity: (id: number) => performMutation(scope(), (repo, value) => workActions(repo).completeActivity(value, id), true),
+    deleteActivity: (id: number) => performMutation(scope(), (repo, value) => workActions(repo).deleteActivity(value, id), true),
     loadActivityFiles: (id: number) => readWork((repo, value) => workActions(repo).activityFiles(value, id)),
     uploadActivityFiles: (id: number, files: LocalPhoto[]) => performMutation(scope(), (repo, value) => workActions(repo).uploadActivityFiles(value, id, files)),
     saveAnswer,

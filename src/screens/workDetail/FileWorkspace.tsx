@@ -26,6 +26,7 @@ import { useCameraPermissionGuide } from "./files/useCameraPermissionGuide";
 export { cleanupFileWorkspace } from "./files/WorkspaceDraftStore";
 
 export interface FileWorkspaceProps {
+  backHandler?: { current: ((home?: boolean) => boolean) | null };
   scopeKey: string;
   resourceKey?: string;
   mode: "live" | "demo";
@@ -73,6 +74,18 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
   const [progress, setProgress] = useState("");
   const [deleting, setDeleting] = useState<Attachment | null>(null);
   const [help, setHelp] = useState(false);
+  useEffect(() => {
+    const handler = props.backHandler;
+    if (!handler) return;
+    const back = (home = false): boolean => {
+      if (operation !== null || draft.store.getSnapshot().fileBusy || draft.store.getSnapshot().saving) return true;
+      if (!home && deleting) { setDeleting(null); return true; }
+      if (!home && help) { setHelp(false); return true; }
+      return false;
+    };
+    handler.current = back;
+    return () => { if (handler.current === back) handler.current = null; };
+  }, [props.backHandler, operation, deleting, help, draft.store]);
   const list = useRef<ScrollView>(null);
   const cameraGuide = useCameraPermissionGuide(JSON.stringify([props.mode, props.scopeKey, props.resourceKey]), () => active.current && !callbacks.current.readOnly && !callbacks.current.busy && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked);
   const unavailable = props.readOnly || props.busy === true || props.offline === null || props.offline?.authBlocked === true || draft.closed || !draft.hydrated || draft.fileBusy;

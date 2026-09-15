@@ -10,18 +10,23 @@ export const workActivityInputSchema = z.object({ activity: z.string().trim().mi
 export type WorkActivityInput = z.infer<typeof workActivityInputSchema>;
 export const workActivitySchema: z.ZodType<Activity> = z.object({
   id, activity: z.string(), executionTime: z.number().nonnegative(), isStarted: z.boolean(), isCompleted: z.boolean(),
+  isChecklist: z.boolean().optional(), checklistId: id.nullish(),
   technicalDocuments: z.array(z.object({ id, documentName: z.string(), notes: z.string().nullable(), file: z.object({ id, name: z.string(), url: link, thumbnailUrl: link, type: z.string().nullable().optional() }).nullable() })).default([]),
 });
 export const workActivityResultSchema = z.object({ id });
+export function isWorkActivity(activity: Activity): boolean {
+  return activity.isChecklist !== true && activity.checklistId == null && !activity.activity.startsWith("__WORK_CHECKLIST__");
+}
 export interface WorkActivitiesPort {
   activities(scope: WorkScope): Promise<Activity[]>;
   createActivity(scope: WorkScope, input: WorkActivityInput): Promise<{ id: number }>;
   completeActivity(scope: WorkScope, id: number): Promise<void>;
+  deleteActivity(scope: WorkScope, id: number): Promise<void>;
   activityFiles(scope: WorkScope, id: number): Promise<Attachment[]>;
   uploadActivityFiles(scope: WorkScope, id: number, files: LocalPhoto[]): Promise<void>;
   reopenWork(scope: WorkScope): Promise<void>;
 }
 export function workActions(repository: Partial<WorkActivitiesPort>): WorkActivitiesPort {
   if (!repository.activities || !repository.createActivity || !repository.completeActivity || !repository.activityFiles || !repository.uploadActivityFiles || !repository.reopenWork) throw new Error("Estas acciones requieren actualizar el servicio de trabajos.");
-  return { activities: repository.activities.bind(repository), createActivity: repository.createActivity.bind(repository), completeActivity: repository.completeActivity.bind(repository), activityFiles: repository.activityFiles.bind(repository), uploadActivityFiles: repository.uploadActivityFiles.bind(repository), reopenWork: repository.reopenWork.bind(repository) };
+  return { activities: repository.activities.bind(repository), createActivity: repository.createActivity.bind(repository), completeActivity: repository.completeActivity.bind(repository), deleteActivity: repository.deleteActivity?.bind(repository) ?? (async () => { throw new Error("Actualiza el servicio para eliminar actividades."); }), activityFiles: repository.activityFiles.bind(repository), uploadActivityFiles: repository.uploadActivityFiles.bind(repository), reopenWork: repository.reopenWork.bind(repository) };
 }

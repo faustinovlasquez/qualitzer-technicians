@@ -80,6 +80,52 @@ const blockers: { name: string; apply(props: WorkDetailScreenProps): void; reaso
   { name: "applied without causal proof", apply: (props) => { props.offline = { ...uiSnapshot([{ ...uiOperation, kind: "timer", status: "applied", payload: { status: "paused", baseStatus: "in_progress" }, receipt: { operationId: uiOperation.id, state: "applied" } }]), online: true }; }, reason: /último cambio del cronómetro/ },
 ];
 
+test("back returns through files and checklist before leaving the work", async t => {
+  const fixture = await detailFixture(); t.after(fixture.close);
+  let exits = 0;
+  fixture.props.onBack = () => { exits++; };
+  const workTab = elements<{ onChecklist(id: number): void }>(fixture.render(), "WorkTab")[0];
+  workTab.props.onChecklist(10);
+  const checklist = elements<{ onEvidence(id?: string): void }>(fixture.render(), "ChecklistTab")[0];
+  checklist.props.onEvidence("102");
+  assert.equal(elements(fixture.render(), "FileWorkspace").length, 1);
+  action(fixture.render(), "Volver conservando el borrador").onPress(); await settle();
+  assert.equal(exits, 0);
+  assert.equal(elements(fixture.render(), "ChecklistTab").length, 1);
+  action(fixture.render(), "Ir al inicio del trabajo").onPress(); await settle();
+  assert.equal(elements(fixture.render(), "WorkTab").length, 1);
+  action(fixture.render(), "Volver conservando el borrador").onPress(); await settle();
+  assert.equal(exits, 1);
+});
+
+test("work summary omits instructions and empty materials while keeping activities first", () => {
+  const hooks = durableReactFixture();
+  const module = uiModule<typeof import("../src/screens/workDetail/WorkInformation")>("screens/workDetail/WorkInformation.tsx", hooks);
+  const props: Parameters<typeof module.WorkTab>[0] = { group: group({ products: [] }), work: work({ materials: [], checklists: [] }), report: "", savedReport: null, disabled: false, readOnly: false, submitting: false, mode: "demo", onReportChange() {}, onReportSubmit() {}, activitiesPanel: "ACTIVITY_PANEL" };
+  const render = () => hooks.render(() => module.WorkTab(props));
+  const empty = JSON.stringify(render());
+  assert.doesNotMatch(empty, /Instrucciones del trabajo|No se recibieron instrucciones|work-materials-section|shared-materials-section|Sin checklists asociados/);
+  assert.ok(empty.indexOf("ACTIVITY_PANEL") < empty.indexOf("Reporte técnico"));
+  props.work = { ...props.work, materials: [{ id: "1", name: "Filtro", ref: null, quantity: 1, stockStatus: "reserved" }] };
+  assert.match(JSON.stringify(render()), /work-materials-section/);
+  hooks.unmount();
+});
+
+test("explicit list exit bypasses section history, but not a busy child", async t => {
+  const fixture = await detailFixture(); t.after(fixture.close);
+  let exits = 0;
+  fixture.props.onHome = () => { exits++; };
+  const tabs = elements<{ accessibilityLabel: string; onPress(): void }>(fixture.render(), "Pressable");
+  tabs.find(({ props }) => props.accessibilityLabel === "Archivos")!.props.onPress();
+  const panel = elements<{ backHandler: { current: ((home?: boolean) => boolean) | null } }>(fixture.render(), "FileWorkspace")[0];
+  panel.props.backHandler.current = () => true;
+  action(fixture.render(), "Volver a mis asignaciones").onPress(); await settle();
+  assert.equal(exits, 0);
+  panel.props.backHandler.current = () => false;
+  action(fixture.render(), "Volver a mis asignaciones").onPress(); await settle();
+  assert.equal(exits, 1);
+});
+
 test("synchronized answer left as a local draft does not block delivery when it matches the confirmed answer", async (t) => {
   const confirmed = answerFromStep(readyWork().checklists[0].steps[0]);
   const f = await detailFixture("deliver", confirmed); t.after(f.close);
@@ -253,4 +299,31 @@ test("delivered detail keeps status across tabs and reopens once without submitt
   assert.equal(action(fixture.render(), "Reabierto · actualizando").disabled, true);
   fixture.props.work = { ...fixture.props.work, status: "completed" };
   assert.equal(elements<{ title: string }>(fixture.render(), "Button").filter(node => node.props.title === "Reabrir trabajo").length, 0);
+});
+
+for (const type of ["internal_maintenance", "external_ot"] as const) test(`${type}: header back returns from files to works before leaving`, () => {
+  const hooks = durableReactFixture();
+  const module = uiModule<{ OrderDetailScreen: Wrapped<OrderDetailScreenProps> }>("screens/OrderDetailScreen.tsx", hooks, {
+    "../ui/SessionContextBar": { SessionContextBar: "SessionContextBar" }, "./orders/AssignmentOrderCard": { AssignmentOrderSummary: "AssignmentOrderSummary" },
+    "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" }, "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" },
+    "./orders/OrderLifecyclePanel": { OrderLifecyclePanel: "OrderLifecyclePanel" }, "./offline/OfflineOrderLifecyclePanel": { OfflineOrderLifecyclePanel: "OfflineOrderLifecyclePanel" },
+    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+  });
+  let exits = 0;
+  const props: OrderDetailScreenProps = { tenant, branchName: "UI", group: group({ type, products: [] }), mode: "live", busy: false, storageKey: "navigation-order", technicianName: "UI", onBack: () => { exits++; }, onOpenWork() {}, onWorkStatus: unused, onRefresh: unused, onLoadFiles: async () => [], onUploadFiles: unused, onDeleteFile: unused, onLoadDelivery: unused, onStart: unused, onDeliver: unused };
+  const render = () => renderWrapped(hooks, module.OrderDetailScreen, props);
+  const tabs = elements<{ accessibilityRole?: string; accessibilityLabel: string; onPress(): void }>(render(), "Pressable");
+  assert.equal(tabs.some(({ props }) => props.accessibilityLabel.startsWith("Repuestos")), false);
+  tabs.find(({ props }) => props.accessibilityLabel === "Archivos")!.props.onPress();
+  const panel = elements<{ backHandler: { current: ((home?: boolean) => boolean) | null } }>(render(), "FileWorkspace")[0];
+  panel.props.backHandler.current = () => true;
+  action(render(), "Volver al paso anterior").onPress();
+  assert.equal(elements(render(), "AssignmentWorkCard").length, 0);
+  panel.props.backHandler.current = () => false;
+  action(render(), "Volver al paso anterior").onPress();
+  assert.ok(elements(render(), "AssignmentWorkCard").length > 0);
+  assert.equal(exits, 0);
+  action(render(), "Volver a mis asignaciones").onPress();
+  assert.equal(exits, 1);
+  hooks.unmount();
 });

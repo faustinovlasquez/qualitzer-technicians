@@ -9,6 +9,8 @@ const report = { startedAt: new Date().toISOString(), completed: false, passed: 
 const save = () => fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2));
 save();
 const targets = ["src/screens/DashboardScreen.tsx", "src/screens/orders/AssignmentOrderCard.tsx", "src/application/useTechnicianApp.ts", "src/domain/notifications.ts", "src/domain/assignmentCodes.ts", "tests/parent-assignment-ui.test.ts", "tests/helpers/agenda-load-lifecycle.ts", "tests/e2e/compact-overview-fixture.tsx"];
+targets.push("src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/WorkActivities.tsx", "src/domain/workActivities.ts", "src/infrastructure/HttpTechnicianRepository.ts", "src/infrastructure/DemoTechnicianRepository.ts", "src/offline/OfflineTechnicianRepository.ts", "server/assignments/workActions.ts", "server/contracts.ts", "tests/work-activities.test.ts", "App.tsx");
+targets.push("src/screens/workDetail/WorkInformation.tsx", "src/screens/workDetail/ChecklistTab.tsx", "src/screens/workDetail/FileWorkspace.tsx", "src/screens/workDetail/detailStyles.ts", "src/screens/OrderDetailScreen.tsx", "src/screens/creation/CreationScreen.tsx", "tests/delivery-review-ui.test.ts", "tests/checklist-resume-ui.test.ts");
 try {
   console.log("Checking assignment types");
   const configPath = path.join(root, "tsconfig.json");
@@ -25,6 +27,8 @@ try {
   save();
   console.log("Running assignment and notification tests");
   const files = ["tests/parent-assignment-ui.test.ts", "tests/notification-client.test.ts", "tests/notification-app-navigation.test.ts", "tests/notification-presentation.test.ts", "tests/notification-inbox-management.test.ts", "tests/device-security-integration.test.ts", "tests/durable-fluidity-hook.test.ts"];
+  files.push("tests/work-activities.test.ts", "tests/delivery-review-ui.test.ts", "tests/timer-reconciliation-ui.test.ts");
+  files.push("tests/checklist-resume-ui.test.ts", "tests/creation-auto-advance.test.ts");
   const result = spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", ...files], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 120000 });
   const log = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   fs.writeFileSync(path.join(output, "tests.log"), log);

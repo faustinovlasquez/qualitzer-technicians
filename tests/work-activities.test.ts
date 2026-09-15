@@ -1,10 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { workActivityInputSchema } from "../src/domain/workActivities";
+import { isWorkActivity, workActivityInputSchema, workActivitySchema } from "../src/domain/workActivities";
 import { assignments, group, work } from "../server/tests/fixtures";
 import { harness, jsonRequest, writeCalls, errorCode, form, uploadRequest } from "../server/tests/mock-upstream";
 
 const path = (suffix: string) => `/api/assignments/direct-11/works/11${suffix}?companyBranchId=1&startDate=2026-09-01&endDate=2026-09-01`;
+test("checklist markers survive transport and are excluded from activities", () => {
+  const activity = { id: 71, activity: "Ruedas y torque pernos", executionTime: 0, isStarted: false, isCompleted: true, technicalDocuments: [] };
+  assert.equal(isWorkActivity(workActivitySchema.parse({ ...activity, isChecklist: true })), false);
+  assert.equal(isWorkActivity(workActivitySchema.parse({ ...activity, checklistId: 12 })), false);
+  assert.equal(isWorkActivity({ ...activity, activity: "__WORK_CHECKLIST__:Revision" }), false);
+  assert.equal(isWorkActivity(activity), true);
+});
+test("delete activity forwards only the exact authorized resource", async context => {
+  const { baseUrl, state } = await harness(context);
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71"), "DELETE")).response.status, 200);
+  const calls = writeCalls(state);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "DELETE");
+  assert.equal(calls[0].path, "/api/technician-dashboard/panel/direct-11/works/11/activities/71");
+  assert.equal(calls[0].query.get("companyBranchId"), "1");
+  state.assignments = assignments([group({ works: [work({ status: "delivered" })] })]);
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71"), "DELETE")).response.status, 409);
+  state.assignments = assignments([]);
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71"), "DELETE")).response.status, 404);
+  assert.equal(writeCalls(state).length, 1);
+});
 test("activities validate names and explicit minute totals without accepting checklist placeholders", () => {
   assert.deepEqual(workActivityInputSchema.parse({ activity: " Revisar puerta ", executionTime: 90 }), { activity: "Revisar puerta", executionTime: 90 });
   for (const input of [{ activity: "", executionTime: 1 }, { activity: "__WORK_CHECKLIST__:Control", executionTime: 0 }, { activity: "Revisar", executionTime: -1 }, { activity: "Revisar", executionTime: 1.5 }, { activity: "Revisar", executionTime: 1, isCompleted: true }]) assert.equal(workActivityInputSchema.safeParse(input).success, false);

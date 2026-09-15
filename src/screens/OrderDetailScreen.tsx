@@ -66,6 +66,8 @@ export function OrderDetailScreen(props: OrderDetailScreenProps) {
 function OrderDetailContent(props: OrderDetailScreenProps) {
   const { group, tenant, branchName, mode, busy, initialTab = "works", onBack, onOpenWork, onWorkStatus, onRefresh } = props;
   const [tab, setTab] = useState<OrderTab>(initialTab);
+  const history = useRef<OrderTab[]>(initialTab === "works" ? [] : ["works"]);
+  const childBack = useRef<((home?: boolean) => boolean) | null>(null);
   const [deliverySucceeded, setDeliverySucceeded] = useState(false);
   const [filesVisited, setFilesVisited] = useState(initialTab === "files");
   const [action, setAction] = useState<OrderAction | null>(null);
@@ -98,6 +100,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
 
   useEffect(() => {
     setTab(initialTab);
+    history.current = initialTab === "works" ? [] : ["works"];
     if (initialTab === "files") setFilesVisited(true);
     scroll.current?.scrollTo({ y: 0, animated: false });
   }, [initialTab]);
@@ -125,6 +128,14 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
 
   function goBack(): void {
     if (actionRef.current !== null || busyRef.current || leaving.current) return;
+    if (childBack.current?.()) return;
+    const previous = history.current.pop();
+    if (previous) { setTab(previous); scroll.current?.scrollTo({ y: 0, animated: false }); return; }
+    if (tab !== "works") { setTab("works"); return; }
+    leaveDetails();
+  }
+  function leaveDetails(): void {
+    if (actionRef.current !== null || busyRef.current || leaving.current || childBack.current?.(true)) return;
     leaving.current = true;
     try { onBack(); }
     catch (error) {
@@ -142,7 +153,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   }, []);
 
   function selectTab(next: OrderTab): void {
-    if (actionRef.current !== null || busyRef.current || leaving.current) return;
+    if (actionRef.current !== null || busyRef.current || leaving.current || childBack.current?.(true) || next === tab) return;
+    history.current.push(tab);
     setTab(next);
     if (next === "files") setFilesVisited(true);
     scroll.current?.scrollTo({ y: 0, animated: false });
@@ -165,9 +177,9 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     {deliverySucceeded ? <DeliverySuccess title="Mantenimiento entregado" name={plainText(group.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
     <SessionContextBar tenant={tenant} branchName={branchName}>{props.connectionStatus}</SessionContextBar>
     <View style={styles.header}>
-      <IconButton name="arrow-back-outline" label="Volver a mis asignaciones" disabled={locked} onPress={goBack} />
+      <IconButton name="arrow-back-outline" label="Volver al paso anterior" disabled={locked} onPress={goBack} />
       <View style={styles.headerCopy}>
-        <Text style={styles.headerTitle}>{direct ? "Detalle de asignación" : "Detalle de OT"}</Text>
+        <Text style={styles.headerTitle}>{direct ? "Detalle de asignación" : group.type === "internal_maintenance" ? "Mantenimiento" : "Detalle de OT"}</Text>
         <View style={styles.codes}>
           {localGroup ? <Badge label="Pendiente de sincronizar" tone="warning" /> : null}
           {localGroup && group.code.trim() ? <Badge label={plainText(group.code)} /> : null}
@@ -175,11 +187,13 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           <Text numberOfLines={1} style={styles.headerSubtitle}>{plainText(group.title)}</Text>
         </View>
       </View>
+      <IconButton name="home-outline" label="Ir al inicio de la orden" disabled={locked} onPress={() => { if (actionRef.current !== null || busyRef.current || childBack.current?.(true)) return; history.current = []; setTab("works"); scroll.current?.scrollTo({ y: 0, animated: false }); }} />
+      <IconButton name="list-outline" label="Volver a mis asignaciones" disabled={locked} onPress={leaveDetails} />
       <IconButton name="refresh-outline" label="Actualizar orden y trabajos" disabled={locked} onPress={refresh} />
     </View>
     <View style={styles.tabsContainer}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones de la orden">
-        {tabs.map((item) => <Pressable
+        {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map((item) => <Pressable
           key={item.id}
           accessibilityRole="tab"
           accessibilityLabel={`${item.label}${item.id === "works" ? `, ${group.works.length}` : item.id === "materials" ? `, ${group.products.length}` : ""}`}
@@ -227,6 +241,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       {filesVisited ? <View style={[styles.stack, tab !== "files" && styles.hidden]}>
         <SectionTitle title={direct ? "Archivos de la asignación" : "Archivos de la OT"} subtitle="Documentos compartidos de la orden. Los archivos de cada trabajo se consultan desde su propia ficha." />
         <FileWorkspace
+          backHandler={tab === "files" ? childBack : undefined}
           scopeKey={filesScope}
           resourceKey={JSON.stringify([group.id, props.range?.startDate, props.range?.endDate, props.companyBranchId])}
           mode={mode}

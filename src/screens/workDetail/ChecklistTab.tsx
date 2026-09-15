@@ -14,6 +14,7 @@ import { errorMessage } from "./detailRules";
 import type { WorkDraft } from "./useWorkDraft";
 
 export interface ChecklistTabProps {
+  backHandler?: { current: ((home?: boolean) => boolean) | null };
   initialChecklistId?: number;
   work: AssignmentWork;
   draft: WorkDraft;
@@ -41,12 +42,13 @@ export function ChecklistTab(props: ChecklistTabProps) {
 
 function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
   const navigation = useChecklistNavigation(props.scopeKey, props.work.checklists);
-  const initialOpened = useRef(false);
+  const initialOpened = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (initialOpened.current || navigation.restoring || props.initialChecklistId === undefined) return;
+    if (props.initialChecklistId === undefined) { initialOpened.current = undefined; return; }
+    if (initialOpened.current === props.initialChecklistId || navigation.restoring || props.initialChecklistId === undefined) return;
     const checklist = props.work.checklists.find(item => item.checklistId === props.initialChecklistId);
-    initialOpened.current = true;
-    if (checklist) navigation.open(checklist);
+    initialOpened.current = props.initialChecklistId;
+    if (checklist && navigation.selection.checklistId !== checklist.checklistId) navigation.open(checklist);
   }, [navigation.restoring, props.initialChecklistId, props.work.checklists]);
   const [overview, setOverview] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,14 +59,39 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
   const stepId = checklist ? navigation.selection.stepIds[String(checklist.checklistId)] : undefined;
   const index = steps.findIndex((step) => String(step.stepId) === stepId);
   const step = steps[index];
+  const history = useRef<Array<{ checklistId: number | null; stepId?: string; overview: boolean }>>([]);
+  function remember(): void { history.current.push({ checklistId: checklist?.checklistId ?? null, stepId, overview }); }
+  function goBack(): boolean {
+    if (props.disabled || refreshingRef.current || navigation.restoring) return true;
+    const previous = history.current.pop();
+    if (previous) {
+      setOverview(previous.overview);
+      if (previous.checklistId == null) navigation.catalog();
+      else if (previous.stepId !== undefined) navigation.jump(previous.checklistId, previous.stepId);
+      else { const item = props.work.checklists.find(item => item.checklistId === previous.checklistId); if (item) navigation.open(item); }
+      return true;
+    }
+    if (overview) { setOverview(false); return true; }
+    if (checklist) { navigation.catalog(); return true; }
+    return false;
+  }
+  useEffect(() => {
+    const handler = props.backHandler;
+    if (!handler) return;
+    const back = (home = false): boolean => home ? props.disabled || refreshingRef.current : goBack();
+    handler.current = back;
+    return () => { if (handler.current === back) handler.current = null; };
+  }, [props.backHandler, props.disabled, props.work.checklists, overview, navigation.selection, navigation.restoring]);
 
   function open(item: Checklist): void {
+    remember();
     setOverview(false);
     navigation.open(item);
   }
 
   function jump(id: string): void {
     if (!checklist) return;
+    remember();
     setOverview(false);
     navigation.jump(checklist.checklistId, id);
   }
@@ -102,12 +129,13 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
     <View style={checklistStyles.screen} testID="checklist-workspace">
       <View style={checklistStyles.toolbar}>
         <View style={checklistStyles.toolbarRow}>
-          <IconButton name="arrow-back-outline" label="Volver a los checklists" disabled={props.disabled} onPress={() => { setOverview(false); navigation.catalog(); }} />
+          <IconButton name="arrow-back-outline" label="Volver al paso anterior del checklist" disabled={props.disabled} onPress={goBack} />
+          <IconButton name="list-outline" label="Volver a los checklists" disabled={props.disabled} onPress={() => { history.current = []; setOverview(false); navigation.catalog(); }} />
           <View style={checklistStyles.toolbarTitle}>
             <Text accessibilityRole="header" numberOfLines={2} style={checklistStyles.title}>{plainText(checklist.name) || "Checklist sin nombre"}</Text>
             <Text accessibilityLiveRegion="polite" style={checklistStyles.progress}>{step ? `Paso ${index + 1} de ${steps.length}` : `${steps.length} pasos`}{checklist.required === true ? " · Obligatorio" : checklist.required == null ? " · Obligatoriedad no informada" : ""}{props.readOnly ? " · Solo lectura" : ""}</Text>
           </View>
-          <IconButton name={overview ? "create-outline" : "grid-outline"} label={overview ? "Volver al paso" : "Resumen de pasos"} disabled={!step || props.disabled} onPress={() => setOverview(!overview)} />
+          <IconButton name={overview ? "create-outline" : "grid-outline"} label={overview ? "Volver al paso" : "Resumen de pasos"} disabled={!step || props.disabled} onPress={() => { remember(); setOverview(!overview); }} />
         </View>
         <ChecklistProgress checklist={checklist} compact />
       </View>

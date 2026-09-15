@@ -197,3 +197,19 @@ test("removing the actively visited step shows summary without discarding its dr
   assert.ok(elements<{ message: string }>(f.render(), "Notice").some(({ props }) => /ya no está/.test(props.message)));
   assert.deepEqual(f.props.draft, before);
 });
+
+test("outer back handler traverses checklist steps and catalog before leaving", async () => {
+  const fixtureState = await fixture();
+  const back = { current: null as ((home?: boolean) => boolean) | null };
+  fixtureState.props.backHandler = back;
+  fixtureState.open(); fixtureState.render();
+  const first = element<EditorProps>(fixtureState.render(), "StepEditor");
+  first.props.onNext?.(); fixtureState.render();
+  assert.equal(element<EditorProps>(fixtureState.render(), "StepEditor").props.step.stepId, 22);
+  assert.equal(back.current?.(), true); fixtureState.render();
+  assert.equal(element<EditorProps>(fixtureState.render(), "StepEditor").props.step.stepId, 21);
+  assert.equal(back.current?.(), true); fixtureState.render();
+  assert.equal(elements(fixtureState.render(), "ChecklistCatalog").length, 1);
+  assert.equal(back.current?.(), false);
+  fixtureState.hooks.unmount();
+});

@@ -53,6 +53,7 @@ export interface WorkDetailScreenProps {
   busy: boolean;
   error: string | null;
   onBack: () => void;
+  onHome?: () => void;
   onRefresh: () => Promise<void>;
   onStatus: (input: StatusInput) => Promise<void>;
   onSaveStep: (stepId: string, answer: StepAnswer) => Promise<void>;
@@ -162,6 +163,33 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const hasPendingOperations = timerPending || pendingDeliveryCount > 0;
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "work");
   const [target, setTarget] = useState<string | undefined>();
+  const viewHistory = useRef<Array<{ tab: Tab; target?: string; checklistId?: number }>>([]);
+  const childBack = useRef<((home?: boolean) => boolean) | null>(null);
+  const checklistVisited = useRef(tab === "checklist");
+  if (tab === "checklist") checklistVisited.current = true;
+  const detailScroll = useRef<ScrollView>(null);
+  const workTabOffset = useRef(0);
+  const scrollPositions = useRef<Partial<Record<Tab, number>>>({});
+  function navigateTab(next: Tab, nextTarget?: string, checklistId?: number): void {
+    if (running.current || parentBusy.current || childBack.current?.(true) || (tab === next && target === nextTarget && initialChecklistId === checklistId)) return;
+    viewHistory.current.push({ tab, target, checklistId: initialChecklistId });
+    setTarget(nextTarget); setInitialChecklistId(checklistId); setTab(next);
+  }
+  function workHome(): void {
+    if (running.current || parentBusy.current || childBack.current?.(true)) return;
+    viewHistory.current = [];
+    setTarget(undefined); setInitialChecklistId(undefined); setTab("work");
+    scrollPositions.current.work = 0;
+    detailScroll.current?.scrollTo({ y: 0, animated: false });
+  }
+  function leaveDetails(): void {
+    if (running.current || parentBusy.current || childBack.current?.(true)) return;
+    void runAction("back", async () => {
+      try { await draft.store.flush(); }
+      catch (error) { if (mounted.current) setExitWarning(true); throw error; }
+      if (mounted.current) (callbacks.current.onHome ?? onBack)();
+    });
+  }
   const allPendingDocuments = scopedOperations.filter((operation): operation is PendingDocument => operation.kind === "document" && operation.status !== "applied");
   const pendingDocuments = allPendingDocuments.filter((operation) => operation.stepId === target);
   const [queuedAnswers, setQueuedAnswers] = useState<{ [stepId: string]: { signature: string; operationId: string } }>({});
@@ -265,10 +293,15 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   }
 
   function goBack(): void {
+    if (running.current || parentBusy.current || childBack.current?.()) return;
     void runAction("back", async () => {
       try { await draft.store.flush(); }
       catch (error) { if (mounted.current) setExitWarning(true); throw error; }
-      if (mounted.current) onBack();
+      if (!mounted.current) return;
+      const previous = viewHistory.current.pop();
+      if (previous) { setTab(previous.tab); setTarget(previous.target); setInitialChecklistId(previous.checklistId); return; }
+      if (tab !== "work") { setTab("work"); setTarget(undefined); setInitialChecklistId(undefined); return; }
+      onBack();
     });
   }
   const back = useRef(goBack);
@@ -523,12 +556,13 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
 
   const evidenceStep = work.checklists.flatMap((checklist) => checklist.steps).find((step) => String(step.stepId) === target);
   const evidenceContent = <FileWorkspace
+    backHandler={childBack}
     compact
     scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:${target ?? "files"}`}
     resourceKey={JSON.stringify([resourceKey, target])}
     title={target !== undefined ? plainText(evidenceStep?.title ?? "Paso no disponible") : "Archivos del trabajo"}
     requirement={target !== undefined ? evidenceStep?.isFilesRequired ? "Evidencia obligatoria · debe estar confirmada" : "Evidencia opcional del paso" : work.isFilesRequired ? "Evidencia obligatoria del trabajo" : undefined}
-    headerAction={target !== undefined ? <IconButton name="folder-open-outline" label="Archivos del trabajo" onPress={() => setTarget(undefined)} /> : undefined}
+    headerAction={target !== undefined ? <IconButton name="folder-open-outline" label="Archivos del trabajo" onPress={() => navigateTab("evidence")} /> : undefined}
     notices={<>
       {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
       {draft.error ? <Notice message={userErrorText(draft.error)} tone="error" /> : null}
@@ -557,38 +591,46 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={insets.top}>
       {compactDetail ? <>
         {props.connectionStatus}
-        <View style={styles.checklistHeader} testID="compact-work-header">
+        <View style={styles.header} testID="compact-work-header">
           <IconButton name="arrow-back-outline" label="Volver conservando el borrador" disabled={locked} onPress={goBack} />
-          <View style={styles.headerText}>
-            <Text numberOfLines={1} style={styles.code}>{localWork ? "Pendiente de sincronizar" : codes.workCode ?? "Trabajo"}</Text>
-            <Text style={styles.caption}>{STATUS_LABELS[work.status]}</Text>
-          </View>
-          {tab === "evidence" && target !== undefined ? <Button title="Checklist" accessibilityLabel="Volver al checklist" variant="ghost" style={styles.checklistHeaderButton} onPress={() => setTab("checklist")} /> : <Button title="Trabajo" accessibilityLabel="Ver detalle del trabajo, archivos y comentarios" variant="ghost" style={styles.checklistHeaderButton} onPress={() => setTab("work")} />}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.headerCodes} contentContainerStyle={styles.headerCodeRow}>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{localWork ? "Local" : codes.workCode ?? "Trabajo"}</Text>
+            {codes.workOrderCode ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{codes.workOrderCode}</Text> : null}
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerStatus}>{STATUS_LABELS[work.status]}</Text>
+          </ScrollView>
+          <IconButton name="home-outline" label="Ir al inicio del trabajo" disabled={locked} onPress={workHome} />
           <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
         </View>
       </> : <>
       <SessionContextBar tenant={props.tenant} branchName={props.branchName}>{props.connectionStatus}</SessionContextBar>
       <View style={styles.header}>
         <IconButton name="arrow-back-outline" label="Volver conservando el borrador" disabled={locked} onPress={goBack} />
-        <View style={styles.headerText}>
-          <View style={styles.row}>
-            {localWork ? <><Badge label="Pendiente de sincronizar" tone="warning" />{group.code.trim() ? <Badge label={plainText(group.code)} /> : null}</> : codes.workCode ? <Badge label={codes.workCode} tone="teal" /> : null}
-            {!localWork && codes.workOrderCode ? <Badge label={codes.workOrderCode} tone="info" /> : null}
-            {!localWork && codes.negotiationCode ? <Badge label={codes.negotiationCode} /> : null}
-          </View>
-          <Text numberOfLines={1} style={styles.caption}>Detalle de ejecución</Text>
-        </View>
-        <Badge label={STATUS_LABELS[work.status]} tone={statusTones[work.status]} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.headerCodes} contentContainerStyle={styles.headerCodeRow}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{localWork ? "Local" : codes.workCode ?? "Trabajo"}</Text>
+          {!localWork && codes.workOrderCode ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{codes.workOrderCode}</Text> : null}
+          {!localWork && codes.negotiationCode ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{codes.negotiationCode}</Text> : null}
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerStatus}>{STATUS_LABELS[work.status]}</Text>
+        </ScrollView>
+        <IconButton name="home-outline" label="Ir al inicio del trabajo" disabled={locked} onPress={workHome} />
         <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
       </View>
       </>}
+      <View style={styles.detailNavigation}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones del trabajo">
+          {tabs.map(item => <Pressable key={item.id} accessibilityRole="tab" accessibilityState={{ selected: tab === item.id, disabled: locked }} accessibilityLabel={item.label} disabled={locked} onPress={() => navigateTab(item.id)} style={[styles.tab, tab === item.id && styles.activeTab]}>
+            <Ionicons name={item.icon} size={17} color={tab === item.id ? palette.primary : palette.textSecondary} accessible={false} /><Text style={[styles.tabText, tab === item.id && styles.activeTabText]}>{item.label}</Text>
+          </Pressable>)}
+        </ScrollView>
+        <IconButton name="list-outline" label="Volver a mis asignaciones" disabled={locked} onPress={leaveDetails} />
+      </View>
       {work.status === "delivered" || work.status === "completed" ? <View style={styles.closedBanner} testID="work-closed-banner">
         <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
         <Text style={styles.label}>{work.status === "delivered" ? "Trabajo entregado" : "Trabajo finalizado"}</Text>
       </View> : null}
-      {tab === "evidence" ? evidenceContent : tab === "checklist" ? <ChecklistTab initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => { setTarget(id); setTab("evidence"); }} notices={checklistNotices} catalogHeader={
+      {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => navigateTab("evidence", id)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
-      } /> : <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
+      } /></View> : null}
+      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : <ScrollView key={tab} ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
           {mode === "demo" ? <Notice message="Modo demostración · los cambios y confirmaciones son locales, no se envían a Qualitzer." /> : null}
           {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
           {exitWarning ? <Card style={styles.stack}>
@@ -611,32 +653,26 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
               <View style={styles.metric}><Text style={styles.heroText}>Prioridad</Text><Text style={styles.metricValue}>{work.priority === "high" ? "Alta" : work.priority === "medium" ? "Media" : "Baja"}</Text></View>
             </View>
           </LinearGradient>
-          <Card style={styles.stack}>
-            <SectionTitle title="Control de ejecución" subtitle={`Fecha para iniciar o pausar: ${shortDate(selectedDate)} · ${selectedDate}`} />
             {!work.canExecute ? <Notice message="La ejecución no está habilitada por Qualitzer. Puedes revisar los requisitos y guardar la información pendiente." tone="warning" /> : null}
             {work.missingRequiredInfo.length > 0 ? <BodyText>Revisa la información requerida en la ficha antes de confirmar la entrega.</BodyText> : null}
-            <View style={styles.row}>
-              {!readOnly && (desiredStatus === "in_progress" ? <Button title={`Pausar trabajo${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={`${desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
-              <Button title={work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" disabled={!canReviewDelivery} onPress={openDeliveryReview} />
-              {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
-            </View>
-            {busy || action === "status" ? <BodyText>Protegiendo el cambio… Espera al guardado local antes de realizar otra acción.</BodyText> : null}
-          </Card>
           <View style={styles.tight}>
             <Text accessibilityLiveRegion="polite" style={styles.caption}>{draft.error ? "El borrador aún no está protegido" : storageMessage}</Text>
             {draft.error ? <View style={styles.tight}><Notice message={userErrorText(draft.error)} tone="error" /><Button title="Reintentar almacenamiento local" variant="secondary" disabled={locked} onPress={() => { void runAction("draft", draft.store.retry); }} /></View> : null}
             <Text style={styles.caption}>Última carga: {loadedAt}</Text>
           </View>
-          <View style={styles.tabs} accessibilityRole="tablist">
-            {tabs.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityState={{ selected: tab === item.id }} accessibilityLabel={item.label} onPress={() => setTab(item.id)} style={({ pressed }) => [styles.tab, tab === item.id && styles.activeTab, pressed && styles.disabled]}>
-              <Ionicons name={item.icon} size={19} color={tab === item.id ? palette.primary : palette.textSecondary} accessible={false} /><Text style={[styles.tabText, tab === item.id && styles.activeTabText]}>{item.label}</Text>
-            </Pressable>)}
-          </View>
           </> : null}
-          {tab === "work" ? <WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => { setInitialChecklistId(id); setTab("checklist"); }} activitiesPanel={<WorkActivities key={resourceKey} scopeKey={`${storageKey}:${resourceKey}`} mode={mode} activities={work.activities ?? []} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} />} /> : null}
+          {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities onCreated={() => { scrollPositions.current.work = workTabOffset.current; detailScroll.current?.scrollTo({ y: workTabOffset.current, animated: true }); }} backHandler={childBack} key={resourceKey} scopeKey={`${storageKey}:${resourceKey}`} mode={mode} activities={work.activities ?? []} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} />} /></View> : null}
             {tab === "comments" ? <CommentsTab scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:comments`} resourceKey={resourceKey} mode={mode} busy={locked || staleReadOnly} pending={props.offline !== undefined ? pendingComments : undefined} offlineReady={offlineReady} onLoad={props.onLoadComments} onSubmit={props.onAddComment} /> : null}
           {tab === "equipment" ? <EquipmentTab group={group} work={work} /> : null}
         </ScrollView>}
+        <View style={styles.executionFooter} testID="work-execution-footer">
+          <View style={styles.executionButtons}>
+            {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
+            <Button title={work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" style={styles.executionButton} disabled={!canReviewDelivery} onPress={openDeliveryReview} />
+            {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" style={styles.executionButton} disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
+          </View>
+          {busy || action === "status" || timerPending ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{timerPending ? timerPendingLabel(pendingTimer) : "Guardando cambio…"}</Text> : null}
+        </View>
       </KeyboardAvoidingView>
       <CameraPermissionGuide guide={cameraGuide} />
       {reopening ? <PrivateModal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setReopening(false); }}><View style={styles.modalOverlay}><View style={[styles.modalCard, styles.modalContent]}>
@@ -651,7 +687,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <Button title="Cancelar" variant="ghost" disabled={locked} onPress={() => setReopening(false)} />
         {operationError ? <Notice message={operationError} tone="error" /> : null}
       </View></View></PrivateModal> : null}
-      {deliverySucceeded ? <DeliverySuccess title={maintenance ? "Mantenimiento entregado" : "Trabajo entregado"} name={plainText(work.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
+      {deliverySucceeded ? <DeliverySuccess title="Trabajo entregado" name={plainText(work.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
       {completing ? <CompletionDialog work={evidenceWork} allowEditExecutionTime={props.allowEditExecutionTime} generatedAt={generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} canSubmit={canSubmitDelivery && canReviewDelivery} error={operationError} busy={locked} mode={mode} onRefresh={offlineReady && props.offline?.connection?.foreground !== false ? refreshDeliveryReview : undefined} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null}
     </SafeAreaView>
   );

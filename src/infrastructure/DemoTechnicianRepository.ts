@@ -15,12 +15,12 @@ import { DemoCreationStore, demoCreationOptions } from "./creationDemo";
 import { DemoNotifications } from "./notificationsDemo";
 import { DemoChecklistAssignments } from "./checklistAssignmentDemo";
 import type { ChecklistCatalogQuery } from "../domain/checklistAssignment";
-import { workActivityInputSchema, type WorkActivitiesPort } from "../domain/workActivities";
+import { isWorkActivity, workActivityInputSchema, type WorkActivitiesPort } from "../domain/workActivities";
 
 export class DemoTechnicianRepository implements TechnicianRepository {
   private data = makeDemoData();
   private activityFilesById = new Map<string, Attachment[]>();
-  activities: WorkActivitiesPort["activities"] = async scope => structuredClone((this.find(scope).work.activities ?? []).filter(activity => !activity.activity.startsWith("__WORK_CHECKLIST__")));
+  activities: WorkActivitiesPort["activities"] = async scope => structuredClone((this.find(scope).work.activities ?? []).filter(isWorkActivity));
   createActivity: WorkActivitiesPort["createActivity"] = async (scope, input) => {
     const work = this.find(scope).work;
     if (work.status === "completed" || work.status === "delivered") throw new Error("El trabajo es de solo lectura.");
@@ -38,6 +38,12 @@ export class DemoTechnicianRepository implements TechnicianRepository {
   activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => {
     if (!(await this.activities(scope)).some(activity => activity.id === id)) throw new Error("Actividad no encontrada.");
     return structuredClone(this.activityFilesById.get(`${this.key(scope)}:${id}`) ?? []);
+  };
+  deleteActivity: WorkActivitiesPort["deleteActivity"] = async (scope, id) => {
+    const work = this.find(scope).work;
+    if (work.status === "completed" || work.status === "delivered") throw new Error("El trabajo es de solo lectura.");
+    if (!work.activities?.some(activity => activity.id === id && isWorkActivity(activity))) throw new Error("Actividad no encontrada.");
+    work.activities = work.activities.filter(activity => activity.id !== id || !isWorkActivity(activity));
   };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = async (scope, id, files) => {
     await this.activityFiles(scope, id);

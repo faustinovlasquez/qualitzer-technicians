@@ -49,13 +49,13 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   useEffect(() => { setNotificationSettings(false); }, [app.session?.token, app.session?.branchId]);
   useEffect(() => { if (app.tab !== "profile") setNotificationSettings(false); }, [app.tab]);
   useEffect(() => {
-    if (!app.session || app.tab !== "notifications" || app.selected || app.selectedOrder || app.selectedCreationKind) return;
+    if (!app.session || app.tab === "today" || app.selected || app.selectedOrder || app.selectedCreationKind || app.selectedOffline || notificationSettings) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (!app.busy) app.setTab("today");
+      if (!app.busy) app.backTab();
       return true;
     });
     return () => subscription.remove();
-  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.busy, app.setTab]);
+  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings]);
 
   function cancelLogout(): void {
     if (!app.busy) setLogoutConfirm(false);
@@ -127,10 +127,11 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       initialAction={app.selected.initialAction}
       allowEditExecutionTime={app.data.technician.allowEditExecutionTime}
       onBack={app.closeWork}
+      onHome={app.closeDetails}
       onRefresh={app.refresh}
       onStatus={app.changeStatus}
       onReopen={app.reopenWork}
-      activityActions={{ load: app.loadActivities, create: app.createActivity, complete: app.completeActivity, files: app.loadActivityFiles, upload: app.uploadActivityFiles }}
+      activityActions={{ load: app.loadActivities, create: app.createActivity, complete: app.completeActivity, remove: app.deleteActivity, files: app.loadActivityFiles, upload: app.uploadActivityFiles }}
       onSaveStep={app.saveAnswer}
       onLoadChecklistOptions={app.loadChecklistOptions}
       onAttachChecklist={app.attachChecklist}
@@ -184,8 +185,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const canCreate = Boolean(app.session.branchId && app.session.user.workerId && app.session.user.accessBranchs.some((branch) => branch.id === app.session?.branchId && branch.isEnabled !== false && branch.isDeleted !== true));
   return <SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
     <View style={styles.top}>
+      {app.tab !== "today" ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
       <Brand tenant={app.session.tenant} showTag={false} singleLine />
       <View style={styles.headerActions}>
+        {app.tab !== "today" ? <IconButton name="home-outline" label="Ir a mi jornada" disabled={app.busy} onPress={app.homeTab} /> : null}
         {app.tab === "today" || app.tab === "agenda" ? <IconButton name="refresh-outline" label="Actualizar asignaciones" disabled={app.busy || app.loading} onPress={refreshAssignments} /> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="Ver mi perfil y sucursal" accessibilityState={{ disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab("profile")} style={styles.avatar}><Text style={styles.avatarText}>{app.session.user.name[0]}</Text></Pressable>
         <IconButton name="log-out-outline" label="Cerrar sesión" disabled={app.busy} onPress={() => setLogoutConfirm(true)} />
@@ -197,7 +200,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       {app.tab === "notifications" ? <>
         {app.error ? <View style={styles.orderError}><Notice message={app.error} tone="warning" /></View> : null}
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
-          <NotificationCenterScreen notifications={app.notifications} onBack={() => app.setTab("today")} />
+          <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
       </> : app.tab === "profile" ? <ProfileScreen session={app.session} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
       {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy || logoutConfirm} /> : null}

@@ -39,7 +39,7 @@ export interface DashboardScreenProps {
 }
 
 type StatusFilter = "all" | "pending" | "in_progress" | "completed";
-type AssignmentListView = "works" | "orders";
+type AssignmentListView = "works" | "maintenances" | "orders";
 interface WorkEntry { group: AssignmentGroup; work: AssignmentWork; }
 interface WorkSection { key: string; date: string | null; entries: WorkEntry[]; }
 interface DaySelection { scope: string; date: string; }
@@ -47,6 +47,7 @@ interface DaySelection { scope: string; date: string; }
 const listViewStorageKey = "@qualitzer/ui/assignment-list-view/v1";
 const listViews: { value: AssignmentListView; label: string; icon: IconName }[] = [
   { value: "works", label: "Trabajos", icon: "construct-outline" },
+  { value: "maintenances", label: "Mantenimientos", icon: "build-outline" },
   { value: "orders", label: "OTs", icon: "albums-outline" },
 ];
 
@@ -140,7 +141,7 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
     let active = true;
     mounted.current = true;
     void AsyncStorage.getItem(listViewStorageKey).then((saved) => {
-      if (active && !preferenceChanged.current && (saved === "works" || saved === "orders")) setListView(saved);
+      if (active && !preferenceChanged.current && (saved === "works" || saved === "orders" || saved === "maintenances")) setListView(saved);
     }).catch(() => {
       if (active && !preferenceChanged.current) setPreferenceError("No se pudo recuperar la vista guardada. Puedes elegir Trabajos u OTs.");
     });
@@ -165,26 +166,31 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
   }, [scopedEntries, selectedDay]);
 
   const filteredEntries = useMemo(() => scopedEntries.filter(({ group, work }) => matchesStatus(work, filter) && matchesAssignmentSearch(group, work, query)), [scopedEntries, query, filter]);
-  const emptyOrders = (data?.groups ?? []).filter((group) => {
-    if (group.type === "direct_assignment" || group.works.length > 0) return false;
+  const scopedOrders = (data?.groups ?? []).filter((group) => {
+    if (group.type === "direct_assignment") return false;
+    if (scopedEntries.some((entry) => groupKey(entry.group) === groupKey(group))) return true;
     const day = assignmentDay(group.scheduledDate);
     const start = selectedDay ?? range.startDate;
     const end = selectedDay ?? range.endDate;
     const open = group.status !== "completed" && group.status !== "delivered";
     return !day || (day >= start && day <= end) || (day < start && open);
   });
-  const filteredEmptyOrders = emptyOrders.filter((group) => matchesStatus(group, filter) && matchesOrderSearch(group, query));
-  const filteredGroups = useMemo(() => {
-    const groups = new Map<string, { group: AssignmentGroup; matchingWorkCount: number }>();
-    for (const { group } of filteredEntries) {
-      const key = groupKey(group);
-      const existing = groups.get(key);
-      if (existing) existing.matchingWorkCount += 1;
-      else groups.set(key, { group, matchingWorkCount: 1 });
-    }
-    return Array.from(groups.values());
-  }, [filteredEntries]);
-  const filteredGroupCount = filteredGroups.length + filteredEmptyOrders.length;
+  const emptyOrders = scopedOrders.filter((group) => group.works.length === 0);
+  const filteredOrders = scopedOrders.filter((group) => matchesStatus(group, filter) && matchesOrderSearch(group, query));
+  const filteredMaintenances = filteredOrders.filter((group) => group.type === "internal_maintenance");
+  const filteredWorkOrders = filteredOrders.filter((group) => group.type === "external_ot");
+  const visibleOrders = listView === "maintenances" ? filteredMaintenances : filteredWorkOrders;
+  const viewCounts = { works: filteredEntries.length, maintenances: filteredMaintenances.length, orders: filteredWorkOrders.length };
+  const visibleCount = viewCounts[listView];
+  const entityTabs = <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist" accessibilityLabel="Tipo de asignación" style={{ flexGrow: 0 }} contentContainerStyle={styles.entityTabs}>
+    {listViews.map((item) => <Pressable key={item.value} accessibilityRole="tab"
+      accessibilityLabel={`${item.label}${hasDataCount() ? `, ${viewCounts[item.value]} coincidencias` : ""}`}
+      accessibilityState={{ selected: listView === item.value, disabled: busy }} disabled={busy}
+      onPress={() => selectListView(item.value)} style={[styles.entityTab, listView === item.value && styles.segmentSelected]}>
+      <Text style={[styles.entityTabText, listView === item.value && styles.segmentTextSelected]}>{item.label}</Text>
+    </Pressable>)}
+  </ScrollView>;
+  function hasDataCount(): boolean { return data !== null && !coveragePending && !partial; }
 
   const sections = useMemo(() => buildSections(filteredEntries, view === "agenda"), [filteredEntries, view]);
   const remaining = counts.total - counts.completed;
@@ -247,8 +253,9 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
     </Pressable>)}
   </View> : null;
 
-  if (view === "agenda" && agendaLayout === "schedule") {
+  if (view === "agenda" && agendaLayout === "schedule" && listView === "works") {
     const content = <>
+    {entityTabs}
     {!compact ? layoutSelector : null}
     <View style={styles.weekNavigation}>
       <IconButton name="chevron-back-outline" label="Semana anterior" disabled={busy || loading} onPress={() => navigateWeek(-1)} />
@@ -261,7 +268,6 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
     {loading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={styles.loadingText}>Actualizando agenda…</Text></View> : null}
     {runningTimersFromSnapshot(data).length > 0 ? <Pressable accessibilityRole="button" onPress={() => setAgendaLayout("list")} style={styles.textButton}><Text style={styles.textButtonLabel}>Hay cronómetros activos · revisar en Lista</Text></Pressable> : null}
     {data && !coveragePending ? <WeeklySchedule data={data} range={range} unavailableDates={unavailableDates} selectedDate={focusDate} onSelectDate={onFocusDate} onOpenWork={onOpenWork} busy={busy || loading} timezone={user.system.timezone} /> : !loading && !coveragePending ? <EmptyState title="Horario no disponible" message="Actualiza para cargar tus trabajos planificados de la semana." /> : null}
-    {filteredEmptyOrders.map((group) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={0} busy={busy} onOpenGroup={onOpenGroup} />)}
     </>;
     return compact ? <ScrollView style={styles.screen} contentContainerStyle={styles.mobileSchedule} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>{content}</ScrollView> : <View style={styles.desktopSchedule}>{content}</View>;
   }
@@ -351,25 +357,11 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
 
       <View style={styles.taskHeading}>
         <SectionTitle title={view === "agenda" ? "Agenda de trabajo" : "Mis asignaciones"} />
-        {hasData && !coveragePending ? <Text style={styles.listCount}>{partial && filteredEntries.length === 0 ? "Sin coincidencias en la copia disponible · parcial" : `${filteredEntries.length} trabajos · ${filteredGroupCount} OT/asignaciones${partial ? " · parcial" : ""}`}</Text> : null}
+        {hasData && !coveragePending ? <Text style={styles.listCount}>{visibleCount} {listView === "works" ? "trabajos" : listView === "maintenances" ? "mantenimientos" : "OTs"}{partial ? " · parcial" : ""}</Text> : null}
       </View>
 
-      <View accessibilityRole="tablist" accessibilityLabel="Agrupar asignaciones" style={styles.segmented}>
-        {listViews.map((item) => <Pressable
-          key={item.value}
-          accessibilityRole="tab"
-          accessibilityLabel={`${item.label}${hasData && !coveragePending ? partial ? ", conteo parcial" : `, ${item.value === "works" ? filteredEntries.length : filteredGroupCount} coincidencias` : ""}`}
-          accessibilityState={{ selected: listView === item.value, disabled: busy }}
-          disabled={busy}
-          onPress={() => selectListView(item.value)}
-          style={({ pressed }) => [styles.segment, listView === item.value && styles.segmentSelected, pressed && styles.pressed]}
-        >
-          <Ionicons name={item.icon} size={19} color={listView === item.value ? palette.white : palette.textSecondary} accessible={false} />
-          <Text style={[styles.segmentText, listView === item.value && styles.segmentTextSelected]}>{item.label}{hasData && !coveragePending ? partial ? " · parcial" : ` (${item.value === "works" ? filteredEntries.length : filteredGroupCount})` : ""}</Text>
-        </Pressable>)}
-      </View>
+      {entityTabs}
       {preferenceError ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.preferenceError}>{preferenceError}</Text> : null}
-      {listView === "orders" ? <Text style={styles.filterNote}>OTs y asignaciones que coinciden con la fecha y los filtros. Sus conteos y detalle incluyen todos sus trabajos asignados.</Text> : null}
 
       <View style={[styles.search, searchFocused && styles.searchFocused]}>
         <Ionicons name="search-outline" size={21} color={palette.textMuted} accessible={false} />
@@ -419,11 +411,8 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
         </View>
       ) : null}
 
-      {hasData && filteredEmptyOrders.length > 0 ? <View style={styles.section}>
-        {filteredEmptyOrders.map((group) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={0} busy={busy} onOpenGroup={onOpenGroup} />)}
-      </View> : null}
-      {hasData && filteredEntries.length > 0 ? listView === "orders" ? <View style={styles.section}>
-        {filteredGroups.map(({ group, matchingWorkCount }) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={matchingWorkCount} busy={busy} onOpenGroup={onOpenGroup} />)}
+      {hasData && visibleCount > 0 ? listView !== "works" ? <View style={styles.section}>
+        {visibleOrders.map((group) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={group.works.length} busy={busy} onOpenGroup={onOpenGroup} />)}
       </View> : sections.map((section) => (
         <View key={section.key} style={styles.section}>
           {section.date !== null ? (
@@ -435,7 +424,7 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
           ) : null}
           {section.entries.map(({ group, work }) => <AssignmentWorkCard key={JSON.stringify([group.type, group.id, work.workType, work.id, work.scheduledDate])} group={group} work={work} queryDate={assignmentWorkQueryRange(work, range).startDate} companyBranchId={companyBranchId} onOpenWork={onOpenWork} onWorkStatus={onWorkStatus} busy={busy} generatedAt={data.generatedAt} offline={offline} online={offline?.online ?? !coveragePending} staleReadOnly={coveragePending || offline?.authBlocked === true || isPendingLocalWork(work)} />)}
         </View>
-      )) : hasData && filteredEmptyOrders.length === 0 && !loading && !error ? (
+      )) : hasData && !loading && !error ? (
         <Card>
           <EmptyState title={coveragePending ? "Verificando copia local" : partial ? "Sin tareas en la copia disponible" : isFiltered ? "No encontramos coincidencias" : "Sin tareas para este período"} message={coveragePending ? "Espera a recuperar el estado local; no se presume vacío." : partial ? "Cobertura parcial: faltan días por descargar. No se puede confirmar que no haya asignaciones." : isFiltered ? "Prueba otro estado o busca por código, equipo o cliente." : selectedDay ? "No tienes asignaciones para este día. Puedes consultar el resto de la semana." : "Aquí aparecerán tus próximas asignaciones. Puedes revisar otra semana o actualizar la información."} icon={isFiltered ? "search-outline" : "calendar-clear-outline"} />
           {isFiltered ? <Button title="Limpiar filtros" variant="secondary" onPress={clearFilters} /> : selectedDay && view === "agenda" ? <Button title="Ver toda la semana" variant="secondary" onPress={() => setDaySelection(null)} /> : <Button title="Actualizar" variant="secondary" icon="refresh-outline" onPress={onRefresh} />}
@@ -449,6 +438,9 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
 }
 
 const styles = StyleSheet.create({
+  entityTabs: { flexGrow: 1, padding: 3, gap: 3, borderRadius: 6, backgroundColor: palette.surface },
+  entityTab: { flexGrow: 1, minHeight: 44, justifyContent: "center", alignItems: "center", paddingHorizontal: 7, paddingVertical: 8, borderRadius: 6 },
+  entityTabText: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: palette.textSecondary, textAlign: "center" },
   mobileSchedule: { padding: 12, gap: 8 },
   desktopSchedule: { flex: 1, minHeight: 0, padding: 14, gap: 8 },
   compactSegments: { padding: 2, gap: 2, alignSelf: "flex-start" },

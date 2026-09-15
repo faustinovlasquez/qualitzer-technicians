@@ -1,10 +1,13 @@
 import { useState, type ReactNode } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { plainText } from "../../domain/format";
+import { isWorkActivity } from "../../domain/workActivities";
 import type { Activity, AssignmentGroup, AssignmentWork, Equipment, Material } from "../../domain/models";
 import { Badge, BodyText, Button, Card, EmptyState, Field, SectionTitle } from "../../ui/components";
 import { AttachmentList, Fact, HttpLink, Notice } from "./DetailUi";
 import { styles } from "./detailStyles";
+import { palette } from "../../ui/theme";
 
 function Materials({ materials }: { materials: Material[] }) {
   const states: { [key in Material["stockStatus"]]: string } = { in_stock: "En stock", requested: "Solicitado", reserved: "Reservado" };
@@ -43,35 +46,36 @@ interface WorkTabProps {
 
 export function WorkTab({ group, work, report, savedReport, disabled, readOnly, submitting, mode, onReportChange, onReportSubmit, activitiesPanel, onChecklist }: WorkTabProps) {
   const [reportError, setReportError] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(report.trim().length > 0);
   const saved = savedReport !== null && savedReport === report.trim();
   return (
-    <View style={styles.stack}>
-      <Card style={styles.stack}>
-        <SectionTitle title="Instrucciones del trabajo" />
-        <BodyText>{plainText(work.summary) || "No se recibieron instrucciones adicionales para este trabajo."}</BodyText>
-      </Card>
-      <View style={styles.columns}>
-        <View style={styles.column}><SectionTitle title={`Materiales · ${work.materials.length}`} /><Materials materials={work.materials} /></View>
-        <View style={styles.column}>
-          <SectionTitle title="Responsables" />
-          {work.responsibles.length === 0 ? <BodyText>No se informaron responsables.</BodyText> : work.responsibles.map((responsible) => <View key={String(responsible.id)} style={styles.item}><Text style={styles.label}>{responsible.name}</Text></View>)}
-        </View>
-      </View>
-      {group.products.length > 0 ? <Card style={styles.stack}><SectionTitle title="Materiales de la asignación" subtitle="Materiales informados a nivel de la orden o asignación, no necesariamente exclusivos de este trabajo." /><Materials materials={group.products} /></Card> : null}
-      <View style={styles.item}><SectionTitle title="Checklists" />{work.checklists.length === 0 ? <BodyText>Sin checklists asociados.</BodyText> : work.checklists.map(checklist => <Button key={checklist.checklistId} title={plainText(checklist.name)} icon="checkbox-outline" variant="secondary" onPress={() => onChecklist?.(checklist.checklistId)} />)}</View>
-      {activitiesPanel ?? <View style={styles.item}><SectionTitle title="Actividades" /><Activities activities={(work.activities ?? []).filter(activity => !activity.activity.startsWith("__WORK_CHECKLIST__"))} documents /></View>}
-      <Card style={styles.stack}>
-        <SectionTitle title="Reporte técnico" subtitle="Describe lo realizado, los hallazgos y cualquier pendiente." />
+    <View style={styles.workSections}>
+      {activitiesPanel ?? <View style={styles.detailSection}><SectionTitle title="Actividades" /><Activities activities={(work.activities ?? []).filter(isWorkActivity)} documents /></View>}
+      {work.checklists.length > 0 ? <View style={styles.detailSection} testID="work-checklist-section">
+        <View style={styles.sectionHeading}><Ionicons name="checkbox-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Checklists</Text><Badge label={String(work.checklists.length)} /></View>
+        {work.checklists.map(checklist => <Pressable key={checklist.checklistId} accessibilityRole="button" accessibilityLabel={plainText(checklist.name)} disabled={!onChecklist} onPress={() => onChecklist?.(checklist.checklistId)} style={styles.checklistLink}>
+          <View style={styles.grow}><Text style={styles.label}>{plainText(checklist.name)}</Text><Text style={styles.caption}>{checklist.steps.length} pasos{checklist.required ? " · Obligatorio" : ""}</Text></View>
+          <Ionicons name="chevron-forward-outline" size={22} color={palette.primary} accessible={false} />
+        </Pressable>)}
+      </View> : null}
+      {work.materials.length > 0 ? <View style={styles.detailSection} testID="work-materials-section"><View style={styles.sectionHeading}><Ionicons name="cube-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Materiales</Text><Badge label={String(work.materials.length)} /></View><Materials materials={work.materials} /></View> : null}
+      {group.products.length > 0 ? <View style={styles.detailSection} testID="shared-materials-section"><View style={styles.sectionHeading}><Ionicons name="layers-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Materiales compartidos</Text></View><Materials materials={group.products} /></View> : null}
+      {work.responsibles.length > 0 ? <View style={styles.detailSection}><Text style={styles.caption}>Responsables</Text><Text style={styles.label}>{work.responsibles.map(responsible => responsible.name).join(", ")}</Text></View> : null}
+      <View style={styles.detailSection}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Reporte técnico" accessibilityState={{ expanded: reportOpen }} onPress={() => setReportOpen(!reportOpen)} style={styles.sectionHeading}>
+          <Ionicons name="document-text-outline" size={22} color={palette.primary} /><Text style={styles.sectionTitle}>Reporte técnico</Text><Ionicons name={reportOpen ? "chevron-up-outline" : "chevron-down-outline"} size={22} color={palette.primary} />
+        </Pressable>
+        {reportOpen ? <View style={styles.stack}>
         {saved ? <Badge label={mode === "demo" ? "Guardado localmente · demo" : "Guardado en Qualitzer"} tone="info" /> : report.length > 0 ? <Badge label="Borrador en dispositivo" tone="warning" /> : null}
         <Field label="Nota del reporte (obligatoria)" value={report} onChangeText={onReportChange} editable={!disabled && !readOnly} multiline maxLength={10000} style={styles.multiline} placeholder="Trabajo realizado, condiciones del equipo y observaciones…" error={reportError} hint={`${report.length}/10000 caracteres. El texto se guarda como borrador mientras escribes; solo se envía al pulsar Guardar reporte.`} />
         {group.type === "internal_maintenance" ? <BodyText>El reporte de mantenimiento se envía para guardarlo como un archivo de texto adjunto al trabajo.</BodyText> : null}
-        <BodyText>{saved ? "Confirmación del último envío desde este dispositivo. " : ""}No hay historial de reportes disponible en esta ficha; este campo no es una lectura de comentarios anteriores.</BodyText>
         {!readOnly ? <Button title={mode === "demo" ? "Guardar reporte en demo" : "Guardar reporte"} icon="document-text-outline" disabled={disabled || saved} loading={submitting} onPress={() => {
           if (!report.trim()) { setReportError("Escribe una nota antes de guardar el reporte."); return; }
           setReportError(null);
           onReportSubmit();
         }} /> : <BodyText>Asignación cerrada. No se pueden enviar nuevos reportes.</BodyText>}
-      </Card>
+        </View> : null}
+      </View>
     </View>
   );
 }
@@ -103,6 +107,6 @@ export function EquipmentTab({ group, work }: { group: AssignmentGroup; work: As
       {group.locationAddress?.trim() ? <View style={styles.tight}><Text style={styles.caption}>Dirección · toca para buscar en Maps</Text><HttpLink label={group.locationAddress} url={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(group.locationAddress)}`} onError={setLinkError} /></View> : <BodyText>No se recibió una dirección para abrir en Maps.</BodyText>}
       {linkError ? <Notice message={linkError} tone="error" onDismiss={() => setLinkError(null)} /> : null}
     </Card>
-    <View style={styles.stack}><SectionTitle title="Actividades y documentos técnicos" /><Activities activities={(work.activities ?? []).filter(activity => !activity.activity.startsWith("__WORK_CHECKLIST__"))} documents /></View>
+    <View style={styles.stack}><SectionTitle title="Actividades y documentos técnicos" /><Activities activities={(work.activities ?? []).filter(isWorkActivity)} documents /></View>
   </View>;
 }

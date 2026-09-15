@@ -50,7 +50,7 @@ export interface Equipment {
 export interface Material { id: string; name: string; ref: string | null; quantity: number; stockStatus: "in_stock" | "requested" | "reserved"; }
 export interface Responsible { id: number | string; name: string; avatarThumbnail?: string | null; }
 export interface TechnicalDocument { id: number; documentName: string; notes: string | null; file: Attachment | null; }
-export interface Activity { id: number; activity: string; executionTime: number; isStarted: boolean; isCompleted: boolean; technicalDocuments: TechnicalDocument[]; }
+export interface Activity { id: number; activity: string; executionTime: number; isStarted: boolean; isCompleted: boolean; isChecklist?: boolean; checklistId?: number | null; technicalDocuments: TechnicalDocument[]; }
 export interface AssignmentWork {
   id: string;
   workType: "productive" | "non_productive";

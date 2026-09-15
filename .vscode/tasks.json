@@ -2,10 +2,36 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de navegacion",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8793" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de actividades y vistas",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8792" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar dialogo de actividades",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\tests\\e2e\\time-sync\\smoke.cjs", "--work-actions"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: comprobar entrega de asignaciones",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
-			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.101:8791/"],
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.101:8793/"],
 			"isBackground": false,
 			"problemMatcher": []
 		},

@@ -43,6 +43,13 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
     const { scope, query, prefix } = await owned(req, false);
     res.json(parseUpstream(attachmentSchema.array(), await upstream.request(`${prefix}/activities/${id}/files`, { token: scope.token, query })));
   });
+  router.delete(`${base}/activities/:activityId`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const id = activityId(req);
+    const { scope, query, prefix } = await owned(req, true);
+    await upstream.request(`${prefix}/activities/${id}`, { token: scope.token, query, method: "DELETE" });
+    res.json({ success: true });
+  });
   router.post(`${base}/activities/:activityId/files`, uploadLimiter, async (req, res) => {
     const id = activityId(req);
     await owned(req, true);

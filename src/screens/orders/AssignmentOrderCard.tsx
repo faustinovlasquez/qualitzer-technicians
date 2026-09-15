@@ -24,6 +24,7 @@ export function AssignmentOrderSummary({ group }: { group: AssignmentGroup }) {
   const progress = total > 0 ? Math.round(completed / total * 100) : 0;
   const closed = group.status === "completed" || group.status === "delivered";
   const direct = group.type === "direct_assignment";
+  const maintenance = group.type === "internal_maintenance";
   const location = group.locationName.trim() ? group.locationName : group.locationAddress;
 
   return <View style={styles.summary}>
@@ -38,7 +39,7 @@ export function AssignmentOrderSummary({ group }: { group: AssignmentGroup }) {
     </View>
     <Text accessibilityRole="header" style={styles.title}>{plainText(group.title)}</Text>
     <View style={styles.codes}>
-      <Text style={styles.statusLabel}>{direct ? "Estado de asignación" : "Estado OT"}</Text>
+      <Text style={styles.statusLabel}>{direct ? "Estado de asignación" : maintenance ? "Estado del mantenimiento" : "Estado OT"}</Text>
       <Badge label={STATUS_LABELS[group.status]} tone={statusTones[group.status]} />
     </View>
     <View style={styles.metadata}>
@@ -49,7 +50,7 @@ export function AssignmentOrderSummary({ group }: { group: AssignmentGroup }) {
     </View>
     <View style={styles.metrics}>
       <View style={styles.metric}><Text style={styles.metricValue}>{total}</Text><Text style={styles.caption}>Trabajos asignados</Text></View>
-      <View style={styles.metric}><Text style={styles.metricValue}>{group.products.length}</Text><Text style={styles.caption}>{direct ? "Repuestos de asignación" : "Repuestos de la OT"}</Text></View>
+      <View style={styles.metric}><Text style={styles.metricValue}>{group.products.length}</Text><Text style={styles.caption}>{direct ? "Repuestos de asignación" : maintenance ? "Repuestos del mantenimiento" : "Repuestos de la OT"}</Text></View>
     </View>
     <View style={styles.progress}>
       <View style={styles.between}><Text style={styles.statusLabel}>Avance de trabajos</Text><Text style={styles.progressCount}>{completed}/{total} completados</Text></View>
@@ -60,7 +61,7 @@ export function AssignmentOrderSummary({ group }: { group: AssignmentGroup }) {
     </View>
     {closed && remaining > 0 ? <View style={styles.warning}>
       <Ionicons name="information-circle-outline" size={20} color={palette.amber} accessible={false} />
-      <Text style={styles.warningText}>{direct ? "Asignación cerrada" : "OT cerrada"} con {remaining} {remaining === 1 ? "trabajo sin finalizar" : "trabajos sin finalizar"}. El estado de la orden no equivale al avance de sus trabajos. Cada trabajo conserva las acciones que habilita Qualitzer.</Text>
+      <Text style={styles.warningText}>{direct ? "Asignación cerrada" : maintenance ? "Mantenimiento cerrado" : "OT cerrada"} con {remaining} {remaining === 1 ? "trabajo sin finalizar" : "trabajos sin finalizar"}. El estado de la orden no equivale al avance de sus trabajos. Cada trabajo conserva las acciones que habilita Qualitzer.</Text>
     </View> : null}
   </View>;
 }
@@ -71,7 +72,7 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
     {matchingWorkCount !== group.works.length ? <Text style={styles.caption}>{matchingWorkCount} de {group.works.length} trabajos coinciden con la fecha y los filtros. Al abrir se muestran todos los trabajos asignados de esta orden.</Text> : null}
     <View style={styles.actions}>
       <Button title={group.works.length > 0 ? `Ver trabajos (${group.works.length})` : group.type === "internal_maintenance" ? "Ver mantenimiento" : "Ver orden"} icon="list-outline" disabled={busy} onPress={() => onOpenGroup(group, "works")} style={styles.action} />
-      <Button title={group.type === "direct_assignment" ? "Archivos de la asignación" : "Archivos de la OT"} icon="folder-open-outline" variant="secondary" disabled={busy} onPress={() => onOpenGroup(group, "files")} style={styles.action} />
+      <Button title={group.type === "direct_assignment" ? "Archivos de la asignación" : group.type === "internal_maintenance" ? "Archivos del mantenimiento" : "Archivos de la OT"} icon="folder-open-outline" variant="secondary" disabled={busy} onPress={() => onOpenGroup(group, "files")} style={styles.action} />
     </View>
   </Card>;
 }

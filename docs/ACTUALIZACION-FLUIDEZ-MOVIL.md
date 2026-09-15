@@ -1,5 +1,7 @@
 # Fluidez móvil — app 1.0.11 y gateway 1.0.4
 
+Actualización actual: gateway 1.0.7 y APK 1.0.18 separan Trabajos, Mantenimientos y OTs; conservan timer/checklist e incorporan eliminación lógica de actividades. El formulario de actividad usa minutos y archivos en un diálogo. Requiere desplegar PanelWorkActions actualizado; no hay migración nueva.
+
 Actualización 15 de septiembre: gateway 1.0.5 añade actividades y reapertura y conserva timer/checklist de 1.0.4. La sincronización anterior fue confirmada por el usuario; la nueva funcionalidad requiere desplegar PanelWorkActions y el paquete nuevo. El resto de este documento registra la entrega histórica 1.0.4.
 
 Actualización posterior: gateway 1.0.6 conserva timer/checklist y admite avisos de mantenimiento completo sin trabajo hijo. Usar con Backend de asignaciones completas y [APK 1.0.17](ACTUALIZACION-1.0.17.md). No añade migraciones ni cambia los recibos de sincronización.

@@ -19,7 +19,7 @@ import { loadSource, reactFixture, tenant } from "./helpers/tenant-challenge";
 
 type AppModel = ReturnType<typeof useTechnicianApp>;
 type FixtureApp = Pick<AppModel,
-  "session" | "notifications" | "tab" | "setTab" | "busy" | "loading" | "restoring" |
+  "session" | "notifications" | "tab" | "setTab" | "backTab" | "homeTab" | "busy" | "loading" | "restoring" |
   "finalizingSession" | "forcePassword" | "selectedTenant" | "selected" | "selectedOrder" |
   "selectedCreationKind" | "selectedOffline" | "offlineController" | "offline" | "offlineSetupError" |
   "offlineVerifiedAt" | "gatewayUrl" | "storageKey" | "data" | "range" | "agendaFocusDate" |
@@ -115,6 +115,8 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
   const app: FixtureApp = {
     session: session(mode), tab, notifications: { client: null, state: notificationState(unreadCount), storageKey: "fixture-notifications", revokeForSession: resolved },
     setTab(next) { tabCalls.push(next); app.tab = next; },
+    backTab() { tabCalls.push("today"); app.tab = "today"; },
+    homeTab() { tabCalls.push("today"); app.tab = "today"; },
     busy: false, loading: false, restoring: false, finalizingSession: false, forcePassword: false,
     selectedTenant: null, selected: null, selectedOrder: null, selectedCreationKind: null, selectedOffline: false,
     offlineController: null, offline: null, offlineSetupError: null, offlineVerifiedAt: null,

@@ -293,6 +293,11 @@ async function main() {
       await check(`parent-${width}-text${scale * 100}-${scenario}`, async () => {
         await fresh("dashboard", scenario);
         const open = page.getByRole("button", { name: scenario === "empty-maintenance" ? "Ver mantenimiento" : "Ver orden", exact: true });
+        await page.getByRole("tab", { name: /^Trabajos/ }).click();
+        assert.equal(await open.count(), 0);
+        await page.getByRole("tab", { name: scenario === "empty-maintenance" ? /^OTs/ : /^Mantenimientos/ }).click();
+        assert.equal(await open.count(), 0);
+        await page.getByRole("tab", { name: scenario === "empty-maintenance" ? /^Mantenimientos/ : /^OTs/ }).click();
         await reachable(open);
         assert.equal(await page.getByRole("button", { name: /^(Iniciar|Pausar|Entregar)$/ }).count(), 0);
         assert.match((await overview("dashboard")).heroText, /1 orden asignada/);
@@ -301,7 +306,7 @@ async function main() {
         const search = page.getByRole("textbox", { name: "Buscar tareas", exact: true });
         await search.fill("bateria");
         await open.waitFor();
-        await page.getByRole("tab", { name: /^OTs/ }).click();
+        await page.getByRole("tab", { name: scenario === "empty-maintenance" ? /^Mantenimientos/ : /^OTs/ }).click();
         await open.waitFor();
         await search.fill("no corresponde");
         await page.getByText("No encontramos coincidencias", { exact: true }).waitFor();

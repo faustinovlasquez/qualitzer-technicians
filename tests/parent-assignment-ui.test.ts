@@ -8,6 +8,21 @@ import type { DashboardScreenProps } from "../src/screens/DashboardScreen";
 import { durableReactFixture, elements, uiModule, uiSnapshot } from "./helpers/durable-ui";
 import { agendaFixture } from "./helpers/agenda-load-lifecycle";
 
+test("main navigation returns to the preceding screen and home resets its history", async () => {
+  const fixture = agendaFixture();
+  try {
+    let app = await fixture.loadDay();
+    app.setTab("profile"); app = await fixture.flush();
+    app.setTab("notifications"); app = await fixture.flush();
+    app.backTab(); app = await fixture.flush();
+    assert.equal(app.tab, "profile");
+    app.homeTab(); app = await fixture.flush();
+    assert.equal(app.tab, "today");
+    app.backTab(); app = await fixture.flush();
+    assert.equal(app.tab, "today");
+  } finally { fixture.unmount(); }
+});
+
 for (const type of ["internal_maintenance", "external_ot"] as const) {
   test(`${type}: actual app hook opens an authorized parent-only notification`, async () => {
     const fixture = agendaFixture();
@@ -48,6 +63,12 @@ for (const type of ["internal_maintenance", "external_ot"] as const) {
     });
     const render = () => hooks.render(() => module.DashboardScreen(props));
     let tree = render();
+    assert.equal(elements(tree, "AssignmentOrderCard").length, 0, "Trabajos must not render maintenance or OT cards");
+    const tabs = elements<{ accessibilityRole?: string; accessibilityLabel?: string; onPress(): void }>(tree, "Pressable");
+    const tab = tabs.find(({ props }) => props.accessibilityRole === "tab" && props.accessibilityLabel?.startsWith(type === "internal_maintenance" ? "Mantenimientos" : "OTs"));
+    assert.ok(tab);
+    tab.props.onPress();
+    tree = render();
     const cards = elements<{ group: AssignmentGroup; matchingWorkCount: number; onOpenGroup: DashboardScreenProps["onOpenGroup"] }>(tree, "AssignmentOrderCard");
     assert.equal(cards.length, 1);
     assert.equal(cards[0].props.matchingWorkCount, 0);

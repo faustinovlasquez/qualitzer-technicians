@@ -24,6 +24,7 @@ report.fixtureAdapters.push("JSX instrumentation wraps only TimeField onChange w
 stubs["react/jsx-runtime"] = 'import {jsx as actualJsx,jsxs as actualJsxs,Fragment} from '+JSON.stringify(path.join(root,"node_modules/react/jsx-runtime.js").replace(/\\\\/g,"/"))+';export {Fragment};function observe(type,props){if(type?.name!=="TimeField")return props;const original=props.onChange;const label=props.label;return {...props,onChange(value){window.timeSync.clockCommit(label,value);return original(value);}};}export const jsx=(type,props,key)=>actualJsx(type,observe(type,props),key);export const jsxs=(type,props,key)=>actualJsxs(type,observe(type,props),key);';
 stubs["node:crypto"] = 'export function createHash(){throw new Error("UNEXPECTED_NODE_HASH");}';
 stubs["expo-crypto"] = 'export const randomUUID=()=>crypto.randomUUID();';
+stubs["expo-document-picker"] = 'export const getDocumentAsync=async()=>{const file=new File(["Ficha de actividad"],"Ficha.txt",{type:"text/plain"});return {canceled:false,assets:[{uri:URL.createObjectURL(file),name:file.name,mimeType:file.type,size:file.size,file}]};};';
 stubs["expo-image-picker"] += 'export const getCameraPermissionsAsync=async()=>{throw new Error("UNEXPECTED_CAMERA");};';
 stubs["@react-native-async-storage/async-storage"] = 'const data=new Map();export default {getItem:async k=>data.get(k)??null,setItem:async(k,v)=>{data.set(k,v);},removeItem:async k=>{data.delete(k);},getAllKeys:async()=>[...data.keys()],multiRemove:async keys=>{for(const k of keys)data.delete(k);}};';
 async function main() {`);

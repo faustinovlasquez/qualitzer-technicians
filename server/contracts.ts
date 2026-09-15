@@ -39,6 +39,7 @@ const material = z.object({
 const equipment = z.object({ label: text, identifier: text, internalNumber: nullableText, ownerLabel: nullableText });
 const activity = z.object({
   id, activity: text, executionTime: number.default(0), isStarted: z.boolean().default(false), isCompleted: z.boolean().default(false),
+  isChecklist: z.boolean().optional(), checklistId: id.nullish(),
   technicalDocuments: z.array(z.object({ id, documentName: text, notes: nullableText, file: attachmentSchema.nullable() })).default([]),
 });
 const status = z.enum(["pending", "in_progress", "paused", "completed", "delivered"]);

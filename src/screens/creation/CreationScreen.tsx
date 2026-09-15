@@ -141,6 +141,11 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
 
   function requestBack(): void {
     if (lock.current || busy) return;
+    if (current.current.phase === "editing" && step > 0) { setStep(step - 1); setError(""); return; }
+    requestExit();
+  }
+  function requestExit(): void {
+    if (lock.current || busy) return;
     if (current.current.phase === "confirmed" || current.current.phase === "queued" || (!changed.current && !draftError)) onBack();
     else setDialog("back");
   }
@@ -148,7 +153,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => { requestBack(); return true; });
     return () => subscription.remove();
-  }, [busy, draftError, onBack]);
+  }, [busy, draftError, onBack, step]);
 
   function change<Key extends keyof CreationForm>(field: Key, value: CreationForm[Key]): void {
     if (lock.current || frozen || current.current.phase !== "editing") return;
@@ -275,6 +280,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
       <View style={styles.header}>
         <IconButton name="arrow-back" label="Volver conservando borrador" disabled={busy || sending} onPress={requestBack} />
         <View style={styles.headerText}><Text style={styles.eyebrow}>CREACIÓN MÓVIL</Text><Text accessibilityRole="header" style={styles.title}>{creationLabels[kind]}</Text></View>
+        <IconButton name="list-outline" label="Volver a mis asignaciones" disabled={busy || sending} onPress={requestExit} />
       </View>
       {connectionStatus}
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>

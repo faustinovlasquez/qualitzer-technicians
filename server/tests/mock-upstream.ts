@@ -89,6 +89,7 @@ export async function mockBackend(t: TestContext, overrides: Partial<MockState> 
     if (req.path === "/api/technician-dashboard/assignments") { res.json(state.invalidAssignments ?? state.sequence.shift() ?? state.assignments); return; }
     if (/\/panel\/[^/]+\/works\/\d+\/activities$/.test(req.path)) { res.json(req.method === "POST" ? { id: 71 } : state.activities ?? []); return; }
     if (req.method === "GET" && /\/activities\/\d+\/files$/.test(req.path)) { res.json([]); return; }
+    if (req.method === "DELETE" && /\/panel\/[^/]+\/works\/\d+\/activities\/\d+$/.test(req.path)) { res.send(); return; }
     if (req.method === "GET" && /^\/api\/(work_files|maintenance_files)\/\d+$/.test(req.path)) { res.json(state.files); return; }
     if (req.path.startsWith("/api/works/comments/")) { res.status(201).end(); return; }
     if (req.method === "POST" || req.method === "PATCH") { res.json({ success: true }); return; }
