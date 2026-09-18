@@ -191,7 +191,7 @@ test("full App + real provider, permission logic, WorkDetail and FileWorkspace: 
   assert.equal(f.control.uploads, 0); assert.equal(f.prompts.length, 1); assert.equal(JSON.stringify(f.model.offline.operations), beforeReview);
   assert.deepEqual(f.events.filter(event => ["permission:read", "permission:request", "camera:launch", "copy:start", "copy:complete"].includes(event)), ["permission:read", "permission:request", "camera:launch", "copy:start", "copy:complete"]);
   f.emit("background"); f.emit("active"); await f.settle();
-  assert.equal(f.prompts.length, 2); assert.equal(f.view.security.isUnlocked(), false);
+  assert.equal(f.prompts.length, 1); assert.equal(f.view.security.isUnlocked(), true);
   assert.equal(f.drafts()[0].id, draft.id); assert.deepEqual(f.bytes.get(draft.uri), png);
 });
 

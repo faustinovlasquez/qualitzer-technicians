@@ -125,7 +125,7 @@ export class DeviceLockController {
     if (!foreground) {
       this.backgroundEpoch += 1;
       this.pendingGrant = null;
-      this.update({ foreground, locked: this.snapshot.enabled || this.snapshot.locked });
+      this.update({ foreground, locked: this.snapshot.locked || (lease !== null && this.snapshot.enabled) });
       return;
     }
     const grant = this.pendingGrant;

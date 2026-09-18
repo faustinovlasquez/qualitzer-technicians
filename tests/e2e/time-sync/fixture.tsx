@@ -30,8 +30,12 @@ import { OfflineEngine } from "../../../src/offline/engine";
 import { updateState } from "../../../src/offline/state";
 import { fixture, assignmentsWithStep, uuid, user } from "../../../src/offline/tests/fakes";
 import { ApiError } from "../../../src/infrastructure/errors";
+import { ProfileScreen } from "../../../src/screens/ProfileScreen";
+import { Button } from "../../../src/ui/components";
+import { userSignatureInputSchema, type UserSignature, type UserSignatureAccess, type UserSignatureOptions } from "../../../src/domain/userSignatures";
+import type { MaintenanceDeliveryInput } from "../../../src/domain/orderLifecycle";
 
-type Screen = "widget" | "invalid" | "creation" | "completion" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary";
+type Screen = "widget" | "invalid" | "creation" | "completion" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary" | "signatures";
 const date = "2026-09-14";
 const range = { startDate: date, endDate: date };
 const scope = { ...range, companyBranchId: 1, groupId: "direct-80", workId: "80" };
@@ -55,6 +59,9 @@ let metrics = (): unknown => ({});
 let changeScope = () => {};
 let activityRows: Activity[] = [];
 let activityFiles: Attachment[] = [];
+let profileSignatures: UserSignature[] = [];
+let signatureDeliveries: MaintenanceDeliveryInput[] = [];
+let signatureId = 1;
 const bitmap: unknown = require("../../../assets/qualitzer-icon.png");
 if (typeof bitmap !== "string") throw new Error("FIXTURE_BITMAP_REQUIRED");
 const bitmapBytes = Uint8Array.from(atob(bitmap.split(",")[1]), character => character.charCodeAt(0));
@@ -117,12 +124,36 @@ function Fixture({ screen, client }: { screen: Screen; client: MobileNotificatio
   const [scopeKey, setScope] = useState("initial");
   const [workStatus, setWorkStatus] = useState<AssignmentWork["status"]>("paused");
   const [draft, setDraft] = useState<DeliveryDraft>({ note: "Conservar observaciones", hours: "24", minutes: "49", faultType: null, receivedByName: "", technicianStrokes: [], clientStrokes: [] });
+  const [signatureDelivery, setSignatureDelivery] = useState(false);
   changeScope = () => setScope(current => current + "-changed");
   metrics = () => ({ unlocked: security.isUnlocked(), security: security.controller.getSnapshot(), value, hours, minutes, offset, scopeKey, draft, calls, submitted,
-    registrations, clockCalls, snapshot: activeEngine?.getSnapshot() ?? null, sent, manualCalls, original });
+    registrations, clockCalls, profileSignatures, signatureDeliveries, snapshot: activeEngine?.getSnapshot() ?? null, sent, manualCalls, original });
   const work: AssignmentWork = { ...assignmentsWithStep().groups[0].works[0], scheduledDate: date, plannedDates: [date], status: "paused", canExecute: true,
     firstInProgressTime: "08:00", elapsedSeconds: 1489 * 60, executedMinutes: 1489, missingRequiredInfo: [], checklists: [] };
   const record = (name: string, next: string, setter: (value: string) => void) => { calls.push({ name, value: next }); setter(next); };
+  if (screen === "signatures") {
+    const catalog = (selected?: number): UserSignatureOptions => ({ userId: user.id, companyBranchId: 1, options: structuredClone(profileSignatures), defaultSignatureId: profileSignatures.find(signature => signature.isDefaultForBranch)?.id ?? null, selectedSignatureId: selected ?? profileSignatures.find(signature => signature.isDefaultForBranch)?.id ?? null });
+    const access: UserSignatureAccess = { scopeKey: `signatures-${revision}-${scopeKey}`, userId: user.id, branchId: 1, name: "Tecnico de prueba", email: "tecnico@example.invalid", available: true, branches: [{ id: 1, name: "Taller" }, { id: 2, name: "Faena" }], actions: {
+      load: async () => catalog(),
+      save: async value => {
+        const input = userSignatureInputSchema.parse(value);
+        if (profileSignatures.some(signature => signature.id !== input.id && signature.branches.some(branch => input.branchIds.includes(Number(branch.value))))) throw new Error("Sucursal con otra firma");
+        const previous = profileSignatures.find(signature => signature.id === input.id);
+        const id = input.id ?? signatureId++;
+        profileSignatures = [...profileSignatures.filter(signature => signature.id !== id), { id, value: String(id), label: input.signatureName, signatureName: input.signatureName, signatureEmail: input.signatureEmail, signaturePhone: input.signaturePhone, signatureImage: input.signatureImage === undefined ? previous?.signatureImage ?? null : input.signatureImage, isDefaultForBranch: input.branchIds.includes(1), branches: input.branchIds.map(branchId => ({ value: String(branchId), label: branchId === 1 ? "Taller" : "Faena" })) }];
+        calls.push({ name: "signature-save", value: { id, branchIds: input.branchIds } });
+        return catalog(id);
+      },
+      remove: async id => { profileSignatures = profileSignatures.filter(signature => signature.id !== id); calls.push({ name: "signature-delete", value: id }); return catalog(); },
+    } };
+    return <View style={{ flex: 1, minHeight: 0 }}>
+      <View style={{ flex: 1, minHeight: 0 }}><ProfileScreen session={session} signatureAccess={access} gatewayUrl="https://example.invalid/mobile" busy={false} error={null} health={null} onBranch={() => {}} onLogout={() => {}} onCheck={() => {}} companyBranding={{ available: false, busy: false, canPin: false, message: "", logoMessage: "", onPin() {} }} /></View>
+      <Button title="Preparar OT de prueba" onPress={() => setSignatureDelivery(true)} />
+      {signatureDelivery ? <MaintenanceDeliveryDialog orderLabel="OT-COR-0001" technicianName="Tecnico de prueba" mode="demo" signatureAccess={access}
+        context={{ groupId: "maintenance-1", status: "paused", maintenanceType: "preventivo", finalizationNote: null, damageType: null, durationMinutes: 30, startedAt: null, finalizedAt: null, incompleteChecklists: [] }}
+        draft={draft} busy={false} unavailable={false} reasons={[]} error={null} onChange={setDraft} onClose={() => setSignatureDelivery(false)} onReload={() => {}} onSubmit={async input => { signatureDeliveries.push(input); setSignatureDelivery(false); }} /> : null}
+    </View>;
+  }
   if (screen === "checklist-summary") {
     const base = assignmentsWithStep().groups[0].works[0].checklists[0];
     const steps = Array.from({ length: 47 }, (_, index) => ({ ...base.steps[0], stepId: String(index + 1), type: index === 0 ? "text" as const : "approval" as const, isRequired: true, isFilesRequired: false, attachments: [], selectValue: index === 1 || index === 2 ? "approved" : "", responseValue: "" }));
@@ -160,6 +191,7 @@ function Fixture({ screen, client }: { screen: Screen; client: MobileNotificatio
 
 async function render(screen: Screen) {
   dispose(); activeEngine = null; calls.length = 0; clockCalls.length = 0; sent.length = 0; submitted = []; registrations = []; manualCalls = 0; upgraded = false; revision++;
+  profileSignatures = []; signatureDeliveries = []; signatureId = 1;
   activityRows = [{ id: 71, activity: "Revisar cierre", executionTime: 30, isStarted: false, isCompleted: false, technicalDocuments: [{ id: 1, documentName: "Manual del supervisor", notes: null, file: { id: 2, name: "manual.pdf", url: "https://files.invalid/manual.pdf", type: "application/pdf" } }] }]; activityFiles = [];
   activityRows.push({ id: 73, activity: "Ruedas y torque pernos", isChecklist: true, executionTime: 0, isStarted: false, isCompleted: true, technicalDocuments: [] });
   let client: MobileNotificationClient | null = null;

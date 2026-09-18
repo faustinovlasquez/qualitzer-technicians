@@ -246,8 +246,8 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
     if (group && work) onOpenWork(group, work);
   }
 
-  const layoutSelector = view === "agenda" ? <View style={[styles.segmented, compact && styles.compactSegments]} accessibilityRole="tablist" accessibilityLabel="Presentación de agenda">
-    {(["schedule", "list"] as const).map((layout) => <Pressable key={layout} accessibilityRole="tab" accessibilityLabel={layout === "schedule" ? compact ? "Agenda cronológica" : "Horario semanal" : "Lista de agenda"} accessibilityState={{ selected: agendaLayout === layout, disabled: busy }} disabled={busy} onPress={() => setAgendaLayout(layout)} style={[styles.segment, compact && styles.compactSegment, agendaLayout === layout && styles.segmentSelected]}>
+  const layoutSelector = view === "agenda" ? <View testID="agenda-layout-selector" style={[styles.segmented, compact && styles.compactSegments]} accessibilityRole="tablist" accessibilityLabel="Presentación de agenda">
+    {(["schedule", "list"] as const).map((layout) => <Pressable key={layout} accessibilityRole="tab" accessibilityLabel={layout === "schedule" ? compact ? "Agenda cronológica" : "Horario semanal" : "Lista de agenda"} accessibilityState={{ selected: agendaLayout === layout, disabled: busy }} aria-selected={agendaLayout === layout} disabled={busy} onPress={() => setAgendaLayout(layout)} style={[styles.segment, compact && styles.compactSegment, agendaLayout === layout && styles.segmentSelected]}>
       <Ionicons name={layout === "schedule" ? "calendar-outline" : "list-outline"} size={18} color={agendaLayout === layout ? palette.white : palette.textSecondary} />
       <Text style={[styles.segmentText, agendaLayout === layout && styles.segmentTextSelected]}>{layout === "schedule" ? compact ? "Agenda" : "Horario" : compact ? "Filtros / OTs" : "Lista"}</Text>
     </Pressable>)}
@@ -443,8 +443,8 @@ const styles = StyleSheet.create({
   entityTabText: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: palette.textSecondary, textAlign: "center" },
   mobileSchedule: { padding: 12, gap: 8 },
   desktopSchedule: { flex: 1, minHeight: 0, padding: 14, gap: 8 },
-  compactSegments: { padding: 2, gap: 2, alignSelf: "flex-start" },
-  compactSegment: { flexGrow: 0, flexShrink: 0, flexBasis: "auto", minHeight: 44, paddingVertical: 6, paddingHorizontal: 12, gap: 6 },
+  compactSegments: { padding: 2, gap: 2, alignSelf: "stretch", width: "100%", flexGrow: 0, flexShrink: 0 },
+  compactSegment: { minHeight: 44, paddingVertical: 6, paddingHorizontal: 12, gap: 6 },
   screen: { flex: 1, backgroundColor: palette.background },
   content: { width: "100%", maxWidth: theme.contentWidth, alignSelf: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 96, gap: 12 },
   heading: { flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 6 },
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
   taskHeading: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 4 },
   listCount: { ...typography.caption, color: palette.textSecondary, flexShrink: 1 },
   segmented: { flexDirection: "row", padding: 4, gap: 4, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.track },
-  segment: { flex: 1, minHeight: 48, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  segment: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, minHeight: 48, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   segmentSelected: { backgroundColor: palette.navy },
   segmentText: { ...typography.label, fontWeight: "700", color: palette.textSecondary, flexShrink: 1 },
   segmentTextSelected: { color: palette.white },

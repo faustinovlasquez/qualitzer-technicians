@@ -35,7 +35,7 @@ function isElement(value: unknown): value is Element { return typeof value === "
 function isContext(value: unknown): value is Context { return typeof value === "object" && value !== null && "provider" in value; }
 
 // Reconcile source-generated JSX by position/type; hook slots and hidden/modal children survive rerenders.
-function renderer() {
+function renderer(unmountHiddenModals = false) {
   const instances = new Map<string, { type: Component; hooks: ReturnType<typeof reactFixture> }>();
   let active: ReturnType<typeof reactFixture> | null = null;
   let security: DeviceSecurityUi | null = null;
@@ -96,7 +96,7 @@ function renderer() {
           return visit(output, `${identity}/render`);
         }
         assert.equal(typeof value.type, "string", "UNEXPECTED_JSX_TYPE");
-        return [{ type: String(value.type), props: value.props, children: visit(value.props.children, `${path}/children`) }];
+        return [{ type: String(value.type), props: value.props, children: unmountHiddenModals && value.type === "NativeModal" && value.props.visible === false ? [] : visit(value.props.children, `${path}/children`) }];
       }
       const tree = visit(root, "root");
       for (const [path, instance] of instances) {
@@ -110,6 +110,7 @@ function renderer() {
 }
 
 interface NativeOptions {
+  unmountHiddenModals?: boolean;
   os?: "android" | "ios" | "web";
   version?: number | string;
   preference?: string | null;
@@ -204,7 +205,7 @@ function text(tree: Tree[]): string { return nodes(tree, "#text").map(node => St
 
 function providerFixture(options: NativeOptions = {}) {
   const ports = nativeFixture(options);
-  const view = renderer();
+  const view = renderer(options.unmountHiddenModals);
   const theme = loadSource<object>("ui/theme.ts", id => { throw new Error(`UNEXPECTED_THEME_IMPORT:${id}`); });
   const context = loadSource<{ DeviceSecurityContext: Context; PrivateModal: Component; useDeviceSecurity(): DeviceSecurityUi }>("security/DeviceSecurityContext.tsx", id => {
     if (id === "react") return view.react;
@@ -274,14 +275,70 @@ function assertBlocked(f: ReturnType<typeof providerFixture>, retained = false):
   assert.equal(hidden.props.importantForAccessibility, "no-hide-descendants");
   assert.ok(Array.isArray(hidden.props.style) && hidden.props.style.some(style => style && style.display === "none"));
   assert.ok(nodes(f.tree, "View").some(node => node.props.accessibilityViewIsModal === true));
-  for (const modal of nodes(f.tree, "NativeModal")) assert.equal(modal.props.visible, false);
+  for (const modal of nodes(f.tree, "NativeModal")) {
+    assert.equal(modal.props.visible, f.security.nativePickerActive === true && f.modalVisibility.value !== false);
+    if (modal.props.visible) {
+      const covered = nodes(modal.children, "View").find(node => node.props.pointerEvents === "none");
+      assert.ok(covered);
+      assert.equal(covered.props.accessibilityElementsHidden, true);
+      assert.equal(covered.props.importantForAccessibility, "no-hide-descendants");
+      assert.ok(nodes(modal.children, "View").some(node => typeof node.props.style === "object" && node.props.style !== null && "backgroundColor" in node.props.style && node.props.style.backgroundColor === "#F5F7FA"));
+    }
+  }
 }
 
 test("integration runner uses Node 22+", () => { assert.ok(Number(process.versions.node.split(".")[0]) >= 22); });
 
+for (const preference of ["enabled", "declined"]) for (const order of ["active-first", "result-first"]) {
+  test(`Android modal preserves its child throughout ${preference} picker ${order}, including privacy restoration`, async t => {
+    const allow = deferred<void>();
+    let delayPrivacy = false;
+    const fixture = providerFixture({ preference, unmountHiddenModals: true, allow: async () => { if (delayPrivacy) await allow.promise; } });
+    t.after(() => fixture.close());
+    await fixture.settle();
+    if (preference === "enabled") { fixture.prompts[0].result.resolve({ success: true }); await fixture.settle(); }
+    assert.equal(fixture.lifecycle.mounts, 1);
+    const native = deferred<string>();
+    let delivered = false;
+    delayPrivacy = true;
+    const result = fixture.security.runTrustedNativePicker!(async () => native.promise).then(value => { delivered = true; return value; });
+    await fixture.settle();
+    assertBlocked(fixture, true);
+    fixture.emit("background"); await fixture.settle();
+    assert.equal(fixture.lifecycle.unmounts, 0);
+    assertBlocked(fixture, true);
+    if (order === "active-first") fixture.emit("active");
+    else native.resolve("selected-file");
+    await fixture.settle();
+    assert.equal(delivered, false);
+    if (order === "active-first") native.resolve("selected-file");
+    else fixture.emit("active");
+    await fixture.settle();
+    assert.equal(fixture.security.nativePickerActive, true);
+    assert.equal(fixture.lifecycle.unmounts, 0);
+    assertBlocked(fixture, true);
+    allow.resolve();
+    assert.equal(await result, "selected-file");
+    await fixture.settle();
+    assert.equal(fixture.security.blocked, false);
+    assert.equal(fixture.security.nativePickerActive, false);
+    assert.equal(fixture.lifecycle.mounts, 1);
+    assert.equal(fixture.lifecycle.unmounts, 0);
+    assert.equal(fixture.prompts.length, preference === "enabled" ? 1 : 0);
+    if (preference === "enabled") {
+      fixture.emit("background"); await fixture.settle();
+      assertBlocked(fixture, true);
+      assert.equal(fixture.lifecycle.unmounts, 1, "Background privacy must still hide the native modal");
+      fixture.emit("active"); await fixture.settle();
+      assert.equal(fixture.security.isUnlocked(), true);
+      assert.equal(fixture.prompts.length, 1);
+    }
+  });
+}
+
 for (const order of ["result-first", "active-first"] as const) {
   for (const canceled of [false, true]) {
-    test(`real lock screen ${order} canceled=${canceled}: pending picker shows only a neutral spinner, then ordinary Home still authenticates`, async t => {
+    test(`real lock screen ${order} canceled=${canceled}: pending picker stays neutral and ordinary Home retains authentication`, async t => {
       const f = providerFixture({ preference: "enabled" });
       t.after(() => f.close());
       await f.settle();
@@ -322,9 +379,9 @@ for (const order of ["result-first", "active-first"] as const) {
       assert.equal(f.lifecycle.mounts, 1);
       assert.equal(f.lifecycle.unmounts, 0);
       f.emit("background"); f.emit("active"); await f.settle();
-      assertBlocked(f, true);
-      assert.equal(f.prompts.length, 2);
-      assert.match(text(f.tree), /huella/);
+      assert.equal(f.security.isUnlocked(), true);
+      assert.equal(f.prompts.length, 1);
+      assert.doesNotMatch(text(f.tree), /huella/);
       assert.doesNotMatch(text(f.tree), /Esperando selección/);
     });
   }
@@ -579,7 +636,7 @@ for (const os of ["android", "ios"] as const) {
     assert.equal(nodes(f.tree, "Button").length, 0); assert.equal(f.prompts.length, 0);
   });
 
-  test(`${os}: background reapplies capture protection until reauthentication and allow both finish`, async t => {
+  test(`${os}: background stays private until allow finishes without reauthentication`, async t => {
     const prevent = deferred<void>(); const allow = deferred<void>();
     let backgroundCycle = false;
     const f = providerFixture({ os, preference: "enabled", capture: () => backgroundCycle ? prevent.promise : Promise.resolve(),
@@ -591,12 +648,13 @@ for (const os of ["android", "ios"] as const) {
     assert.equal(f.privacy.switcherEnabled, os === "ios" ? true : null);
     backgroundCycle = true; const isUnlocked = f.security.isUnlocked;
     f.emit("background"); assert.equal(isUnlocked(), false); f.render(); await f.settle(); assertBlocked(f, true);
-    assert.equal(f.privacy.captureBlocked, false); assert.equal(f.security.state.locked, true);
+    assert.equal(f.privacy.captureBlocked, false); assert.equal(f.security.state.locked, false);
+    assert.doesNotMatch(text(f.tree), /huella|desbloque/i);
+    assert.equal(nodes(f.tree, "Button").length, 0);
     assert.equal(f.events.filter(event => event === "capture.prevent:qualitzer-device-security").length, 2);
     prevent.resolve(); await f.settle(); assertBlocked(f, true); assert.equal(f.privacy.captureBlocked, true);
-    f.emit("active"); await f.settle(); assertBlocked(f, true); assert.equal(f.prompts.length, 2);
+    f.emit("active"); await f.settle(); assertBlocked(f, true); assert.equal(f.prompts.length, 1);
     assert.equal(f.privacy.captureBlocked, true);
-    f.prompts[1].result.resolve({ success: true }); await f.settle(); assertBlocked(f, true);
     assert.equal(f.security.state.locked, false); assert.equal(f.privacy.captureBlocked, true);
     assert.equal(f.events.filter(event => event === "capture.allow:qualitzer-device-security").length, 2);
     allow.resolve(); await f.settle();
@@ -610,7 +668,7 @@ for (const os of ["android", "ios"] as const) {
     assert.equal(f.security.state.enabled, true); assert.deepEqual(f.writes, []);
   });
 
-  test(`${os}: fast reauthentication cannot reuse an old allowed target while reprotection is in flight`, async t => {
+  test(`${os}: fast app switching cannot reuse an old allowed target while reprotection is in flight`, async t => {
     const prevent = deferred<void>(); const allow = deferred<void>(); let backgroundCycle = false;
     const f = providerFixture({ os, preference: "enabled", capture: () => backgroundCycle ? prevent.promise : Promise.resolve(),
       allow: () => backgroundCycle ? allow.promise : Promise.resolve() });
@@ -618,8 +676,7 @@ for (const os of ["android", "ios"] as const) {
     await f.settle(); f.prompts[0].result.resolve({ success: true }); await f.settle();
     assert.equal(f.security.isUnlocked(), true); assert.equal(f.privacy.captureBlocked, false);
     backgroundCycle = true; f.emit("background"); f.render(); await f.settle(); assertBlocked(f, true);
-    f.emit("active"); await f.settle(); assert.equal(f.prompts.length, 2);
-    f.prompts[1].result.resolve({ success: true }); await f.settle();
+    f.emit("active"); await f.settle(); assert.equal(f.prompts.length, 1);
     prevent.resolve(); await f.settle();
     assert.equal(f.security.state.locked, false); assert.equal(f.privacy.captureBlocked, true);
     assert.equal(f.events.filter(event => event === "capture.allow:qualitzer-device-security").length, 2);
@@ -632,7 +689,7 @@ for (const os of ["android", "ios"] as const) {
     assert.equal(f.lifecycle.mounts, 1); assert.equal(f.lifecycle.unmounts, 0); assert.equal(f.lifecycle.identities.size, 1);
   });
 
-  test(`${os}: allow failure after reauthentication hides but never unmounts the retained private modal`, async t => {
+  test(`${os}: allow failure after app switching keeps private content concealed`, async t => {
     let failAllow = false;
     const f = providerFixture({ os, preference: "enabled", allow: async () => { if (failAllow) throw new Error("FIXTURE_ALLOW_FAILURE"); } });
     t.after(() => f.close()); await f.settle();
@@ -640,8 +697,7 @@ for (const os of ["android", "ios"] as const) {
     assert.equal(f.security.isUnlocked(), true); assert.equal(f.privacy.captureBlocked, false);
     failAllow = true; f.emit("background"); f.render(); await f.settle(); assertBlocked(f, true);
     assert.equal(f.privacy.captureBlocked, true);
-    f.emit("active"); await f.settle(); assert.equal(f.prompts.length, 2);
-    f.prompts[1].result.resolve({ success: true }); await f.settle(); assertBlocked(f, true);
+    f.emit("active"); await f.settle(); assert.equal(f.prompts.length, 1); assertBlocked(f, true);
     assert.equal(f.security.state.locked, false); assert.equal(f.security.state.enabled, true);
     assert.equal(f.privacy.captureBlocked, true);
     assert.match(text(f.tree), /No se pudo activar la protección visual/);
@@ -649,7 +705,7 @@ for (const os of ["android", "ios"] as const) {
     assert.equal(nodes(f.tree, "Button").length, 0);
     assert.equal(text(nodes(f.tree, "Draft")), "unsaved fixture draft");
     assert.equal(f.lifecycle.mounts, 1); assert.equal(f.lifecycle.unmounts, 0); assert.equal(f.lifecycle.identities.size, 1);
-    await f.settle(); assertBlocked(f, true); assert.equal(f.prompts.length, 2); assert.deepEqual(f.writes, []);
+    await f.settle(); assertBlocked(f, true); assert.equal(f.prompts.length, 1); assert.deepEqual(f.writes, []);
   });
 }
 
@@ -663,10 +719,7 @@ for (const visible of [true, false, undefined]) {
     f.emit("background"); assert.equal(isUnlocked(), false); f.render(); assertBlocked(f, true);
     assert.equal(f.lifecycle.mounts, 1); assert.equal(f.lifecycle.unmounts, 0);
     assert.ok([...f.backHandlers].every(handler => handler() === true));
-    f.emit("active"); await f.settle(); assertBlocked(f, true); assert.equal(f.prompts.length, 2);
-    f.prompts[1].result.resolve({ success: false, error: "user_cancel" }); await f.settle(); assertBlocked(f, true);
-    f.press("Reintentar desbloqueo"); await f.settle(); assert.equal(f.prompts.length, 3);
-    f.prompts[2].result.resolve({ success: true }); await f.settle();
+    f.emit("active"); await f.settle(); assert.equal(f.prompts.length, 1);
     assert.equal(f.security.isUnlocked(), true); assert.equal(nodes(f.tree, "NativeModal")[0].props.visible, allowed);
     assert.equal(text(nodes(f.tree, "Draft")), "unsaved fixture draft");
     assert.equal(f.lifecycle.mounts, 1); assert.equal(f.lifecycle.unmounts, 0); assert.equal(f.lifecycle.identities.size, 1);
@@ -695,15 +748,13 @@ test("system PIN success arriving in background waits for active without a secon
 for (const error of ["user_cancel", "system_cancel", "lockout"]) {
   test(`system PIN ${error} before active does not auto-reprompt; explicit screen retry works`, async t => {
     const f = providerFixture({ preference: "enabled" }); t.after(() => f.close()); await f.settle();
-    f.prompts[0].result.resolve({ success: true }); await f.settle();
-    f.emit("background"); f.render(); f.emit("active"); await f.settle(); assert.equal(f.prompts.length, 2);
     f.emit("inactive"); f.emit("background"); f.render();
-    f.prompts[1].result.resolve({ success: false, error }); await f.settle(); assertBlocked(f, true);
+    f.prompts[0].result.resolve({ success: false, error }); await f.settle(); assertBlocked(f);
     f.emit("active"); await f.settle();
-    assert.equal(f.prompts.length, 2, "Returning from a cancelled system credential activity must not reopen it automatically");
+    assert.equal(f.prompts.length, 1, "Returning from a cancelled system credential activity must not reopen it automatically");
     assert.equal(f.privacy.captureBlocked, true);
-    assertBlocked(f, true); f.press("Reintentar desbloqueo"); await f.settle(); assert.equal(f.prompts.length, 3);
-    f.prompts[2].result.resolve({ success: true }); await f.settle(); assert.equal(f.security.blocked, false);
+    assertBlocked(f); f.press("Reintentar desbloqueo"); await f.settle(); assert.equal(f.prompts.length, 2);
+    f.prompts[1].result.resolve({ success: true }); await f.settle(); assert.equal(f.security.blocked, false);
     assert.equal(f.privacy.captureBlocked, false);
   });
 }

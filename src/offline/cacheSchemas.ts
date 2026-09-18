@@ -29,11 +29,12 @@ const work: z.ZodType<AssignmentWork> = z.lazy(() => z.object({
   isOverdue: z.boolean(), canExecute: z.boolean(), canEditDefinition: z.boolean(), missingRequiredInfo: z.array(z.string()), materials: z.array(material),
   checklists: z.array(z.object({ checklistId: z.number(), name: z.string(), code: z.string(), required: z.boolean().optional(), steps: z.array(step) })),
   activities: z.array(z.object({ id: z.number(), activity: z.string(), executionTime: z.number(), isStarted: z.boolean(), isCompleted: z.boolean(),
+    isChecklist: z.boolean().optional(), checklistId: z.number().nullish(),
     technicalDocuments: z.array(z.object({ id: z.number(), documentName: z.string(), notes: nullableText, file: cachedAttachmentSchema.nullable() })) })).optional(),
   responsibles: z.array(z.object({ id: resourceId, name: z.string(), avatarThumbnail: nullableText.optional() })),
   workCustomerName: nullableText.optional(), workEquipment: equipment.nullish(), plannedDates: z.array(z.string()).optional(),
   schedules: z.array(z.object({ date: z.string(), queryDates: z.array(z.string()), generatedAt: z.string(), work })).optional(),
-  systemName: nullableText.optional(), componentName: nullableText.optional(),
+  systemId: z.number().nullish(), componentId: z.number().nullish(), systemName: nullableText.optional(), componentName: nullableText.optional(),
 }));
 export const cachedAssignmentsSchema: z.ZodType<Assignments> = z.object({
   generatedAt: z.string(), technician: z.object({ id: z.number().nullable(), name: z.string(), allowEditExecutionTime: z.boolean(), avatarThumbnail: nullableText.optional() }),
@@ -43,6 +44,7 @@ export const cachedAssignmentsSchema: z.ZodType<Assignments> = z.object({
     customerName: nullableText, locationName: z.string(), locationAddress: nullableText, scheduledDate: z.string(), scheduledStartTime: z.string(), scheduledEndTime: z.string(),
     plannedMinutes: z.number(), isOverdue: z.boolean(), isResponsible: z.boolean(), canManage: z.boolean(), equipment: equipment.nullable(), products: z.array(material), works: z.array(work),
     maintenanceType: nullableText.optional(), negotiationCode: nullableText.optional(), businessModality: nullableText.optional(), businessTypeName: nullableText.optional(),
+    startedAt: nullableText.optional(), finalizedAt: nullableText.optional(), durationMinutes: z.number().nullable().optional(), finalizationNote: nullableText.optional(), damageType: nullableText.optional(),
     negotiationCorrelative: z.number().nullish(), workOrderNumber: z.number().nullish(), workOrderInternalNumber: z.number().nullish(), isWorkOrderInternal: z.boolean().nullish(),
   })),
 });

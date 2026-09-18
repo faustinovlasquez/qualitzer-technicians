@@ -1,8 +1,9 @@
 import { isChecklistStepSatisfied } from "../../../domain/checklistProgress";
 import type { AssignmentGroup } from "../../../domain/models";
+import type { SelectedUserSignature } from "../../../domain/userSignatures";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput, MaintenanceFaultType } from "../../../domain/orderLifecycle";
 import { ApiError } from "../../../infrastructure/errors";
-import { hasSignature, type SignatureStrokes } from "./signatureGeometry";
+import { hasSignature, requireSignaturePng, type SignatureStrokes } from "./signatureGeometry";
 
 export interface DeliveryDraft {
   note: string;
@@ -11,6 +12,7 @@ export interface DeliveryDraft {
   faultType: MaintenanceFaultType | null;
   receivedByName: string;
   technicianStrokes: SignatureStrokes;
+  technicianProfileSignature?: SelectedUserSignature | null;
   clientStrokes: SignatureStrokes;
 }
 
@@ -71,7 +73,10 @@ export function deliveryDraftErrors(draft: DeliveryDraft, clientRequired: boolea
   const errors: DeliveryErrors = {};
   if (draft.note.length > DELIVERY_NOTE_LIMIT) errors.note = "Las observaciones admiten hasta 10.000 caracteres.";
   if (!/^\d{0,2}$/.test(draft.hours) || !/^\d{0,2}$/.test(draft.minutes) || Number(draft.minutes) > 59) errors.duration = "Ingresa de 0 a 99 horas y de 0 a 59 minutos, sin decimales.";
-  if (!hasSignature(draft.technicianStrokes)) errors.technicianSignature = "Falta la firma del técnico. Dibuja un trazo, no solo un punto.";
+  if (draft.technicianProfileSignature) {
+    try { requireSignaturePng(draft.technicianProfileSignature.png); }
+    catch { errors.technicianSignature = "Vuelve a seleccionar la firma del perfil o dibuja una firma valida."; }
+  } else if (!hasSignature(draft.technicianStrokes)) errors.technicianSignature = "Falta la firma del técnico. Selecciona una del perfil o dibuja un trazo, no solo un punto.";
   if (clientRequired) {
     if (draft.faultType !== "operative" && draft.faultType !== "wear") errors.faultType = "Selecciona falla operacional o desgaste.";
     if (!draft.receivedByName.trim() || draft.receivedByName.trim().length > DELIVERY_RECEIVER_LIMIT) errors.receivedByName = "Ingresa el nombre de quien recibe (máximo 200 caracteres).";

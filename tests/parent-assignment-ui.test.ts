@@ -8,6 +8,43 @@ import type { DashboardScreenProps } from "../src/screens/DashboardScreen";
 import { durableReactFixture, elements, uiModule, uiSnapshot } from "./helpers/durable-ui";
 import { agendaFixture } from "./helpers/agenda-load-lifecycle";
 
+test("compact agenda layout selector has a bounded full-width row and preserves both view actions", () => {
+  const hooks = durableReactFixture();
+  const module = uiModule<{ DashboardScreen(props: DashboardScreenProps): ReactNode }>("screens/DashboardScreen.tsx", hooks, {
+    "react-native": { ActivityIndicator: "ActivityIndicator", Pressable: "Pressable", RefreshControl: "RefreshControl", ScrollView: "ScrollView", StyleSheet: { create: (styles: object) => styles }, Text: "Text", TextInput: "TextInput", View: "View", useWindowDimensions: () => ({ width: 390 }) },
+    "@react-native-async-storage/async-storage": { default: { getItem: async () => null, setItem: async () => {} } },
+    "../ui/components": { Badge: "Badge", Button: "Button", Card: "Card", EmptyState: "EmptyState", IconButton: "IconButton", SectionTitle: "SectionTitle" },
+    "./orders/AssignmentOrderCard": { AssignmentOrderCard: "AssignmentOrderCard" },
+    "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" },
+    "./schedule/WeeklySchedule": { WeeklySchedule: "WeeklySchedule" },
+    "./notifications/RunningTimersNotice": { RunningTimersNotice: "RunningTimersNotice" },
+  });
+  const props: DashboardScreenProps = { data: assignments(), user: user(), range: { startDate: "2026-09-07", endDate: "2026-09-13" }, view: "agenda", loading: false, error: null,
+    onRefresh() {}, onRangeChange() {}, onOpenWork() {}, onOpenGroup() {}, async onWorkStatus() {} };
+  const render = () => hooks.render(() => module.DashboardScreen(props));
+  let tree = render();
+  elements<{ label: string; onPress(): void }>(tree, "IconButton").find(node => node.props.label === "Filtros y OTs de agenda")!.props.onPress();
+  tree = render();
+  const selector = elements<{ testID?: string; style: Array<{ width?: string; alignSelf?: string; flexDirection?: string }> }>(tree, "View").find(node => node.props.testID === "agenda-layout-selector");
+  assert.ok(selector);
+  const style = Object.assign({}, ...selector.props.style);
+  assert.equal(style.width, "100%");
+  assert.equal(style.alignSelf, "stretch");
+  assert.equal(style.flexDirection, "row");
+  const controls = elements<{ accessibilityLabel?: string; style: Array<object | false>; onPress(): void }>(selector, "Pressable");
+  assert.equal(controls.length, 2);
+  for (const control of controls) {
+    const controlStyle = Object.assign({}, ...control.props.style.filter(Boolean));
+    assert.equal(controlStyle.flexBasis, 0);
+    assert.equal(controlStyle.flexGrow, 1);
+    assert.equal(controlStyle.minWidth, 0);
+    assert.equal(controlStyle.flex, undefined);
+  }
+  controls.find(control => control.props.accessibilityLabel === "Agenda cronológica")!.props.onPress();
+  assert.equal(elements(render(), "WeeklySchedule").length, 1);
+  hooks.unmount();
+});
+
 test("main navigation returns to the preceding screen and home resets its history", async () => {
   const fixture = agendaFixture();
   try {

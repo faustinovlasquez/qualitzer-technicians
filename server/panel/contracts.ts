@@ -13,10 +13,12 @@ const publicUrl = z.string().refine((value) => {
 const resourceId = z.union([positiveId, z.number().int().positive().max(Number.MAX_SAFE_INTEGER)]);
 
 export const panelFileSchema = z.intersection(attachmentSchema, z.object({
-  originalUrl: publicUrl.nullish(), size: z.number().int().nonnegative().nullish(),
-})).transform((file) => ({
+  originalUrl: publicUrl.nullish(), size: z.number().finite().nonnegative().nullish(),
+  unit: z.enum(["KB", "MB"]).optional(),
+})).refine((file) => file.unit !== undefined || file.size == null || Number.isSafeInteger(file.size))
+  .transform(({ unit, ...file }) => ({
   ...file, url: file.url || file.originalUrl || "", originalUrl: file.originalUrl || file.url,
-  size: file.size ?? null,
+  size: unit === undefined ? file.size ?? null : null,
 }));
 export const panelFilesSchema = z.object({
   data: z.array(panelFileSchema), totalRows: z.number().int().nonnegative(), totalPages: z.number().int().nonnegative(),

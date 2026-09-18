@@ -6,8 +6,9 @@ import type { OfflineSyncPort } from "./offline";
 import type { ChecklistAssignmentPort } from "./checklistAssignment";
 import type { AssignmentReadOptions } from "./assignmentRead";
 import type { WorkActivitiesPort } from "./workActivities";
+import type { UserSignaturesPort } from "./userSignatures";
 
-export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort> {
+export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort> {
   createRecord(input: CreationInput): Promise<CreationResult>;
   creationOptions(query: CreationOptionsQuery): Promise<CreationOptions>;
   notificationStatus(branch: number): Promise<NotificationStatus>;

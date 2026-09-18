@@ -27,6 +27,8 @@ Query común obligatoria: `startDate`, `endDate`, `companyBranchId`, con las mis
 
 Las escrituras responden `{ success: true }`; POST usa 201, DELETE 200 aunque backend responda vacío. Las lecturas conservan `{ data, totalRows, totalPages }`. Los archivos conservan ID, nombre, MIME, tamaño disponible y URLs; los comentarios incluyen autor y archivos históricos. No se reintentan escrituras automáticamente.
 
+Desde gateway 1.0.9, `size` solo representa bytes enteros cuando el backend no indica unidad. El gestor backend devuelve valores redondeados en `KB`/`MB`; esos archivos se conservan con `size: null`, sin convertir un valor aproximado en un tamaño exacto. La app puede completar los bytes desde su copia local o recibo. No se modifican IDs, destinos ni autorizaciones.
+
 ## Destinos y autorización
 
 - Trabajo/paso: `AssignmentAuthorization.work(req, false)` sobre una proyección validada, sin modificar el request original ni el contrato común de asignaciones. Los recursos siguen disponibles en estados finalizados/entregados y con `canExecute=false`.

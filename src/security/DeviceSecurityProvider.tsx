@@ -16,6 +16,7 @@ export function DeviceSecurityProvider({ children }: { children: ReactNode }) {
   const privacyListeners = useRef(new Set<() => void>());
   const [, refreshPrivacy] = useState(0);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const [nativePickerActive, setNativePickerActive] = useState(false);
   const mounted = useRef(false);
   const initializationAttempted = useRef(false);
   const protectionTail = useRef<Promise<void>>(Promise.resolve());
@@ -84,10 +85,12 @@ export function DeviceSecurityProvider({ children }: { children: ReactNode }) {
   }, [controller, isUnlocked, synchronizePrivacy]);
   const runTrustedNativePicker = useCallback<TrustedNativePicker>(async operation => {
     if (!isUnlocked()) throw new Error("TRUSTED_NATIVE_INTERACTION_NOT_ALLOWED");
-    return controller.runTrustedNativePicker(operation, waitForPrivacy(false), waitForPrivacy(true));
+    setNativePickerActive(true);
+    try { return await controller.runTrustedNativePicker(operation, waitForPrivacy(false), waitForPrivacy(true)); }
+    finally { setNativePickerActive(false); }
   }, [controller, isUnlocked, waitForPrivacy]);
   const blocked = !isUnlocked();
-  const security = useMemo<DeviceSecurityUi>(() => ({ controller, state, blocked, isUnlocked, runTrustedNativePicker }), [controller, state, blocked, isUnlocked, runTrustedNativePicker]);
+  const security = useMemo<DeviceSecurityUi>(() => ({ controller, state, blocked, isUnlocked, runTrustedNativePicker, nativePickerActive }), [controller, state, blocked, isUnlocked, runTrustedNativePicker, nativePickerActive]);
   if (!blocked) mounted.current = true;
 
   useEffect(() => {

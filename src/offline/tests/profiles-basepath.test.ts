@@ -76,3 +76,19 @@ test("mounted base never adopts legacy origin-only passports or rewrites persist
   for (const path of ["/mobile/../", "/mobile/%2e%2e", "/mobile?", "/mobile/%2fother"]) await assert.rejects(api.restoreOfflineProfile(stored(`https://api.example.com${path}`), store));
   assert.deepEqual(await store.read("offline-passports-v1"), before);
 });
+
+test("offline startup accepts the saved verified identity without a network failure, but not another token, branch or revoked passport", async () => {
+  const store = new MemoryStore();
+  const gateway = "https://api.example.com/mobile";
+  await api.saveOfflineProfile(session, gateway, store, 100);
+  const candidate = stored(gateway);
+  assert.equal((await api.restoreOfflineProfile(candidate, store))?.user.id, session.user.id);
+  assert.equal(await api.restoreOfflineProfile({ ...candidate, token: `qzm_${"b".repeat(43)}` }, store), null);
+  assert.equal(await api.restoreOfflineProfile({ ...candidate, branchId: 999 }, store), null);
+  assert.equal(await api.restoreOfflineProfile({ ...candidate, tenant: { ...candidate.tenant, id: "another" } }, store), null);
+  await api.disableOfflineProfile(candidate, store);
+  assert.equal(await api.restoreOfflineProfile(candidate, store), null);
+  const stateAfter = await store.read("offline-passports-v1");
+  assert.equal(stateAfter.passports.length, 1);
+  assert.equal(stateAfter.passports[0].disabled, true);
+});

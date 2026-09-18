@@ -132,6 +132,34 @@ test("cold enabled preference locks without automatically authenticating", async
   assert.equal(adapter.writes.length, 0);
 });
 
+test("app switching retains the in-memory unlock but a new process requires authentication", async () => {
+  const { controller, adapter } = await create("enabled");
+  await controller.unlock();
+  assert.equal(adapter.authentications, 1);
+  for (let transition = 0; transition < 5; transition += 1) {
+    controller.setForeground(false);
+    assert.equal(controller.getSnapshot().foreground, false);
+    assert.equal(controller.getSnapshot().locked, false);
+    controller.setForeground(true);
+    await controller.unlock();
+    assert.equal(controller.getSnapshot().locked, false);
+    assert.equal(adapter.authentications, 1);
+  }
+  assert.deepEqual(adapter.writes, []);
+  controller.dispose();
+  adapter.initialForeground = false;
+  const restarted = new DeviceLockController(adapter);
+  await restarted.initialize();
+  protectedState(restarted);
+  restarted.setForeground(true);
+  protectedState(restarted);
+  await restarted.unlock();
+  assert.equal(restarted.getSnapshot().locked, false);
+  assert.equal(adapter.authentications, 2);
+  assert.deepEqual(adapter.writes, []);
+  restarted.dispose();
+});
+
 test("corrupt storage rejection fails closed and only explicit retry reloads", async () => {
   const adapter = new SecurityAdapter();
   adapter.read = async () => { throw new Error("secret corrupt data"); };
@@ -446,16 +474,16 @@ test("unlock is transient and a new cold controller is locked again", async () =
   assert.equal(adapter.authentications, 1);
 });
 
-test("background locks immediately and foreground never starts an automatic prompt", async () => {
+test("background changes visibility without locking an authenticated session", async () => {
   const { controller, adapter } = await create("enabled");
   await controller.unlock();
   controller.setForeground(false);
-  protectedState(controller);
+  assert.equal(controller.getSnapshot().locked, false);
   const hidden = controller.getSnapshot();
   controller.setForeground(false);
   assert.equal(controller.getSnapshot(), hidden);
   controller.setForeground(true);
-  protectedState(controller);
+  assert.equal(controller.getSnapshot().locked, false);
   await settle();
   assert.equal(adapter.authentications, 1);
   await controller.unlock();
@@ -495,7 +523,7 @@ test("system PIN success before active waits for foreground without canceling th
   assert.equal(adapter.authentications, 1);
   controller.setForeground(false);
   controller.setForeground(true);
-  protectedState(controller);
+  assert.equal(controller.getSnapshot().locked, false);
 });
 
 test("system PIN active before success unlocks within the same prompt", async () => {

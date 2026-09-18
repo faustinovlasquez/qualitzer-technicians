@@ -10,7 +10,7 @@ const localRequire = createRequire(path.join(root, "package.json"));
 const esbuild = localRequire("esbuild");
 const ts = localRequire("typescript");
 const name = "@qualitzer/mobile-gateway";
-const version = "1.0.8";
+const version = "1.0.10";
 const destination = path.resolve(root, "artifacts/mobile-gateway");
 const hash = (content) => crypto.createHash("sha256").update(content).digest("hex");
 const relative = (file) => path.relative(root, file).split(path.sep).join("/");

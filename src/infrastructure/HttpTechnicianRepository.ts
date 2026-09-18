@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
+import { userSignatureInputSchema, userSignatureOptionsSchema, type UserSignatureInput } from "../domain/userSignatures";
 import { checklistAssignmentInputSchema, checklistAssignmentResultSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import type { Assignments, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginStartResult, StatusInput, StepAnswer, Tenant, User, WorkScope } from "../domain/models";
@@ -25,6 +26,15 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   token = "";
   onUnauthorized: (() => void) | null = null;
   constructor(readonly baseUrl: string, public tenant?: Tenant) {}
+  async userSignatures(branchId: number) {
+    return userSignatureOptionsSchema.parse(await this.request<unknown>(`/api/user-signatures?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  }
+  async saveUserSignature(branchId: number, input: UserSignatureInput) {
+    return userSignatureOptionsSchema.parse(await this.request<unknown>(`/api/user-signatures?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`, "PUT", userSignatureInputSchema.parse(input)));
+  }
+  async deleteUserSignature(branchId: number, signatureId: number) {
+    return userSignatureOptionsSchema.parse(await this.request<unknown>(`/api/user-signatures/${positiveCreationIdSchema.parse(signatureId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`, "DELETE"));
+  }
   activities: WorkActivitiesPort["activities"] = async scope => workActivitySchema.array().parse(await this.request<unknown>(this.scopePath(scope, "/activities")));
   createActivity: WorkActivitiesPort["createActivity"] = async (scope, input) => workActivityResultSchema.parse(await this.request<unknown>(this.scopePath(scope, "/activities"), "POST", workActivityInputSchema.parse(input)));
   updateActivity: WorkActivitiesPort["updateActivity"] = (scope, id, input) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}`), "PATCH", workActivityInputSchema.parse(input));

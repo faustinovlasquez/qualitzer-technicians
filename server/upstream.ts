@@ -4,6 +4,7 @@ import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, syncReceip
 
 export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
 type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_password" |
+  "/user_signatures/me" | `/user_signatures/me/${number}` |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |
@@ -111,11 +112,11 @@ export class Upstream {
         throw new GatewayError(response.status >= 500 ? 503 : 502, "UPSTREAM_INVALID_RESPONSE");
       }
       if (!response.ok) {
-        if ((path.startsWith("/mobile-notifications/") || path.startsWith("/technician-dashboard/mobile-creations")) && [400, 401, 403, 404, 409, 429, 500, 503].includes(response.status)) {
+        if ((path.startsWith("/mobile-notifications/") || path.startsWith("/technician-dashboard/mobile-creations") || path.startsWith("/user_signatures/")) && [400, 401, 403, 404, 409, 429, 500, 503].includes(response.status)) {
           const text = await readBody(response);
           let failure: unknown;
           try { failure = JSON.parse(text); } catch { failure = null; }
-          const parsed = z.object({ error: z.string().regex(/^(?:MOBILE_PUSH_[A-Z_]+|MOBILE_CREATION_[A-Z_]+|NON_PRODUCTIVE_REASON_TEXT_REQUIRED|UNAUTHORIZED)$/) }).safeParse(failure);
+          const parsed = z.object({ error: z.string().regex(/^(?:MOBILE_PUSH_[A-Z_]+|MOBILE_CREATION_[A-Z_]+|USER_SIGNATURE_[A-Z_]+|NON_PRODUCTIVE_REASON_TEXT_REQUIRED|UNAUTHORIZED)$/) }).safeParse(failure);
           if (parsed.success) throw new GatewayError(response.status, parsed.data.error, mobileErrorMessage(parsed.data.error));
         }
         await response.body?.cancel();
@@ -148,6 +149,11 @@ export class Upstream {
 }
 
 function mobileErrorMessage(code: string): string {
+  if (code === "USER_SIGNATURE_BRANCH_DUPLICATED") return "Una sucursal seleccionada ya tiene otra firma predeterminada. Edita esa firma o elige otra sucursal.";
+  if (code === "USER_SIGNATURE_BRANCH_NOT_ASSIGNED") return "No tienes acceso a una de las sucursales de la firma. Actualiza el perfil.";
+  if (code === "USER_SIGNATURE_NOT_FOUND") return "La firma ya no está disponible en tu perfil. Actualiza la lista.";
+  if (code === "USER_SIGNATURE_IMAGE_INVALID") return "La imagen de firma no es válida o supera 1 MiB.";
+  if (code.startsWith("USER_SIGNATURE_")) return "No se pudo guardar la firma. Revisa sus datos y sucursales.";
   if (code === "MOBILE_CREATION_REQUEST_CONFLICT") return "Este intento ya se usó con otros datos. Inicia una nueva creación; para reintentar, conserva los datos originales.";
   if (code === "MOBILE_CREATION_MAINTENANCE_WEB_WIZARD_REQUIRED") return "Este mantenimiento requiere el asistente web.";
   if (code.includes("TIMEZONE")) return "La sucursal necesita una zona horaria válida configurada en el servidor.";

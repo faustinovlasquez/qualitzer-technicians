@@ -3,6 +3,7 @@ import { Text, View } from "react-native";
 import type { AssignmentGroup, Tenant, WorkStatus } from "../../domain/models";
 import { assignmentWorkOrderCode } from "../../domain/assignmentCodes";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../../domain/orderLifecycle";
+import type { UserSignatureAccess } from "../../domain/userSignatures";
 import { Badge, BodyText, Button, Card, SectionTitle } from "../../ui/components";
 import { Notice } from "../workDetail/DetailUi";
 import { deleteLifecycleDraft, readLifecycleDraft, saveLifecycleDraft } from "./lifecycle/lifecycleDrafts";
@@ -18,6 +19,7 @@ export interface OrderLifecyclePanelProps {
   group: AssignmentGroup;
   tenant?: Tenant;
   technicianName: string;
+  signatureAccess?: UserSignatureAccess;
   storageKey: string;
   mode: "live" | "demo";
   busy: boolean;
@@ -170,6 +172,7 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       orderLabel={orderLabel}
       tenantName={tenant?.name}
       technicianName={props.technicianName}
+      signatureAccess={props.signatureAccess}
       mode={mode}
       context={context}
       draft={draft}

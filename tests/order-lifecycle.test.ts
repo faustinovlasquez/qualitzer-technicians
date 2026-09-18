@@ -115,3 +115,16 @@ test("drafts survive remounts and remain isolated by tenant user branch mode and
   assert.equal(readLifecycleDraft(second)?.note, "Otra empresa");
   deleteLifecycleDraft(second);
 });
+
+test("a saved profile signature satisfies the technician requirement but never signs for the receiver", async () => {
+  const png = `data:image/png;base64,${(await sharp(Buffer.from('<svg width="768" height="320"><path d="M10 40 L40 10 L70 40" fill="none" stroke="blue"/></svg>')).png().toBuffer()).toString("base64")}`;
+  const draft = { ...initialDeliveryDraft(makeDemoData().groups[0], context), technicianProfileSignature: { id: 7, name: "Firma del perfil", png } };
+  assert.deepEqual(deliveryDraftErrors(draft, false), {});
+  assert.equal(deliveryDraftErrors(draft, true).technicianSignature, undefined);
+  assert.ok(deliveryDraftErrors(draft, true).clientSignature);
+  assert.ok(deliveryDraftErrors({ ...draft, technicianProfileSignature: { ...draft.technicianProfileSignature, png: "https://example.invalid/sign.png" } }, false).technicianSignature);
+  const submitted = deliveryInput(draft, false, png, null);
+  assert.equal(submitted.technicianSignature, png);
+  assert.equal(submitted.clientSignature, null);
+  assert.equal("userId" in submitted, false);
+});

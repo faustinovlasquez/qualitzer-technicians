@@ -5,6 +5,7 @@ import type { Assignments, DateRange, Tenant, User, WorkScope } from "../../src/
 import type { OfflineSnapshot } from "../../src/domain/offline";
 import * as creation from "../../src/domain/creation";
 import * as workActivities from "../../src/domain/workActivities";
+import * as userSignatures from "../../src/domain/userSignatures";
 import * as progress from "../../src/domain/assignmentChecklistProgress";
 import * as schedule from "../../src/domain/assignmentSchedule";
 import * as format from "../../src/domain/format";
@@ -133,7 +134,7 @@ export interface ControlledRead {
   reject(error: Error): void;
 }
 
-export function agendaFixture(options: { online?: boolean } = {}) {
+export function agendaFixture(options: { online?: boolean; overrides?: { [specifier: string]: unknown } } = {}) {
   const hooks = agendaReactFixture();
   const access = { allowed: true, isAllowed: (): boolean => access.allowed };
   const reads: ControlledRead[] = [];
@@ -227,6 +228,7 @@ export function agendaFixture(options: { online?: boolean } = {}) {
   const configuration = { locked: true, url: gateway, error: null };
   const noop = async (): Promise<void> => {};
   const module = loadSource<typeof import("../../src/application/useTechnicianApp")>("application/useTechnicianApp.ts", (id) => {
+    if (options.overrides && Object.hasOwn(options.overrides, id)) return options.overrides[id];
     if (id === "react") return hooks.react;
     if (id === "react-native") return { Platform: { OS: "android" } };
     if (id === "expo-constants") return {};
@@ -241,13 +243,14 @@ export function agendaFixture(options: { online?: boolean } = {}) {
     if (id === "../domain/format") return format;
     if (id === "../domain/creation") return creation;
     if (id === "../domain/workActivities") return workActivities;
+    if (id === "../domain/userSignatures") return userSignatures;
     if (id === "../domain/weeklySchedule") return weeklySchedule;
     if (id === "../notifications") return { useMobileNotifications: (options: UseMobileNotificationsOptions) => { notificationOptions = options; return { client: null, revokeForSession: noop }; }, bindNotificationApi: () => null };
     if (id === "../notifications/notificationSafety") return notificationSafety;
     if (id === "../offline") return {
       OfflineTechnicianRepository: OfflineRepository,
       createOfflineRepository: async (remote: HttpRepository) => { const wrapped = new OfflineRepository(remote); wrappers.push(wrapped); return wrapped; },
-      saveOfflineProfile: noop, establishVerifiedOfflineSession: noop, disableOfflineProfile: noop,
+      saveOfflineProfile: noop, restoreOfflineProfile: async () => null, establishVerifiedOfflineSession: noop, disableOfflineProfile: noop,
     };
     if (id === "../offline/connectivity") return { createConnectivity: () => ({ current: async () => true, subscribe: () => () => {} }) };
     if (id === "../offline/foreground") return {

@@ -12,6 +12,7 @@ import { createOrderRouter } from "./orders/routes";
 import { createCreationRouter } from "./creation/routes";
 import { createNotificationsRouter } from "./notifications/routes";
 import { createOfflineRouter } from "./offline/routes";
+import { createUserSignatureRouter } from "./userSignatures/routes";
 import { type TenantRegistry, type TenantRuntime } from "./tenants";
 import type { SessionManager } from "./sessions";
 import { SessionContext } from "./session-context";
@@ -41,7 +42,8 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
   app.use(["/api/auth/login", "/api/auth/forced_password"], credentialsLimiter);
   const parseJson = express.json({ limit: "32kb", strict: true, inflate: false });
   app.use((req, res, next) => {
-    if (req.method === "POST" && (/^\/api\/assignments\/maintenance-\d+\/deliver\/?$/i.test(req.path) || /^\/api\/offline\/(commands|documents)\/?$/i.test(req.path))) next();
+    if (req.method === "POST" && (/^\/api\/assignments\/maintenance-\d+\/deliver\/?$/i.test(req.path) || /^\/api\/offline\/(commands|documents)\/?$/i.test(req.path))
+      || req.method === "PUT" && /^\/api\/user-signatures\/?$/i.test(req.path)) next();
     else parseJson(req, res, next);
   });
   if (development) app.use("/api/development", development);
@@ -75,11 +77,12 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
     router.use("/creation", createCreationRouter(upstream));
     router.use("/mobile-notifications", createNotificationsRouter(upstream, tenant.portalOrigin));
     router.use("/offline", createOfflineRouter(upstream, uploadLimiter, uploads));
+    router.use("/user-signatures", createUserSignatureRouter(upstream));
     mobileRouters.set(runtime, router);
     return router;
   };
   app.use("/api", (req, res, next) => {
-    if (!/^\/(creation|mobile-notifications|offline)(\/|$)/.test(req.path)) { next(); return; }
+    if (!/^\/(creation|mobile-notifications|offline|user-signatures)(\/|$)/.test(req.path)) { next(); return; }
     context.middleware()(req, res, (error?: unknown) => {
       if (error) { next(error); return; }
       mobileRouter(context.get(req).runtime)(req, res, next);

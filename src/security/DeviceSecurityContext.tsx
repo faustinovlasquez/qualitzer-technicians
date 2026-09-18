@@ -9,6 +9,7 @@ export interface DeviceSecurityUi {
   blocked: boolean;
   isUnlocked(): boolean;
   runTrustedNativePicker?: TrustedNativePicker;
+  nativePickerActive?: boolean;
 }
 
 export const DeviceSecurityContext = createContext<DeviceSecurityUi | null>(null);
@@ -30,10 +31,13 @@ export function useDeviceSecurity(): DeviceSecurityUi {
 export function PrivateModal(props: ModalProps) {
   const security = useContext(DeviceSecurityContext);
   const blocked = security?.blocked ?? false;
-  return <NativeModal {...props} animationType={blocked ? "none" : props.animationType} visible={(props.visible ?? true) && !blocked}>
-    <View style={[{ flex: 1 }, blocked && { display: "none" }]} pointerEvents={blocked ? "none" : "auto"}
-      accessibilityElementsHidden={blocked} importantForAccessibility={blocked ? "no-hide-descendants" : "auto"}>
-      {props.children}
+  const retainPicker = security?.nativePickerActive === true;
+  return <NativeModal {...props} animationType={blocked ? "none" : props.animationType} visible={(props.visible ?? true) && (!blocked || retainPicker)} onRequestClose={blocked ? () => {} : props.onRequestClose}>
+    <View style={{ flex: 1, backgroundColor: blocked ? "#F5F7FA" : undefined }}>
+      <View style={[{ flex: 1 }, blocked && { display: "none" }]} pointerEvents={blocked ? "none" : "auto"}
+        accessibilityElementsHidden={blocked} importantForAccessibility={blocked ? "no-hide-descendants" : "auto"}>
+        {props.children}
+      </View>
     </View>
   </NativeModal>;
 }

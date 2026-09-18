@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
+import { ownSignatureOptions, userSignaturesPort, type UserSignatureAccess, type UserSignatureOptions, type UserSignaturesPort } from "../domain/userSignatures";
 import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
@@ -23,7 +24,7 @@ import { clearCreationDrafts } from "../screens/creation/creationDrafts";
 import { scheduleClock } from "../domain/weeklySchedule";
 import { bindNotificationApi, useMobileNotifications, type MobileNotificationClient, type NotificationData, type NotificationOpenContext } from "../notifications";
 import { notificationForSession, sameNotification, sameNotificationSession } from "../notifications/notificationSafety";
-import { createOfflineRepository, disableOfflineProfile, establishVerifiedOfflineSession, hasPendingChanges, OfflineTechnicianRepository, restoreOfflineSession, saveOfflineProfile } from "../offline";
+import { createOfflineRepository, disableOfflineProfile, establishVerifiedOfflineSession, hasPendingChanges, OfflineTechnicianRepository, restoreOfflineProfile, saveOfflineProfile } from "../offline";
 import { createDurableStore } from "../offline/DurableStore";
 import { createConnectivity } from "../offline/connectivity";
 import { bindForeground, readForeground } from "../offline/foreground";
@@ -220,6 +221,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   async function bindOffline(repo: TechnicianRepository, next: Session, url: string, version: number, cached = false) {
     const connectivity = createConnectivity();
     let networkAllowed = !cached;
+    let refreshAfterVerification = cached;
     const wrapped = await createOfflineRepository(repo, next, {
       gatewayUrl: url, storageKey: tenantStorageNamespace(next, url, next.branchId),
       connectivity: { current: () => networkAllowed ? connectivity.current() : Promise.resolve(false), subscribe: (listener) => connectivity.subscribe((online) => listener(networkAllowed && online)) },
@@ -230,6 +232,10 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       await onVerified?.(user);
       if (version !== sessionVersion.current || remoteRepository(repository.current) !== repo) return;
       if (next.mode === "live") { setOfflineVerifiedAt(Date.now()); setLiveVerified(true); }
+      if (refreshAfterVerification) {
+        refreshAfterVerification = false;
+        void refreshAssignments(true).catch(() => undefined);
+      }
     };
     if (!cached && wrapped.getSnapshot().authBlocked) await establishVerifiedOfflineSession(wrapped);
     return { wrapped, allowNetwork: () => { networkAllowed = true; } };
@@ -288,8 +294,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     setSelected(null); setSelectedOrder(null); setSelectedCreationKind(null); setData(null); setError(offlineWarning); setForcePassword(false); setFinalizingSession(false); setTab("today"); setLoading(false);
   }
 
-  async function restoreCachedSession(stored: StoredSession, repo: HttpTechnicianRepository, caught: NetworkError, version: number): Promise<boolean> {
-    const profile = await restoreOfflineSession(stored, caught);
+  async function restoreCachedSession(stored: StoredSession, repo: HttpTechnicianRepository, version: number): Promise<boolean> {
+    const profile = await restoreOfflineProfile(stored);
     if (!profile || version !== sessionVersion.current || stored.branchId === null || profile.user.workerId === null) return false;
     const verified = sessionSetup.current?.verifiedUser;
     if (verified && (verified.id !== profile.user.id || verified.workerId !== profile.user.workerId
@@ -300,11 +306,20 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (wrapped.getSnapshot().authBlocked) { wrapped.stop(); return false; }
     const today = scheduleClock(next.user.system.timezone)?.day ?? dateKey();
     const week = weekRange(today);
-    const coverage = new Set(wrapped.getSnapshot().coverage.filter((entry) => entry.branchId === next.branchId).map((entry) => entry.date));
-    const nextRange = assignmentDays(week).every((day) => coverage.has(day)) ? week : dailyRange(today);
+    const snapshot = wrapped.getSnapshot();
+    const downloaded = snapshot.coverage.filter((entry) => entry.branchId === next.branchId)
+      .sort((left, right) => right.fetchedAt - left.fetchedAt || right.date.localeCompare(left.date));
+    const coverage = new Set(downloaded.map((entry) => entry.date));
+    const localCreations = snapshot.operations.filter((operation) => operation.kind === "create" && operation.input.companyBranchId === next.branchId)
+      .sort((left, right) => right.createdAt - left.createdAt);
+    const createdToday = localCreations.some((operation) => operation.kind === "create" && operation.input.schedule.date === today);
+    const latestCreation = localCreations[0];
+    const initialDay = coverage.has(today) || createdToday ? today : downloaded[0]?.date ?? (latestCreation?.kind === "create" ? latestCreation.input.schedule.date : today);
+    const nextRange = assignmentDays(week).every((day) => coverage.has(day)) ? week
+      : initialDay !== today ? weekRange(initialDay) : dailyRange(today);
     let cachedData: Assignments | null = null;
     let warning: string | null = null;
-    try { cachedData = await wrapped.assignments(nextRange, stored.branchId); }
+    try { cachedData = await wrapped.localAssignments(nextRange, stored.branchId); }
     catch (failure) { warning = `No hay una copia disponible para todo este período. Revisa la cobertura en Sin conexión. ${errorText(failure)}`; }
     if (version !== sessionVersion.current) { wrapped.stop(); return false; }
     allowNetwork();
@@ -313,7 +328,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     sessionSetup.current = null;
     manualRefresh.current = { session: next, range: nextRange };
     state.current = { ...state.current, session: next, data: cachedData, range: nextRange, selected: null, selectedOrder: null, selectedCreationKind: null, tab: nextTab };
-    setSession(next); setSelectedTenant(next.tenant); setData(cachedData); setRange(nextRange); setTab(nextTab); setAgendaFocusDate(today);
+    setSession(next); setSelectedTenant(next.tenant); setData(cachedData); setRange(nextRange); setTab(nextTab); setAgendaFocusDate(initialDay);
     setSelected(null); setSelectedOrder(null); setSelectedCreationKind(null); setSelectedOffline(false);
     setOfflineController(wrapped); setOfflineVerifiedAt(profile.verifiedAt); setLiveVerified(false);
     setForcePassword(false); setFinalizingSession(false); setError(warning); setLoading(false);
@@ -371,12 +386,17 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
         repo.token = stored.token;
         attachUnauthorized(repo, version);
         repository.current = repo;
+        try { if (await restoreCachedSession(stored, repo, version)) return; }
+        catch (caught) {
+          if (!active || version !== sessionVersion.current) return;
+          setOfflineSetupError(`No se pudo recuperar la copia local. Los datos se conservan. ${errorText(caught)}`);
+        }
         sessionSetup.current = { repo, token: stored.token, url, tenant: stored.tenant, version, preferredBranch: stored.branchId, canRequirePasswordChange: true };
         setSelectedTenant(stored.tenant); setFinalizingSession(true);
         try { await finishSessionSetup(); }
         catch (caught) {
           if (!active || version !== sessionVersion.current) return;
-          if (caught instanceof NetworkError && await restoreCachedSession(stored, repo, caught, version)) return;
+          if (caught instanceof NetworkError && await restoreCachedSession(stored, repo, version)) return;
           throw caught;
         }
       } catch (caught) {
@@ -1037,6 +1057,22 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     return { ...dailyRange(selectedOrder.queryDate), groupId: group.id, companyBranchId: session.branchId };
   }
 
+  async function signatureOperation(operation: (port: UserSignaturesPort, branchId: number) => Promise<UserSignatureOptions>, write = false): Promise<UserSignatureOptions> {
+    const owner = session;
+    const repo = repository.current;
+    if (!isAccessAllowed() || !owner?.branchId || !repo || owner.token !== state.current.session?.token
+      || owner.branchId !== state.current.session?.branchId || signatureSessionVersion !== sessionVersion.current) throw new Error("La sesion de firmas cambio. Vuelve a abrir el perfil.");
+    if (write && actionLock.current) throw new Error("Hay una operacion en curso. Espera a que termine.");
+    const version = sessionVersion.current;
+    const action = write ? beginAction() : null;
+    try {
+      const result = await operation(userSignaturesPort(repo), owner.branchId);
+      if (!isAccessAllowed() || version !== sessionVersion.current || repo !== repository.current
+        || owner.branchId !== state.current.session?.branchId) throw new Error("La sesion de firmas cambio. Actualiza antes de repetir la operacion.");
+      return ownSignatureOptions(result, owner.user.id, owner.branchId);
+    } finally { if (action !== null) endAction(action); }
+  }
+
   async function performMutation<T extends GroupScope, Result = void>(value: T, operation: (repo: TechnicianRepository, value: T) => Promise<Result>, refreshAfter = false): Promise<Result> {
     if (!isAccessAllowed()) throw new Error("Desbloquea la aplicación antes de continuar.");
     if (actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
@@ -1266,7 +1302,21 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     prepareWeek: (nextRange, branchId, options) => isAccessAllowed() && repository.current === offlineController ? offlineController.prepareWeek(nextRange, branchId, options) : Promise.reject(new Error("Desbloquea la app y verifica la sesión offline.")),
   } : null, [offlineController, isAccessAllowed]);
 
+  const signatureSessionVersion = sessionVersion.current;
+  const signatureAccess: UserSignatureAccess | undefined = session?.branchId ? {
+    scopeKey: `${signatureSessionVersion}:${tenantStorageNamespace(session, gatewayUrl, session.branchId)}:signatures`,
+    userId: session.user.id, branchId: session.branchId, name: `${session.user.name} ${session.user.lastnames}`.trim(), email: session.user.email,
+    branches: session.user.accessBranchs.filter(branch => branch.isEnabled !== false && branch.isDeleted !== true).map(branch => ({ id: branch.id, name: branch.name })),
+    available: session.mode === "demo" || Boolean(liveVerified && (!offline || offline.online && !offline.authBlocked)),
+    actions: {
+      load: () => signatureOperation((port, branchId) => port.userSignatures(branchId)),
+      save: input => signatureOperation((port, branchId) => port.saveUserSignature(branchId, input), true),
+      remove: id => signatureOperation((port, branchId) => port.deleteUserSignature(branchId, id), true),
+    },
+  } : undefined;
+
   return {
+    signatureAccess,
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,
     suggestedGatewayUrl: !gatewayConfiguration.locked && __DEV__ && Platform.OS !== "web" ? suggestedExpoGatewayUrl(Constants.expoConfig?.hostUri, gatewayUrl) : undefined,
     session, data, range, selected, selectedOrder, selectedCreationKind, selectedGroupId: selectedOrder?.id ?? null, orderGroup, group, work, detailRange, detailGeneratedAt, tab, setTab: changeTab, error: error ?? offlineSetupError, busy, loading, restoring, forcePassword, finalizingSession, health, notifications, liveVerified,

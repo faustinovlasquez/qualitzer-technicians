@@ -6,7 +6,7 @@ import { DashboardScreen, type DashboardScreenProps } from "../../src/screens/Da
 import { LoginScreen } from "../../src/screens/LoginScreen";
 
 type Scenario = "full" | "supplemental" | "partial" | "partial-empty" | "null-coverage" | "no-data" | "empty-maintenance" | "empty-ot";
-type Screen = "login" | "dashboard";
+type Screen = "login" | "dashboard" | "agenda";
 const range: DateRange = { startDate: "2026-09-12", endDate: "2026-09-12" };
 const user: User = { id: 1, workerId: 1, name: "Alex", lastnames: "Fixture", email: "alex@example.invalid", role: { name: "Técnico" },
   accessBranchs: [{ id: 1, name: "Sucursal ficticia", main: true }], system: { name: "Fixture aislada", timezone: "UTC" } };
@@ -71,7 +71,7 @@ window.compactOverviewFixture = {
         : <DashboardScreen data={scenario === "no-data" ? null : assignments(scenario)} user={user} range={range} loading={false} error={null}
           onRefresh={() => { metrics.refreshCalls += 1; }} onRangeChange={value => { metrics.rangeCalls.push(value); }}
           onOpenWork={onOpenWork} onOpenGroup={() => { metrics.openCalls += 1; }} onWorkStatus={async () => { metrics.statusCalls += 1; }}
-          offline={coverage(scenario)} companyBranchId={1} busy={busy} view="today" />}
+          offline={screen === "agenda" ? undefined : coverage(scenario)} companyBranchId={1} busy={busy} view={screen === "agenda" ? "agenda" : "today"} />}
     </SafeAreaProvider>);
   },
   metrics: () => metrics,

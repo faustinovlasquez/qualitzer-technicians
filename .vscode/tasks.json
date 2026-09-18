@@ -2,6 +2,138 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de selector de agenda",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8801" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar selector de agenda",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\tests\\e2e\\compact-overview-smoke.cjs", "--agenda-layout"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK y gateway de firmas",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8800" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar interfaz de firmas",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\tests\\e2e\\time-sync\\smoke.cjs", "--signatures"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar firmas de usuario",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "scripts/testing/user-signatures-validation.cjs"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: instalar imagenes de firmas",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["-e", "const {spawnSync}=require('node:child_process');const result=spawnSync(process.execPath,['node_modules/expo/bin/cli','install','expo-image-manipulator','--npm'],{stdio:'inherit',env:{...process.env,PATH:require('node:path').dirname(process.execPath)+';'+process.env.PATH,EXPO_NO_DOTENV:'1',CI:'1'}});process.exit(result.status??1);"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar gateway de archivos",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8799" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar contrato de archivos",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["-e", "const {spawnSync}=require('node:child_process');for(const args of [['node_modules/typescript/bin/tsc','--noEmit','-p','server/tsconfig.json'],['node_modules/tsx/dist/cli.mjs','--tsconfig','server/tsconfig.json','--test','server/tests/panel-resources.test.ts']]){const result=spawnSync(process.execPath,args,{stdio:'inherit'});console.log('VALIDATION_EXIT_CODE',result.status);if(result.status!==0)process.exit(result.status??1);}console.log('FILE_CONTRACT_VALIDATION_PASS');"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar regreso desde otras apps",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["-e", "const {spawnSync}=require('node:child_process');for(const script of ['tests/e2e/time-sync/smoke.cjs','tests/e2e/picker-messages-smoke.cjs']){const result=spawnSync(process.execPath,['--max-old-space-size=8192',script,'--case=background-discards|camera-(result-active|active-result)$'],{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de bloqueo al iniciar",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8798" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar bloqueo al iniciar",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", "tests/device-lock-controller.test.ts"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de adjuntos de actividad",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8797" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar seguridad de adjuntos",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", "tests/device-security-integration.test.ts", "tests/trusted-native-picker-provider.test.ts", "tests/trusted-native-picker-controller.test.ts", "tests/trusted-native-picker-utilities.test.ts", "tests/camera-root-integration.test.ts", "tests/work-activities.test.ts"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar adjuntos de actividad",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\tests\\e2e\\time-sync\\smoke.cjs", "--activity-picker"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de inicio offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8796" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: descargar APK de resumen checklist",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
@@ -57,7 +189,7 @@
 			"label": "Qualitzer: comprobar entrega de asignaciones",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
-			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.101:8795/"],
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.106:8801/"],
 			"isBackground": false,
 			"problemMatcher": []
 		},

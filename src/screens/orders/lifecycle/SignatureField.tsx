@@ -12,17 +12,18 @@ export interface SignatureFieldProps {
   signatureRef: Ref<SignaturePadHandle>;
   disabled: boolean;
   error?: string;
+  required?: boolean;
   onChange: (strokes: SignatureStrokes) => void;
   onDrawingChange: (drawing: boolean) => void;
 }
 
-export function SignatureField({ label, name, strokes, signatureRef, disabled, error, onChange, onDrawingChange }: SignatureFieldProps) {
+export function SignatureField({ label, name, strokes, signatureRef, disabled, error, required = true, onChange, onDrawingChange }: SignatureFieldProps) {
   const signed = hasSignature(strokes);
   const limit = signaturePointCount(strokes) >= SIGNATURE_MAX_POINTS;
   return <View style={styles.tight}>
     <View style={styles.row}>
-      <View style={styles.grow}><Text style={styles.label}>{label} *</Text>{name ? <Text style={styles.caption}>{name}</Text> : null}</View>
-      <Badge label={signed ? "Dibujada" : "Pendiente"} tone={signed ? "success" : "warning"} />
+      <View style={styles.grow}><Text style={styles.label}>{label}{required ? " *" : ""}</Text>{name ? <Text style={styles.caption}>{name}</Text> : null}</View>
+      <Badge label={signed ? "Dibujada" : required ? "Pendiente" : "Sin imagen"} tone={signed ? "success" : "warning"} />
     </View>
     <View style={[styles.signature, error && styles.signatureError]}>
       <SignaturePad ref={signatureRef} label={label} strokes={strokes} disabled={disabled} onChange={onChange} onDrawingChange={onDrawingChange} />

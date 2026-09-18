@@ -4,6 +4,7 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const strict = require("node:assert/strict");
 const root = path.resolve(__dirname, "../..");
+const caseFilter = process.argv.find(argument => argument.startsWith("--case="))?.slice(7);
 process.chdir(root);
 const { build } = require(require.resolve("esbuild", { paths: [root] }));
 const { chromium } = require(require.resolve("playwright", { paths: [root, path.resolve(root, "../Qualitzer2.0-Frontend")] }));
@@ -133,6 +134,7 @@ async function main() {
       return box;
     }
     async function check(name, run) {
+      if (caseFilter && !new RegExp(caseFilter).test(name)) return;
       const before = report.assertionCount;
       try { await run(); report.tests.push({ name, passed: true, assertions: report.assertionCount - before }); }
       catch (error) { report.tests.push({ name, passed: false, assertions: report.assertionCount - before, error: error.stack }); try { await screenshot(name + "-FAILED"); fs.writeFileSync(path.join(output, `${name}-body.txt`), await page.locator("body").innerText()); } catch {} }
@@ -267,13 +269,13 @@ async function main() {
         await pickerLabels(label + order + "-return", scale);
         assert.ok((await os()).privacy.includes("prevent")); assert.equal((await os()).privacy.at(-1), "allow");
         await page.getByText("0 confirmados · 0 en cola", { exact: true }).waitFor(); await dock(label + order + "-return", "files-save-dock"); await quiet(label + order + "-camera-return"); await screenshot(label + "-camera-" + order + "-return");
-        await button("Volver al checklist").click(); await heading("¿El equipo está limpio?").waitFor();
+        await button("Volver conservando el borrador").click(); await heading("¿El equipo está limpio?").waitFor();
         assert.equal(await page.getByRole("radio", { name: "Sí", exact: true }).getAttribute("aria-checked"), "true"); assert.equal(await page.getByRole("textbox", { name: "Comentario del paso (opcional)", exact: true }).inputValue(), "Conservar tras cámara simulada"); await progress(10, 22);
         await button("Adjuntar al paso").click(); await button("Guardar archivos · 1").waitFor();
         await page.evaluate(() => window.pickerOs.lifecycle(false)); await settle(); assert.equal((await metrics()).unlocked, false);
-        await page.evaluate(() => window.pickerOs.lifecycle(true)); await page.waitForFunction(() => window.pickerOs.prompts === 2);
-        assert.equal((await metrics()).unlocked, false, "Ordinary Home return still demands fresh authentication"); await page.evaluate(() => window.pickerOs.confirm()); await page.waitForFunction(() => window.pickerMessages.metrics().unlocked);
-        await button("Guardar archivos · 1").waitFor(); assert.equal((await os()).prompts, 2); assert.equal((await os()).cameraStarts, 1); assert.deepEqual((await metrics()).work, before.work); assert.deepEqual((await metrics()).calls, []);
+        await page.evaluate(() => window.pickerOs.lifecycle(true)); await page.waitForFunction(() => window.pickerMessages.metrics().unlocked);
+        assert.equal((await os()).prompts, 1, "Ordinary Home return retains the current authentication");
+        await button("Guardar archivos · 1").waitFor(); assert.equal((await os()).prompts, 1); assert.equal((await os()).cameraStarts, 1); assert.deepEqual((await metrics()).work, before.work); assert.deepEqual((await metrics()).calls, []);
         report.measurements.push({ name: label + order + "-camera-lifecycle", os: await os(), confirmed: (await metrics()).progress, unsavedSelectedFiles: 1 });
         await screenshot(label + "-camera-" + order + "-home-return");
       });

@@ -7,17 +7,22 @@ import { palette } from "../ui/theme";
 import type { CompanyBrandingUi } from "../branding/contracts";
 import type { DeviceSecurityUi } from "../security/DeviceSecurityContext";
 import { DeviceSecurityCard } from "../security/DeviceSecurityCard";
+import type { UserSignatureAccess } from "../domain/userSignatures";
+import { UserSignaturesPanel } from "./signatures/UserSignaturesPanel";
 
-export function ProfileScreen({ session, companyBranding, deviceSecurity, onNotificationSettings, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck }: {
+export function ProfileScreen({ session, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck }: {
   session: Session; gatewayUrl: string; busy: boolean; error: string | null; health: Health | null;
   companyBranding: CompanyBrandingUi;
   deviceSecurity?: DeviceSecurityUi;
   onNotificationSettings?: () => void;
+  signatureAccess?: UserSignatureAccess;
   offline?: OfflineSnapshot | null; offlineVerifiedAt?: number | null; onOffline?: () => void;
   onBranch: (id: number) => void; onLogout: () => void; onCheck: () => void;
 }) {
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [signaturesOpen, setSignaturesOpen] = useState(false);
   const currentBranch = session.user.accessBranchs.find((branch) => branch.id === session.branchId);
+  if (signaturesOpen && signatureAccess) return <UserSignaturesPanel access={signatureAccess} onBack={() => setSignaturesOpen(false)} />;
   return <ScrollView contentContainerStyle={styles.content}>
     <SectionTitle title="Mi perfil" subtitle="Tu espacio de trabajo en terreno" />
     <Card style={styles.stack}>
@@ -30,6 +35,10 @@ export function ProfileScreen({ session, companyBranding, deviceSecurity, onNoti
       <SectionTitle title="Notificaciones" subtitle="Decide qué avisos recibir y cuándo" />
       <BodyText>Configura permisos, nuevas asignaciones, recordatorios y horario silencioso. Tus avisos se consultan en la pestaña Avisos.</BodyText>
       <Button title="Configurar notificaciones" icon="notifications-outline" variant="secondary" disabled={busy} onPress={onNotificationSettings} />
+    </Card> : null}
+    {signatureAccess ? <Card style={styles.stack}>
+      <SectionTitle title="Firmas" />
+      <Button title="Configurar mis firmas" icon="create-outline" variant="secondary" disabled={busy} onPress={() => setSignaturesOpen(true)} />
     </Card> : null}
     {deviceSecurity && session.mode === "live" ? <DeviceSecurityCard security={deviceSecurity} disabled={busy} /> : null}
     <Card style={styles.stack}>

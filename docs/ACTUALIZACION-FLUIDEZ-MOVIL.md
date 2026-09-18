@@ -1,5 +1,9 @@
 # Fluidez móvil — app 1.0.11 y gateway 1.0.4
 
+Firmas del perfil: gateway 1.0.10 y APK 1.0.25 permiten consultar, crear, editar y eliminar firmas propias y elegirlas al entregar una OT. Desplegar las nuevas rutas userSignatures del backend antes de instalar la pasarela. Mismos registros de perfil web, sin migración nueva; timer, checklist y recibos permanecen sin cambios. Ver ACTUALIZACION-1.0.25.md.
+
+Actualización del 18 de septiembre: gateway 1.0.9 corrige listas y validaciones de pertenencia de archivos con tamaños redondeados en KB/MB. Mantiene timer, checklist y recibos. Usar la APK 1.0.24 existente; no requiere APK nueva ni migraciones. Instalar el paquete en el backend y reiniciar un único proceso. No repetir cargas ya en cola. El contenido posterior conserva el historial de entregas anteriores.
+
 Actualización vigente: gateway 1.0.8 y APK 1.0.20 conservan timer/checklist y permiten editar actividades y devolverlas a pendiente. Los adjuntos exigen ID confirmado; el lote no se interrumpe por su propio bloqueo temporal. Desplegar el backend PanelWorkActions actualizado antes del gateway y la APK. Sin migración nueva.
 
 Actualización actual: gateway 1.0.7 y APK 1.0.18 separan Trabajos, Mantenimientos y OTs; conservan timer/checklist e incorporan eliminación lógica de actividades. El formulario de actividad usa minutos y archivos en un diálogo. Requiere desplegar PanelWorkActions actualizado; no hay migración nueva.

@@ -7,7 +7,7 @@ import type { DeviceSecurityUi } from "./DeviceSecurityContext";
 
 export function DeviceLockScreen({ security, privacyError }: { security: DeviceSecurityUi; privacyError: string | null }) {
   const { state, controller } = security;
-  if (!privacyError && (state.nativeInteractionPending || state.ready && !state.enabled && !state.offered && !state.error)) return <SafeAreaView style={[styles.screen, styles.picker]}>
+  if (!privacyError && (state.nativeInteractionPending || state.ready && (!state.enabled || !state.locked) && !state.offered && !state.error)) return <SafeAreaView style={[styles.screen, styles.picker]}>
     <ActivityIndicator accessibilityLabel={state.nativeInteractionPending ? "Esperando selección" : "Preparando privacidad"} color={palette.primary} size="large" />
     <BodyText>{state.nativeInteractionPending ? "Esperando selección…" : "Preparando privacidad…"}</BodyText>
   </SafeAreaView>;

@@ -29,7 +29,8 @@ for (const order of ["result-first", "active-first"] as const) {
       assert.equal(adapter.prompts.length, 1);
       assert.equal(clock.timers.size, 0);
       controller.setForeground(false); controller.setForeground(true);
-      assert.equal(controller.getSnapshot().locked, true);
+      assert.equal(controller.getSnapshot().locked, false);
+      assert.equal(adapter.prompts.length, 1);
     });
   }
 }

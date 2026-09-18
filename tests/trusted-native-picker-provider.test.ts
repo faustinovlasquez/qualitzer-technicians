@@ -119,17 +119,18 @@ test("second unresolved SDK background remains protected without another prompt;
   assert.equal(await result, "photo");
   assert.equal(f.security.isUnlocked(), true);
   f.emit(false); f.emit(true); await f.settle();
-  assert.equal(f.adapter.prompts.length, 2);
-  assert.equal(f.security.isUnlocked(), false);
+  assert.equal(f.adapter.prompts.length, 1);
+  assert.equal(f.security.isUnlocked(), true);
 });
 
-test("normal background without lease still requires authentication", async t => {
+test("normal background conceals the app but foreground resumes without authentication", async t => {
   const f = await unlockedProvider();
   t.after(() => f.close());
   f.emit(false); await f.settle();
   assert.equal(f.security.isUnlocked(), false);
   f.emit(true); await f.settle();
-  assert.equal(f.adapter.prompts.length, 2);
+  assert.equal(f.adapter.prompts.length, 1);
+  assert.equal(f.security.isUnlocked(), true);
 });
 
 test("privacy ABA: stale allow completion cannot release a result after second background", async t => {

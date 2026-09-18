@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const root = path.resolve(__dirname, "../..");
+const agendaOnly = process.argv.includes("--agenda-layout");
 const outputRoot = path.join(root, "artifacts/logs/compact-overview-ui");
 const runtimeFiles = ["src/screens/LoginScreen.tsx", "src/screens/DashboardScreen.tsx"];
 const hash = text => crypto.createHash("sha256").update(text).digest("hex");
@@ -63,7 +64,7 @@ async function main() {
     report.sourceHashes = Object.fromEntries(Object.entries(current).map(([file, text]) => [file, hash(text)]));
     report.testSourceHashes = Object.fromEntries(["tests/e2e/compact-overview-fixture.tsx", "tests/e2e/compact-overview-smoke.cjs"].map(file => [file, hash(fs.readFileSync(path.join(root, file)))]));
     const bundles = { after: await bundle(current) };
-    if (report.baseline.comparable && !process.argv.includes("--parent-orders")) bundles.before = await bundle(baseline.sources);
+    if (report.baseline.comparable && !process.argv.includes("--parent-orders") && !agendaOnly) bundles.before = await bundle(baseline.sources);
     report.bundleInputs = Object.keys(bundles.after.metafile.inputs);
     for (const file of runtimeFiles) assert.ok(report.bundleInputs.includes(file), `Missing real screen: ${file}`);
     assert.ok(!report.bundleInputs.some(file => /(^|\/)App\.tsx$|HttpTechnicianRepository|sessionStorage|expo-secure-store|(?:^|\/)\.env$/.test(file)), "Forbidden runtime imported");
@@ -192,7 +193,50 @@ async function main() {
         new MutationObserver(apply).observe(document.body, { childList: true, subtree: true }); apply();
       }, factor);
     }
-    if (!process.argv.includes("--parent-orders")) for (const phase of Object.keys(bundles).sort().reverse()) {
+    if (agendaOnly) for (const width of [320, 360, 390, 1024]) for (const scale of [1, 2]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`${origin}/after`);
+      await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
+      await scaleText(scale);
+      await check(`agenda-layout-${width}-text${scale * 100}`, async () => {
+        await page.evaluate(() => window.compactOverviewFixture.render("agenda"));
+        const showList = () => width < 600 ? page.getByRole("button", { name: "Filtros y OTs de agenda", exact: true }) : page.getByRole("tab", { name: "Lista de agenda", exact: true });
+        await showList().click();
+        await page.getByRole("heading", { name: "Mi agenda", exact: true }).waitFor();
+        const selector = page.getByTestId("agenda-layout-selector");
+        const layout = await selector.boundingBox();
+        const heading = await page.getByTestId("day-overview-heading").boundingBox();
+        assert.ok(layout && heading);
+        assert.ok(Math.abs(layout.width - heading.width) <= 1 && layout.width <= width, `selector follows content width ${layout.width}`);
+        if (width < 600) assert.ok(layout.width >= width - 40);
+        assert.ok(layout.height >= 44 && layout.height <= (scale === 1 ? 64 : 128), `selector height ${layout.height}`);
+        assert.ok(heading.y >= layout.y + layout.height && heading.y <= layout.y + layout.height + 16, "No empty block between selector and heading");
+        const tabs = selector.getByRole("tab");
+        assert.equal(await tabs.count(), 2);
+        const boxes = await Promise.all((await tabs.all()).map(tab => tab.boundingBox()));
+        assert.ok(boxes.every(box => box && box.width > 100 && box.height >= 44));
+        assert.ok(Math.abs(boxes[0].width - boxes[1].width) <= 1);
+        assert.ok(Math.abs(boxes[0].y - boxes[1].y) <= 1);
+        assert.equal(await page.getByRole("tab", { name: "Lista de agenda", exact: true }).getAttribute("aria-selected"), "true");
+        const textIssues = await selector.evaluate(element => [...element.querySelectorAll("*")].filter(child => {
+          const style = getComputedStyle(child);
+          if (style.fontFamily.includes("ionicons") || ![...child.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim())) return false;
+          const box = child.getBoundingClientRect();
+          return box.width <= 0 || box.height <= 0 || child.scrollWidth > child.clientWidth + 1 || child.scrollHeight > child.clientHeight + 1;
+        }).map(child => child.textContent));
+        assert.deepEqual(textIssues, []);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        report.measurements.push({ name: "agenda-layout", width, scale, selector: layout, heading, buttons: boxes });
+        await shot(`agenda-layout-${width}-text${scale * 100}`);
+        await page.getByRole("tab", { name: width < 600 ? "Agenda cronológica" : "Horario semanal", exact: true }).click();
+        await showList().waitFor();
+        await showList().click();
+        await page.getByRole("heading", { name: "Mi agenda", exact: true }).waitFor();
+        assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).statusCalls, 0);
+        assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).rangeCalls.length, 0);
+      });
+    }
+    if (!process.argv.includes("--parent-orders") && !agendaOnly) for (const phase of Object.keys(bundles).sort().reverse()) {
       for (const [width, height] of [[320, 740], [360, 740], [390, 740], [1024, 800]]) for (const scale of phase === "before" ? [1] : [1, 2]) {
         const label = `${phase}-${width}x${height}-text${scale * 100}`;
         await page.setViewportSize({ width, height });
@@ -260,7 +304,7 @@ async function main() {
     }
     await page.setViewportSize({ width: 390, height: 740 }); await page.goto(`${origin}/after`);
     await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
-    if (!process.argv.includes("--parent-orders")) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
+    if (!process.argv.includes("--parent-orders") && !agendaOnly) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
       await fresh("login");
       const username = page.getByRole("textbox", { name: "Correo o usuario", exact: true });
       const password = page.getByLabel("Contraseña", { exact: true });
@@ -285,7 +329,7 @@ async function main() {
       assert.equal(await username.isEditable(), false); assert.equal(await password.isEditable(), false);
       assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).gatewayChanges, 0);
     });
-    for (const width of [360, 1024]) for (const scale of [1, 2]) for (const scenario of ["empty-maintenance", "empty-ot"]) {
+    if (!agendaOnly) for (const width of [360, 1024]) for (const scale of [1, 2]) for (const scenario of ["empty-maintenance", "empty-ot"]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`${origin}/after`);
       await page.waitForFunction(() => Boolean(window.compactOverviewFixture));

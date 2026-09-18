@@ -153,6 +153,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     if (id === "../ui/components") return ui;
     if (id === "../ui/theme") return theme;
     if (id === "../security/DeviceSecurityCard") return { DeviceSecurityCard: "DeviceSecurityCard" };
+    if (id === "./signatures/UserSignaturesPanel") return { UserSignaturesPanel: "UserSignaturesPanel" };
     return forbidden(id);
   });
   const imports = new Map<string, unknown>([

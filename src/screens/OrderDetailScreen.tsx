@@ -21,6 +21,7 @@ import { OrderLifecyclePanel } from "./orders/OrderLifecyclePanel";
 import { OfflineOrderLifecyclePanel } from "./offline/OfflineOrderLifecyclePanel";
 import { offlineAttachment, operationsForWork, type PendingDocument } from "./offline/offlineUi";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../domain/orderLifecycle";
+import type { UserSignatureAccess } from "../domain/userSignatures";
 
 export interface OrderDetailScreenProps {
   group: AssignmentGroup;
@@ -38,6 +39,7 @@ export interface OrderDetailScreenProps {
   onUploadFiles: (files: LocalPhoto[]) => Promise<void>;
   onDeleteFile: (fileId: string) => Promise<void>;
   technicianName: string;
+  signatureAccess?: UserSignatureAccess;
   onLoadDelivery: () => Promise<MaintenanceDeliveryContext>;
   onStart: () => Promise<void>;
   onDeliver: (input: MaintenanceDeliveryInput) => Promise<void>;
@@ -168,6 +170,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
 
   const lifecycleProps = {
     group, tenant, technicianName: props.technicianName, storageKey: props.storageKey, mode, busy: locked,
+    signatureAccess: props.signatureAccess,
     onLoad: props.onLoadDelivery,
     onStart: () => runOperation("start", props.onStart),
     onDeliver: (input: MaintenanceDeliveryInput) => runOperation("deliver", () => props.onDeliver(input)),

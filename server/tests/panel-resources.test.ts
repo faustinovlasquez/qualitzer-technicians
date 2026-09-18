@@ -70,7 +70,7 @@ async function backend(t: TestContext) {
       if (req.method === "GET") res.json(state.comments); else res.status(201).json({ success: true });
       return;
     }
-    if (req.method === "DELETE" && /^\/api\/files\/\d+$/.test(req.path)) { res.status(204).end(); return; }
+    if (req.method === "DELETE" && /^\/api\/files\/\d+$/.test(req.path)) { res.send(); return; }
     if (req.method === "POST" || req.method === "PATCH") { res.status(201).json({ success: true }); return; }
     res.status(404).end();
   });
@@ -133,6 +133,36 @@ function deferred() {
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 }
+
+test("maintenance file lists accept backend display sizes without treating rounded KB or MB as exact bytes", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group({ id: "maintenance-50", type: "internal_maintenance" })]);
+  state.assignments.groups[0]!.works[0]!.checklists[0]!.steps = [step({ attachments: [file] })];
+  for (const unit of ["KB", "MB"]) {
+    state.files = { ...fileList, data: [{ ...file, size: 21.37, unit }] };
+    const result = await request(groupPath("maintenance-50"));
+    assert.equal(result.response.status, 200);
+    const listed = panelFilesSchema.parse(result.data).data;
+    assert.equal(listed[0]?.id, file.id);
+    assert.equal(listed[0]?.size, null);
+    assert.equal(listed[0]?.url, file.url);
+    for (const target of [
+      groupPath("maintenance-50", "/files/7"),
+      workPath("maintenance-50", "11", "/files/7"),
+      workPath("maintenance-50", "11", "/steps/101/files/7"),
+    ]) {
+      state.calls.length = 0;
+      const removed = await request(target, "DELETE");
+      assert.equal(removed.response.status, 200);
+      assert.deepEqual(removed.data, { success: true });
+      assert.deepEqual(writes(state.calls).map(call => [call.method, call.path]), [["DELETE", "/api/files/7"]]);
+    }
+  }
+  assert.equal(panelFilesSchema.safeParse({ ...fileList, data: [{ ...file, size: 21.37 }] }).success, false);
+  assert.equal(panelFilesSchema.safeParse({ ...fileList, data: [{ ...file, size: -1, unit: "KB" }] }).success, false);
+  assert.equal(panelFilesSchema.safeParse({ ...fileList, data: [{ ...file, size: 1, unit: "unknown" }] }).success, false);
+  assert.equal(panelFilesSchema.parse(fileList).data[0]?.size, 30);
+});
 
 test("group files resolve canonical OT IDs, maintenance roots and the first unambiguous direct work", async (t) => {
   const { request, state } = await harness(t);

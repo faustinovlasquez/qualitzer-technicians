@@ -1,4 +1,5 @@
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
+import { userSignatureInputSchema, type UserSignature, type UserSignatureInput, type UserSignatureOptions } from "../domain/userSignatures";
 import * as Crypto from "expo-crypto";
 import type { OfflineCommand, OfflineDocumentMetadata, OfflineReceipt } from "../domain/offline";
 import { syncAnswerFromStep, syncAnswersEqual, syncResponseForStep, type SyncCommand } from "../domain/offlineProtocol";
@@ -19,6 +20,38 @@ import { isWorkActivity, workActivityInputSchema, type WorkActivitiesPort } from
 
 export class DemoTechnicianRepository implements TechnicianRepository {
   private data = makeDemoData();
+  private profileSignatures: UserSignature[] = [];
+  private nextSignatureId = 1;
+
+  async userSignatures(branchId: number): Promise<UserSignatureOptions> {
+    if (!demoUser.accessBranchs.some(branch => branch.id === branchId)) throw new Error("USER_SIGNATURE_BRANCH_NOT_ASSIGNED");
+    const options = this.profileSignatures.map(signature => ({ ...signature, isDefaultForBranch: signature.branches.some(branch => branch.value === String(branchId)) }));
+    const defaultSignatureId = options.find(signature => signature.isDefaultForBranch)?.id ?? null;
+    return structuredClone({ userId: demoUser.id, companyBranchId: branchId, options, defaultSignatureId, selectedSignatureId: defaultSignatureId });
+  }
+
+  async saveUserSignature(branchId: number, value: UserSignatureInput): Promise<UserSignatureOptions> {
+    await this.userSignatures(branchId);
+    const input = userSignatureInputSchema.parse(value);
+    const previous = this.profileSignatures.find(signature => signature.id === input.id);
+    if (input.id !== undefined && !previous) throw new Error("USER_SIGNATURE_NOT_FOUND");
+    if (input.branchIds.some(id => !demoUser.accessBranchs.some(branch => branch.id === id))) throw new Error("USER_SIGNATURE_BRANCH_NOT_ASSIGNED");
+    if (this.profileSignatures.some(signature => signature.id !== input.id && signature.branches.some(branch => input.branchIds.includes(Number(branch.value))))) throw new Error("USER_SIGNATURE_BRANCH_DUPLICATED");
+    const id = input.id ?? this.nextSignatureId++;
+    const saved: UserSignature = { id, value: String(id), label: input.signatureName, signatureName: input.signatureName,
+      signatureEmail: input.signatureEmail, signaturePhone: input.signaturePhone,
+      signatureImage: input.signatureImage === undefined ? previous?.signatureImage ?? null : input.signatureImage,
+      isDefaultForBranch: input.branchIds.includes(branchId), branches: input.branchIds.map(id => ({ value: String(id), label: demoUser.accessBranchs.find(branch => branch.id === id)?.name ?? "" })) };
+    this.profileSignatures = [...this.profileSignatures.filter(signature => signature.id !== id), saved];
+    return { ...await this.userSignatures(branchId), selectedSignatureId: id };
+  }
+
+  async deleteUserSignature(branchId: number, signatureId: number): Promise<UserSignatureOptions> {
+    await this.userSignatures(branchId);
+    if (!this.profileSignatures.some(signature => signature.id === signatureId)) throw new Error("USER_SIGNATURE_NOT_FOUND");
+    this.profileSignatures = this.profileSignatures.filter(signature => signature.id !== signatureId);
+    return this.userSignatures(branchId);
+  }
   private activityFilesById = new Map<string, Attachment[]>();
   activities: WorkActivitiesPort["activities"] = async scope => structuredClone((this.find(scope).work.activities ?? []).filter(isWorkActivity));
   createActivity: WorkActivitiesPort["createActivity"] = async (scope, input) => {
