@@ -9,6 +9,7 @@ export interface MaintenanceDeliveryInput {
   clientSignature: string | null;
   technicianSignature: string | null;
   durationMinutes?: number | null;
+  acknowledgeDelivery?: true;
 }
 
 export interface MaintenanceDeliveryContext {
@@ -24,4 +25,9 @@ export interface MaintenanceDeliveryContext {
   suggestedDurationMinutes?: number;
   canStart?: boolean;
   canDeliver?: boolean;
+  canTechnicianDeliver?: boolean;
+  technicianDeliverySupported?: boolean;
+  pendingWorkNames?: string[];
+  pendingDeliveryChecklists?: string[];
+  totalWorks?: number;
 }

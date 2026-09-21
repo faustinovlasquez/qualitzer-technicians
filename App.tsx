@@ -105,6 +105,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       onBack={app.closeCreate}
       onLoadOptions={app.creationOptions}
       onSubmit={app.createRecord}
+      offline={app.offlineController ? app.offline : undefined}
       onCreated={app.onCreated}
       onQueued={app.onOfflineQueuedCreate}
     />;
@@ -131,7 +132,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       onRefresh={app.refresh}
       onStatus={app.changeStatus}
       onReopen={app.reopenWork}
-      activityActions={{ load: app.loadActivities, create: app.createActivity, update: app.updateActivity, complete: app.completeActivity, remove: app.deleteActivity, files: app.loadActivityFiles, upload: app.uploadActivityFiles }}
+      activityActions={{ load: app.loadActivities, create: app.createActivity, update: app.updateActivity, complete: app.completeActivity, remove: app.deleteActivity, files: app.loadActivityFiles, deleteFile: app.deleteActivityFile, upload: app.uploadActivityFiles }}
       onSaveStep={app.saveAnswer}
       onLoadChecklistOptions={app.loadChecklistOptions}
       onAttachChecklist={app.attachChecklist}
@@ -160,7 +161,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         mode={app.session.mode}
         busy={app.busy}
         initialTab={app.selectedOrder.initialTab}
+        deliveryIntent={app.selectedOrder.deliveryIntent}
+        onDeliveryIntentConsumed={app.consumeOrderDeliveryIntent}
         onBack={app.closeOrder}
+        onHome={app.homeFromDetails}
         onOpenWork={app.openWork}
         onWorkStatus={app.onWorkStatus}
         onRefresh={app.refresh}
@@ -203,7 +207,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "profile" ? <ProfileScreen session={app.session} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
+      </> : app.tab === "profile" ? <ProfileScreen session={app.session} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
       {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy || logoutConfirm} /> : null}
     </View>
     <View style={styles.nav}>{navigation.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "notifications" && unreadNotifications > 0 ? `${item.label}, ${unreadNotifications} sin leer` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab(item.id)} style={styles.navItem}>

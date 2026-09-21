@@ -29,6 +29,7 @@ export interface WorkActivityActions {
   complete(id: number, isCompleted?: boolean): Promise<void>;
   remove?(id: number): Promise<void>;
   files(id: number): Promise<Attachment[]>;
+  deleteFile?(id: number, fileId: string): Promise<void>;
   upload(id: number, files: LocalPhoto[]): Promise<void>;
 }
 interface Props { canContinueWrite?: () => boolean; onPanelChange?: (open: boolean) => void; onCreated?: () => void; backHandler?: { current: ((home?: boolean) => boolean) | null }; scopeKey: string; mode: "live" | "demo"; activities: Activity[]; actions?: WorkActivityActions; disabled: boolean; readOnly: boolean; }
@@ -176,7 +177,7 @@ export function WorkActivities(props: Props) {
     </View>)}
     {selectedActivity ? <PrivateModal visible animationType="slide" onRequestClose={closeFiles}><SafeAreaView style={styles.safe}>
       <View style={styles.header}><IconButton name="arrow-back-outline" label="Volver a actividades" onPress={closeFiles} /><View style={styles.grow}><Text style={styles.caption}>Archivos de actividad</Text><Text style={styles.label}>{plainText(selectedActivity.activity)}</Text></View><IconButton name="home-outline" label="Volver al inicio de actividades" onPress={closeFiles} /></View>
-      {props.actions ? <FileWorkspace compact backHandler={filesBack} scopeKey={`${props.scopeKey}:activity:${selectedActivity.id}`} resourceKey={`${props.scopeKey}:${selectedActivity.id}`} mode={props.mode} readOnly={props.readOnly} busy={props.disabled || busy} title="Archivos" notices={selectedActivity.technicalDocuments.map(document => <View key={document.id} style={styles.tight}><Text style={styles.label}>{plainText(document.documentName)}</Text>{document.file ? <AttachmentList files={[document.file]} /> : null}</View>)} onLoad={() => props.actions!.files(selectedActivity.id)} onUpload={files => props.actions!.upload(selectedActivity.id, files)} /> : null}
+      {props.actions ? <FileWorkspace compact backHandler={filesBack} scopeKey={`${props.scopeKey}:activity:${selectedActivity.id}`} resourceKey={`${props.scopeKey}:${selectedActivity.id}`} mode={props.mode} readOnly={props.readOnly} busy={props.disabled || busy} title="Archivos" notices={selectedActivity.technicalDocuments.map(document => <View key={document.id} style={styles.tight}><Text style={styles.label}>{plainText(document.documentName)}</Text>{document.file ? <AttachmentList files={[document.file]} /> : null}</View>)} onLoad={() => props.actions!.files(selectedActivity.id)} onUpload={files => props.actions!.upload(selectedActivity.id, files)} onDelete={props.actions.deleteFile && !props.readOnly ? fileId => props.actions!.deleteFile!(selectedActivity.id, fileId) : undefined} /> : null}
     </SafeAreaView></PrivateModal> : null}
     {creating ? <PrivateModal visible transparent animationType="fade" onRequestClose={() => { if (!busy && !draft.fileBusy) setCreating(false); }}>
       <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === "ios" ? "padding" : undefined}>

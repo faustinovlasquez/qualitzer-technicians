@@ -1,11 +1,13 @@
 import { createRoot } from "react-dom/client";
+import { useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import type { Assignments, AssignmentWork, DateRange, User } from "../../src/domain/models";
 import type { OfflineSnapshot } from "../../src/domain/offline";
 import { DashboardScreen, type DashboardScreenProps } from "../../src/screens/DashboardScreen";
 import { LoginScreen } from "../../src/screens/LoginScreen";
+import { monthRange, weekRange } from "../../src/domain/format";
 
-type Scenario = "full" | "supplemental" | "partial" | "partial-empty" | "null-coverage" | "no-data" | "empty-maintenance" | "empty-ot";
+type Scenario = "full" | "supplemental" | "partial" | "partial-empty" | "null-coverage" | "no-data" | "empty-maintenance" | "empty-ot" | "agenda-date16";
 type Screen = "login" | "dashboard" | "agenda";
 const range: DateRange = { startDate: "2026-09-12", endDate: "2026-09-12" };
 const user: User = { id: 1, workerId: 1, name: "Alex", lastnames: "Fixture", email: "alex@example.invalid", role: { name: "Técnico" },
@@ -56,6 +58,28 @@ let revision = 0;
 let releaseLogin: (() => void) | null = null;
 let metrics: Metrics;
 
+function DashboardFixture({ screen, scenario, busy, onOpenWork }: { screen: Screen; scenario: Scenario; busy: boolean; onOpenWork: DashboardScreenProps["onOpenWork"] }) {
+  const [currentRange, setRange] = useState(scenario === "agenda-date16" ? monthRange(range.startDate) : screen === "agenda" ? weekRange(range.startDate) : range);
+  const [focusDate, setFocusDate] = useState<string | null>(null);
+  const data = assignments(scenario);
+  if (scenario === "agenda-date16") {
+    const base = data.groups[0];
+    data.groups = [
+      { ...base, works: [{ ...base.works[0], id: "16", title: "Tarea programada del 16", scheduledDate: "2026-09-16" }, { ...base.works[0], id: "160", title: "Tarea sin hora del 16", scheduledDate: "2026-09-16", scheduledStartTime: "", scheduledEndTime: "" }] },
+      { ...base, id: "maintenance-16", type: "internal_maintenance", code: "OT-COR-0016", title: "Mantenimiento del 16 sin trabajos", scheduledDate: "2026-09-16", works: [] },
+      { ...base, id: "maintenance-17", type: "internal_maintenance", code: "OT-COR-0017", scheduledDate: "2026-09-16", works: [{ ...base.works[0], id: "161", title: "Revision de equipo del 16", scheduledDate: "2026-09-16", scheduledStartTime: "14:00", scheduledEndTime: "15:00" }] },
+    ];
+  }
+  if (screen === "agenda" && scenario !== "agenda-date16" && currentRange.endDate.endsWith("30")) {
+    const base = data.groups[0]?.works[0];
+    if (base) data.groups[0].works.push({ ...base, id: "month-last", title: "Trabajo del último día", scheduledDate: currentRange.endDate, scheduledStartTime: "14:00", scheduledEndTime: "16:00", plannedMinutes: 120 });
+  }
+  return <DashboardScreen data={scenario === "no-data" ? null : data} user={user} range={currentRange} focusDate={focusDate} onFocusDate={setFocusDate} loading={scenario === "agenda-date16"} pendingDates={scenario === "agenda-date16" ? ["2026-09-17"] : undefined} error={null}
+    onRefresh={() => { metrics.refreshCalls += 1; }} onRangeChange={value => { metrics.rangeCalls.push(value); setRange(value); }}
+    onOpenWork={onOpenWork} onOpenGroup={() => { metrics.openCalls += 1; }} onWorkStatus={async () => { metrics.statusCalls += 1; }}
+    offline={screen === "agenda" ? undefined : coverage(scenario)} companyBranchId={1} busy={busy} view={screen === "agenda" ? "agenda" : "today"} />;
+}
+
 window.compactOverviewFixture = {
   render(screen, scenario = "full", busy = false) {
     releaseLogin?.();
@@ -68,10 +92,7 @@ window.compactOverviewFixture = {
           metrics.loginCalls.push({ username, passwordMatches: password === "Fixture password only" });
           await new Promise<void>(resolve => { releaseLogin = resolve; });
         }} onDemo={() => { metrics.demoCalls += 1; }} onGatewayChange={() => { metrics.gatewayChanges += 1; }} />
-        : <DashboardScreen data={scenario === "no-data" ? null : assignments(scenario)} user={user} range={range} loading={false} error={null}
-          onRefresh={() => { metrics.refreshCalls += 1; }} onRangeChange={value => { metrics.rangeCalls.push(value); }}
-          onOpenWork={onOpenWork} onOpenGroup={() => { metrics.openCalls += 1; }} onWorkStatus={async () => { metrics.statusCalls += 1; }}
-          offline={screen === "agenda" ? undefined : coverage(scenario)} companyBranchId={1} busy={busy} view={screen === "agenda" ? "agenda" : "today"} />}
+        : <DashboardFixture screen={screen} scenario={scenario} busy={busy} onOpenWork={onOpenWork} />}
     </SafeAreaProvider>);
   },
   metrics: () => metrics,

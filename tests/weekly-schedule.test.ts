@@ -4,8 +4,19 @@ import { assignmentWorkForDay, assignmentWorkRange, mergeDailyAssignments, type 
 import type { AssignmentWork, DateRange } from "../src/domain/models";
 import { buildWeeklySchedule, layoutScheduleBlocks, scheduleClock, scheduleDateOffset, scheduleInterval, scheduleOverlapMinutes, scheduleTimeMinutes } from "../src/domain/weeklySchedule";
 import { assignments, group, work } from "../server/tests/fixtures";
+import { monthRange } from "../src/domain/format";
 
 const range: DateRange = { startDate: "2026-09-07", endDate: "2026-09-13" };
+
+test("month scope preserves calendar boundaries including leap February and year end", () => {
+  for (const [day, endDate] of [["2026-09-18", "2026-09-30"], ["2026-02-17", "2026-02-28"], ["2028-02-29", "2028-02-29"], ["2026-12-31", "2026-12-31"]]) {
+    const month = monthRange(day);
+    assert.deepEqual(month, { startDate: `${day.slice(0, 7)}-01`, endDate });
+    const model = buildWeeklySchedule(assignments([]), month);
+    assert.equal(model.days.length, Number(endDate.slice(-2)));
+    assert.equal(model.days.at(-1)?.date, endDate);
+  }
+});
 
 function task(overrides: Partial<AssignmentWork> = {}): AssignmentWork {
   return work({ scheduledDate: range.startDate, plannedDates: [range.startDate], ...overrides });

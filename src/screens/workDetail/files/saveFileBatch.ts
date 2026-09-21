@@ -9,15 +9,16 @@ interface FileBatchOptions {
   canContinue: () => boolean;
   requireSource: boolean;
   onProgress: (index: number, total: number, name: string) => void;
+  fileIds?: readonly string[];
 }
 
-export async function saveFileBatch({ store, upload, canContinue, requireSource, onProgress }: FileBatchOptions) {
+export async function saveFileBatch({ store, upload, canContinue, requireSource, onProgress, fileIds }: FileBatchOptions) {
   let saved = 0;
   let queued = 0;
   let failure: string | null = null;
   try {
     await store.flush();
-    const selected = store.getSnapshot().files.filter((file) => !file.uploaded);
+    const selected = store.getSnapshot().files.filter((file) => !file.uploaded && (fileIds === undefined || fileIds.includes(file.id)));
     for (const [index, file] of selected.entries()) {
       if (!canContinue() || store.getSnapshot().closed) throw new Error("Envío detenido; los pendientes se conservan.");
       onProgress(index + 1, selected.length, file.name);

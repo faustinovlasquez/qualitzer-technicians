@@ -4,6 +4,54 @@ import { weekRange } from "../src/domain/format";
 import { NetworkError } from "../src/infrastructure/errors";
 import { checklistDate, equipmentChecklistPayload } from "./helpers/assignment-checklist";
 import { agendaFixture, agendaReactFixture, frozenNow } from "./helpers/agenda-load-lifecycle";
+import type { MaintenanceDeliveryContext } from "../src/domain/orderLifecycle";
+
+test("agenda publishes completed dates before the batch and ignores late progress after range change", async t => {
+  const current = fixture(t);
+  (await current.loadDay()).setTab("agenda");
+  await current.flush();
+  const week = current.reads.at(-1)!;
+  const partial = equipmentChecklistPayload();
+  week.progress(partial, ["2026-09-11"]);
+  const loading = await current.flush();
+  assert.equal(loading.loading, true);
+  assert.ok(loading.data);
+  assert.equal(week.priorityDate, "2026-09-11");
+  assert.equal(loading.agendaPendingDates?.includes("2026-09-11"), false);
+  assert.equal(loading.agendaPendingDates?.length, 6);
+  loading.changeRange({ startDate: "2026-09-14", endDate: "2026-09-20" });
+  await current.flush();
+  week.progress(partial, ["2026-09-11"]);
+  assert.equal((await current.flush()).data, null);
+  const next = current.reads.at(-1)!;
+  next.resolve();
+  assert.equal((await current.flush()).agendaPendingDates?.length, 0);
+});
+
+test("empty maintenance opens using its scheduled date, not the first day of the month", async t => {
+  const current = fixture(t);
+  (await current.loadDay()).setTab("agenda"); await current.flush();
+  current.reads.at(-1)!.resolve();
+  (await current.flush()).changeRange({ startDate: "2026-09-01", endDate: "2026-09-30" }); await current.flush();
+  const data = equipmentChecklistPayload();
+  data.groups[0] = { ...data.groups[0], id: "maintenance-16", type: "internal_maintenance", scheduledDate: "2026-09-16", works: [] };
+  current.reads.at(-1)!.resolve(data);
+  (await current.flush()).openGroup(data.groups[0]);
+  assert.equal((await current.flush()).selectedOrder?.queryDate, "2026-09-16");
+});
+
+test("agenda month keeps the complete requested range and selected date outside the first week", async t => {
+  const current = fixture(t);
+  (await current.loadDay()).setTab("agenda");
+  await current.flush(); current.reads.at(-1)!.resolve();
+  const app = await current.flush();
+  app.changeRange({ startDate: "2026-09-01", endDate: "2026-09-30" });
+  await current.flush();
+  assert.deepEqual(current.reads.at(-1)!.range,{ startDate: "2026-09-01", endDate: "2026-09-30" });
+  current.reads.at(-1)!.resolve();
+  (await current.flush()).focusAgendaDay("2026-09-30");
+  assert.equal((await current.flush()).agendaFocusDate,"2026-09-30");
+});
 
 function fixture(t: TestContext, options?: Parameters<typeof agendaFixture>[0]) {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: frozenNow });
@@ -306,5 +354,51 @@ for (const boundary of ["lock", "unauthorized", "logout", "branch", "unmount"] a
     assert.equal(f.reads[1].signal.aborted, true);
     assert.equal(f.reads[1].aborts, 1);
     assert.equal(f.calls.options, 0);
+  });
+}
+
+for (const scenario of ["ready-card", "ready-detail", "pending", "empty", "closed", "failed-read", "failed-write", "locked"] as const) {
+  test(`technical delivery guidance uses confirmed full-order state: ${scenario}`, async (t) => {
+    const harness = fixture(t);
+    await harness.restore();
+    const payload = equipmentChecklistPayload();
+    const group = payload.groups[0];
+    group.type = "internal_maintenance"; group.id = "maintenance-80"; group.status = "in_progress";
+    const work = group.works[0]; work.status = "paused";
+    harness.reads[0].resolve(payload);
+    let app = await harness.flush();
+    let confirmWrite: () => void = () => {};
+    const writeGate = new Promise<void>(resolve => { confirmWrite = resolve; });
+    harness.setStatusGate(async () => { await writeGate; if (scenario === "failed-write") throw new Error("STATUS_REJECTED"); });
+    const context: MaintenanceDeliveryContext = { groupId: group.id, status: scenario === "closed" ? "delivered" : "in_progress", maintenanceType: "correctivo", finalizationNote: null,
+      damageType: null, durationMinutes: null, startedAt: null, finalizedAt: null, incompleteChecklists: ["Checklist pendiente"], technicianDeliverySupported: true,
+      canTechnicianDeliver: scenario !== "closed", totalWorks: scenario === "empty" ? 0 : 2, pendingWorkNames: scenario === "pending" ? ["Trabajo completado, no entregado"] : [] };
+    harness.setDeliveryGate(async () => {
+      if (scenario === "failed-read") throw new NetworkError("timeout", "GUIDANCE_READ_FAILED");
+      if (scenario === "locked") harness.access.allowed = false;
+      return context;
+    });
+    if (scenario === "ready-detail") { app.openWork(group, work); app = await harness.flush(); }
+    const mutation = scenario === "ready-detail" ? app.changeStatus({ status: "delivered" }) : app.onWorkStatus(group, work, { status: "delivered" });
+    await harness.flush();
+    assert.equal(harness.deliveryReads.length, 0);
+    assert.equal(harness.render().selectedOrder, null);
+    confirmWrite();
+    if (scenario === "failed-write") await assert.rejects(mutation, /STATUS_REJECTED/); else await mutation;
+    const final = await harness.flush();
+    const ready = scenario === "ready-card" || scenario === "ready-detail";
+    assert.equal(final.selectedOrder?.deliveryIntent === "ready", ready);
+    if (ready) {
+      assert.equal(final.selected, null); assert.equal(final.selectedOrder?.queryDate, checklistDate);
+      final.consumeOrderDeliveryIntent();
+      const consumed = await harness.flush();
+      assert.equal(consumed.selectedOrder?.deliveryIntent, undefined);
+      consumed.openWork(group, work);
+      (await harness.flush()).closeWork();
+      assert.equal((await harness.flush()).selectedOrder?.deliveryIntent, undefined);
+    }
+    assert.equal(harness.deliveryReads.length, scenario === "failed-write" ? 0 : 1);
+    assert.ok(harness.deliveryReads.every(read => read.requireFresh === true));
+    assert.equal(harness.calls.statuses, 1);
   });
 }

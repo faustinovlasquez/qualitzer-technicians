@@ -37,6 +37,13 @@ export class OrderService {
 
   async deliver(req: Request, input: OrderDeliveryInput): Promise<void> {
     await this.mutate(req, (scope) => assertDelivery(scope, input), async (scope) => {
+      if (input.acknowledgeDelivery === true) {
+        parseUpstream(orderMutationResultSchema, await this.upstream.request(`/maintenances/${scope.maintenanceId}/technician-delivery`, {
+          method: "POST", token: scope.token, query: new URLSearchParams({ companyBranchId: String(scope.range.companyBranchId) }),
+          json: { note: input.note, durationMinutes: input.durationMinutes === 0 ? null : input.durationMinutes, technicianSignature: input.technicianSignature, acknowledgeDelivery: true },
+        }));
+        return;
+      }
       parseUpstream(orderMutationResultSchema, await this.upstream.request(`/maintenances/${scope.maintenanceId}/finalize`, {
         method: "POST", token: scope.token,
         json: {

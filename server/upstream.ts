@@ -16,6 +16,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/maintenances/works/steps/${number}/files` | `/works/comments/${number}` |
   `/negotiation_files/${number}` | `/files/${number}` |
   `/maintenances/${number}` | `/maintenances/${number}/start-repair` | `/maintenances/${number}/finalize` |
+  `/maintenances/${number}/technician-delivery` |
   `/technician-dashboard/panel/${string}/works/${number}/comments` |
   `/technician-dashboard/panel/${string}/works/${number}/checklists/options` |
   `/technician-dashboard/panel/${string}/works/${number}/checklists` |
@@ -23,6 +24,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/complete` |
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/files` |
+  `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/files/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/reopen` |
   `/technician-dashboard/panel/${string}/works/${number}/steps/${number}/files`;
 interface RequestOptions {

@@ -20,6 +20,19 @@ const path = (suffix = "/status", groupId = "direct-11") => `/api/assignments/${
 const delivery: StatusInput = { status: "delivered", executionDates: [day] };
 const manual: StatusInput = { ...delivery, executionStartTime: "08:00", executionEndTime: "09:00", endDateOffset: 0, isManual: true };
 
+test("worked days allow nonconsecutive dates without changing the execution scope", () => {
+  const workedDates = ["2026-09-01", "2026-09-04", "2026-09-08"];
+  const parsed = statusInputSchema.parse({ ...manual, workedDates });
+  assert.deepEqual(parsed.workedDates, workedDates);
+  assert.deepEqual(parsed.executionDates, [day]);
+  assert.equal(executionDuration(parsed), 60);
+  for (const dates of [[], [day, day], ["2026-02-30"], Array.from({ length: 31 }, (_, index) => `2026-08-${String(index + 1).padStart(2, "0")}`)]) {
+    assert.equal(statusInputSchema.safeParse({ ...manual, workedDates: dates }).success, false);
+  }
+  for (const status of ["in_progress", "paused"]) assert.equal(statusInputSchema.safeParse({ status, workedDates }).success, false);
+  assert.equal(statusInputSchema.safeParse({ ...manual, workedDates, executionDates: [day, "2026-09-09"] }).success, false);
+});
+
 function owned(overrides: Partial<AssignmentWork> = {}, allowEditExecutionTime = false, maintenance = false): OwnedWork {
   const assignedWork = work({ scheduledDate: day, plannedDates: [day], ...overrides });
   const assignedGroup = group({ status: "completed", works: [assignedWork], ...(maintenance ? { id: "maintenance-50", type: "internal_maintenance" } : {}) });
@@ -29,6 +42,25 @@ function owned(overrides: Partial<AssignmentWork> = {}, allowEditExecutionTime =
 function withRequiredSteps(steps: ChecklistStep[]): AssignmentWork["checklists"] {
   return [{ checklistId: 10, name: "Control", code: "CHK-10", required: true, steps }];
 }
+
+test("nonconsecutive worked dates forward once with a single authorized anchor and unchanged timer", async context => {
+  const { baseUrl, state } = await harness(context);
+  const workedDates = ["2026-09-01", "2026-09-04", day];
+  for (const maintenance of [false, true]) {
+    const groupId = maintenance ? "maintenance-50" : "direct-11";
+    state.assignments = assignments([group({ id: groupId, type: maintenance ? "internal_maintenance" : "direct_assignment", works: [work({ scheduledDate: day, plannedDates: [day], elapsedSeconds: 1200 })] })]);
+    state.assignments.technician.allowEditExecutionTime = false;
+    state.calls.length = 0;
+    const response = await jsonRequest(baseUrl, path("/status", groupId), "POST", { ...delivery, workedDates: [...workedDates].reverse(), isManual: false });
+    assert.equal(response.response.status, 200);
+    const writes = writeCalls(state);
+    assert.equal(writes.length, 1);
+    const expected = validateStatus(owned({ elapsedSeconds: 1200 }, false, maintenance), { ...delivery, workedDates, isManual: false });
+    assert.deepEqual(writes[0]?.json, { ...expected, workId: 11, sourceType: maintenance ? "maintenance" : "work", ...(maintenance ? { maintenanceWorkId: 11 } : {}) });
+    assert.ok(assignmentCalls(state).every(call => call.query.get("startDate") === day));
+    assert.equal(executionDuration(validateStatus(owned({}, true, maintenance), { ...manual, workedDates })), 60);
+  }
+});
 
 function plannedSnapshots(state: MockState, dates: string[], customize?: (snapshot: Assignments, date: string, afterFiles: boolean) => void): void {
   let afterFiles = false;

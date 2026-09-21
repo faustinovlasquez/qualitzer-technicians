@@ -25,10 +25,11 @@ export interface WorkActivitiesPort {
   completeActivity(scope: WorkScope, id: number, isCompleted?: boolean): Promise<void>;
   deleteActivity(scope: WorkScope, id: number): Promise<void>;
   activityFiles(scope: WorkScope, id: number): Promise<Attachment[]>;
+  deleteActivityFile(scope: WorkScope, id: number, fileId: string): Promise<void>;
   uploadActivityFiles(scope: WorkScope, id: number, files: LocalPhoto[]): Promise<void>;
   reopenWork(scope: WorkScope): Promise<void>;
 }
 export function workActions(repository: Partial<WorkActivitiesPort>): WorkActivitiesPort {
   if (!repository.activities || !repository.createActivity || !repository.completeActivity || !repository.activityFiles || !repository.uploadActivityFiles || !repository.reopenWork) throw new Error("Estas acciones requieren actualizar el servicio de trabajos.");
-  return { activities: repository.activities.bind(repository), createActivity: repository.createActivity.bind(repository), updateActivity: repository.updateActivity?.bind(repository) ?? (async () => { throw new Error("Actualiza el servicio para editar actividades."); }), completeActivity: repository.completeActivity.bind(repository), deleteActivity: repository.deleteActivity?.bind(repository) ?? (async () => { throw new Error("Actualiza el servicio para eliminar actividades."); }), activityFiles: repository.activityFiles.bind(repository), uploadActivityFiles: repository.uploadActivityFiles.bind(repository), reopenWork: repository.reopenWork.bind(repository) };
+  return { activities: repository.activities.bind(repository), createActivity: repository.createActivity.bind(repository), updateActivity: repository.updateActivity?.bind(repository) ?? (async () => { throw new Error("Actualiza el servicio para editar actividades."); }), completeActivity: repository.completeActivity.bind(repository), deleteActivity: repository.deleteActivity?.bind(repository) ?? (async () => { throw new Error("Actualiza el servicio para eliminar actividades."); }), activityFiles: repository.activityFiles.bind(repository), deleteActivityFile: repository.deleteActivityFile?.bind(repository) ?? (async () => { throw new Error("Actualiza el servicio para eliminar archivos de actividades."); }), uploadActivityFiles: repository.uploadActivityFiles.bind(repository), reopenWork: repository.reopenWork.bind(repository) };
 }

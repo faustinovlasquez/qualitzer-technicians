@@ -57,6 +57,8 @@ export const cachedDeliverySchema = z.object({
   groupId: z.string(), status, maintenanceType: nullableText, finalizationNote: nullableText, damageType: z.enum(["operacional", "desgaste"]).nullable(),
   durationMinutes: z.number().nullable(), startedAt: nullableText, finalizedAt: nullableText, incompleteChecklists: z.array(z.string()),
   suggestedDurationMinutes: z.number().optional(), canStart: z.boolean().optional(), canDeliver: z.boolean().optional(),
+  canTechnicianDeliver: z.boolean().optional(), technicianDeliverySupported: z.boolean().optional(),
+  pendingWorkNames: z.array(z.string()).optional(), pendingDeliveryChecklists: z.array(z.string()).optional(), totalWorks: z.number().int().nonnegative().optional(),
 });
 export function resourceCacheKey(kind: "files" | "comments", scope: OfflineScope, detail?: string | number): string {
   return `${kind}:${JSON.stringify([scope.companyBranchId, scope.groupId, scope.workId ?? null, detail ?? null])}`;

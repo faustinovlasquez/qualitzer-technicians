@@ -7,7 +7,8 @@ import { assignmentWorkQueryRange } from "../domain/assignmentSchedule";
 import { plainText } from "../domain/format";
 import type { AssignmentGroup, AssignmentWork, Attachment, DateRange, LocalPhoto, StatusInput, Tenant, WorkOpenOptions } from "../domain/models";
 import type { OfflineController, OfflineSnapshot } from "../domain/offline";
-import { Badge, Card, EmptyState, IconButton, SectionTitle, type IconName } from "../ui/components";
+import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconName } from "../ui/components";
+import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
 import { SessionContextBar } from "../ui/SessionContextBar";
 import { palette, radius, theme, typography } from "../ui/theme";
 import { AssignmentOrderSummary } from "./orders/AssignmentOrderCard";
@@ -31,7 +32,10 @@ export interface OrderDetailScreenProps {
   mode: "live" | "demo";
   busy: boolean;
   initialTab?: "works" | "files";
+  deliveryIntent?: "deliver" | "ready";
+  onDeliveryIntentConsumed?: () => void;
   onBack: () => void;
+  onHome?: () => void;
   onOpenWork: (group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions) => void;
   onWorkStatus: (group: AssignmentGroup, work: AssignmentWork, input: StatusInput) => Promise<void>;
   onRefresh: () => Promise<void>;
@@ -68,6 +72,7 @@ export function OrderDetailScreen(props: OrderDetailScreenProps) {
 function OrderDetailContent(props: OrderDetailScreenProps) {
   const { group, tenant, branchName, mode, busy, initialTab = "works", onBack, onOpenWork, onWorkStatus, onRefresh } = props;
   const [tab, setTab] = useState<OrderTab>(initialTab);
+  const [sectionsOpen, setSectionsOpen] = useState(false);
   const history = useRef<OrderTab[]>(initialTab === "works" ? [] : ["works"]);
   const childBack = useRef<((home?: boolean) => boolean) | null>(null);
   const [deliverySucceeded, setDeliverySucceeded] = useState(false);
@@ -130,16 +135,17 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
 
   function goBack(): void {
     if (actionRef.current !== null || busyRef.current || leaving.current) return;
+    if (sectionsOpen) { setSectionsOpen(false); return; }
     if (childBack.current?.()) return;
     const previous = history.current.pop();
     if (previous) { setTab(previous); scroll.current?.scrollTo({ y: 0, animated: false }); return; }
     if (tab !== "works") { setTab("works"); return; }
     leaveDetails();
   }
-  function leaveDetails(): void {
+  function leaveDetails(home = false): void {
     if (actionRef.current !== null || busyRef.current || leaving.current || childBack.current?.(true)) return;
     leaving.current = true;
-    try { onBack(); }
+    try { (home ? props.onHome ?? onBack : onBack)(); }
     catch (error) {
       leaving.current = false;
       setOperationError(errorMessage(error));
@@ -171,6 +177,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const lifecycleProps = {
     group, tenant, technicianName: props.technicianName, storageKey: props.storageKey, mode, busy: locked,
     signatureAccess: props.signatureAccess,
+    deliveryIntent: props.deliveryIntent,
+    onDeliveryIntentConsumed: props.onDeliveryIntentConsumed,
     onLoad: props.onLoadDelivery,
     onStart: () => runOperation("start", props.onStart),
     onDeliver: (input: MaintenanceDeliveryInput) => runOperation("deliver", () => props.onDeliver(input)),
@@ -180,19 +188,21 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     {deliverySucceeded ? <DeliverySuccess title="Mantenimiento entregado" name={plainText(group.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
     <SessionContextBar tenant={tenant} branchName={branchName}>{props.connectionStatus}</SessionContextBar>
     <View style={styles.header}>
+      <Text style={styles.headerTitle}>{direct ? "Detalle de asignación" : group.type === "internal_maintenance" ? "Mantenimiento" : "Detalle de OT"}</Text>
+      <View style={styles.headerControls}>
       <IconButton name="arrow-back-outline" label="Volver al paso anterior" disabled={locked} onPress={goBack} />
       <View style={styles.headerCopy}>
-        <Text style={styles.headerTitle}>{direct ? "Detalle de asignación" : group.type === "internal_maintenance" ? "Mantenimiento" : "Detalle de OT"}</Text>
-        <View style={styles.codes}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={styles.codes}>
           {localGroup ? <Badge label="Pendiente de sincronizar" tone="warning" /> : null}
           {localGroup && group.code.trim() ? <Badge label={plainText(group.code)} /> : null}
           {workOrderCode ? <Badge label={workOrderCode} tone="teal" /> : null}
-          <Text numberOfLines={1} style={styles.headerSubtitle}>{plainText(group.title)}</Text>
-        </View>
+        </ScrollView>
       </View>
-      <IconButton name="home-outline" label="Ir al inicio de la orden" disabled={locked} onPress={() => { if (actionRef.current !== null || busyRef.current || childBack.current?.(true)) return; history.current = []; setTab("works"); scroll.current?.scrollTo({ y: 0, animated: false }); }} />
-      <IconButton name="list-outline" label="Volver a mis asignaciones" disabled={locked} onPress={leaveDetails} />
+      <IconButton name="home-outline" label="Ir a mi jornada" disabled={locked} onPress={() => leaveDetails(true)} />
+      <IconButton name="ellipsis-horizontal" label="Opciones de la orden" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) setSectionsOpen(true); }} />
       <IconButton name="refresh-outline" label="Actualizar orden y trabajos" disabled={locked} onPress={refresh} />
+      </View>
+      <Text numberOfLines={1} style={styles.headerSubtitle}>{plainText(group.title)}</Text>
     </View>
     <View style={styles.tabsContainer}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones de la orden">
@@ -210,6 +220,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
         </Pressable>)}
       </ScrollView>
     </View>
+    <View style={[styles.screen, tab === "files" && styles.hidden]} testID="order-details-scroll-container">
     <ScrollView
       ref={scroll}
       style={styles.screen}
@@ -241,9 +252,13 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
         />)}
       </View> : null}
       {tab === "materials" ? <OrderMaterialsTab group={group} onShowWorks={() => selectTab("works")} /> : null}
-      {filesVisited ? <View style={[styles.stack, tab !== "files" && styles.hidden]}>
-        <SectionTitle title={direct ? "Archivos de la asignación" : "Archivos de la OT"} subtitle="Documentos compartidos de la orden. Los archivos de cada trabajo se consultan desde su propia ficha." />
+      <Text style={styles.footerNote}>Los estados, cantidades y asignaciones corresponden a la información recibida de Qualitzer.</Text>
+    </ScrollView>
+    </View>
+      {filesVisited ? <View style={[styles.filePanel, tab !== "files" && styles.hidden]}>
         <FileWorkspace
+          compact
+          autoSave
           backHandler={tab === "files" ? childBack : undefined}
           scopeKey={filesScope}
           resourceKey={JSON.stringify([group.id, props.range?.startDate, props.range?.endDate, props.companyBranchId])}
@@ -254,6 +269,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           pending={pendingDocuments}
           readLocalFile={props.readLocalFile}
           title={direct ? "Archivos compartidos" : "Archivos de la OT"}
+          notices={operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : props.staleReadOnly ? <Notice message="La ficha no esta verificada. Actualiza para comprobar su estado." tone="warning" /> : null}
           onLoad={async () => {
             const current = latest.current;
             const attachments = await current.onLoadFiles();
@@ -267,19 +283,31 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           onDelete={(fileId: string) => runOperation("delete", () => props.onDeleteFile(fileId))}
         />
       </View> : null}
-      <Text style={styles.footerNote}>Los estados, cantidades y asignaciones corresponden a la información recibida de Qualitzer.</Text>
-    </ScrollView>
+    {sectionsOpen ? <Modal visible transparent animationType="fade" onRequestClose={() => setSectionsOpen(false)}>
+      <View style={styles.menuOverlay}><ScrollView style={styles.menu} contentContainerStyle={styles.menuContent} accessibilityViewIsModal>
+        <SectionTitle title="Secciones de la orden" />
+        {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); selectTab(item.id); }} />)}
+        <Button title="Ir a mi jornada" icon="home-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(true); }} />
+        <Button title="Volver a mis asignaciones" icon="list-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(); }} />
+        <Button title="Cerrar menu" icon="close-outline" variant="ghost" onPress={() => setSectionsOpen(false)} />
+      </ScrollView></View>
+    </Modal> : null}
   </SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: palette.background },
   screen: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: palette.surface },
-  headerCopy: { flex: 1, gap: 5 },
+  filePanel: { flex: 1, minHeight: 0 },
+  menuOverlay: { flex: 1, justifyContent: "center", padding: 16, backgroundColor: "rgba(18,44,58,0.65)" },
+  menu: { width: "100%", maxWidth: 440, maxHeight: "90%", flexGrow: 0, alignSelf: "center", borderRadius: 8, backgroundColor: palette.surface },
+  menuContent: { padding: 20, gap: 12 },
+  header: { gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: palette.surface },
+  headerControls: { flexDirection: "row", alignItems: "center", gap: 4 },
+  headerCopy: { flex: 1, minWidth: 0 },
   headerTitle: { ...typography.label, color: palette.navy, fontWeight: "700" },
   headerSubtitle: { ...typography.caption, color: palette.textSecondary, flexShrink: 1 },
-  codes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
+  codes: { flexDirection: "row", alignItems: "center", gap: 6 },
   tabsContainer: { backgroundColor: palette.surface, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: palette.border },
   tabs: { flexGrow: 1, gap: 6, paddingHorizontal: 16 },
   tab: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 12, paddingVertical: 12, borderRadius: radius.sm, backgroundColor: palette.track },

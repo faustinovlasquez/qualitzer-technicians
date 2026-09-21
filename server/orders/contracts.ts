@@ -15,6 +15,7 @@ export const maintenanceStepSchema = z.object({
 });
 const maintenanceWorkSchema = z.object({
   id, maintenanceId: id, title: z.string(),
+  status: z.string().optional(),
   checklists: z.array(z.object({
     checklistId: id.nullable(), name: z.string().nullable(), isRequired: z.boolean(),
     steps: z.array(maintenanceStepSchema),

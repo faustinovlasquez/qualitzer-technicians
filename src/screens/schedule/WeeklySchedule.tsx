@@ -1,29 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { duration, plainText, STATUS_LABELS } from "../../domain/format";
+import { duration, plainText, STATUS_LABELS, weekRange } from "../../domain/format";
+import { assignmentDay } from "../../domain/assignmentSchedule";
 import type { AssignmentGroup, Assignments, AssignmentWork, DateRange, WorkOpenOptions } from "../../domain/models";
 import { buildWeeklySchedule, scheduleClock, scheduleDateOffset, type ScheduleDay, type ScheduleEntry, type ScheduleSource } from "../../domain/weeklySchedule";
 import { palette, radius, typography } from "../../ui/theme";
 import { ScheduleTimeline, SCHEDULE_HEADER_HEIGHT, SCHEDULE_PIXELS_PER_MINUTE } from "./ScheduleTimeline";
 import { scheduleDayLabel, scheduleSources } from "./schedulePresentation";
 import { isPendingLocalWork } from "../offline/offlineDashboardUi";
-import { MobileAgenda } from "./MobileAgenda";
+import { AgendaOrderCard, MobileAgenda } from "./MobileAgenda";
 
 export interface WeeklyScheduleProps {
   data: Assignments;
   range: DateRange;
   onOpenWork: (group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions) => void;
+  onOpenGroup?: (group: AssignmentGroup) => void;
   busy?: boolean;
   timezone?: string;
   selectedDate?: string | null;
   onSelectDate?: (date: string) => void;
   unavailableDates?: string[];
+  viewMode?: "day" | "week" | "month";
+  onViewModeChange?: (mode: "day" | "week" | "month", date?: string) => void;
 }
 
-export function WeeklySchedule({ data, range, onOpenWork, busy = false, timezone, selectedDate, onSelectDate, unavailableDates = [] }: WeeklyScheduleProps) {
+export function WeeklySchedule({ data, range, onOpenWork, onOpenGroup, busy = false, timezone, selectedDate, onSelectDate, unavailableDates = [], viewMode, onViewModeChange }: WeeklyScheduleProps) {
   const { width } = useWindowDimensions();
   const compact = width < 600;
-  const [mode, setMode] = useState<"day" | "week">(compact ? "day" : "week");
+  const [localMode, setLocalMode] = useState<"day" | "week" | "month">("week");
+  const mode = viewMode ?? localMode;
+  function setMode(next: "day" | "week" | "month", date = selectedDay): void {
+    if (busy) return;
+    if (onViewModeChange) onViewModeChange(next, date); else setLocalMode(next);
+  }
   const lastCompact = useRef(compact);
   const [selection, setSelection] = useState<{ scope: string; day: string } | null>(null);
   const [showUnscheduled, setShowUnscheduled] = useState(false);
@@ -38,17 +47,19 @@ export function WeeklySchedule({ data, range, onOpenWork, busy = false, timezone
   const dates = model.days.map((day) => day.date);
   const missing = new Set(unavailableDates.filter((date) => dates.includes(date)));
   const localDates = new Set(model.unscheduled.filter((entry) => isPendingLocalWork(entry.work)).map((entry) => entry.scheduledDay));
-  const selectableDates = model.days.filter((day) => !missing.has(day.date) || day.blocks.length > 0 || localDates.has(day.date)).map((day) => day.date);
   const initialDay = clock && dates.includes(clock.day) ? clock.day : range.startDate;
   const localDay = selection?.scope === scope ? selection.day : null;
   const requestedDay = selectedDate === undefined ? localDay : selectedDate;
   const candidateDay = requestedDay && dates.includes(requestedDay) ? requestedDay : initialDay;
-  const selectedDay = compact || selectableDates.includes(candidateDay) ? candidateDay : selectableDates[0] ?? candidateDay;
+  const selectedDay = candidateDay;
   const selectedIndex = Math.max(0, dates.indexOf(selectedDay));
-  const pageStart = Math.floor(selectedIndex / 7) * 7;
-  const weekDays: ScheduleDay[] = Array.from({ length: 7 }, (_, index) => model.days[pageStart + index] ?? {
-    date: scheduleDateOffset(range.startDate, pageStart + index), blocks: [], plannedMinutes: 0, overlapMinutes: 0,
+  const selectedWeek = weekRange(selectedDay);
+  const pageStart = Math.max(0, dates.indexOf(selectedWeek.startDate));
+  const weekDays: ScheduleDay[] = Array.from({ length: 7 }, (_, index) => {
+    const date = scheduleDateOffset(selectedWeek.startDate, index);
+    return model.days.find(day => day.date === date) ?? { date, blocks: [], plannedMinutes: 0, overlapMinutes: 0 };
   });
+  const orders = data.groups.filter(group => group.type !== "direct_assignment" && group.works.length === 0);
   const focusedDay = model.days[selectedIndex]!;
   const visibleDays = mode === "day" ? [focusedDay] : weekDays;
   const weekMinutes = weekDays.reduce((total, day) => total + day.plannedMinutes, 0);
@@ -67,7 +78,7 @@ export function WeeklySchedule({ data, range, onOpenWork, busy = false, timezone
   useEffect(() => {
     if (lastCompact.current === compact) return;
     lastCompact.current = compact;
-    setMode(compact ? "day" : "week");
+    setLocalMode("week");
   }, [compact]);
 
   function selectDay(day: string): void {
@@ -104,11 +115,13 @@ export function WeeklySchedule({ data, range, onOpenWork, busy = false, timezone
     return day.blocks.every((block) => isPendingLocalWork(block.work)) ? "solo local" : "parcial";
   }
 
-  if (compact) return <MobileAgenda days={weekDays.filter((day) => dates.includes(day.date))} selectedDay={selectedDay} mode={mode} clock={clock} unavailableDates={unavailableDates} unscheduled={model.unscheduled} busy={busy} onMode={setMode} onSelect={selectDay} onOpen={(entry, day) => {
+  const mobileAgenda = <MobileAgenda days={mode === "month" ? model.days : weekDays.filter((day) => dates.includes(day.date))} orders={orders} onOpenGroup={onOpenGroup} selectedDay={selectedDay} mode={mode} clock={clock} unavailableDates={unavailableDates} unscheduled={model.unscheduled} busy={busy} onMode={setMode} onSelect={selectDay} onOpen={(entry, day) => {
     if (busy) return;
     selectDay(day);
     onOpenWork(entry.group, entry.work);
   }} />;
+  if (compact) return mobileAgenda;
+  if (mode === "month") return <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>{mobileAgenda}</ScrollView>;
 
   return (
     <View style={[styles.root, compact && styles.compactRoot]} accessibilityState={{ busy }}>
@@ -118,8 +131,8 @@ export function WeeklySchedule({ data, range, onOpenWork, busy = false, timezone
           <Text accessibilityLabel={`${weekLoad} en siete días. ${clockLabel}`} style={[styles.total, compact && styles.caption]}>{weekLoad} <Text style={styles.muted}>{compact ? "· 7 días" : "planificadas · 7 días"}{compact && clock ? ` · ${String(Math.floor(clock.minute / 60)).padStart(2, "0")}:${String(clock.minute % 60).padStart(2, "0")}` : ""}</Text></Text>
         </View>
         <View accessibilityRole="tablist" accessibilityLabel="Vista del horario" style={styles.toggle}>
-          {(["day", "week"] as const).map((value) => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: mode === value }} onPress={() => setMode(value)} style={[styles.toggleButton, mode === value && styles.selected]}>
-            <Text style={[styles.label, mode === value && styles.selectedText]}>{value === "day" ? "Día" : "Semana"}</Text>
+          {(["day", "week", "month"] as const).map((value) => <Pressable key={value} accessibilityRole="tab" aria-selected={mode === value} accessibilityLabel={value === "day" ? "Agenda del día" : value === "week" ? "Agenda de la semana" : "Agenda del mes"} accessibilityState={{ selected: mode === value, disabled: busy }} disabled={busy} onPress={() => setMode(value)} style={[styles.toggleButton, mode === value && styles.selected]}>
+            <Text style={[styles.label, mode === value && styles.selectedText]}>{value === "day" ? "Día" : value === "week" ? "Semana" : "Mes"}</Text>
           </Pressable>)}
         </View>
       </View>
@@ -134,7 +147,7 @@ export function WeeklySchedule({ data, range, onOpenWork, busy = false, timezone
         {weekDays.map((day) => {
           const available = dates.includes(day.date);
           const selected = selectedDay === day.date;
-          const disabled = !selectableDates.includes(day.date) || busy;
+          const disabled = !available || busy;
           return <Pressable key={day.date} accessibilityRole="button" accessibilityLabel={`${scheduleDayLabel(day.date)}. ${available ? `${dayLoad(day)}${missing.has(day.date) ? ", sin copia completa del servidor" : " planificadas"}${day.overlapMinutes > 0 ? ", con solapamientos" : ""}${clock?.day === day.date ? ", hoy" : ""}` : "Fuera del rango consultado"}`} accessibilityHint="Muestra el horario ampliado de este día." accessibilityState={{ selected, disabled }} disabled={disabled} onPress={() => { selectDay(day.date); setMode("day"); }} style={[styles.dayChoice, compact && styles.compactDayChoice, selected && styles.daySelected, disabled && styles.disabled]}>
             <Text style={[styles.dayLabel, selected && styles.activeText]}>{scheduleDayLabel(day.date, true)}</Text>
             <Text style={[styles.dayLoad, selected && styles.activeText]}>{available ? dayLoad(day) : "—"}</Text>
@@ -170,6 +183,10 @@ export function WeeklySchedule({ data, range, onOpenWork, busy = false, timezone
           </Pressable>)}
         </View> : null}
         <View onLayout={(event) => { timelineTop.current = event.nativeEvent.layout.y; initialScroll.current.timeline = true; scrollInitially(); }}>
+          {!showUnscheduled ? model.unscheduled.filter(entry => entry.reason === "invalid_time" && visibleDays.some(day => day.date === entry.scheduledDay)).map(entry => <Pressable key={entry.key} accessibilityRole="button" disabled={busy} onPress={() => open(entry)} style={styles.unplannedCard}>
+            <Text style={styles.unplannedTitle}>{plainText(entry.work.title)}</Text><Text style={styles.caption}>{scheduleDayLabel(entry.scheduledDay)} · Sin hora asignada</Text>
+          </Pressable>) : null}
+          {orders.filter(group => visibleDays.some(day => day.date === assignmentDay(group.scheduledDate))).map(group => <AgendaOrderCard key={group.id} group={group} busy={busy} onOpenGroup={onOpenGroup} />)}
           <ScheduleTimeline days={visibleDays} availableDates={dates} unavailableDates={unavailableDates} clock={clock} busy={busy} onOpen={open} />
         </View>
         {!compact ? footnote : null}

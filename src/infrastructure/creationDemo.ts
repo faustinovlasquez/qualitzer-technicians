@@ -57,8 +57,9 @@ export class DemoCreationStore {
     if (equipmentId !== undefined && !equipment.some((item) => item.id === equipmentId)) throw new Error("MOBILE_CREATION_EQUIPMENT_NOT_FOUND");
     const workId = ++this.nextId;
     const groupId = input.kind === "maintenance" ? `maintenance-${++this.nextId}` : `${input.kind === "work" ? "direct" : "direct-np"}-${workId}`;
+    const hasTimes = Boolean(input.schedule.startTime && input.schedule.endTime);
     const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-    const plannedMinutes = minutes(input.schedule.endTime) - minutes(input.schedule.startTime);
+    const plannedMinutes = hasTimes ? minutes(input.schedule.endTime) - minutes(input.schedule.startTime) : 0;
     const selectedEquipment = equipment.find((item) => item.id === equipmentId);
     const title = input.kind === "work" ? input.work.title : input.kind === "maintenance" ? input.maintenance.title : input.nonProductive.reasonText ?? reasons[nonProductiveReasonSchema.options.indexOf(input.nonProductive.reason)]!;
     const work: AssignmentWork = {
@@ -77,7 +78,7 @@ export class DemoCreationStore {
       equipment: selectedEquipment ? { label: selectedEquipment.label, identifier: `EQ-${selectedEquipment.id}`, internalNumber: String(selectedEquipment.id), ownerLabel: "Demostración" } : null,
       products: [], works: [work], ...(input.kind === "maintenance" ? { maintenanceType: input.maintenance.type } : {}),
     };
-    const result = creationResultSchema.parse({ kind: input.kind, groupId, workId, companyBranchId: input.companyBranchId, schedule: { date: input.schedule.date, startTime: input.schedule.startTime, endTime: input.schedule.endTime, plannedMinutes, timezone: demoUser.system.timezone } });
+    const result = creationResultSchema.parse({ kind: input.kind, groupId, workId, companyBranchId: input.companyBranchId, schedule: { date: input.schedule.date, startTime: input.schedule.startTime, endTime: input.schedule.endTime, plannedMinutes: hasTimes ? plannedMinutes : null, timezone: demoUser.system.timezone } });
     this.insert(group, input.kind === "non_productive" ? input.nonProductive.initialComment : undefined);
     this.groupIds.add(group.id);
     this.requests.set(input.clientRequestId, { signature, result: structuredClone(result) });

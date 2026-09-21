@@ -54,6 +54,22 @@ export function incompleteDeliveryChecklists(group: AssignmentGroup): string[] {
     .map((checklist) => `${work.title} — ${checklist.name}`));
 }
 
+export function deliveryWarnings(group: AssignmentGroup, context?: MaintenanceDeliveryContext | null) {
+  const works = visibleMaintenanceWorks(group);
+  const pendingWorks = context?.pendingWorkNames ?? works.filter(work => work.status !== "delivered").map(work => work.title);
+  const pendingChecklists = [...new Set([
+    ...works.flatMap(work => work.checklists.filter(checklist => !checklist.steps.every(isChecklistStepSatisfied))
+      .map(checklist => `${work.title} — ${checklist.name}`)),
+    ...(context?.incompleteChecklists ?? []),
+    ...(context?.pendingDeliveryChecklists ?? []),
+  ])];
+  return { pendingWorks, pendingChecklists, allWorksDelivered: (context?.totalWorks ?? works.length) > 0 && pendingWorks.length === 0 };
+}
+
+export function technicianDeliveryInput(draft: DeliveryDraft, technicianSignature: string): MaintenanceDeliveryInput {
+  return { ...deliveryInput(draft, false, technicianSignature, null), acknowledgeDelivery: true };
+}
+
 export function initialDeliveryDraft(group: AssignmentGroup, context: MaintenanceDeliveryContext): DeliveryDraft {
   const minutes = context.durationMinutes !== null && context.durationMinutes > 0
     ? context.durationMinutes : context.suggestedDurationMinutes ?? suggestedDurationMinutes(group);

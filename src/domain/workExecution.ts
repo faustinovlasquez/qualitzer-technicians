@@ -3,6 +3,11 @@ import type { AssignmentWork, DateRange, StatusInput, WorkStatus } from "./model
 
 export const MAX_EXECUTION_DATES = 30;
 
+export function workedDatesAllowed(dates: readonly string[]): boolean {
+  return dates.length > 0 && dates.length <= MAX_EXECUTION_DATES && new Set(dates).size === dates.length
+    && dates.every(date => assignmentDay(date) === date && date >= "2000-01-01" && date <= "2100-12-31");
+}
+
 export interface ExecutionTiming {
   executionStartTime: string;
   executionEndTime: string;

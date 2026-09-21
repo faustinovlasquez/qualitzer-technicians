@@ -8,6 +8,9 @@ const workActionsOnly = process.argv.includes("--work-actions");
 const checklistSummaryOnly = process.argv.includes("--checklist-summary");
 const activityPickerOnly = process.argv.includes("--activity-picker");
 const signaturesOnly = process.argv.includes("--signatures");
+const fileDeletionOnly = process.argv.includes("--file-deletion");
+const orderFilesOnly = process.argv.includes("--order-files");
+const androidRefreshBefore = process.argv.includes("--android-refresh-before");
 let runner = fs.readFileSync(shared, "utf8");
 function replace(before, after) {
   if (runner.split(before).length !== 2) throw new Error(`STALE_HARNESS: ${before.slice(0, 100)}`);
@@ -41,6 +44,33 @@ stubs["react-native"] = 'import React from "react";import * as Native from '+JSO
 stubs["expo-image-picker"] = stubs["expo-image-picker"].replace('()=>{throw new Error("UNEXPECTED_GALLERY");}', '()=>window.activityPicker.open("library")');
 stubs["expo-document-picker"] = 'let resolvePicker=null;window.activityPicker={kind:null,open(kind){if(resolvePicker)throw new Error("PICKER_ALREADY_OPEN");this.kind=kind;return new Promise(resolve=>{resolvePicker=resolve;});},finish(canceled=false){if(!resolvePicker)throw new Error("NO_PICKER");const resolve=resolvePicker;resolvePicker=null;if(canceled){resolve({canceled:true,assets:null});return;}const library=this.kind==="library";const file=library?new File([Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jz1cAAAAASUVORK5CYII="),character=>character.charCodeAt(0))],"galeria.png",{type:"image/png"}):new File(["%PDF-1.4 simulated fixture"],"Documento.pdf",{type:"application/pdf"});resolve({canceled:false,assets:[{uri:URL.createObjectURL(file),name:file.name,fileName:file.name,mimeType:file.type,size:file.size,fileSize:file.size,width:1,height:1,file}]});}};export const getDocumentAsync=()=>window.activityPicker.open("document");';
 async function main() {`);
+if (orderFilesOnly) {
+  const splitPath = path.join(root, "node_modules/react-native/Libraries/StyleSheet/splitLayoutProps.js");
+  const splitSource = fs.readFileSync(splitPath, "utf8");
+  const splitCode = require("@babel/core").transformSync(splitSource, { filename: splitPath, babelrc: false, configFile: false, plugins: [require.resolve("@babel/plugin-transform-flow-strip-types")] }).code;
+  const nativePath = JSON.stringify(path.join(root, "node_modules/react-native-web/dist/index.js").split(path.sep).join("/"));
+  const nativeShim = `import React from "react";import * as Native from ${nativePath};export * from ${nativePath};import splitLayoutProps from "android-split-layout";
+export const ScrollView=React.forwardRef(function AndroidRefreshScrollView({refreshControl,style,...props},ref){
+  if(!refreshControl)return <Native.ScrollView {...props} ref={ref} style={style}/>;
+  const base={flexGrow:1,flexShrink:1,flexDirection:"column",overflow:"hidden"};
+  const {outer,inner}=splitLayoutProps(Native.StyleSheet.flatten([base,style]));
+  return <Native.View style={[base,outer]} testID="android-refresh-layout"><Native.ScrollView {...props} ref={ref} style={[base,inner]}/></Native.View>;
+});`;
+  replace('async function main() {', `
+report.androidRefreshLayout = { simulated: true, splitSourceSha256: hash(fs.readFileSync(${JSON.stringify(splitPath)})), beforeFix: ${androidRefreshBefore} };
+report.fixtureAdapters.push("Android refresh wrapper modeled on RN Web using installed React Native splitLayoutProps; native rendering and OS remain unverified");
+stubs["android-split-layout"] = ${JSON.stringify(splitCode)};
+stubs["react-native"] = ${JSON.stringify(nativeShim)};
+async function main() {`);
+}
+if (androidRefreshBefore) replace('builder.onResolve({ filter: /.*/ }, args => {', `builder.onLoad({filter: /OrderDetailScreen\\.tsx$/}, args => {
+          let source=fs.readFileSync(args.path,"utf8").replaceAll("\\r\\n","\\n");
+          const before='<View style={[styles.screen, tab === "files" && styles.hidden]} testID="order-details-scroll-container">';
+          if(!source.includes(before))throw new Error("REFRESH_REGRESSION_ANCHOR_MISSING");
+          source=source.replace(before,"").replace('style={styles.screen}', 'style={[styles.screen, tab === "files" && styles.hidden]}').replace('</ScrollView>\\n    </View>\\n      {filesVisited', '</ScrollView>\\n      {filesVisited');
+          return {contents:source,loader:"tsx",resolveDir:path.dirname(args.path)};
+        });
+        builder.onResolve({ filter: /.*/ }, args => {`);
 replace('builder.onResolve({ filter: /.*/ }, args => {', `builder.onLoad({filter: /picker-messages-fixture\\.tsx$/}, args => {
           const source=fs.readFileSync(args.path,"utf8");
           const start=source.indexOf("const listeners ="); const end=source.indexOf('const date = "2026-09-14";');
@@ -52,11 +82,14 @@ replace('file === "tests/e2e/picker-messages-fixture.tsx"', 'file.startsWith("te
 const components = ["src/ui/time/TimeField.tsx", "src/ui/time/TimePickerPanel.tsx", "src/ui/time/useSelectionSession.ts", "src/ui/time/SelectorUi.tsx", "src/ui/time/NumericSelectField.tsx", "src/screens/creation/CreationScreen.tsx", "src/screens/workDetail/CompletionDialog.tsx", "src/screens/notifications/NotificationSettingsScreen.tsx", "src/screens/orders/lifecycle/MaintenanceDeliveryDialog.tsx", "src/screens/offline/OfflineCenterScreen.tsx", "src/screens/offline/OfflineStatusBar.tsx", "src/screens/offline/syncAttemptPresentation.ts", "src/offline/engine.ts", "src/offline/syncScheduling.ts", "src/offline/state.ts", "src/offline/tests/fakes.ts", "src/security/DeviceSecurityProvider.tsx", "src/security/DeviceSecurityContext.tsx", "src/security/DeviceLockController.ts"];
 components.push("src/screens/workDetail/FileWorkspace.tsx", "src/screens/workDetail/files/WorkspaceFileList.tsx", "src/screens/workDetail/DetailUi.tsx");
 components.push("src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/WorkActivities.tsx", "src/screens/workDetail/DeliverySuccess.tsx");
+if (orderFilesOnly) components.push("src/screens/OrderDetailScreen.tsx", "src/screens/workDetail/files/workspaceStyles.ts");
 if (signaturesOnly) components.push("src/screens/ProfileScreen.tsx", "src/screens/signatures/UserSignaturesPanel.tsx", "src/screens/signatures/SignatureEditor.tsx", "src/screens/orders/lifecycle/SignaturePad.web.tsx", "src/infrastructure/signatureImage.web.ts");
 if (workActionsOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/work-actions/.test(name)) return;');
 if (checklistSummaryOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/checklist-summary/.test(name)) return;');
 if (activityPickerOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/activity-picker/.test(name)) return;');
 if (signaturesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/profile-signatures/.test(name)) return;');
+if (fileDeletionOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/file-deletion/.test(name)) return;');
+if (orderFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/order-files/.test(name)) return;');
 if (deliveryFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/completion|blocked-stays|confirmed-files/.test(name)) return;');
 const componentStart = runner.indexOf('    report.realComponents = [');
 const componentEnd = runner.indexOf(';', componentStart);

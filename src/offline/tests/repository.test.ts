@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TechnicianRepository } from "../../domain/TechnicianRepository";
-import type { Assignments, ChecklistStep, DateRange, LocalPhoto, Session, StepAnswer, WorkScope } from "../../domain/models";
+import type { Assignments, Attachment, ChecklistStep, DateRange, LocalPhoto, Session, StepAnswer, WorkScope } from "../../domain/models";
 import type { CreationOptions, CreationOptionsQuery } from "../../domain/creation";
 import { OfflineQueuedError } from "../../domain/offline";
 import { ApiError, NetworkError } from "../../infrastructure/errors";
@@ -13,6 +13,7 @@ import { syncAnswerFromStep, syncCommandSchema, toSyncAnswer } from "../../domai
 import { answerFromStep } from "../../domain/format";
 import { resourceCacheKey } from "../cacheSchemas";
 import { OFFLINE_LIMITS } from "../contracts";
+import type { WorkActivitiesPort } from "../../domain/workActivities";
 
 const scope: WorkScope = { groupId: "direct-80", workId: "80", companyBranchId: 1, startDate: "2026-09-08", endDate: "2026-09-08" };
 const draftPhoto: LocalPhoto = { id: "persisted-draft-photo", uri: "source:photo", name: "proof.png", mimeType: "image/png", size: 10 };
@@ -41,6 +42,71 @@ function repositoryFixture() {
   const dependencies = { ...f.dependencies, upstream: remote };
   return { ...f, remote, session, dates, repository: new OfflineTechnicianRepository(remote, session, dependencies), setReadError: (error?: Error) => { readError = error; } };
 }
+
+test("agenda prioritizes the selected day and publishes it before other dates complete", async () => {
+  const current = repositoryFixture();
+  let releaseOthers: () => void = () => {};
+  const others = new Promise<void>(resolve => { releaseOthers = resolve; });
+  let firstProgress: () => void = () => {};
+  const progressed = new Promise<void>(resolve => { firstProgress = resolve; });
+  const requested: string[] = [];
+  const updates: { data: Assignments; dates: string[] }[] = [];
+  let finished = false;
+  let selectedDate = "2026-09-16";
+  current.remote.assignments = async range => {
+    requested.push(range.startDate);
+    if (range.startDate !== "2026-09-16") await others;
+    const data = assignmentsWithStep();
+    data.groups[0].works[0].scheduledDate = range.startDate;
+    data.groups[0].works[0].plannedDates = [range.startDate];
+    return data;
+  };
+  const request = current.repository.assignments({ startDate: "2026-09-14", endDate: "2026-09-20" }, 1, {
+    priorityDate: "2026-09-16", getPriorityDate: () => selectedDate,
+    onProgress: (data, dates) => { updates.push({ data, dates }); selectedDate = "2026-09-20"; firstProgress(); },
+  }).then(value => { finished = true; return value; });
+  try {
+    await progressed;
+    assert.equal(requested[0], "2026-09-16");
+    assert.equal(finished, false);
+    assert.deepEqual(updates[0].dates, ["2026-09-16"]);
+    assert.equal(updates[0].data.groups[0].works[0].scheduledDate, "2026-09-16");
+  } finally { releaseOthers(); }
+  const result = await request;
+  assert.equal(requested.length, 7);
+  assert.equal(requested[2], "2026-09-20");
+  assert.equal(updates.at(-1)!.dates.length, 7);
+  assert.equal(result.groups[0].works[0].schedules?.length, 7);
+});
+
+test("confirmed activity file deletion invalidates cache and rejects late listings without deleting drafts or queue", async () => {
+  const current = repositoryFixture();
+  const files: Attachment[] = [{ id: 401, name: "Foto", type: "image/png", url: "https://files.invalid/photo.png" }];
+  let resolveRead: (files: Attachment[]) => void = () => {};
+  let deferred = false;
+  let deletes = 0;
+  const actions: WorkActivitiesPort = {
+    activities: async () => [], createActivity: async () => ({ id: 71 }), updateActivity: async () => {}, completeActivity: async () => {}, deleteActivity: async () => {}, reopenWork: async () => {}, uploadActivityFiles: async () => {},
+    activityFiles: async () => deferred ? new Promise(resolve => { resolveRead = resolve; }) : files,
+    deleteActivityFile: async (value, id, fileId) => { assert.deepEqual(value, scope); assert.equal(id, 71); assert.equal(fileId, "401"); deletes++; },
+  };
+  Object.assign(current.remote, actions);
+  assert.deepEqual(await current.repository.activityFiles(scope, 71), files);
+  const before = await current.store.read("a");
+  deferred = true;
+  const listing = current.repository.activityFiles(scope, 71);
+  await new Promise(resolve => setImmediate(resolve));
+  await current.repository.deleteActivityFile(scope, 71, "401");
+  resolveRead(files);
+  await assert.rejects(listing, /archivos cambiaron/);
+  const after = await current.store.read("a");
+  assert.deepEqual(after.operations, before.operations);
+  assert.equal(after.cache.some(entry => entry.key.startsWith("activity-files:")), false);
+  current.connect(false);
+  await assert.rejects(current.repository.activityFiles(scope, 71), /CACHE_MISS/);
+  await assert.rejects(current.repository.deleteActivityFile(scope, 71, "401"), /REQUIRES_CONNECTION/);
+  assert.equal(deletes, 1);
+});
 
 test("remote read readiness, 503, unknown link and cache reads preserve honest connection state", async () => {
   const f = repositoryFixture();
@@ -171,6 +237,54 @@ test("online creation returns canonical result only after persisted applied stat
   const value = await f.repository.createRecord(creation());
   assert.equal(value.groupId, "direct-80"); assert.equal((await f.store.read("a")).operations[0]?.status, "applied");
 });
+test("connected creation waits for its own persisted confirmation without a second submission", async () => {
+  const current = repositoryFixture();
+  await current.repository.syncNow();
+  assert.equal(current.repository.getSnapshot().online, true);
+  const value = await current.repository.createRecord(creation());
+  assert.equal(value.groupId, "direct-80");
+  assert.equal((await current.store.read("a")).operations[0]?.status, "applied");
+  assert.equal(current.upstream.creates.length, 1);
+  assert.deepEqual(await current.repository.createRecord(creation()), value);
+  assert.equal(current.upstream.creates.length, 1);
+});
+test("connected creation keeps a lost response queued instead of claiming confirmation", async () => {
+  const current = repositoryFixture();
+  await current.repository.syncNow();
+  current.upstream.failAfterApply = true;
+  const outcome = await queued(current.repository.createRecord(creation()));
+  assert.equal(outcome.operationId, creation().clientRequestId);
+  assert.equal(current.upstream.creates.length, 1);
+  assert.notEqual((await current.store.read("a")).operations[0]?.status, "applied");
+});
+test("slow creation returns queued after eight seconds and reconciles the same late receipt", async context => {
+  const current = repositoryFixture();
+  await current.repository.syncNow();
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  let entered = () => {};
+  let release = () => {};
+  const sending = new Promise<void>(resolve => { entered = resolve; });
+  const response = new Promise<void>(resolve => { release = resolve; });
+  current.remote.createRecord = async input => { entered(); await response; return current.upstream.createRecord(input); };
+  const pending = queued(current.repository.createRecord(creation()));
+  await sending;
+  context.mock.timers.tick(8_000);
+  assert.equal((await pending).operationId, creation().clientRequestId);
+  release();
+  await current.repository.syncNow();
+  assert.equal(current.repository.getSnapshot().operations[0]?.status, "applied");
+  assert.equal(current.upstream.creates.length, 1);
+});
+test("untimed offline work retains its date without negative planned minutes", async () => {
+  for (const times of [{ startTime: "", endTime: "" }, { startTime: "09:00", endTime: "" }, { startTime: "", endTime: "10:30" }]) {
+    const current = repositoryFixture(); current.connect(false);
+    const input = creation(); input.schedule = { ...input.schedule, ...times };
+    await queued(current.repository.createRecord(input));
+    const data = await current.repository.assignments(scope, 1);
+    assert.equal(data.groups[0]?.works[0]?.plannedMinutes, 0);
+    assert.equal(data.groups[0]?.works[0]?.scheduledDate, input.schedule.date);
+  }
+});
 test("photo batch owns all durable files before returning queued outcome", async () => {
   const f = repositoryFixture(); f.connect(false);
   await assert.rejects(f.repository.uploadDocuments(scope, [1, 2].map((id) => ({ id: String(id), uri: "fake:", name: `${id}.png`, mimeType: "image/png" }))), (error: unknown) => error instanceof OfflineQueuedError && error.ownsFiles && error.operationIds.length === 2);
@@ -198,6 +312,120 @@ test("offline status report and delete never pretend success or enqueue", async 
   await assert.rejects(f.repository.report(scope, "Report"), /REQUIRES_CONNECTION/);
   await assert.rejects(f.repository.deleteFile(scope, "1"), /REQUIRES_CONNECTION/);
   assert.equal((await f.store.read("a")).operations.length, 0);
+});
+test("a confirmed checklist deletion is not resurrected from its applied upload receipt", async () => {
+  const f = repositoryFixture();
+  let remoteFiles: Attachment[] = [];
+  let deletes = 0;
+  f.remote.stepFiles = async () => structuredClone(remoteFiles);
+  f.remote.deleteFile = async (actualScope, fileId, stepId) => {
+    assert.deepEqual(actualScope, scope);
+    assert.equal(stepId, "9");
+    assert.equal(remoteFiles.some(file => String(file.id) === fileId), true);
+    remoteFiles = remoteFiles.filter(file => String(file.id) !== fileId);
+    deletes += 1;
+  };
+  await queued(f.repository.uploadDocuments(scope, [draftPhoto], "9"));
+  await f.repository.engine.syncNow();
+  const uploaded = (await f.store.read("a")).operations[0]!;
+  assert.equal(uploaded.status, "applied");
+  assert.ok(uploaded.receipt?.fileId !== undefined);
+  remoteFiles = [{ id: uploaded.receipt.fileId, name: draftPhoto.name, type: draftPhoto.mimeType, url: "https://files.example.invalid/proof.png" }];
+  assert.equal((await f.repository.stepFiles(scope, "9")).length, 1);
+  await f.repository.deleteFile(scope, String(uploaded.receipt.fileId), "9");
+  assert.deepEqual(await f.repository.stepFiles(scope, "9"), []);
+  assert.equal(deletes, 1);
+  const after = (await f.store.read("a")).operations.find(operation => operation.id === uploaded.id);
+  assert.deepEqual(after, uploaded, "The confirmed upload and receipt remain unchanged");
+  assert.deepEqual((await f.store.read("a")).cache.find(entry => entry.key === resourceCacheKey("files", scope, "9"))?.fileReadOperationIds, [uploaded.id]);
+  f.connect(false);
+  const restarted = new OfflineTechnicianRepository(f.remote, f.session, { ...f.dependencies, upstream: f.remote });
+  assert.deepEqual(await restarted.stepFiles({ ...scope, startDate: "2026-09-09", endDate: "2026-09-09" }, "9"), []);
+  assert.equal(f.files.files.size, 1);
+  assert.equal(f.files.removes.length, 0);
+  f.connect(true); await restarted.syncNow();
+  assert.equal(f.upstream.documents.length, 1, "No upload is replayed after deletion");
+});
+
+for (const target of ["work", "group"] as const) test(`${target} files respect a post-upload server list without dropping a pending document`, async () => {
+  const f = repositoryFixture();
+  const groupScope = { groupId: scope.groupId, companyBranchId: scope.companyBranchId, startDate: scope.startDate, endDate: scope.endDate };
+  const upload = (photo: LocalPhoto) => target === "work" ? f.repository.uploadDocuments(scope, [photo]) : f.repository.uploadGroupFiles(groupScope, [photo]);
+  const list = () => target === "work" ? f.repository.files(scope) : f.repository.groupFiles(groupScope);
+  f.remote.groupFiles = async () => [];
+  await queued(upload(draftPhoto)); await f.repository.syncNow();
+  const confirmed = (await f.store.read("a")).operations[0]!;
+  assert.equal(confirmed.status, "applied");
+  await queued(upload({ ...draftPhoto, id: "still-pending", name: "pending.png" }));
+  const before = (await f.store.read("a")).operations;
+  const listed = await list();
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.name, "pending.png");
+  assert.match(String(listed[0]?.id), /^local-/);
+  assert.deepEqual((await f.store.read("a")).operations, before);
+  f.connect(false);
+  assert.deepEqual(await list(), listed);
+});
+
+test("a file read started before the upload receipt cannot hide the newly confirmed document", async () => {
+  const f = repositoryFixture();
+  await queued(f.repository.uploadDocuments(scope, [draftPhoto], "9"));
+  let resolveRead!: (files: Attachment[]) => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  f.remote.stepFiles = () => { markStarted(); return new Promise(resolve => { resolveRead = resolve; }); };
+  const inFlight = f.repository.stepFiles(scope, "9");
+  await started;
+  await f.repository.syncNow();
+  resolveRead([]);
+  const after = await inFlight;
+  assert.equal(after.length, 1);
+  const uploaded = (await f.store.read("a")).operations[0]!;
+  assert.ok(uploaded.kind === "document");
+  assert.ok("offline" in after[0]!);
+  assert.deepEqual(after[0].offline, { operationId: uploaded.id, status: "applied", downloaded: true, confirmed: true, localFileId: uploaded.file.id });
+  assert.deepEqual((await f.store.read("a")).cache.find(entry => entry.key === resourceCacheKey("files", scope, "9"))?.fileReadOperationIds, []);
+  f.connect(false);
+  assert.equal((await f.repository.stepFiles(scope, "9")).length, 1);
+  f.connect(true); f.remote.stepFiles = async () => [];
+  assert.deepEqual(await f.repository.stepFiles(scope, "9"), []);
+});
+
+test("a late pre-deletion file response cannot replace the newer authoritative empty list", async () => {
+  const f = repositoryFixture();
+  await queued(f.repository.uploadDocuments(scope, [draftPhoto], "9")); await f.repository.syncNow();
+  const uploaded = (await f.store.read("a")).operations[0]!;
+  assert.ok(uploaded.receipt?.fileId !== undefined);
+  const original: Attachment = { id: uploaded.receipt.fileId, name: "proof.png", url: "https://files.example.invalid/proof.png" };
+  let resolveRead!: (files: Attachment[]) => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  f.remote.stepFiles = () => { markStarted(); return new Promise(resolve => { resolveRead = resolve; }); };
+  const stale = f.repository.stepFiles(scope, "9");
+  await started;
+  f.remote.stepFiles = async () => [];
+  assert.deepEqual(await f.repository.stepFiles(scope, "9"), []);
+  resolveRead([original]);
+  assert.deepEqual(await stale, []);
+  f.connect(false);
+  assert.deepEqual(await f.repository.stepFiles(scope, "9"), []);
+});
+
+test("failed reads and failed deletions do not turn old cache into evidence of an absent file", async () => {
+  const f = repositoryFixture();
+  f.remote.stepFiles = async () => [];
+  await f.repository.stepFiles(scope, "9");
+  await queued(f.repository.uploadDocuments(scope, [draftPhoto], "9")); await f.repository.syncNow();
+  const before = (await f.store.read("a")).operations;
+  f.remote.deleteFile = async () => { throw new ApiError(404, "FILE_NOT_FOUND", "Missing"); };
+  await assert.rejects(f.repository.deleteFile(scope, "1101", "9"), error => error instanceof ApiError && error.code === "FILE_NOT_FOUND");
+  f.remote.stepFiles = async () => { throw new NetworkError("network"); };
+  assert.equal((await f.repository.stepFiles(scope, "9")).length, 1);
+  assert.deepEqual((await f.store.read("a")).operations, before);
+  f.remote.stepFiles = async () => { throw new ApiError(503, "UPSTREAM_UNAVAILABLE", "Unavailable"); };
+  await assert.rejects(f.repository.stepFiles(scope, "9"), ApiError);
+  f.connect(false);
+  assert.equal((await f.repository.stepFiles(scope, "9")).length, 1);
 });
 test("cached reads cannot cross branch namespace", async () => {
   const f = repositoryFixture(); await f.repository.assignments(scope, 1);
@@ -551,9 +779,15 @@ test("local dependency and remapped canonical target reuse the applied operation
   const restarted = new OfflineTechnicianRepository(f.remote, f.session, { ...f.dependencies, upstream: f.remote });
   await restarted.uploadDocuments(scope, [draftPhoto]);
   await restarted.uploadDocuments(localScope, [draftPhoto]);
+  f.remote.files = async () => [{ id: Number(first.operationId.slice(-12)) + 100, name: draftPhoto.name, url: "https://files.invalid/confirmed.png" }];
   const files = await restarted.files(scope);
   assert.equal(files.length, 1); assert.equal(files[0]!.id, Number(first.operationId.slice(-12)) + 100);
-  assert.match(files[0]!.url, /^memory:/); assert.equal(f.files.sequence, 1);
+  assert.equal(files[0]!.url, "https://files.invalid/confirmed.png"); assert.equal(f.files.sequence, 1);
+  const retained = (await f.store.read("a")).operations.find(operation => operation.id === first.operationId);
+  assert.ok(retained?.kind === "document");
+  assert.match((await restarted.readLocalFile(retained.file.id)).uri, /^memory:/);
+  f.remote.files = async () => [];
+  assert.deepEqual(await restarted.files(scope), [], "A remapped local upload cannot resurrect a file absent from a newer canonical list");
   assert.equal(f.upstream.documents.length, 1); assert.equal(f.upstream.creates.length, 1);
   assert.equal(f.upstream.documents[0]!.scope.workId, scope.workId);
 });

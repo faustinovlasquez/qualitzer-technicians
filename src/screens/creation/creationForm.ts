@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
 import type { Assignments } from "../../domain/models";
+import type { OfflineSnapshot } from "../../domain/offline";
 import { buildWeeklySchedule, scheduleTimeMinutes } from "../../domain/weeklySchedule";
 import { queuedCreationOutcomeSchema } from "../offline/offlineUi";
 
@@ -27,7 +28,7 @@ export function creationPayload(kind: CreationKind, form: CreationForm, companyB
   const base = { companyBranchId, clientRequestId, schedule: { date: form.date, startTime: form.startTime, endTime: form.endTime } };
   const specialty = form.specialty ? { specialtyId: form.specialty.id } : {};
   if (kind === "work") return creationInputSchema.parse({ ...base, kind, work: {
-    title: form.title, summary: form.summary, priority: form.priority, ...specialty,
+    title: form.title, summary: form.summary.trim(), priority: form.priority, ...specialty,
     ...(form.equipment ? { rentalEquipmentId: form.equipment.id } : {}),
   } });
   if (kind === "maintenance") return creationInputSchema.parse({ ...base, kind, maintenance: {
@@ -46,14 +47,13 @@ export function validateCreationForm(kind: CreationKind, form: CreationForm): Cr
     if (!form[field].trim()) errors[field] = `${label} es obligatorio.`;
   };
   if (kind !== "non_productive") requiredText("title", "El título");
-  if (kind === "work") requiredText("summary", "El resumen");
   if (kind === "maintenance") { requiredText("motive", "El motivo"); if (!form.equipment) errors.equipment = "Selecciona un equipo."; }
   if (kind === "non_productive" && form.reason === "other") requiredText("reasonText", "El detalle del motivo");
   if (!calendarDateSchema.safeParse(form.date).success) errors.date = "Ingresa una fecha real YYYY-MM-DD entre 2000 y 2100.";
   const time = /^([01]\d|2[0-3]):[0-5]\d$/;
-  if (!time.test(form.startTime)) errors.startTime = "Usa HH:mm, por ejemplo 09:00.";
-  if (!time.test(form.endTime)) errors.endTime = "Usa HH:mm, por ejemplo 10:30.";
-  else if (!errors.startTime && form.startTime >= form.endTime) errors.endTime = "El fin debe ser posterior al inicio, en el mismo día.";
+  if ((kind !== "work" || form.startTime) && !time.test(form.startTime)) errors.startTime = "Usa HH:mm, por ejemplo 09:00.";
+  if ((kind !== "work" || form.endTime) && !time.test(form.endTime)) errors.endTime = "Usa HH:mm, por ejemplo 10:30.";
+  else if (form.startTime && form.endTime && !errors.startTime && form.startTime >= form.endTime) errors.endTime = "El fin debe ser posterior al inicio, en el mismo día.";
   const parsed = creationFormSchema.safeParse(form);
   if (!parsed.success) for (const issue of parsed.error.issues) {
     const field = issue.path[0];
@@ -88,6 +88,23 @@ export const creationDraftSchema = z.discriminatedUnion("phase", [
   } catch { context.addIssue({ code: "custom", message: "CREATION_DRAFT_MISMATCH" }); }
 });
 export type CreationDraft = z.infer<typeof creationDraftSchema>;
+
+export function queuedCreationState(draft: Extract<CreationDraft, { phase: "queued" }>, snapshot?: OfflineSnapshot | null): {
+  status: "unavailable" | "pending" | "syncing" | "review" | "auth_required" | "confirmed";
+  confirmed?: Extract<CreationDraft, { phase: "confirmed" }>;
+} {
+  const operation = snapshot?.operations.find(item => item.id === draft.input.clientRequestId);
+  if (!operation || operation.kind !== "create" || operation.localGroupId !== draft.outcome.localGroupId || operation.localWorkId !== draft.outcome.localWorkId) return { status: "unavailable" };
+  const input = creationInputSchema.safeParse(operation.input);
+  if (!input.success || JSON.stringify(input.data) !== JSON.stringify(draft.input)) return { status: "unavailable" };
+  if (operation.status === "applied") {
+    const confirmed = creationDraftSchema.safeParse({ version: draft.version, kind: draft.kind, phase: "confirmed", form: draft.form, input: draft.input, result: operation.result });
+    return confirmed.success && confirmed.data.phase === "confirmed" ? { status: "confirmed", confirmed: confirmed.data } : { status: "unavailable" };
+  }
+  if (snapshot?.authBlocked || operation.status === "auth_required") return { status: "auth_required" };
+  if (operation.status === "blocked" || operation.status === "needs_review" || operation.status === "conflict") return { status: "review" };
+  return { status: operation.status };
+}
 
 export function readCreationDraft(raw: string, kind: CreationKind, companyBranchId: number): CreationDraft | null {
   if (raw.length > 80_000) return null;

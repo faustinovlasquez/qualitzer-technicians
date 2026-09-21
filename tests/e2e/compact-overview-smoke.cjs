@@ -235,6 +235,63 @@ async function main() {
         assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).statusCalls, 0);
         assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).rangeCalls.length, 0);
       });
+      await check(`agenda-date16-${width}-text${scale * 100}`, async () => {
+        await page.evaluate(()=>window.compactOverviewFixture.render("agenda","agenda-date16"));
+        const date16=page.getByTestId("agenda-month-2026-09-16");
+        await date16.waitFor();
+        assert.equal(await date16.isEnabled(),true);
+        assert.equal(await date16.getByText("4",{exact:true}).count(),1);
+        const other=await page.getByRole("button",{name:/0 atrasados.*1 sin horario/}).boundingBox();
+        assert.ok(other&&other.height<150,`Unscheduled notice must not collapse to a vertical column: ${JSON.stringify(other)}`);
+        await date16.click();
+        const day=page.getByTestId("agenda-day-2026-09-16");
+        for(const title of ["Tarea programada del 16","Tarea sin hora del 16","Mantenimiento del 16 sin trabajos","Revision de equipo del 16"]){assert.equal(await day.getByText(title,{exact:true}).count(),1);}
+        assert.equal(await day.getByText("Sin bloques con horario",{exact:true}).count(),0);
+        await day.getByRole("button",{name:/Mantenimiento del 16 sin trabajos/}).click();
+        assert.equal((await page.evaluate(()=>window.compactOverviewFixture.metrics())).openCalls,1);
+        await date16.scrollIntoViewIfNeeded();await shot(`agenda-date16-${width}-text${scale*100}`);
+        await page.getByRole("tab",{name:"Agenda del día",exact:true}).click();
+        await page.getByRole("button",{name:/Tarea sin hora del 16/}).waitFor();
+        await page.getByRole("tab",{name:"Agenda de la semana",exact:true}).click();
+        await page.getByRole("tab",{name:"Agenda del mes",exact:true}).click();
+        await page.getByTestId("agenda-month-2026-09-17").click();
+        await page.getByTestId("agenda-day-2026-09-17").getByText("Sin planificación completa",{exact:true}).waitFor();
+        await date16.click();await day.getByText("Tarea sin hora del 16",{exact:true}).waitFor();
+        const state=await page.evaluate(()=>window.compactOverviewFixture.metrics());
+        assert.deepEqual(state.rangeCalls,[]);
+        assert.equal(state.statusCalls,0);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      });
+      await check(`agenda-calendar-${width}-text${scale * 100}`, async () => {
+        await page.evaluate(() => window.compactOverviewFixture.render("dashboard"));
+        await page.getByRole("tab",{name:/^Mantenimientos/}).click();
+        await page.evaluate(() => window.compactOverviewFixture.render("agenda"));
+        const week=page.getByRole("tab",{name:"Agenda de la semana",exact:true});
+        await week.waitFor();
+        assert.equal(await week.getAttribute("aria-selected"),"true");
+        assert.equal(await page.getByRole("tablist",{name:"Tipo de asignación",exact:true}).count(),0);
+        await page.getByRole("tab",{name:"Agenda del mes",exact:true}).click();
+        await page.getByTestId("agenda-month-grid").waitFor();
+        assert.deepEqual((await page.evaluate(()=>window.compactOverviewFixture.metrics())).rangeCalls,[{startDate:"2026-09-01",endDate:"2026-09-30"}]);
+        assert.equal(await page.getByTestId("agenda-month-grid").getByRole("button").count(),30);
+        await page.getByTestId("agenda-month-2026-09-30").click();
+        const last=page.getByRole("button",{name:/Trabajo del último día.*14:00/});
+        await last.waitFor();
+        await last.scrollIntoViewIfNeeded();
+        await shot(`agenda-month-${width}-text${scale*100}`);
+        await last.click();
+        assert.equal((await page.evaluate(()=>window.compactOverviewFixture.metrics())).openCalls,1);
+        await page.getByRole("tab",{name:"Agenda del día",exact:true}).click();
+        assert.deepEqual((await page.evaluate(()=>window.compactOverviewFixture.metrics())).rangeCalls.at(-1),{startDate:"2026-09-28",endDate:"2026-10-04"});
+        await page.getByRole("tab",{name:"Agenda del mes",exact:true}).click();
+        await page.getByRole("button",{name:"Mes siguiente",exact:true}).click();
+        assert.deepEqual((await page.evaluate(()=>window.compactOverviewFixture.metrics())).rangeCalls.at(-1),{startDate:"2026-10-01",endDate:"2026-10-31"});
+        assert.equal(await page.getByTestId("agenda-month-grid").getByRole("button").count(),31);
+        await page.getByRole("button",{name:"Mes anterior",exact:true}).click();
+        assert.equal(await page.getByTestId("agenda-month-grid").getByRole("button").count(),30);
+        assert.equal((await page.evaluate(()=>window.compactOverviewFixture.metrics())).statusCalls,0);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      });
     }
     if (!process.argv.includes("--parent-orders") && !agendaOnly) for (const phase of Object.keys(bundles).sort().reverse()) {
       for (const [width, height] of [[320, 740], [360, 740], [390, 740], [1024, 800]]) for (const scale of phase === "before" ? [1] : [1, 2]) {

@@ -1,5 +1,5 @@
     const wiring = [
-      ["src/screens/creation/CreationScreen.tsx", [["Hora de inicio *", 'form.startTime', '(value) => change("startTime", value)'], ["Hora de fin *", 'form.endTime', '(value) => change("endTime", value)']]],
+      ["src/screens/creation/CreationScreen.tsx", [["Hora de inicio (opcional)", 'form.startTime', '(value) => change("startTime", value)'], ["Hora de fin (opcional)", 'form.endTime', '(value) => change("endTime", value)']]],
       ["src/screens/workDetail/CompletionDialog.tsx", [["Inicio real (HH:mm)", "start", "(value) => { edited.current = true; setStart(value); }"], ["Término real (HH:mm)", "end", "(value) => { edited.current = true; setEnd(value); }"]]],
       ["src/screens/notifications/NotificationSettingsScreen.tsx", [["Desde", "preferences.quietHoursStart", "(quietHoursStart) => update({ quietHoursStart })"], ["Hasta", "preferences.quietHoursEnd", "(quietHoursEnd) => update({ quietHoursEnd })"]]],
     ];
@@ -10,7 +10,7 @@
       const visit = node => { if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source)==="TimeField") fields.push(node); ts.forEachChild(node,visit); };
       visit(source); assert.equal(fields.length,2);
       for(const [label,value,change] of expected) {
-        const field=fields.find(node=>node.attributes.properties.some(prop=>ts.isJsxAttribute(prop)&&prop.name.getText(source)==="label"&&ts.isStringLiteral(prop.initializer)&&prop.initializer.text===label));
+        const field=fields.find(node=>node.attributes.properties.some(prop=>ts.isJsxAttribute(prop)&&prop.name.getText(source)==="label"&&(ts.isStringLiteral(prop.initializer)?prop.initializer.text===label:ts.isJsxExpression(prop.initializer)&&ts.isConditionalExpression(prop.initializer.expression)&&prop.initializer.expression.whenTrue.text===label)));
         assert.ok(field,label);
         const prop = name => field.attributes.properties.find(prop=>ts.isJsxAttribute(prop)&&prop.name.getText(source)===name)?.initializer;
         assert.equal(prop("value").expression.getText(source),value);
@@ -141,13 +141,84 @@
         assert.equal((await metrics()).value,"08:49");await screenshot(label+"-numeric-final");
       });
       await check(label+"-creation-two-real-clocks",async()=>{
-        await fresh("creation",scale);await button("Continuar a horario").click();await trigger("Hora de inicio *").waitFor();
-        await clockChange("Hora de inicio *","00","07");await clockChange("Hora de fin *","23","59");
+        await fresh("creation",scale);await button("Continuar a horario").click();await trigger("Hora de inicio (opcional)").waitFor();
+        await clockChange("Hora de inicio (opcional)","00","07");await clockChange("Hora de fin (opcional)","23","59");
         await page.clock.runFor(400);await settle();
         const draft=await page.evaluate(()=>window.timeSync.creation());
         assert.equal(draft.form.startTime,"00:07");assert.equal(draft.form.endTime,"23:59");assert.equal(draft.form.date,"2026-09-14");
         assert.equal(draft.phase,"editing");assert.deepEqual((await metrics()).calls,[]);
         await screenshot(label+"-creation-two-clocks");
+      });
+      await check(label+"-creation-only-actionable-conflicts",async()=>{
+        for (const screen of ["creation", "creation-empty", "creation-free", "creation-overlap"]) {
+          await fresh(screen,scale);await button("Continuar a horario").click();await trigger("Hora de inicio (opcional)").waitFor();
+          const warning=page.getByText("Este horario coincide con otros trabajos de tu agenda. Puedes continuar.",{exact:true});
+          for (const stage of ["schedule", "review"]) {
+            assert.equal(await page.getByText(/cobertura cargada|Datos cargados:|Sin superposiciones|no confirma disponibilidad/).count(),0);
+            assert.equal(await warning.count(),screen==="creation-overlap"?1:0);
+            if(screen==="creation-overlap")assert.equal(await page.getByText(/Trabajo coincidente/).count(),1);
+            const action=button(stage==="schedule"?"Revisar solicitud":"Confirmar y crear");
+            assert.equal(await action.isEnabled(),true);
+            await action.scrollIntoViewIfNeeded();
+            if(screen==="creation"||screen==="creation-overlap")await screenshot(label+"-"+screen+"-"+stage);
+            if(stage==="schedule")await action.click();
+          }
+          assert.deepEqual((await metrics()).calls,[]);
+          assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+        }
+      });
+      await check(label+"-creation-recovery-allows-another",async()=>{
+        for (const screen of ["creation-queued", "creation-applied", "creation-review", "creation-unknown"]) {
+          await fresh(screen,scale);
+          const title=screen==="creation-queued"?"Guardado · pendiente de sincronizar":screen==="creation-applied"?"Tu planificación está lista":screen==="creation-review"?"Solicitud por revisar":"Solicitud guardada anteriormente";
+          await page.getByRole("heading",{name:title,exact:true}).waitFor();
+          assert.deepEqual((await metrics()).calls,[]);
+          const originalQueue=(await metrics()).creationQueue;
+          await button("Crear otro").scrollIntoViewIfNeeded();await screenshot(label+"-"+screen+"-recovered");
+          await button("Crear otro").click();await page.getByRole("textbox",{name:"Título *",exact:true}).waitFor();
+          assert.equal(await page.getByRole("textbox",{name:"Título *",exact:true}).inputValue(),"");
+          const draft=await page.evaluate(()=>window.timeSync.creation());assert.equal(draft.phase,"editing");assert.equal(draft.form.date,"2026-09-14");
+          assert.deepEqual((await metrics()).creationQueue,originalQueue);assert.deepEqual((await metrics()).calls,[]);
+          if(screen!=="creation-queued")continue;
+          for(let index=1;index<=2;index++) {
+            await page.getByRole("textbox",{name:"Título *",exact:true}).fill("Otro trabajo "+index);
+            await page.getByRole("textbox",{name:"Resumen del trabajo (opcional)",exact:true}).fill("Revision adicional");
+            await button("Continuar a horario").click();
+            await clockChange("Hora de inicio (opcional)","11","00");await clockChange("Hora de fin (opcional)","12","00");
+            await button("Revisar solicitud").click();
+            assert.equal((await metrics()).calls.filter(call=>call.name==="create").length,index-1);
+            await button("Confirmar y crear").click();await page.getByRole("heading",{name:"Guardado · pendiente de sincronizar",exact:true}).waitFor();
+            const state=await metrics();assert.equal(state.creationQueue.length,index+1);assert.deepEqual(state.creationQueue[0],originalQueue[0]);
+            assert.equal(new Set(state.creationQueue.map(operation=>operation.id)).size,index+1);
+            if(index===1){await button("Crear otro").click();await page.getByRole("textbox",{name:"Título *",exact:true}).waitFor();}
+          }
+        }
+        await fresh("creation-queued",scale);await page.getByRole("heading",{name:"Guardado · pendiente de sincronizar",exact:true}).waitFor();
+        await page.evaluate(()=>window.timeSync.confirmCreation());await button("Ver en mi agenda").waitFor();
+        assert.deepEqual((await metrics()).calls,[]);assert.equal((await page.evaluate(()=>window.timeSync.creation())).phase,"confirmed");
+        await screenshot(label+"-creation-now-confirmed");
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      });
+      await check(label+"-creation-optional-fields",async()=>{
+        await fresh("creation",scale);
+        await button("Continuar a horario").click();
+        await button("Quitar hora de inicio").click();await button("Quitar hora de fin").click();
+        await button("Revisar solicitud").click();await page.getByText(/Sin duración prevista/).waitFor();
+        assert.deepEqual((await metrics()).calls,[]);
+        await fresh("creation-queued",scale);await button("Crear otro").click();
+        await page.getByRole("textbox",{name:"Título *",exact:true}).fill("Trabajo sin horario");
+        assert.equal(await page.getByRole("textbox",{name:"Resumen del trabajo (opcional)",exact:true}).inputValue(),"");
+        await button("Continuar a horario").click();await screenshot(label+"-creation-optional-schedule");
+        await button("Revisar solicitud").click();await screenshot(label+"-creation-optional-review");
+        await button("Confirmar y crear").click();await page.getByRole("heading",{name:"Guardado · pendiente de sincronizar",exact:true}).waitFor();
+        const state=await metrics();const operation=state.creationQueue.at(-1);
+        assert.equal(operation.input.work.summary,"");
+        assert.deepEqual(operation.input.schedule,{date:"2026-09-14",startTime:"",endTime:""});
+        assert.equal(state.calls.filter(call=>call.name==="create").length,1);
+        await page.evaluate(()=>window.timeSync.confirmCreation());await button("Ver en mi agenda").waitFor();
+        assert.equal((await metrics()).calls.filter(call=>call.name==="create").length,1);
+        assert.equal((await page.evaluate(()=>window.timeSync.creation())).result.schedule.plannedMinutes,null);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       });
       await check(label+"-completion-two-clocks-offset49",async()=>{
         await fresh("completion",scale);await page.getByRole("checkbox",{name:"Editar horas de ejecución manualmente",exact:true}).click();
@@ -292,7 +363,7 @@
         assert.equal((await metrics()).draft.technicianProfileSignature.id,original.id);
         await button("Mis firmas: elegir, agregar o editar").scrollIntoViewIfNeeded();
         await screenshot(label+"-delivery-default-signature");
-        await button("Dibujar otra firma para esta entrega").click();assert.equal((await metrics()).draft.technicianProfileSignature,null);
+        await button("Dibujar firma").click();assert.equal((await metrics()).draft.technicianProfileSignature,null);
         await button("Mis firmas: elegir, agregar o editar").click();await button("Editar firma: Luis Roca - Faena").waitFor();
         await button("Usar firma").nth(1).click();await page.getByRole("img",{name:"Firma del tecnico desde el perfil",exact:true}).waitFor();
         assert.equal((await metrics()).draft.technicianProfileSignature.name,"Luis Roca - Faena");
@@ -301,18 +372,189 @@
         await button("Guardar firma").click();await button("Editar firma: Luis Roca - Faena editada").waitFor();
         await button("Cerrar mis firmas").click();
         await page.getByText("Firma del tecnico · Luis Roca - Faena editada",{exact:true}).waitFor();
-        await button("Revisar entrega y firmas").click();await button("Confirmar entrega en demo").waitFor();
         assert.equal((await metrics()).signatureDeliveries.length,0);
-        await screenshot(label+"-delivery-signature-review");
-        await button("Confirmar entrega en demo").click();
+        await screenshot(label+"-delivery-signature-compact");
+        await button("Entregar OT en demo").click();
         assert.equal((await metrics()).signatureDeliveries.length,1);
         assert.equal((await metrics()).signatureDeliveries[0].clientSignature,null);
+        assert.equal((await metrics()).signatureDeliveries[0].acknowledgeDelivery,true);
         await button("Configurar mis firmas").click();await button("Eliminar firma: Luis Roca - Faena editada").click();await button("Cancelar eliminacion").click();
         assert.equal((await metrics()).profileSignatures.length,2);
         await button("Eliminar firma: Luis Roca - Faena editada").click();await button("Confirmar eliminacion de firma").click();
         await button("Editar firma: Luis Roca - Faena editada").waitFor({state:"hidden"});assert.equal((await metrics()).profileSignatures.length,1);
         assert.equal((await metrics()).signatureDeliveries.length,1);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      });
+      await check(label+"-profile-signatures-technical-preflight",async()=>{
+        await fresh("technical-delivery",scale);
+        const filesBox=await button("Archivos del mantenimiento").boundingBox();
+        const deliveryBox=await button("Entregar OT").boundingBox();
+        assert.ok(filesBox&&deliveryBox&&deliveryBox.y>=filesBox.y+filesBox.height);
+        assert.equal(await button("Entregar OT").evaluate(element=>getComputedStyle(element).backgroundColor),"rgb(196, 81, 10)");
+        await button("Entregar OT").click();await button("Entendido, continuar").waitFor();
+        await page.getByText("2 trabajo(s) sin entregar",{exact:true}).waitFor();
+        await page.getByText("2 checklist(s) incompleto(s)",{exact:true}).waitFor();
+        assert.equal(await page.getByRole("textbox",{name:"Nota técnica",exact:true}).count(),0);
+        assert.equal((await metrics()).signatureDeliveries.length,0);
+        await screenshot(label+"-technical-preflight");
+        await button("Cancelar").click();await settle();assert.equal((await metrics()).signatureDeliveries.length,0);
+        assert.equal(await button("Entendido, continuar").count(),0);
+        await button("Entregar OT").click();await button("Entendido, continuar").click();
+        await page.getByRole("textbox",{name:"Nota técnica",exact:true}).fill("Se entrega con revisión pendiente.");
+        assert.equal(await page.getByText("Tipo de falla *",{exact:true}).count(),0);
+        assert.equal(await page.getByRole("textbox",{name:"Nombre de quien recibe *",exact:true}).count(),0);
+        await button("Entregar OT").last().click();await page.getByText(/Falta la firma del técnico/).first().waitFor();
+        assert.equal((await metrics()).signatureDeliveries.length,0);
+        const canvas=page.locator("canvas");await canvas.scrollIntoViewIfNeeded();const box=await canvas.boundingBox();
+        assert.ok(box&&box.height>80);await page.mouse.move(box.x+20,box.y+80);await page.mouse.down();await page.mouse.move(box.x+70,box.y+30,{steps:12});await page.mouse.move(box.x+130,box.y+90,{steps:12});await page.mouse.up();
+        await screenshot(label+"-technical-form");
+        await button("Entregar OT").last().click();await page.getByText("Entrega de la OT confirmada.",{exact:true}).waitFor();
+        const delivery=(await metrics()).signatureDeliveries;assert.equal(delivery.length,1);assert.equal(delivery[0].note,"Se entrega con revisión pendiente.");assert.equal(delivery[0].durationMinutes,35);assert.equal(delivery[0].acknowledgeDelivery,true);assert.equal(delivery[0].clientSignature,null);assert.equal(delivery[0].faultType,null);
+        await fresh("technical-ready",scale);await button("Sí, entregar OT").waitFor();
+        await page.getByText("Ya tienes todo listo para entregar la OT. ¿Quieres hacerlo ahora?",{exact:true}).waitFor();await screenshot(label+"-technical-ready");
+        await button("Más tarde").click();await button("Actualizar estado de OT").click();await settle();assert.equal(await button("Sí, entregar OT").count(),0);
+        assert.equal((await metrics()).signatureDeliveries.length,0);
+      });
+      await check(label+"-file-deletion-confirmed-versus-rejected",async()=>{
+        for (const screen of ["file-delete", "file-delete-refresh-fails", "file-delete-rejected"]) {
+          await fresh(screen,scale);
+          const remove=button("Eliminar archivo guardado: Evidencia.png");
+          await remove.click();await button("Cancelar").click();
+          assert.equal((await metrics()).calls.length,0);
+          await remove.click();await button("Confirmar eliminación").click();
+          if(screen==="file-delete-rejected") {
+            await page.getByText(/No se confirmó la eliminación/).last().waitFor();
+            await button("Cancelar").click();
+            await remove.waitFor();
+            assert.equal(await remove.isVisible(),true);
+          } else {
+            await remove.waitFor({state:"hidden"});
+            await page.getByText(screen==="file-delete"?"Archivo eliminado.":"El archivo se eliminó, pero no se pudo actualizar la lista. Actualízala; no repitas la eliminación.",{exact:true}).waitFor();
+            await page.clock.runFor(500);await settle();
+            assert.equal(await page.getByText("Evidencia.png",{exact:true}).isVisible(),false);
+            assert.equal(await button("Confirmar eliminación").isVisible(),false);
+            assert.equal(await page.getByText("Conservar.pdf",{exact:true}).count(),1);
+          }
+          assert.deepEqual((await metrics()).calls,[{name:"delete-file",value:"43"}]);
+          await screenshot(label+"-"+screen);
+        }
+      });
+      await check(label+"-order-files-autosave-home-menu",async()=>{
+        async function verifyFilesLayout(stage) {
+          const tabs=await page.getByRole("tablist",{name:"Secciones de la orden",exact:true}).boundingBox();
+          const toolbar=await page.getByTestId("files-toolbar").boundingBox();
+          const list=await page.getByTestId("files-list-scroll").boundingBox();
+          const dock=await page.getByTestId("files-save-dock").boundingBox();
+          report.measurements.push({name:label+"-"+stage,tabs,toolbar,list,dock});
+          assert.ok(tabs&&toolbar&&list&&dock);
+          const gap=toolbar.y-tabs.y-tabs.height;
+          assert.ok(gap>=0&&gap<=16,`Files toolbar must follow tabs, not an empty refresh wrapper: ${gap}px`);
+          assert.ok(list.height>=190,`Image viewport compressed to ${list.height}px`);
+          assert.ok(Math.abs(list.y-toolbar.y-toolbar.height)<2);
+          assert.ok(Math.abs(dock.y-list.y-list.height)<2);
+          assert.ok(Math.abs(dock.y+dock.height-page.viewportSize().height)<2);
+        }
+        async function verifyImageVisible(preview,stage) {
+          await preview.scrollIntoViewIfNeeded();
+          const image=await preview.boundingBox();
+          const viewport=await page.getByTestId("files-list-scroll").boundingBox();
+          assert.ok(image&&viewport);
+          const visibleHeight=Math.max(0,Math.min(image.y+image.height,viewport.y+viewport.height)-Math.max(image.y,viewport.y));
+          assert.ok(visibleHeight>=140,`Only ${visibleHeight}px of image visible at ${stage}`);
+          const pixels=await preview.evaluate(element=>{
+            const bitmap=element.matches("img")?element:element.querySelector("img");
+            if(!bitmap?.complete||!bitmap.naturalWidth)return null;
+            const canvas=document.createElement("canvas");canvas.width=32;canvas.height=32;
+            const context=canvas.getContext("2d");context.drawImage(bitmap,0,0,32,32);
+            const data=context.getImageData(0,0,32,32).data;
+            return {width:bitmap.naturalWidth,height:bitmap.naturalHeight,colors:new Set(Array.from({length:1024},(_,index)=>data.slice(index*4,index*4+4).join(","))).size};
+          });
+          assert.ok(pixels&&pixels.width>0&&pixels.height>0&&pixels.colors>1,`Missing or blank image at ${stage}`);
+          await screenshot(label+"-"+stage+"-image-visible");
+        }
+        for (const screen of ["order-files", "order-files-queued", "order-files-error"]) {
+          await fresh(screen,scale);
+          await page.getByText("13 confirmados · 0 en cola",{exact:true}).waitFor();
+          await verifyFilesLayout(screen+"-initial");
+          const beforeDock=await page.getByTestId("files-save-dock").boundingBox();
+          assert.ok(beforeDock&&Math.abs(beforeDock.y+beforeDock.height-page.viewportSize().height)<2);
+          await button("Opciones de la orden").click();
+          await button("Trabajos").waitFor();
+          assert.equal((await metrics()).calls.length,0);
+          await screenshot(label+"-order-menu");
+          await button("Trabajos").click();
+          await button("Opciones de la orden").click();
+          await button("Archivos").last().click();
+          await page.getByTestId("files-save-dock").waitFor();
+          await verifyFilesLayout(screen+"-from-works");
+          await button("Cámara").click();await page.waitForFunction(()=>window.pickerOs.cameraStarts===1);
+          await page.evaluate(()=>window.pickerOs.lifecycle(false));
+          await page.evaluate(()=>window.pickerOs.cameraResult());
+          await page.evaluate(()=>window.pickerOs.lifecycle(true));
+          await page.waitForFunction(()=>window.timeSync.metrics().calls.some(call=>call.name==="order-upload"));
+          assert.equal(await button("Ir a mi jornada").isDisabled(),true);
+          assert.equal(await button("Opciones de la orden").isDisabled(),true);
+          const afterDock=await page.getByTestId("files-save-dock").boundingBox();
+          assert.ok(afterDock&&Math.abs(afterDock.y+afterDock.height-page.viewportSize().height)<2,JSON.stringify(afterDock));
+          await page.evaluate(()=>window.timeSync.releaseOrderUpload());
+          if(screen==="order-files-error") {
+            await page.getByText(/No se pudo guardar el archivo de prueba/).waitFor();
+            await page.getByText(/1 sin guardar/).waitFor();
+            const draftTile=button("Ampliar archivo pendiente: camara-simulada.png");
+            await draftTile.waitFor();assert.ok((await draftTile.boundingBox()).height>=140);
+            await verifyFilesLayout(screen+"-pending");
+            await verifyImageVisible(draftTile,screen+"-pending");
+          } else if(screen==="order-files-queued") {
+            await page.getByText("13 confirmados · 1 en cola",{exact:true}).waitFor();
+            const preview=page.getByRole("img",{name:"Vista previa pendiente: camara-simulada.png",exact:true});
+            await preview.waitFor();assert.ok((await preview.boundingBox()).height>=140);
+            await verifyFilesLayout(screen+"-queued");
+            await verifyImageVisible(preview,screen+"-queued");
+            await screenshot(label+"-order-file-queued");
+            await page.evaluate(()=>window.timeSync.confirmOrderFiles());
+            await page.getByText("14 confirmados · 0 en cola",{exact:true}).waitFor();
+          } else await page.getByText("14 confirmados · 0 en cola",{exact:true}).waitFor();
+          assert.equal((await metrics()).calls.filter(call=>call.name==="order-upload").length,1);
+          if(screen!=="order-files-error")await verifyImageVisible(button("Ampliar imagen: camara-simulada.png"),screen+"-saved");
+          await screenshot(label+"-"+screen);
+          await button("Opciones de la orden").click();await button("Trabajos").click();
+          await page.getByRole("tab",{name:"Archivos",exact:true}).click();
+          await page.getByText(screen==="order-files-error"?/1 sin guardar/:"14 confirmados · 0 en cola").waitFor();
+          await verifyFilesLayout(screen+"-return");
+          assert.equal((await metrics()).calls.filter(call=>call.name==="order-upload").length,1,"Opening files does not replay drafts");
+          await button("Ir a mi jornada").click();
+          assert.equal((await metrics()).calls.filter(call=>call.name==="order-home").length,1);
+          assert.equal((await metrics()).calls.filter(call=>call.name==="order-back").length,0);
+        }
+      });
+      await check(label+"-work-actions-delete-activity-file",async()=>{
+        for (const outcome of ["success", "rejected", "refresh-fails"]) {
+          await fresh("detail",scale);
+          await page.evaluate(outcome=>window.timeSync.activityDeletionCase(outcome),outcome);
+          await button("Archivos de actividad: Revisar cierre").click();
+          const remove=button("Eliminar archivo guardado: Foto de actividad.png");
+          await remove.waitFor();
+          assert.equal(await button("Eliminar archivo guardado: manual.pdf").count(),0);
+          await remove.scrollIntoViewIfNeeded();await screenshot(label+"-activity-delete-"+outcome+"-before");
+          await remove.click();await button("Cancelar").click();assert.equal((await metrics()).calls.length,0);
+          await remove.click();await button("Confirmar eliminación").click();
+          if(outcome==="rejected") {
+            await page.getByText(/No se confirmó la eliminación/).last().waitFor();
+            await button("Cancelar").click();await remove.waitFor();
+          } else {
+            await remove.waitFor({state:"hidden"});
+            await page.getByText(outcome==="success"?"Archivo eliminado.":"El archivo se eliminó, pero no se pudo actualizar la lista. Actualízala; no repitas la eliminación.",{exact:true}).waitFor();
+          }
+          assert.deepEqual((await metrics()).calls,[{name:"delete-activity-file",value:{id:71,fileId:"401"}}]);
+          assert.equal(await button("Eliminar archivo guardado: Otra foto.png").count(),1);
+          await screenshot(label+"-activity-delete-"+outcome+"-after");
+          await button("Volver a actividades").click();await button("Archivos de actividad: Revisar cierre").click();
+          if(outcome!=="refresh-fails") {
+            await page.getByText(outcome==="success"?"1 confirmados · 0 en cola":"2 confirmados · 0 en cola",{exact:true}).waitFor();
+            assert.equal(await remove.count(),outcome==="success"?0:1);
+          }
+          assert.equal((await metrics()).calls.length,1);
+        }
       });
       await check(label+"-work-actions-complete-create-deliver-reopen",async()=>{
         await fresh("detail",scale);
@@ -418,7 +660,7 @@
         assert.deepEqual((await metrics()).calls,[{name:"maintenance",value:{...before,hours:"25"}}]);
         await trigger("Minutos (0–59)").click();await button("Aumentar Minutos (0–59)").click();await button("Confirmar selección").click();
         assert.deepEqual((await metrics()).calls,[{name:"maintenance",value:{...before,hours:"25"}},{name:"maintenance",value:{...before,hours:"25",minutes:"50"}}]);
-        await button("Revisar entrega y firmas").click();await page.getByText(/Falta la firma del técnico/).first().waitFor();assert.equal(await button("Confirmar y entregar OT").count(),0);
+        await button("Entregar OT").click();await page.getByText(/Falta la firma del técnico/).first().waitFor();assert.equal((await metrics()).signatureDeliveries.length,0);
         await screenshot(label+"-maintenance-missing-signature");
       });
       for(const entry of ["center","bar"]) await check(label+"-sync-"+entry+"-partial-automatic-uuid",async()=>{

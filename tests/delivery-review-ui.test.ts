@@ -409,6 +409,13 @@ for (const type of ["internal_maintenance", "external_ot"] as const) test(`${typ
   action(render(), "Volver al paso anterior").onPress();
   assert.ok(elements(render(), "AssignmentWorkCard").length > 0);
   assert.equal(exits, 0);
+  action(render(), "Opciones de la orden").onPress();
+  assert.equal(exits, 0);
+  action(render(), "Archivos").onPress();
+  const filesPanel = elements<{ compact: boolean; autoSave: boolean }>(render(), "FileWorkspace")[0];
+  assert.equal(filesPanel.props.compact, true);
+  assert.equal(filesPanel.props.autoSave, true);
+  action(render(), "Opciones de la orden").onPress();
   action(render(), "Volver a mis asignaciones").onPress();
   assert.equal(exits, 1);
   hooks.unmount();

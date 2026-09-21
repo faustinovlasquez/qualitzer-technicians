@@ -4,7 +4,7 @@ import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { clock, duration, shiftDate, shortDate } from "../../domain/format";
 import type { AssignmentWork, DateRange, StatusInput } from "../../domain/models";
-import { automaticExecutionTiming, availableExecutionDates, canTransitionExecution, executionDatesAllowed, executionElapsedSeconds, executionIntervalCovered, executionStartTime, MAX_EXECUTION_DATES } from "../../domain/workExecution";
+import { automaticExecutionTiming, availableExecutionDates, canTransitionExecution, executionDatesAllowed, executionElapsedSeconds, executionIntervalCovered, executionStartTime, MAX_EXECUTION_DATES, workedDatesAllowed } from "../../domain/workExecution";
 import { BodyText, Button, SectionTitle } from "../../ui/components";
 import { TimeField } from "../../ui/time/TimeField";
 import { DayOffsetField, NumericSelectField } from "../../ui/time/NumericSelectField";
@@ -13,6 +13,7 @@ import { manualCompletion } from "./detailRules";
 import { manualDurationCompletion } from "./completionTiming";
 import { assignmentWorkSnapshotForQueryDate } from "../../domain/assignmentSchedule";
 import { styles } from "./detailStyles";
+import { CreationDatePicker } from "../creation/CreationDatePicker";
 
 export interface CompletionDialogProps {
   maintenance: boolean;
@@ -36,6 +37,9 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
   const dates = availableExecutionDates(work, range);
   const plannedDates = dates.filter((day) => work.plannedDates?.includes(day));
   const [selectedDates, setSelectedDates] = useState<string[]>([dates.includes(initialDate) ? initialDate : range.startDate]);
+  const [multipleWorkedDays, setMultipleWorkedDays] = useState(false);
+  const [workedDates, setWorkedDates] = useState<string[]>([initialDate]);
+  const [choosingWorkedDates, setChoosingWorkedDates] = useState(false);
   const date = [...selectedDates].sort()[0] ?? range.startDate;
   const [manual, setManual] = useState(false);
   const [start, setStart] = useState(() => executionStartTime(work));
@@ -60,7 +64,8 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
   const editing = manual && allowEditExecutionTime;
   const interval = manualCompletion(selectedDates, start, end, /^\d{1,2}$/.test(offset) ? Number(offset) : NaN, range, status, work);
   const result = editMode === "duration" ? manualDurationCompletion(selectedDates, hours, minutes, start, range, work, status) : interval;
-  const canSubmit = submitAllowed && canTransitionExecution(work, status) && work.missingRequiredInfo.length === 0 && executionDatesAllowed(work, range, selectedDates, maintenance);
+  const canSubmit = submitAllowed && canTransitionExecution(work, status) && work.missingRequiredInfo.length === 0 && executionDatesAllowed(work, range, selectedDates, maintenance)
+    && (!multipleWorkedDays || workedDatesAllowed(workedDates));
   const blocked = reasons.length > 0 || !canSubmit;
   const autoError = selectedDates.length > 1 && timing && !executionIntervalCovered(selectedDates, timing.endDateOffset)
     ? "Selecciona todos los días que abarca el intervalo o corrige el tiempo trabajado."
@@ -82,8 +87,8 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
   }, [date, timing?.executionStartTime, timing?.executionEndTime, timing?.endDateOffset, timing?.minutes, manual]);
   const submitted = useRef(false);
   const mounted = useRef(true);
-  const latest = useRef({ busy, blocked, editing, result, autoError, status, selectedDates, onSubmit });
-  latest.current = { busy, blocked, editing, result, autoError, status, selectedDates, onSubmit };
+  const latest = useRef({ busy, blocked, editing, result, autoError, status, selectedDates, multipleWorkedDays, workedDates, onSubmit });
+  latest.current = { busy, blocked, editing, result, autoError, status, selectedDates, multipleWorkedDays, workedDates, onSubmit };
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -131,11 +136,11 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
     const input = current.editing ? current.result.input : current.autoError ? null : { status: current.status, executionDates: [...current.selectedDates].sort(), isManual: false };
     if (!input) return;
     submitted.current = true;
-    try { current.onSubmit(input); }
+    try { current.onSubmit({ ...input, ...(current.multipleWorkedDays ? { workedDates: [...current.workedDates].sort() } : {}) }); }
     catch (error) { submitted.current = false; throw error; }
   }
 
-  return (
+  return (<>
     <Modal visible transparent animationType="fade" onRequestClose={() => { if (!busy) onClose(); }}>
       <SafeAreaView style={styles.modalOverlay}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalCard}>
@@ -154,10 +159,22 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
               {editing && anchorWork ? <BodyText>Registrado por el cronómetro: {clock(elapsed)}</BodyText> : null}
             </View>
             <View style={styles.tight}>
+              <ChoiceButton multiple label="Trabajé en varios días" selected={multipleWorkedDays} disabled={busy} onPress={() => {
+                if (busy) return;
+                setMultipleWorkedDays(!multipleWorkedDays);
+                setSelectedDates([range.startDate]);
+              }} />
+              {multipleWorkedDays ? <>
+                <Text style={styles.label}>Días trabajados · {workedDates.length} seleccionado(s)</Text>
+                <Text style={styles.caption}>{workedDates.map(day => new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`))).join(" · ")}</Text>
+                <Button title="Seleccionar días trabajados" icon="calendar-outline" variant="secondary" disabled={busy} onPress={() => setChoosingWorkedDates(true)} />
+                <BodyText>Tiempo total trabajado: {editing ? duration(result.minutes) : clock(elapsed)}</BodyText>
+              </> : <>
               <Text style={styles.label}>Días trabajados · {selectedDates.length} seleccionado(s)</Text>
               {dates.length > 1 ? <View style={styles.row}>{dates.map((day) => <ChoiceButton key={day} multiple={!maintenance} label={shortDate(day)} selected={selectedDates.includes(day)} disabled={busy || (!selectedDates.includes(day) && selectedDates.length >= MAX_EXECUTION_DATES)} onPress={() => toggleDate(day)} />)}</View> : <BodyText>{shortDate(date)}</BodyText>}
               {!maintenance && plannedDates.length > 1 && plannedDates.length <= MAX_EXECUTION_DATES ? <Button title="Seleccionar todas las fechas planificadas" variant="secondary" disabled={busy} onPress={() => setSelectedDates([...plannedDates])} /> : null}
               {selectedDates.length > 1 ? <BodyText>El tiempo indicado es el total, no una cantidad por día.</BodyText> : null}
+              </>}
             </View>
             {allowEditExecutionTime ? <ChoiceButton multiple label="Editar horas de ejecución manualmente" selected={editing} disabled={busy} onPress={toggleManual} /> : null}
             {editing ? <View style={styles.stack}>
@@ -175,8 +192,8 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
               </View>
               <DayOffsetField label="Día de término" value={offset} onChange={(value) => { edited.current = true; setOffset(value); }} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} />
               </>}
-              {result.input ? <BodyText>{shortDate(date)} {result.input.executionStartTime} → {shortDate(shiftDate(date, result.input.endDateOffset ?? 0))} {result.input.executionEndTime}</BodyText> : null}
-            </View> : <BodyText>{timing ? `${shortDate(date)} ${timing.executionStartTime} → ${shortDate(shiftDate(date, timing.endDateOffset))} ${timing.executionEndTime}` : "Se utilizará el tiempo registrado del trabajo."}</BodyText>}
+              {result.input && !multipleWorkedDays ? <BodyText>{shortDate(date)} {result.input.executionStartTime} → {shortDate(shiftDate(date, result.input.endDateOffset ?? 0))} {result.input.executionEndTime}</BodyText> : null}
+            </View> : <BodyText>{timing && !multipleWorkedDays ? `${shortDate(date)} ${timing.executionStartTime} → ${shortDate(shiftDate(date, timing.endDateOffset))} ${timing.executionEndTime}` : "Se utilizará el tiempo registrado del trabajo."}</BodyText>}
           </ScrollView>
           <View style={[styles.tight, { padding: 16 }]}>
             {error || validationError ? <Text accessibilityRole="alert" style={styles.errorText}>{error ?? validationError}</Text> : blocked ? <Text style={styles.caption}>{reasons[0] ?? "Revisa los requisitos de entrega antes de confirmar."}</Text> : null}
@@ -186,5 +203,6 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
-  );
+    {choosingWorkedDates ? <CreationDatePicker multiple value={initialDate} selectedDates={workedDates} onClose={() => setChoosingWorkedDates(false)} onChange={setWorkedDates} /> : null}
+  </>);
 }

@@ -16,6 +16,12 @@ export function weekRange(day = dateKey()): DateRange {
   const startDate = shiftDate(day, -((date.getDay() + 6) % 7));
   return { startDate, endDate: shiftDate(startDate, 6) };
 }
+export function monthRange(day = dateKey()): DateRange {
+  const startDate = `${day.slice(0, 7)}-01`;
+  const nextMonth = new Date(`${startDate}T12:00:00`);
+  nextMonth.setMonth(nextMonth.getMonth() + 1);
+  return { startDate, endDate: shiftDate(dateKey(nextMonth), -1) };
+}
 export function duration(minutes: number): string {
   const safe = Math.max(0, Math.round(Number.isFinite(minutes) ? minutes : 0));
   return safe >= 60 ? `${Math.floor(safe / 60)} h ${safe % 60 ? `${safe % 60} min` : ""}`.trim() : `${safe} min`;

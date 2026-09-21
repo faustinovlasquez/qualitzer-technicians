@@ -115,3 +115,20 @@ test("equipment exact lookup forwards a normalized string on the same options ro
   }
   assert.equal(state.calls.length, 0);
 });
+
+test("work creation forwards optional times and description without manufacturing duration", async (context) => {
+  const { state, baseUrl } = await harness(context);
+  for (const times of [{ startTime: "", endTime: "" }, { startTime: "09:00", endTime: "" }, { startTime: "", endTime: "10:30" }]) {
+    const optional: Omit<Extract<CreationInput, { kind: "work" }>, "work"> & { work: { title: string; priority: "medium" } } = {
+      ...input, schedule: { date: input.schedule.date, ...times }, work: { title: "Trabajo", priority: "medium" },
+    };
+    const expected = { ...result, schedule: { ...result.schedule, ...times, plannedMinutes: null } };
+    state.failures.set(upstreamPath, { status: 201, body: expected });
+    const response = await jsonRequest(baseUrl, "/api/creation", "POST", optional);
+    assert.equal(response.response.status, 201);
+    assert.deepEqual(response.data, expected);
+    assert.deepEqual(writeCalls(state).at(-1)?.json, { ...optional, work: { ...optional.work, summary: "" } });
+    state.failures.set(upstreamPath, { status: 201, body: { ...expected, schedule: { ...expected.schedule, plannedMinutes: 60 } } });
+    assert.equal((await jsonRequest(baseUrl, "/api/creation", "POST", optional)).response.status, 502);
+  }
+});

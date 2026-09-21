@@ -12,7 +12,7 @@ export interface AssignmentOrderCardProps {
   group: AssignmentGroup;
   matchingWorkCount: number;
   busy?: boolean;
-  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files") => void;
+  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files" | "deliver") => void;
 }
 
 export function AssignmentOrderSummary({ group }: { group: AssignmentGroup }) {
@@ -74,6 +74,7 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
       <Button title={group.works.length > 0 ? `Ver trabajos (${group.works.length})` : group.type === "internal_maintenance" ? "Ver mantenimiento" : "Ver orden"} icon="list-outline" disabled={busy} onPress={() => onOpenGroup(group, "works")} style={styles.action} />
       <Button title={group.type === "direct_assignment" ? "Archivos de la asignación" : group.type === "internal_maintenance" ? "Archivos del mantenimiento" : "Archivos de la OT"} icon="folder-open-outline" variant="secondary" disabled={busy} onPress={() => onOpenGroup(group, "files")} style={styles.action} />
     </View>
+    {group.type === "internal_maintenance" && group.status !== "delivered" && group.status !== "completed" ? <Button title="Entregar OT" icon="checkmark-circle-outline" disabled={busy} onPress={() => onOpenGroup(group, "deliver")} style={{ backgroundColor: "#C4510A", borderColor: "#C4510A" }} /> : null}
   </Card>;
 }
 

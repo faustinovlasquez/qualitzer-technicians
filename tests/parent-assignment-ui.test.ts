@@ -78,6 +78,16 @@ for (const type of ["internal_maintenance", "external_ot"] as const) {
       assert.equal(opened.selectedOrder?.id, id);
       assert.equal(opened.selected, null);
       assert.equal(opened.data?.groups[0].works.length, 0);
+      fixture.access.allowed = false;
+      opened.homeFromDetails();
+      assert.ok((await fixture.flush()).selectedOrder);
+      fixture.access.allowed = true;
+      (await fixture.flush()).homeFromDetails();
+      const home = await fixture.flush();
+      assert.equal(home.selectedOrder, null);
+      assert.equal(home.selected, null);
+      assert.equal(home.tab, "today");
+      assert.equal(home.range.startDate, home.range.endDate);
     } finally { fixture.unmount(); }
   });
   test(`${type}: empty assigned parent remains visible and opens without a fabricated work`, () => {

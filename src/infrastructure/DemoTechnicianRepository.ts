@@ -84,6 +84,13 @@ export class DemoTechnicianRepository implements TechnicianRepository {
     if (!work.activities?.some(activity => activity.id === id && isWorkActivity(activity))) throw new Error("Actividad no encontrada.");
     work.activities = work.activities.filter(activity => activity.id !== id || !isWorkActivity(activity));
   };
+  deleteActivityFile: WorkActivitiesPort["deleteActivityFile"] = async (scope, id, fileId) => {
+    const files = await this.activityFiles(scope, id);
+    const work = this.find(scope).work;
+    if (work.status === "completed" || work.status === "delivered") throw new Error("El trabajo es de solo lectura.");
+    if (!files.some(file => String(file.id) === fileId)) throw new Error("Archivo de actividad no encontrado.");
+    this.activityFilesById.set(`${this.key(scope)}:${id}`, files.filter(file => String(file.id) !== fileId));
+  };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = async (scope, id, files) => {
     await this.activityFiles(scope, id);
     const work = this.find(scope).work;
@@ -282,6 +289,9 @@ export class DemoTechnicianRepository implements TechnicianRepository {
       incompleteChecklists: group.works.flatMap((work) => work.checklists.filter((list) => list.required && !list.steps.every(isChecklistStepSatisfied)).map((list) => `${work.title} — ${list.name}`)),
       suggestedDurationMinutes: Math.round(group.works.reduce((total, work) => total + Math.max(work.executedMinutes, work.elapsedSeconds / 60), 0)),
       canStart: group.status === "pending", canDeliver: group.status !== "completed" && group.status !== "delivered",
+      technicianDeliverySupported: true, canTechnicianDeliver: group.status !== "completed" && group.status !== "delivered",
+      totalWorks: group.works.length, pendingWorkNames: group.works.filter(work => work.status !== "delivered").map(work => work.title),
+      pendingDeliveryChecklists: group.works.flatMap(work => work.checklists.filter(list => !list.steps.every(isChecklistStepSatisfied)).map(list => `${work.title} — ${list.name}`)),
     };
   }
   async startOrder(scope: GroupScope): Promise<void> {
@@ -291,9 +301,13 @@ export class DemoTechnicianRepository implements TechnicianRepository {
   }
   async deliverOrder(scope: GroupScope, input: MaintenanceDeliveryInput): Promise<void> {
     const context = await this.orderDelivery(scope);
-    if (!context.canDeliver || context.incompleteChecklists.length || !input.technicianSignature) throw new Error("Completa los requisitos de entrega de la OT.");
-    if (["correctivo", "detencion"].includes(context.maintenanceType ?? "") && (!input.clientSignature || !input.receivedByName?.trim() || !input.faultType || input.faultType === "undetermined")) throw new Error("Completa el tipo de falla, receptor y firma del cliente.");
+    if (!context.canDeliver || !input.technicianSignature) throw new Error("Completa los requisitos de entrega de la OT.");
+    if (input.acknowledgeDelivery !== true) {
+      if (context.incompleteChecklists.length) throw new Error("Completa los requisitos de entrega de la OT.");
+      if (["correctivo", "detencion"].includes(context.maintenanceType ?? "") && (!input.clientSignature || !input.receivedByName?.trim() || !input.faultType || input.faultType === "undetermined")) throw new Error("Completa el tipo de falla, receptor y firma del cliente.");
+    }
     this.orderDeliveries.set(scope.groupId, structuredClone(input));
     this.maintenanceGroup(scope).status = "delivered";
+    if (input.acknowledgeDelivery) for (const work of this.maintenanceGroup(scope).works) { work.status = "delivered"; }
   }
 }

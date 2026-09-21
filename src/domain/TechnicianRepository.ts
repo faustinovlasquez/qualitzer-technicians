@@ -37,7 +37,7 @@ export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<
   groupFiles(scope: GroupScope): Promise<Attachment[]>;
   uploadGroupFiles(scope: GroupScope, files: LocalPhoto[]): Promise<void>;
   deleteGroupFile(scope: GroupScope, fileId: string): Promise<void>;
-  orderDelivery(scope: GroupScope): Promise<MaintenanceDeliveryContext>;
+  orderDelivery(scope: GroupScope, requireFresh?: boolean): Promise<MaintenanceDeliveryContext>;
   startOrder(scope: GroupScope): Promise<void>;
   deliverOrder(scope: GroupScope, input: MaintenanceDeliveryInput): Promise<void>;
 }

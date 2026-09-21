@@ -34,12 +34,12 @@ function checklistStep(step: MaintenanceStep): ChecklistStep {
   };
 }
 
-export function incompleteChecklists(scope: OrderScope): string[] {
+export function incompleteChecklists(scope: OrderScope, requiredOnly = true): string[] {
   const incomplete = new Set<string>();
   for (const work of scope.detail.works) {
     if (productContainers.has(work.title.trim())) continue;
     for (const checklist of work.checklists) {
-      if (checklist.isRequired && !checklist.steps.every((step) => isChecklistStepSatisfied(checklistStep(step)))) {
+      if ((!requiredOnly || checklist.isRequired) && !checklist.steps.every((step) => isChecklistStepSatisfied(checklistStep(step)))) {
         incomplete.add(`${work.title} — ${checklist.name ?? `Checklist #${checklist.checklistId ?? "-"}`}`);
       }
     }
@@ -47,7 +47,7 @@ export function incompleteChecklists(scope: OrderScope): string[] {
   for (const work of scope.group.works) {
     if (productContainers.has(work.title.trim())) continue;
     for (const checklist of work.checklists) {
-      if (checklist.required === true && !checklist.steps.every(isChecklistStepSatisfied)) incomplete.add(`${work.title} — ${checklist.name}`);
+      if ((!requiredOnly || checklist.required === true) && !checklist.steps.every(isChecklistStepSatisfied)) incomplete.add(`${work.title} — ${checklist.name}`);
     }
   }
   return [...incomplete];
@@ -66,6 +66,10 @@ function requiresClient(scope: OrderScope): boolean { return scope.detail.type =
 
 export function assertDelivery(scope: OrderScope, input: OrderDeliveryInput): void {
   if (isFinal(scope)) throw new GatewayError(409, "ORDER_READ_ONLY");
+  if (input.acknowledgeDelivery === true) {
+    if (input.clientSignature !== null || input.receivedByName !== null || input.faultType !== null) throw new GatewayError(400, "CLIENT_DELIVERY_FIELDS_NOT_APPLICABLE");
+    return;
+  }
   const incomplete = incompleteChecklists(scope);
   if (incomplete.length) throw new GatewayError(400, "REQUIRED_CHECKLISTS_INCOMPLETE", `Completa todos los checklists obligatorios: ${incomplete.join(", ")}`);
   if (requiresClient(scope)) {
@@ -91,6 +95,11 @@ export function deliveryContext(scope: OrderScope): OrderDeliveryContext {
     finalizationNote: scope.detail.finalizationNote, damageType: scope.detail.damageType,
     durationMinutes: scope.detail.durationMinutes, startedAt: scope.detail.startedAt ?? null, finalizedAt: scope.detail.finalizedAt,
     incompleteChecklists: incomplete, suggestedDurationMinutes: Math.round(seconds / 60),
+    technicianDeliverySupported: true, canTechnicianDeliver: !isFinal(scope),
+    totalWorks: scope.detail.works.filter(work => !productContainers.has(work.title.trim())).length,
+    pendingWorkNames: scope.detail.works.filter(work => !productContainers.has(work.title.trim()) && (work.status !== undefined
+      ? work.status !== "entrega_tecnico" : scope.group.works.find(candidate => Number(candidate.id) === work.id)?.status !== "delivered")).map(work => work.title),
+    pendingDeliveryChecklists: incompleteChecklists(scope, false),
     canStart: !isFinal(scope) && scope.group.status === "pending", canDeliver: !isFinal(scope) && incomplete.length === 0,
     requiresClientSignature: requiresClient(scope), faultTypes: [...faultTypeSchema.options], maxSignatureBytes: MAX_SIGNATURE_BYTES,
     technician: { userId: scope.user.id, workerId: scope.user.workerId, name: `${scope.user.name} ${scope.user.lastnames}`.trim() },

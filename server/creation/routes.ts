@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema } from "../../src/domain/creation";
+import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, creationPlannedMinutes } from "../../src/domain/creation";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
@@ -42,8 +42,7 @@ export function createCreationRouter(upstream: Upstream): Router {
       status = metadata.status;
       replayed = metadata.idempotencyReplayed ?? (status === 200 ? "true" : "false");
     } }));
-    const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-    if (![200, 201].includes(status) || result.kind !== input.kind || result.companyBranchId !== input.companyBranchId || result.schedule.date !== input.schedule.date || result.schedule.startTime !== input.schedule.startTime || result.schedule.endTime !== input.schedule.endTime || result.schedule.plannedMinutes !== minutes(input.schedule.endTime) - minutes(input.schedule.startTime) || (input.kind !== "maintenance" && result.groupId !== `${input.kind === "work" ? "direct" : "direct-np"}-${result.workId}`)) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    if (![200, 201].includes(status) || result.kind !== input.kind || result.companyBranchId !== input.companyBranchId || result.schedule.date !== input.schedule.date || result.schedule.startTime !== input.schedule.startTime || result.schedule.endTime !== input.schedule.endTime || result.schedule.plannedMinutes !== creationPlannedMinutes(input.schedule) || (input.kind !== "maintenance" && result.groupId !== `${input.kind === "work" ? "direct" : "direct-np"}-${result.workId}`)) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.set("Idempotency-Replayed", replayed === "true" ? "true" : "false").status(status).json(result);
   });
   return router;

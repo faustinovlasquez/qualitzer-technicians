@@ -3,6 +3,7 @@ import type { DependencyList, Dispatch, SetStateAction } from "react";
 import type { AssignmentReadOptions } from "../../src/domain/assignmentRead";
 import type { Assignments, DateRange, Tenant, User, WorkScope } from "../../src/domain/models";
 import type { OfflineSnapshot } from "../../src/domain/offline";
+import type { MaintenanceDeliveryContext } from "../../src/domain/orderLifecycle";
 import * as creation from "../../src/domain/creation";
 import * as workActivities from "../../src/domain/workActivities";
 import * as userSignatures from "../../src/domain/userSignatures";
@@ -130,6 +131,8 @@ export interface ControlledRead {
   signal: AbortSignal;
   aborts: number;
   settled: boolean;
+  priorityDate?: string;
+  progress(data: Assignments, loadedDates: string[]): void;
   resolve(data?: Assignments): void;
   reject(error: Error): void;
 }
@@ -146,6 +149,8 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
   let answerGate: (() => Promise<void>) | undefined;
   let localGate: (() => Promise<Assignments>) | undefined;
   let statusGate: (() => Promise<void>) | undefined;
+  let deliveryGate: (() => Promise<MaintenanceDeliveryContext>) | undefined;
+  const deliveryReads: { scope: WorkScope; requireFresh?: boolean }[] = [];
   let notificationData: Assignments | undefined;
   let notificationOptions: UseMobileNotificationsOptions | undefined;
   const account: User = { ...user(), accessBranchs: [...user().accessBranchs, { id: 2, name: "Secundaria", main: false }] };
@@ -168,6 +173,8 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
       };
       const call: ControlledRead = {
         range: { ...range }, branchId, signal, aborts: 0, settled: false,
+        priorityDate: readOptions.priorityDate,
+        progress: (value, dates) => readOptions.onProgress?.(structuredClone(value), dates),
         resolve: (value = captured) => finish(() => resolve(structuredClone(value))),
         reject: (error) => finish(() => reject(error)),
       };
@@ -220,6 +227,11 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     answer = answer;
     localAssignments = async (): Promise<Assignments> => { calls.localAssignments++; return localGate ? localGate() : structuredClone(data); };
     status = async (): Promise<void> => { calls.statuses++; await statusGate?.(); };
+    orderDelivery = async (scope: WorkScope, requireFresh?: boolean): Promise<MaintenanceDeliveryContext> => {
+      deliveryReads.push({ scope, requireFresh });
+      if (!deliveryGate) throw new Error("DELIVERY_READ_NOT_CONFIGURED");
+      return deliveryGate();
+    };
     creationOptions = async (): Promise<void> => { calls.options++; };
   }
 
@@ -285,12 +297,13 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     throw new Error("HOOK_DID_NOT_SETTLE: unstable dependencies or an effect loop");
   }
   return {
-    access, calls, reads, wrappers, render, flush,
+    access, calls, reads, wrappers, render, flush, deliveryReads,
     unmount: hooks.unmount,
     ignoreNextAbort: () => { ignoreNextAbort = true; },
     setAnswerGate: (gate: () => Promise<void>) => { answerGate = gate; },
     setLocalAssignments: (gate: () => Promise<Assignments>) => { localGate = gate; },
     setStatusGate: (gate: () => Promise<void>) => { statusGate = gate; },
+    setDeliveryGate: (gate: () => Promise<MaintenanceDeliveryContext>) => { deliveryGate = gate; },
     setNotificationAssignments: (value: Assignments) => { notificationData = value; },
     async openNotification(payload: NotificationData): Promise<boolean> {
       assert.ok(notificationOptions?.session);

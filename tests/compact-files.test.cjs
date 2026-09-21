@@ -39,6 +39,20 @@ for (const platform of ["web", "android"]) {
     await f.save(store, async () => { throw new Error("MUST_NOT_RESUBMIT"); });
     assert.equal(store.getSnapshot().files.length, 0);
   });
+  test(`${platform}: automatic save targets only the newly selected batch and retains older uncertain drafts`, async () => {
+    const f = fileHarness(platform); const store = await f.store();
+    await store.addFiles([f.asset("older-uncertain.png")]);
+    const original = store.getSnapshot().files[0];
+    await store.addFiles([f.asset("new.png"), f.asset("new.pdf")]);
+    const added = store.getSnapshot().files.filter(file => file.id !== original.id);
+    const sent = [];
+    const result = await f.save(store, async files => { sent.push(files[0].id); }, { fileIds: added.map(file => file.id) });
+    assert.deepEqual(sent, added.map(file => file.id));
+    assert.equal(result.saved, 2); assert.equal(result.queued, 0); assert.equal(result.failure, null);
+    assert.deepEqual(store.getSnapshot().files, [original]);
+    await f.save(store, async () => assert.fail("NO_REPLAY"), { fileIds: added.map(file => file.id) });
+    assert.deepEqual(store.getSnapshot().files, [original]);
+  });
   test(`${platform}: queued ownership differs from confirmed; plain failure never permits cleanup`, async () => {
     const f = fileHarness(platform); const store = await f.store();
     await store.addFiles([f.asset("queued.pdf"), f.asset("confirmed.png"), f.asset("remain.pdf")]);

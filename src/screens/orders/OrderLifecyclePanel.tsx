@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import type { AssignmentGroup, Tenant, WorkStatus } from "../../domain/models";
 import { assignmentWorkOrderCode } from "../../domain/assignmentCodes";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../../domain/orderLifecycle";
@@ -7,7 +10,7 @@ import type { UserSignatureAccess } from "../../domain/userSignatures";
 import { Badge, BodyText, Button, Card, SectionTitle } from "../../ui/components";
 import { Notice } from "../workDetail/DetailUi";
 import { deleteLifecycleDraft, readLifecycleDraft, saveLifecycleDraft } from "./lifecycle/lifecycleDrafts";
-import { incompleteDeliveryChecklists, initialDeliveryDraft, lifecycleError, requiresClientSignature, type DeliveryDraft } from "./lifecycle/lifecycleRules";
+import { deliveryWarnings, initialDeliveryDraft, lifecycleError, type DeliveryDraft } from "./lifecycle/lifecycleRules";
 import { styles } from "./lifecycle/lifecycleStyles";
 import { MaintenanceDeliveryDialog } from "./lifecycle/MaintenanceDeliveryDialog";
 import { StartMaintenanceDialog } from "./lifecycle/StartMaintenanceDialog";
@@ -24,6 +27,8 @@ export interface OrderLifecyclePanelProps {
   mode: "live" | "demo";
   busy: boolean;
   allow?: boolean;
+  deliveryIntent?: "deliver" | "ready";
+  onDeliveryIntentConsumed?: () => void;
   onStart: () => Promise<void>;
   onDeliver: (input: MaintenanceDeliveryInput) => Promise<void>;
   onLoad: () => Promise<MaintenanceDeliveryContext>;
@@ -48,7 +53,8 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
   const actionRef = useRef<LifecycleAction | null>(null);
   const [action, setAction] = useState<LifecycleAction | null>(null);
   const [context, setContext] = useState<MaintenanceDeliveryContext | null>(null);
-  const [dialog, setDialog] = useState<"start" | "deliver" | null>(null);
+  const [dialog, setDialog] = useState<"start" | "preflight" | "ready" | "deliver" | null>(null);
+  const consumedIntent = useRef<string | undefined>(undefined);
   const [draft, setDraft] = useState<DeliveryDraft | null>(() => props.storageKey.trim() ? readLifecycleDraft(scope) : null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -56,9 +62,9 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
   const effectiveStatus = finished(group.status) ? group.status : confirmed === "deliver" ? "delivered" : context?.status ?? group.status;
   const readOnly = finished(effectiveStatus);
   const canStart = allow && !readOnly && effectiveStatus === "pending" && confirmed !== "start" && context?.canStart !== false;
-  const canDeliver = allow && !readOnly && context?.canDeliver !== false;
+  const canDeliver = allow && !readOnly && context?.canTechnicianDeliver !== false;
   const locked = busy || action !== null;
-  const reasons = [...new Set([...incompleteDeliveryChecklists(group), ...(context?.incompleteChecklists ?? [])])];
+  const warnings = deliveryWarnings(group, context);
 
   async function loadContext(): Promise<MaintenanceDeliveryContext> {
     const loaded = await latest.current.onLoad();
@@ -92,17 +98,25 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     if (latest.current.storageKey.trim()) saveLifecycleDraft(scope, next);
   }
 
-  function openDelivery(): void {
+  function openDelivery(ready = false): void {
     if (locked || !canDeliver) return;
     setSuccess(null);
     void run("load", async () => {
       const loaded = await loadContext();
       if (!mounted.current) return;
-      if (finished(loaded.status) || loaded.canDeliver === false) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
+      if (finished(loaded.status) || loaded.canTechnicianDeliver === false || latest.current.allow === false) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
+      if (!loaded.technicianDeliverySupported) throw new Error("Actualiza el servidor para habilitar la entrega técnica simplificada.");
       if (!draft) saveDraft(initialDeliveryDraft(latest.current.group, loaded));
-      setDialog("deliver");
+      if (!ready || deliveryWarnings(latest.current.group, loaded).allWorksDelivered) setDialog(ready ? "ready" : "preflight");
+      latest.current.onDeliveryIntentConsumed?.();
     }).catch(() => {});
   }
+
+  useEffect(() => {
+    if (!props.deliveryIntent || consumedIntent.current === props.deliveryIntent || !context || locked || actionRef.current !== null || !canDeliver) return;
+    consumedIntent.current = props.deliveryIntent;
+    openDelivery(props.deliveryIntent === "ready");
+  }, [props.deliveryIntent, context, locked, canDeliver]);
 
   async function start(): Promise<void> {
     if (!canStart) return;
@@ -126,10 +140,8 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     await run("deliver", async () => {
       const loaded = await loadContext();
       if (!mounted.current) return;
-      if (finished(loaded.status) || loaded.canDeliver === false || latest.current.allow === false || finished(latest.current.group.status)) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
-      const pending = [...new Set([...loaded.incompleteChecklists, ...incompleteDeliveryChecklists(latest.current.group)])];
-      if (pending.length > 0) throw new Error(`REQUIRED_CHECKLISTS_INCOMPLETE:${pending.join("; ")}`);
-      if (requiresClientSignature(loaded.maintenanceType) && (!input.clientSignature || !input.receivedByName?.trim() || (input.faultType !== "operative" && input.faultType !== "wear"))) throw new Error("Los requisitos de recepción cambiaron. Vuelve a editar y completa el tipo de falla, receptor y firma.");
+      if (finished(loaded.status) || loaded.canTechnicianDeliver === false || !loaded.technicianDeliverySupported || latest.current.allow === false || finished(latest.current.group.status)) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
+      if (dialog !== "deliver" || input.acknowledgeDelivery !== true || !input.technicianSignature) throw new Error("Confirma el aviso previo y añade tu firma.");
       await latest.current.onDeliver(input);
       deleteLifecycleDraft(scope);
       if (!mounted.current) return;
@@ -150,11 +162,11 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
 
   return <Card style={styles.stack}>
     <View style={styles.row}>
-      <View style={styles.grow}><SectionTitle title="Inicio y entrega de OT" subtitle="Gestión de la orden de mantenimiento" /></View>
+      <View style={styles.grow}><SectionTitle title="Entrega de OT" /></View>
       <Badge label={readOnly ? "OT cerrada" : effectiveStatus === "pending" && confirmed !== "start" ? "Por iniciar" : "En ejecución"} tone={readOnly ? "success" : "teal"} />
     </View>
     {tenant ? <Text style={styles.caption}>{tenant.name} · {orderLabel}</Text> : null}
-    {readOnly ? <Notice message="La OT está entregada o finalizada. Este panel no admite otro inicio ni otra entrega; los permisos de los trabajos, comentarios y archivos se gestionan en sus propias secciones." tone="success" /> : <BodyText>Inicia la reparación o prepara su entrega con observaciones y firmas. Puedes entregar desde pendiente si los requisitos obligatorios están completos.</BodyText>}
+    {readOnly ? <Notice message="OT entregada o finalizada." tone="success" /> : null}
     {!allow ? <Notice message="El acceso actual no habilita inicio ni entrega de esta OT." tone="warning" /> : null}
     {success ? <Notice message={success} tone="success" /> : null}
     {error ? <Notice message={error} tone="error" /> : null}
@@ -162,12 +174,30 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     {readOnly && context?.finalizationNote ? <BodyText>{context.finalizationNote}</BodyText> : null}
     {!readOnly ? <View style={styles.stack}>
       {canStart ? <Button title="Iniciar OT" icon="play-outline" variant="secondary" disabled={locked} onPress={() => { setError(null); setSuccess(null); setDialog("start"); }} /> : null}
-      <Button title={draft ? "Continuar borrador de entrega" : "Preparar entrega de OT"} icon="create-outline" disabled={locked || !canDeliver} onPress={openDelivery} />
-      {reasons.length > 0 ? <Text style={styles.caption}>{reasons.length} checklist(s) obligatorio(s) pendiente(s). Puedes revisar el formulario antes de completarlos.</Text> : null}
-      {draft ? <><Notice message="Hay un borrador de entrega en esta sesión. Se conserva al cambiar de pestaña; no se ha enviado." /><Button title="Descartar borrador de entrega" variant="ghost" icon="trash-outline" disabled={locked} onPress={discardDraft} /></> : null}
+      <Button title="Entregar OT" icon="checkmark-circle-outline" disabled={locked || !canDeliver} onPress={() => openDelivery()} style={{ backgroundColor: "#C4510A", borderColor: "#C4510A" }} />
+      {draft ? <Button title="Descartar borrador" variant="ghost" icon="trash-outline" disabled={locked} onPress={discardDraft} /> : null}
     </View> : null}
     <Button title="Actualizar estado de OT" icon="refresh-outline" variant="ghost" loading={action === "load"} disabled={locked} onPress={reload} />
     {dialog === "start" ? <StartMaintenanceDialog orderLabel={orderLabel} busy={locked} allowed={canStart} mode={mode} error={error} onClose={() => setDialog(null)} onStart={() => { void start().catch(() => {}); }} /> : null}
+    {dialog === "preflight" || dialog === "ready" ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setDialog(null); }}>
+      <SafeAreaView style={styles.overlay}><View style={styles.modal}>
+        <View style={styles.header}>
+          <Ionicons name={dialog === "ready" ? "checkmark-circle-outline" : "alert-circle-outline"} size={44} color={dialog === "ready" ? "#16805D" : "#C4510A"} accessible={false} />
+          <SectionTitle title={dialog === "ready" ? "Tus trabajos ya están entregados" : "Antes de entregar la OT"} subtitle={orderLabel} />
+        </View>
+        <ScrollView contentContainerStyle={styles.content}>
+          {dialog === "ready" ? <BodyText>Ya tienes todo listo para entregar la OT. ¿Quieres hacerlo ahora?</BodyText> : <View style={styles.stack}>
+            {warnings.pendingWorks.length > 0 ? <View style={styles.tight}><Text style={styles.label}>{warnings.pendingWorks.length} trabajo(s) sin entregar</Text>{warnings.pendingWorks.slice(0, 3).map((name, index) => <BodyText key={`${index}:${name}`}>{name}</BodyText>)}{warnings.pendingWorks.length > 3 ? <BodyText>Y {warnings.pendingWorks.length - 3} más.</BodyText> : null}</View> : null}
+            {warnings.pendingChecklists.length > 0 ? <View style={styles.tight}><Text style={styles.label}>{warnings.pendingChecklists.length} checklist(s) incompleto(s)</Text>{warnings.pendingChecklists.slice(0, 3).map(name => <BodyText key={name}>{name}</BodyText>)}{warnings.pendingChecklists.length > 3 ? <BodyText>Y {warnings.pendingChecklists.length - 3} más.</BodyText> : null}</View> : null}
+            <Notice tone="warning" message="La OT y todos sus trabajos pasarán a entregados, aunque haya checklists incompletos. Sus respuestas y evidencias se conservarán tal como están." />
+          </View>}
+        </ScrollView>
+        <View style={styles.footer}>
+          <Button title={dialog === "ready" ? "Sí, entregar OT" : "Entendido, continuar"} icon="arrow-forward-outline" disabled={locked || !canDeliver} onPress={() => setDialog(dialog === "ready" ? "preflight" : "deliver")} style={{ backgroundColor: "#C4510A", borderColor: "#C4510A" }} />
+          <Button title={dialog === "ready" ? "Más tarde" : "Cancelar"} variant="ghost" disabled={locked} onPress={() => setDialog(null)} />
+        </View>
+      </View></SafeAreaView>
+    </Modal> : null}
     {dialog === "deliver" && context && draft ? <MaintenanceDeliveryDialog
       orderLabel={orderLabel}
       tenantName={tenant?.name}
@@ -178,7 +208,7 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       draft={draft}
       busy={locked}
       unavailable={!canDeliver}
-      reasons={reasons}
+      reasons={[]}
       error={error}
       onChange={saveDraft}
       onClose={() => setDialog(null)}

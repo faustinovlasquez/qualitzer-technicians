@@ -34,6 +34,7 @@ export interface FileWorkspaceProps {
   busy?: boolean;
   title?: string;
   compact?: boolean;
+  autoSave?: boolean;
   headerAction?: ReactNode;
   requirement?: string;
   notices?: ReactNode;
@@ -156,6 +157,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     const context = pickerContext.current.identity;
     const canContinue = (): boolean => isCurrent() && active.current && token === pickerGeneration.current && pickerContext.current.identity === context && (securityRef.current?.isUnlocked() ?? true) && !callbacks.current.readOnly && !callbacks.current.busy && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked;
     let permissionError: CameraPermissionError | null = null;
+    let addedIds: string[] = [];
     setMessage(null);
     setOperation("select");
     try {
@@ -165,7 +167,9 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       if (selected.length === 0) return;
       selectionLease.current = null;
       setOperation("prepare");
+      const previousIds = new Set(draft.store.getSnapshot().files.map(file => file.id));
       await draft.store.addFiles(selected);
+      addedIds = draft.store.getSnapshot().files.filter(file => !previousIds.has(file.id)).map(file => file.id);
     } catch (error) {
       if (source === "camera" && error instanceof CameraPermissionError) permissionError = error;
       else if (active.current && token === pickerGeneration.current) setMessage({ text: errorMessage(error), tone: "error" });
@@ -174,6 +178,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       if (selectionLease.current === lease) selectionLease.current = null;
       if (active.current && token === pickerGeneration.current) setOperation(null);
     }
+    if (addedIds.length > 0 && callbacks.current.autoSave && canContinue()) await upload(addedIds);
     if (permissionError && canContinue()) cameraGuide.handleError(permissionError, { onRetry: current => pick("camera", current), onGallery: current => pick("library", current) });
   }
 
@@ -197,8 +202,8 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     finally { draft.store.endFiles(lease); if (active.current) setOperation(null); }
   }
 
-  async function upload(): Promise<void> {
-    if (!active.current || callbacks.current.readOnly || callbacks.current.busy || callbacks.current.offline === null || callbacks.current.offline?.authBlocked) return;
+  async function upload(fileIds?: readonly string[]): Promise<void> {
+    if (!active.current || !(securityRef.current?.isUnlocked() ?? true) || callbacks.current.readOnly || callbacks.current.busy || callbacks.current.offline === null || callbacks.current.offline?.authBlocked) return;
     const lease = draft.store.beginFiles();
     if (!lease) return;
     const uploadFile = callbacks.current.onUpload;
@@ -207,14 +212,15 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     setOperation("upload");
     try {
       const { saved, queued, failure } = await saveFileBatch({
-        store: draft.store, upload: uploadFile,
-        canContinue: () => active.current && !callbacks.current.readOnly && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.resourceKey === resource,
+        store: draft.store, upload: uploadFile, fileIds,
+        canContinue: () => active.current && (securityRef.current?.isUnlocked() ?? true) && !callbacks.current.readOnly && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.resourceKey === resource,
         requireSource: callbacks.current.offline === undefined,
         onProgress: (index, total, name) => { if (active.current) setProgress(`${index}/${total} · ${name}`); },
       });
-      if (saved > 0 && active.current) void load();
+      if (saved + queued > 0 && active.current) void load();
       if (active.current) {
-        setMessage({ text: `${saved} confirmado(s)${props.mode === "demo" ? " en demo" : ""} · ${queued} en cola, sin confirmar.${failure ? ` ${failure} Los restantes se conservan; reintenta solo los pendientes.` : " No repitas los transferidos."}`, tone: failure && saved + queued === 0 ? "error" : queued > 0 || failure ? "warning" : "success" });
+        const resultText = props.autoSave ? `${saved} confirmado(s) · ${queued} pendiente(s) de sincronizar.` : `${saved} confirmado(s)${props.mode === "demo" ? " en demo" : ""} · ${queued} en cola, sin confirmar.`;
+        setMessage({ text: `${resultText}${failure ? ` ${failure} Los restantes se conservan; reintenta solo los pendientes.` : props.autoSave ? "" : " No repitas los transferidos."}`, tone: failure && saved + queued === 0 ? "error" : queued > 0 || failure ? "warning" : "success" });
       }
     } catch (error) {
       if (active.current) setMessage({ text: `No se pudo terminar el guardado. Conserva los borradores y revisa la cola antes de reintentar: ${errorMessage(error)}`, tone: "error" });
@@ -232,8 +238,13 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     setMessage(null);
     setOperation("delete");
     try {
-      await onDelete(String(deleting.id));
-      if (active.current) setDeleting(null);
+      const deletedId = String(deleting.id);
+      await onDelete(deletedId);
+      if (active.current) {
+        generation.current += 1;
+        setFiles(current => current?.filter(file => String(file.id) !== deletedId) ?? null);
+        setDeleting(null);
+      }
       const refreshed = active.current ? await load() : true;
       if (active.current) setMessage({ text: refreshed ? "Archivo eliminado." : "El archivo se eliminó, pero no se pudo actualizar la lista. Actualízala; no repitas la eliminación.", tone: refreshed ? "success" : "warning" });
     } catch (error) { if (active.current) setMessage({ text: `No se confirmó la eliminación: ${errorMessage(error)}`, tone: "error" }); }
@@ -252,8 +263,9 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       {!draft.hydrated && !draft.error ? <View style={styles.row}><ActivityIndicator color={palette.primary} /><BodyText>Recuperando borradores de este destino…</BodyText></View> : null}
       {draft.fileBusy && operation === null ? <Notice message="Hay una operación de archivos en curso para este destino. Espera a que termine antes de realizar otra." /> : null}
       {message ? <Notice message={userErrorText(message.text)} tone={message.tone} onDismiss={() => setMessage(null)} /> : null}
-      {draft.hydrated ? <Text style={styles.label}>{pending.length} sin guardar · {fileSizeLabel(draft.files.reduce((sum, file) => sum + file.size, 0))} / 40 MiB</Text> : null}
-      <PendingFileList files={props.offline !== undefined ? pending : draft.files} disabled={unavailable} onRemove={(id) => { void remove(id); }} />
+      {props.compact && Platform.OS === "web" && pending.length > 0 ? <Text style={styles.caption}>Sin guardar: se pierden al recargar.</Text> : null}
+      {draft.hydrated && (!props.autoSave || pending.length > 0) ? <Text style={styles.label}>{pending.length} sin guardar · {fileSizeLabel(draft.files.reduce((sum, file) => sum + file.size, 0))} / 40 MiB</Text> : null}
+      <PendingFileList files={props.offline !== undefined ? pending : draft.files} expanded={props.autoSave} disabled={unavailable} onRemove={(id) => { void remove(id); }} />
       {draft.files.some((file) => file.uploaded) ? <View style={styles.tight}><Notice message="Ya transferidos; no se reenviarán. Falta limpiar el borrador original." tone="warning" />{draft.files.filter((file) => file.uploaded).map((file) => <Button key={file.id} title={`Limpiar borrador original: ${file.name}`} variant="secondary" disabled={unavailable} onPress={() => void remove(file.id)} />)}</View> : null}
       <View style={styles.between}><Text style={styles.label}>{[...displayedFiles.values()].filter(isConfirmedAttachment).length}{props.mode === "demo" ? " en listado demo" : " confirmados"} · {localFiles.filter((file) => !file.offline.confirmed).length} en cola</Text><IconButton label={loadError ? "Reintentar archivos" : "Actualizar archivos"} name="refresh-outline" disabled={loading || props.busy || draft.fileBusy || draft.closed} onPress={() => { void load(); }} /></View>
       {props.mode === "demo" && localFiles.some((file) => !file.offline.confirmed) ? <Notice message="El listado demo no confirma los envíos en cola. Sus copias pendientes se conservan." tone="warning" /> : null}
@@ -262,7 +274,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       {localFiles.map((file) => {
         const error = props.pending?.find((operation) => operation.id === file.offline.operationId)?.lastError;
         return <View key={String(file.id)} style={styles.tight}>
-        <OfflineFileCard file={file} readLocalFile={props.readLocalFile} />
+        <OfflineFileCard file={file} readLocalFile={props.offline?.authBlocked ? undefined : props.readLocalFile} expanded={props.autoSave} />
         {error ? <Notice message={syncUserError(error)} tone="warning" /> : null}
         {props.onDelete ? <Button title="Eliminar archivo" variant="secondary" disabled={unavailable || deletionDisabled || !file.offline.confirmed || String(file.id).startsWith("local-") || loading || !!loadError} onPress={() => setDeleting(file)} /> : null}
       </View>; })}
@@ -287,9 +299,9 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     </View>
     {props.compact ? <ScrollView ref={list} style={workspaceStyles.list} contentContainerStyle={workspaceStyles.listContent} keyboardShouldPersistTaps="handled" testID="files-list-scroll">{listContent}</ScrollView> : <View style={workspaceStyles.listContent}>{listContent}</View>}
     <View style={workspaceStyles.dock} testID="files-save-dock">
-      <Text style={styles.caption} accessibilityLiveRegion="polite" numberOfLines={2}>{progress || (operation === "select" ? "Esperando selección…" : operation === "prepare" ? "Protegiendo archivos…" : connection)}</Text>
-      {Platform.OS === "web" && pending.length > 0 ? <Text style={styles.caption}>Sin guardar: se pierden al recargar.</Text> : null}
-      {operation === "select" && Platform.OS === "web" ? <Button title="Ya cerré el selector · cancelar" variant="secondary" onPress={cancelPicker} /> : !props.readOnly ? <Button title={savePresentation.title} icon="cloud-upload-outline" disabled={unavailable || offlineLoading || pending.length === 0 || draft.saving || draft.error !== null} loading={operation === "upload"} onPress={() => { void upload(); }} /> : null}
+      <Text style={styles.caption} accessibilityLiveRegion="polite" numberOfLines={2}>{progress || (operation === "select" ? "Esperando selección…" : operation === "prepare" ? "Protegiendo archivos…" : props.autoSave && !offlineLoading && !props.offline?.authBlocked ? pending.length > 0 ? `${pending.length} archivo(s) por guardar` : localFiles.length > 0 ? "Guardado local · pendiente de sincronizar" : "Sin archivos por guardar" : connection)}</Text>
+      {!props.compact && Platform.OS === "web" && pending.length > 0 ? <Text style={styles.caption}>Sin guardar: se pierden al recargar.</Text> : null}
+      {operation === "select" && Platform.OS === "web" ? <Button title="Ya cerré el selector · cancelar" variant="secondary" onPress={cancelPicker} /> : !props.readOnly && (!props.autoSave || pending.length > 0 || operation === "upload") ? <Button title={props.autoSave ? `${props.compact ? "Guardar" : "Guardar pendientes"} · ${pending.length}` : savePresentation.title} accessibilityLabel={props.autoSave ? `Guardar pendientes · ${pending.length}` : savePresentation.title} icon="cloud-upload-outline" disabled={unavailable || offlineLoading || pending.length === 0 || draft.saving || draft.error !== null} loading={operation === "upload"} onPress={() => { void upload(); }} /> : null}
     </View>
     <CameraPermissionGuide guide={cameraGuide} />
     <Modal visible={help} transparent animationType="fade" onRequestClose={() => setHelp(false)}>
@@ -304,7 +316,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
         <Button title="Cerrar ayuda" onPress={() => setHelp(false)} />
       </ScrollView></View></View>
     </Modal>
-    <Modal visible={deleting !== null} transparent animationType="fade" onRequestClose={() => { if (operation !== "delete") setDeleting(null); }}>
+    {deleting !== null ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (operation !== "delete") setDeleting(null); }}>
       <View style={styles.modalOverlay}><View style={styles.modalCard} accessibilityViewIsModal><ScrollView contentContainerStyle={styles.modalContent}>
         <SectionTitle title="¿Eliminar archivo?" subtitle={deleting?.name} />
         <BodyText>El archivo dejará de estar disponible en este destino. No podrás restaurarlo desde la app.</BodyText>
@@ -312,6 +324,6 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
         <Button title="Cancelar" variant="secondary" disabled={operation === "delete"} onPress={() => setDeleting(null)} />
         <Button title="Confirmar eliminación" variant="danger" icon="trash-outline" loading={operation === "delete"} disabled={unavailable || deletionDisabled || !props.onDelete} onPress={() => { void deleteSaved(); }} />
       </ScrollView></View></View>
-    </Modal>
+    </Modal> : null}
   </View>;
 }

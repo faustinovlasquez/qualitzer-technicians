@@ -8,6 +8,30 @@ import type { WorkspaceFileDraft } from "../src/screens/workDetail/files/Workspa
 import { action, durableReactFixture, settle, uiModule } from "./helpers/durable-ui";
 
 const path = (suffix: string) => `/api/assignments/direct-11/works/11${suffix}?companyBranchId=1&startDate=2026-09-01&endDate=2026-09-01`;
+test("delete activity image validates membership and forwards exact context only after fresh authorization", async context => {
+  const { baseUrl, state } = await harness(context);
+  state.activityFiles = [{ id: 401, name: "Foto", type: "image/png", url: "https://files.invalid/photo.png" }];
+  const result = await jsonRequest(baseUrl, path("/activities/71/files/401"), "DELETE");
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(result.data, { success: true });
+  assert.equal(writeCalls(state).length, 1);
+  assert.equal(writeCalls(state)[0].path, "/api/technician-dashboard/panel/direct-11/works/11/activities/71/files/401");
+  assert.deepEqual(Object.fromEntries(writeCalls(state)[0].query), { startDate: "2026-09-01", endDate: "2026-09-01", companyBranchId: "1", groupType: "direct_assignment" });
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71/files/402"), "DELETE")).response.status, 404);
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71/files/401"), "DELETE", { userId: 2 })).response.status, 400);
+  state.beforeResponse = async call => { if (call.path.endsWith("/activities/71/files")) state.assignments = assignments([]); };
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71/files/401"), "DELETE")).response.status, 404);
+  assert.equal(writeCalls(state).length, 1);
+});
+test("activity image deletion preserves backend rejection and rejects delivered work", async context => {
+  const { baseUrl, state } = await harness(context);
+  state.activityFiles = [{ id: 401, name: "Foto", type: "image/png", url: "https://files.invalid/photo.png" }];
+  state.failures.set("/api/technician-dashboard/panel/direct-11/works/11/activities/71/files/401", { status: 404, body: { error: "WORK_ACTIVITY_FILE_NOT_FOUND" } });
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71/files/401"), "DELETE")).response.status, 404);
+  state.assignments = assignments([group({ works: [work({ status: "delivered" })] })]);
+  assert.equal((await jsonRequest(baseUrl, path("/activities/71/files/401"), "DELETE")).response.status, 409);
+  assert.equal(writeCalls(state).length, 1);
+});
 test("checklist markers survive transport and are excluded from activities", () => {
   const activity = { id: 71, activity: "Ruedas y torque pernos", executionTime: 0, isStarted: false, isCompleted: true, technicalDocuments: [] };
   assert.equal(isWorkActivity(workActivitySchema.parse({ ...activity, isChecklist: true })), false);

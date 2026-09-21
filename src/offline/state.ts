@@ -35,7 +35,7 @@ export const offlineUserSchema = z.object({
 const stateSchema = z.object({
   version: z.literal(1), revision: z.number().int().nonnegative(), operations: z.array(operation),
   revokedResources: z.array(z.object({ key: z.string(), status: z.union([z.literal(403), z.literal(404)]) })).default([]),
-  cache: z.array(z.object({ key: z.string(), json: z.string(), fetchedAt: z.number().nonnegative(), timerReadOperationIds: z.array(z.string()).optional(), coverage: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), branchId: z.number().int().positive(), fetchedAt: z.number().nonnegative() }).optional() })),
+  cache: z.array(z.object({ key: z.string(), json: z.string(), fetchedAt: z.number().nonnegative(), timerReadOperationIds: z.array(z.string()).optional(), fileReadOperationIds: z.array(z.string()).optional(), coverage: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), branchId: z.number().int().positive(), fetchedAt: z.number().nonnegative() }).optional() })),
   passports: z.array(z.object({ key: z.string(), user: offlineUserSchema, verifiedAt: z.number(), disabled: z.boolean() })),
   reservations: z.array(z.object({ id: z.string(), size: z.number(), namespace: z.string() })),
   attachments: z.array(z.object({ scope, stepId: z.string().optional(), attachmentId: z.string(), file: fileSchema })).default([]),

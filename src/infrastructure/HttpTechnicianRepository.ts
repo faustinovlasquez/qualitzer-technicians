@@ -41,6 +41,10 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id, isCompleted = true) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/complete`), "POST", { isCompleted });
   deleteActivity: WorkActivitiesPort["deleteActivity"] = (scope, id) => this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}`), "DELETE");
   activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => cachedAttachmentSchema.array().parse(await this.request<unknown>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/files`)));
+  deleteActivityFile: WorkActivitiesPort["deleteActivityFile"] = (scope, id, fileId) => {
+    if (!/^[1-9]\d*$/.test(fileId)) throw new Error("Archivo de actividad inválido.");
+    return this.request<void>(this.scopePath(scope, `/activities/${positiveCreationIdSchema.parse(id)}/files/${positiveCreationIdSchema.parse(Number(fileId))}`), "DELETE");
+  };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = async (scope, id, files) => {
     for (const file of files) {
       const body = new FormData(); await appendPhoto(body, file);
@@ -227,11 +231,18 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async assignments(range: DateRange, branchId: number, options?: AssignmentReadOptions): Promise<Assignments> {
     return withAssignmentReadBatch(options, async (batch) => {
-      const snapshots = await batch.map(assignmentDays(range), async (date) => {
+      const days = assignmentDays(range);
+      const requestedDays = options?.priorityDate && days.includes(options.priorityDate) ? [options.priorityDate, ...days.filter(date => date !== options.priorityDate)] : days;
+      const completed: Array<{ date: string; data: Assignments }> = [];
+      const snapshots = await batch.map(requestedDays, async (date) => {
         const data = await batch.wait(() => this.request<Assignments>(`/api/assignments?${new URLSearchParams({ ...dailyRange(date), companyBranchId: String(branchId) })}`, "GET", undefined, undefined, undefined, batch.signal));
         if (!cachedAssignmentsSchema.safeParse(data).success) throw new ApiError(502, "UPSTREAM_INVALID_RESPONSE", apiMessage("UPSTREAM_INVALID_RESPONSE"));
-        return { date, data };
-      });
+        const snapshot = { date, data };
+        completed.push(snapshot);
+        batch.check();
+        options?.onProgress?.(mergeDailyAssignments(completed, range.startDate), completed.map(item => item.date));
+        return snapshot;
+      }, options?.getPriorityDate);
       return mergeDailyAssignments(snapshots, range.startDate);
     });
   }

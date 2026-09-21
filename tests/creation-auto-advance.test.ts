@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ReactNode } from "react";
 import type { CreationInput, CreationOptions, CreationResult } from "../src/domain/creation";
-import { OfflineQueuedError, type OfflineQueuedOutcome } from "../src/domain/offline";
+import { OfflineQueuedError, type OfflineQueuedOutcome, type OfflineSnapshot, type OfflineOperationStatus } from "../src/domain/offline";
 import type { CreationScreenProps } from "../src/screens/creation/CreationScreen";
 import type { TimeFieldProps } from "../src/ui/time/TimeField";
-import { creationDraftSchema, creationPayload, emptyCreationForm, type CreationDraft } from "../src/screens/creation/creationForm";
+import { creationDraftSchema, creationPayload, emptyCreationForm, queuedCreationState, type CreationDraft, type CreationForm } from "../src/screens/creation/creationForm";
 import { user } from "../server/tests/fixtures";
 import { reactFixture, tenant } from "./helpers/tenant-challenge";
 import { action, deferred, elements, memoryDraftStorage, settle, uiModule, type Wrapped } from "./helpers/durable-ui";
@@ -19,7 +19,13 @@ const result: CreationResult = { kind: "work", groupId: "direct-71", workId: 71,
 const outcome: Extract<CreationDraft, { phase: "queued" }>["outcome"] = { kind: "create", operationId: requestId, operationIds: [requestId], date,
   localGroupId: `local-${requestId}`, localWorkId: `local-${requestId}`, ownsFiles: false };
 const options: CreationOptions = { companyBranchId: 1, userId: 9, workerId: 42, timezone: "America/Santiago",
-  priorities: ["low", "medium", "high"], nonProductiveReasons: [], maintenanceTypes: [], schedule: { sameDayOnly: true, conflictPolicy: "warning" } };
+  priorities: ["low", "medium", "high"], nonProductiveReasons: [{ value: "waiting_parts", label: "Espera de repuestos" }], maintenanceTypes: [{ value: "correctivo", enabled: true, instruction: null }], schedule: { sameDayOnly: true, conflictPolicy: "warning" } };
+
+const savedQueued: Extract<CreationDraft, { phase: "queued" }> = { version: 1, kind: "work", phase: "queued", form, input, outcome };
+function snapshot(status: OfflineOperationStatus = "pending"): OfflineSnapshot {
+  return { online: true, preparing: false, syncing: false, authBlocked: false, pending: status === "applied" ? 0 : 1, conflicts: 0, lastSyncedAt: null, lastError: null, coverage: [],
+    operations: [{ id: requestId, kind: "create", status, attempts: 0, createdAt: 1, nextAttemptAt: 0, input, localGroupId: outcome.localGroupId, localWorkId: outcome.localWorkId, ...(status === "applied" ? { result } : {}) }] };
+}
 
 function stableHooks() {
   const hooks = reactFixture();
@@ -45,6 +51,7 @@ async function creationFixture(initial?: CreationDraft) {
   const created: CreationResult[] = [];
   const events: string[] = [];
   const security = { unlocked: true };
+  let generatedIds = 0;
   const controls: { hold?: CreationDraft["phase"]; gate?: ReturnType<typeof deferred<void>>; fail?: CreationDraft["phase"] } = {};
   const storage = { ...memory.storage, setItem: async (key: string, value: string) => {
     const draft = creationDraftSchema.parse(JSON.parse(value));
@@ -61,7 +68,7 @@ async function creationFixture(initial?: CreationDraft) {
     react,
     "react-native": { Platform: { OS: "web" }, StyleSheet: { create: (styles: object) => styles }, BackHandler: { addEventListener: () => ({ remove: () => {} }) },
       View: "View", Text: "Text", ScrollView: "ScrollView", KeyboardAvoidingView: "KeyboardAvoidingView", ActivityIndicator: "ActivityIndicator" },
-    "expo-crypto": { randomUUID: () => requestId },
+    "expo-crypto": { randomUUID: () => ++generatedIds === 1 && (!initial || initial.phase === "editing") ? requestId : `52b5201d-4ea9-4dad-9f9d-${String(generatedIds).padStart(12, "0")}` },
     "../../security/DeviceSecurityContext": { useDeviceSecurity: () => ({ isUnlocked: () => security.unlocked }) },
     "./creationDrafts": drafts,
     "./CreationCatalogSelector": { CreationCatalogSelector: "CreationCatalogSelector" },
@@ -71,7 +78,7 @@ async function creationFixture(initial?: CreationDraft) {
     "./CreationModal": { CreationModal: "CreationModal" },
   });
   let backs = 0;
-  const props: CreationScreenProps = { kind: "work", user: user(), tenant, companyBranchId: 1, initialDate: date, data: null,
+  const props: CreationScreenProps = { kind: initial?.kind ?? "work", user: user(), tenant, companyBranchId: 1, initialDate: date, data: null,
     mode: "live", storageKey: "creation-isolated", onBack: () => { backs++; }, onLoadOptions: async () => options,
     onSubmit: async (value) => { submitted.push(value); return submit.promise; },
     onQueued: async (value) => { events.push("open:queued"); queued.push(value); },
@@ -93,8 +100,105 @@ async function creationFixture(initial?: CreationDraft) {
     action(render(), "Continuar a horario").onPress();
     action(render(), "Revisar solicitud").onPress();
   }
-  return { hooks, props, memory, key, security, controls, submit, writes, submitted, queued, created, events, render, review, backs: () => backs };
+  return { hooks, props, memory, drafts, key, security, controls, submit, writes, submitted, queued, created, events, render, review, backs: () => backs };
 }
+
+for (const kind of ["work", "maintenance", "non_productive"] as const) test(`${kind}: can create multiple distinct requests after queue handoff without deleting the original`, async t => {
+  const previousForm = { ...form, motive: "Revisar motor", equipment: { id: 4, label: "Camion" } };
+  const previousInput = creationPayload(kind, previousForm, 1, requestId);
+  const saved: CreationDraft = { ...savedQueued, kind, form: previousForm, input: previousInput };
+  const fixture = await creationFixture(saved); t.after(() => fixture.hooks.unmount());
+  const queuedInputs = [structuredClone(previousInput)];
+  fixture.props.initialDate = "2026-09-18";
+  fixture.props.onSubmit = async next => {
+    fixture.submitted.push(next); queuedInputs.push(structuredClone(next));
+    throw new OfflineQueuedError({ ...outcome, operationId: next.clientRequestId, operationIds: [next.clientRequestId], date: next.schedule.date, localGroupId: `local-${next.clientRequestId}`, localWorkId: `local-${next.clientRequestId}` });
+  };
+  for (let index = 1; index <= 2; index++) {
+    const createAnother = action(fixture.render(), "Crear otro"); createAnother.onPress(); createAnother.onPress(); await settle();
+    const store = fixture.drafts.openCreationDraftStore(fixture.key(), kind, 1);
+    assert.deepEqual((await store.read())?.form, emptyCreationForm("2026-09-18"));
+    assert.equal(fixture.submitted.length, index - 1);
+    const fields = elements<{ form: CreationForm; onChange: (field: keyof CreationForm, value: CreationForm[keyof CreationForm]) => void }>(fixture.render(), "CreationFields")[0].props;
+    fields.onChange("title", `Trabajo distinto ${index}`); fields.onChange("summary", "Alcance nuevo"); fields.onChange("motive", "Motivo nuevo"); fields.onChange("equipment", { id: 4, label: "Camion" });
+    action(fixture.render(), "Continuar a horario").onPress();
+    const times = elements<TimeFieldProps>(fixture.render(), "TimeField");
+    times[0].props.onChange("11:00"); times[1].props.onChange("12:00");
+    action(fixture.render(), "Revisar solicitud").onPress();
+    assert.equal(fixture.submitted.length, index - 1);
+    const confirm = action(fixture.render(), "Confirmar y crear"); confirm.onPress(); confirm.onPress(); await settle();
+    assert.equal((await store.read())?.phase, "queued");
+    assert.equal(fixture.submitted.length, index);
+  }
+  assert.equal(new Set(queuedInputs.map(entry => entry.clientRequestId)).size, 3);
+  assert.deepEqual(queuedInputs[0], previousInput);
+  fixture.hooks.unmount(); fixture.render(); await settle();
+  assert.ok(action(fixture.render(), "Crear otro"));
+  assert.equal(fixture.submitted.length, 2);
+});
+
+for (const phase of ["queued", "confirmed"] as const) test(`${phase}: failure saving a fresh form preserves the original persistent and in-memory draft`, async t => {
+  const saved: CreationDraft = phase === "queued" ? savedQueued : { version: 1, kind: "work", phase, form, input, result };
+  const fixture = await creationFixture(saved); t.after(() => fixture.hooks.unmount());
+  const store = fixture.drafts.openCreationDraftStore(fixture.key(), "work", 1);
+  await store.write(saved);
+  fixture.controls.fail = "editing";
+  action(fixture.render(), "Crear otro").onPress(); await settle();
+  assert.deepEqual(await store.read(), saved);
+  assert.deepEqual(JSON.parse(fixture.memory.values.get(fixture.key())!), saved);
+  assert.equal(fixture.submitted.length, 0);
+  fixture.controls.fail = undefined;
+  action(fixture.render(), "Crear otro").onPress(); await settle();
+  assert.equal((await store.read())?.phase, "editing");
+  fixture.hooks.unmount(); fixture.render(); await settle();
+  assert.ok(action(fixture.render(), "Continuar a horario"));
+  assert.equal(fixture.submitted.length, 0);
+});
+
+test("queued screen follows confirmed operation without auto-navigation or resubmission", async t => {
+  const fixture = await creationFixture(savedQueued); t.after(() => fixture.hooks.unmount());
+  fixture.props.offline = snapshot(); fixture.render();
+  const previous = JSON.stringify(fixture.props.offline);
+  fixture.props.offline = snapshot("applied"); fixture.render(); await settle();
+  assert.ok(action(fixture.render(), "Ver en mi agenda"));
+  assert.equal(fixture.created.length + fixture.queued.length + fixture.submitted.length, 0);
+  const store = fixture.drafts.openCreationDraftStore(fixture.key(), "work", 1);
+  assert.equal((await store.read())?.phase, "confirmed");
+  assert.equal(JSON.stringify(snapshot()), previous);
+  action(fixture.render(), "Ver en mi agenda").onPress(); await settle();
+  assert.deepEqual(fixture.created, [result]);
+  assert.equal(fixture.submitted.length, 0);
+});
+
+test("zero pending is not confirmation: exact queued identity, body and valid result are required", () => {
+  for (const status of ["pending", "syncing", "applied", "blocked", "needs_review", "conflict", "auth_required"] as const) {
+    const current = snapshot(status); current.pending = 0;
+    assert.equal(queuedCreationState(savedQueued, current).status, status === "applied" ? "confirmed" : ["blocked", "needs_review", "conflict"].includes(status) ? "review" : status);
+  }
+  assert.equal(queuedCreationState(savedQueued, null).status, "unavailable");
+  const missing = snapshot("applied"); missing.operations = [];
+  assert.equal(queuedCreationState(savedQueued, missing).status, "unavailable");
+  for (const tamper of ["id", "local", "branch", "body", "result", "missing-result"] as const) {
+    const current = snapshot("applied"); const operation = current.operations[0];
+    if (operation.kind !== "create") throw new Error("INVALID_FIXTURE");
+    if (tamper === "id") operation.id = "another-operation";
+    if (tamper === "local") operation.localGroupId = "another-group";
+    if (tamper === "branch") operation.input = { ...operation.input, companyBranchId: 2 };
+    if (tamper === "body") operation.input = { ...input, schedule: { ...input.schedule, endTime: "11:30" } };
+    if (tamper === "result") operation.result = { ...result, companyBranchId: 2 };
+    if (tamper === "missing-result") operation.result = undefined;
+    assert.equal(queuedCreationState(savedQueued, current).status, "unavailable", tamper);
+  }
+});
+
+test("new request action ignores stale callbacks when locked or busy", async t => {
+  const fixture = await creationFixture(savedQueued); t.after(() => fixture.hooks.unmount());
+  const createAnother = action(fixture.render(), "Crear otro");
+  fixture.props.busy = true; fixture.render(); createAnother.onPress(); await settle();
+  fixture.props.busy = false; fixture.security.unlocked = false; fixture.render(); createAnother.onPress(); await settle();
+  assert.equal(fixture.writes.length, 0);
+  assert.equal(fixture.submitted.length, 0);
+});
 
 function alerts(tree: ReactNode): string {
   return elements<{ accessibilityRole?: string; children?: ReactNode }>(tree, "Text")

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { duration, plainText, STATUS_LABELS } from "../../domain/format";
+import { assignmentDay } from "../../domain/assignmentSchedule";
+import type { AssignmentGroup } from "../../domain/models";
 import type { ScheduleBlock, ScheduleClock, ScheduleDay, ScheduleEntry, UnscheduledEntry } from "../../domain/weeklySchedule";
 import { palette } from "../../ui/theme";
 import { isPendingLocalWork } from "../offline/offlineDashboardUi";
@@ -9,12 +11,14 @@ import { agendaDaySummary, agendaEmptyMessage, scheduleBlockTime, scheduleDayLab
 interface MobileAgendaProps {
   days: ScheduleDay[];
   selectedDay: string;
-  mode: "day" | "week";
+  mode: "day" | "week" | "month";
   clock: ScheduleClock | null;
   unavailableDates: readonly string[];
   unscheduled: UnscheduledEntry[];
   busy: boolean;
-  onMode: (mode: "day" | "week") => void;
+  orders?: AssignmentGroup[];
+  onOpenGroup?: (group: AssignmentGroup) => void;
+  onMode: (mode: "day" | "week" | "month", date?: string) => void;
   onSelect: (day: string) => void;
   onOpen: (entry: ScheduleEntry, day: string) => void;
 }
@@ -36,50 +40,76 @@ function AgendaCard({ entry, block, busy, onOpen }: { entry: ScheduleEntry; bloc
   </Pressable>;
 }
 
-export function MobileAgenda({ days, selectedDay, mode, clock, unavailableDates, unscheduled, busy, onMode, onSelect, onOpen }: MobileAgendaProps) {
+export function AgendaOrderCard({ group, busy, onOpenGroup }: { group: AssignmentGroup; busy: boolean; onOpenGroup?: (group: AssignmentGroup) => void }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${group.code}. ${plainText(group.title)}. Sin trabajos asociados`} disabled={busy || !onOpenGroup} onPress={() => onOpenGroup?.(group)} style={[styles.card, { borderLeftColor: scheduleSources[group.type].color }]}>
+    <Text style={styles.cardTitle}>{plainText(group.title)}</Text>
+    <Text style={styles.status}>{scheduleSources[group.type].label} · {group.code} · {STATUS_LABELS[group.status]}</Text>
+    <Text style={styles.caption}>Sin trabajos asociados</Text>
+  </Pressable>;
+}
+
+export function MobileAgenda({ days, orders = [], onOpenGroup, selectedDay, mode, clock, unavailableDates, unscheduled, busy, onMode, onSelect, onOpen }: MobileAgendaProps) {
   const [showOther, setShowOther] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
-  const visibleDays = mode === "day" ? days.filter((day) => day.date === selectedDay) : days;
+  const visibleDays = mode === "week" ? days : days.filter((day) => day.date === selectedDay);
+  const leadingDays = days[0] ? (new Date(`${days[0].date}T12:00:00Z`).getUTCDay() + 6) % 7 : 0;
   const overdue = unscheduled.filter((entry) => entry.reason === "overdue").length;
   const otherLabel = `${overdue} ${overdue === 1 ? "atrasado" : "atrasados"} · ${unscheduled.length - overdue} sin horario`;
   return <View style={styles.root} testID="mobile-agenda" accessibilityState={{ busy }}>
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayScroll} contentContainerStyle={styles.days} testID="agenda-day-strip">
+    {mode !== "month" ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayScroll} contentContainerStyle={styles.days} testID="agenda-day-strip">
       {days.map((day) => {
         const selected = day.date === selectedDay;
         const missing = unavailableDates.includes(day.date);
         const local = missing && (day.blocks.some((block) => isPendingLocalWork(block.work)) || unscheduled.some((entry) => entry.scheduledDay === day.date && isPendingLocalWork(entry.work)));
         const label = new Intl.DateTimeFormat("es", { weekday: "short", timeZone: "UTC" }).format(new Date(`${day.date}T12:00:00Z`)).replace(".", "");
-        return <Pressable key={day.date} accessibilityRole="button" accessibilityLabel={`${scheduleDayLabel(day.date)} de ${day.date.slice(0, 4)}. ${agendaDaySummary(day, missing)}${local ? ". Solo local, sin copia completa del servidor" : ""}${day.overlapMinutes > 0 ? ". Con solapamientos" : ""}${clock?.day === day.date ? ". Hoy" : ""}${selected ? ". Seleccionado" : ""}`} accessibilityState={{ selected, disabled: busy }} disabled={busy} onPress={() => { if (busy) return; onSelect(day.date); onMode("day"); }} style={[styles.day, clock?.day === day.date && styles.today, (missing || day.overlapMinutes > 0) && styles.dayWarning, selected && styles.active, busy && styles.disabled]}>
+        return <Pressable key={day.date} accessibilityRole="button" accessibilityLabel={`${scheduleDayLabel(day.date)} de ${day.date.slice(0, 4)}. ${agendaDaySummary(day, missing)}${local ? ". Solo local, sin copia completa del servidor" : ""}${day.overlapMinutes > 0 ? ". Con solapamientos" : ""}${clock?.day === day.date ? ". Hoy" : ""}${selected ? ". Seleccionado" : ""}`} accessibilityState={{ selected, disabled: busy }} disabled={busy} onPress={() => { if (busy) return; onSelect(day.date); onMode("day", day.date); }} style={[styles.day, clock?.day === day.date && styles.today, (missing || day.overlapMinutes > 0) && styles.dayWarning, selected && styles.active, busy && styles.disabled]}>
           <Text style={[styles.weekday, selected && styles.white]}>{label}</Text>
           <Text style={[styles.dayNumber, selected && styles.white]}>{Number(day.date.slice(-2))}</Text>
           {missing ? <Text style={[styles.dayCoverage, selected && styles.white]}>{local ? "solo local" : day.blocks.length ? "Parcial" : "Sin copia"}</Text> : null}
         </Pressable>;
       })}
-    </ScrollView>
+    </ScrollView> : null}
     <View style={styles.heading}>
       {unscheduled.length > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={otherLabel} accessibilityHint="Muestra los trabajos fuera de los bloques horarios." accessibilityState={{ expanded: showOther }} onPress={() => setShowOther(!showOther)} style={styles.other}><Text style={styles.otherLabel}>{otherLabel}</Text><Text style={styles.label}>{showOther ? "Ocultar" : "Ver"}</Text></Pressable> : <Text style={styles.title}>Agenda</Text>}
       <View style={styles.toggle} accessibilityRole="tablist" accessibilityLabel="Vista de agenda">
-        {(["day", "week"] as const).map((value) => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === "day" ? "Agenda del día" : "Agenda de la semana"} accessibilityState={{ selected: mode === value, disabled: busy }} disabled={busy} onPress={() => onMode(value)} style={[styles.mode, mode === value && styles.active]}><Text style={[styles.label, mode === value && styles.white]}>{value === "day" ? "Día" : "Semana"}</Text></Pressable>)}
+        {(["day", "week", "month"] as const).map((value) => <Pressable key={value} accessibilityRole="tab" aria-selected={mode === value} accessibilityLabel={value === "day" ? "Agenda del día" : value === "week" ? "Agenda de la semana" : "Agenda del mes"} accessibilityState={{ selected: mode === value, disabled: busy }} disabled={busy} onPress={() => onMode(value)} style={[styles.mode, mode === value && styles.active]}><Text style={[styles.label, mode === value && styles.white]}>{value === "day" ? "Día" : value === "week" ? "Semana" : "Mes"}</Text></Pressable>)}
       </View>
     </View>
+    {mode === "month" ? <View testID="agenda-month-grid" style={styles.monthGrid}>
+      {["L", "M", "X", "J", "V", "S", "D"].map((label, index) => <View key={`weekday-${index}`} style={styles.monthCell}><Text style={styles.weekday}>{label}</Text></View>)}
+      {Array.from({ length: leadingDays }, (_, index) => <View key={`empty-${index}`} style={styles.monthCell} />)}
+      {days.map(day => {
+        const selected = day.date === selectedDay;
+        const missing = unavailableDates.includes(day.date);
+        const dayTasks = day.blocks.length + unscheduled.filter(entry => entry.scheduledDay === day.date && entry.reason === "invalid_time").length + orders.filter(group => assignmentDay(group.scheduledDate) === day.date).length;
+        return <Pressable key={day.date} testID={`agenda-month-${day.date}`} accessibilityRole="button" accessibilityLabel={`${scheduleDayLabel(day.date)} de ${day.date.slice(0, 4)}. ${agendaDaySummary(day, missing)}${missing ? ". Sin copia completa" : ""}`} accessibilityState={{ selected, disabled: busy }} disabled={busy} onPress={() => onSelect(day.date)} style={[styles.monthCell, styles.monthDay, clock?.day === day.date && styles.today, missing && styles.dayWarning, selected && styles.active]}>
+          <Text style={[styles.monthNumber, selected && styles.white]}>{Number(day.date.slice(-2))}</Text>
+          <Text style={[styles.dayCoverage, selected && styles.white]}>{missing ? "?" : dayTasks > 0 ? dayTasks : ""}</Text>
+        </Pressable>;
+      })}
+    </View> : null}
     {showOther ? <View style={styles.section}>
-      <Text style={styles.caption}>De toda la semana consultada y pendientes anteriores. No se incluyen en las horas planificadas.</Text>
-      {unscheduled.map((entry) => <View key={entry.key} style={styles.section}>
+      <Text style={styles.caption}>Del período consultado y pendientes anteriores. No se incluyen en las horas planificadas.</Text>
+      {unscheduled.filter(entry => entry.reason !== "invalid_time" || !visibleDays.some(day => day.date === entry.scheduledDay)).map((entry) => <View key={entry.key} style={styles.section}>
         <Text style={styles.caption}>{entry.reason === "overdue" ? "Atrasado" : "Sin horario válido"} · {entry.scheduledDay ? scheduleDayLabel(entry.scheduledDay) : "Sin fecha válida"}</Text>
         <AgendaCard entry={entry} busy={busy} onOpen={() => onOpen(entry, selectedDay)} />
       </View>)}
     </View> : null}
     {visibleDays.map((day) => {
       const missing = unavailableDates.includes(day.date);
-      const withoutTime = unscheduled.filter((entry) => entry.scheduledDay === day.date && entry.reason === "invalid_time").length;
+      const withoutTime = unscheduled.filter((entry) => entry.scheduledDay === day.date && entry.reason === "invalid_time");
+      const dayOrders = orders.filter(group => assignmentDay(group.scheduledDate) === day.date);
       return <View key={day.date} style={styles.section} testID={`agenda-day-${day.date}`}>
         <View style={styles.section}>
           <Text accessibilityRole="header" style={styles.dateTitle}>{scheduleDayLabel(day.date)}{clock?.day === day.date ? " · Hoy" : ""}</Text>
           <Text style={styles.caption}>{agendaDaySummary(day, missing)}</Text>
+          {withoutTime.length + dayOrders.length > 0 ? <Text style={styles.caption}>{withoutTime.length} sin hora · {dayOrders.length} órdenes sin trabajos</Text> : null}
         </View>
         {missing ? <Text accessibilityRole="alert" style={styles.warning}>Día no descargado por completo. La copia visible no confirma todas las asignaciones.</Text> : null}
         {day.overlapMinutes > 0 ? <Text style={styles.overlap}>{duration(day.overlapMinutes)} con horarios solapados</Text> : null}
-        {day.blocks.length === 0 ? <View style={styles.empty}><Text style={styles.cardTitle}>{missing ? "Sin planificación completa" : "Sin bloques con horario"}</Text><Text style={styles.caption}>{agendaEmptyMessage(missing, withoutTime, unscheduled.length)}</Text></View> : day.blocks.map((block) => <AgendaCard key={block.key} entry={block} block={block} busy={busy} onOpen={() => onOpen(block, day.date)} />)}
+        {day.blocks.length === 0 && withoutTime.length === 0 && dayOrders.length === 0 ? <View style={styles.empty}><Text style={styles.cardTitle}>{missing ? "Sin planificación completa" : "Sin bloques con horario"}</Text><Text style={styles.caption}>{agendaEmptyMessage(missing, 0, unscheduled.length)}</Text></View> : day.blocks.map((block) => <AgendaCard key={block.key} entry={block} block={block} busy={busy} onOpen={() => onOpen(block, day.date)} />)}
+        {withoutTime.length > 0 ? <View style={styles.section}><Text style={styles.caption}>Sin hora asignada · {withoutTime.length}</Text>{withoutTime.map(entry => <AgendaCard key={entry.key} entry={entry} busy={busy} onOpen={() => onOpen(entry, day.date)} />)}</View> : null}
+        {dayOrders.map(group => <AgendaOrderCard key={group.id} group={group} busy={busy} onOpenGroup={onOpenGroup} />)}
       </View>;
     })}
     <Pressable accessibilityRole="button" accessibilityLabel="Información de horas y carga" accessibilityState={{ expanded: showInfo }} onPress={() => setShowInfo(!showInfo)} style={styles.info}>
@@ -91,7 +121,11 @@ export function MobileAgenda({ days, selectedDay, mode, clock, unavailableDates,
 
 const styles = StyleSheet.create({
   root: { gap: 12, paddingBottom: 88 },
-  heading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  heading: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  monthGrid: { flexDirection: "row", flexWrap: "wrap" },
+  monthCell: { width: "14.285714%", minWidth: 0, alignItems: "center", justifyContent: "center", paddingVertical: 4 },
+  monthDay: { minHeight: 64, borderWidth: 1, borderColor: palette.border, borderRadius: 6 },
+  monthNumber: { fontSize: 14, lineHeight: 20, fontWeight: "700", color: palette.text, fontVariant: ["tabular-nums"] },
   title: { fontSize: 20, fontWeight: "700", color: palette.navy, flexShrink: 1 },
   toggle: { flexDirection: "row", backgroundColor: palette.track, borderRadius: 10, padding: 2 },
   mode: { minHeight: 44, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", borderRadius: 8 },
@@ -111,7 +145,7 @@ const styles = StyleSheet.create({
   time: { fontSize: 16, lineHeight: 22, fontWeight: "700", color: palette.navy, fontVariant: ["tabular-nums"] },
   cardTitle: { fontSize: 16, lineHeight: 22, fontWeight: "600", color: palette.text },
   status: { fontSize: 13, lineHeight: 19, fontWeight: "600", color: palette.primary },
-  other: { flex: 1, minHeight: 44, gap: 2, padding: 8, borderRadius: 10, backgroundColor: palette.amberSoft },
+  other: { flexGrow: 1, flexBasis: 160, minWidth: 140, minHeight: 44, gap: 2, padding: 8, borderRadius: 10, backgroundColor: palette.amberSoft },
   otherLabel: { fontSize: 13, fontWeight: "600", color: palette.text, flexShrink: 1 },
   warning: { fontSize: 13, lineHeight: 19, padding: 10, borderRadius: 10, color: palette.amber, backgroundColor: palette.amberSoft },
   overlap: { fontSize: 13, lineHeight: 19, color: palette.amber },

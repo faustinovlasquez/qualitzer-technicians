@@ -38,7 +38,7 @@ export function CreationFields({ kind, form, errors, options, disabled, equipmen
     </> : null}
     {kind !== "non_productive" ? <>
       <Field label="Título *" value={form.title} editable={!disabled} maxLength={255} error={errors.title} onChangeText={(value) => onChange("title", value)} placeholder="¿Qué necesitas realizar?" />
-      {kind === "work" ? <Field label="Resumen del trabajo *" value={form.summary} editable={!disabled} maxLength={5000} multiline error={errors.summary}
+      {kind === "work" ? <Field label="Resumen del trabajo (opcional)" value={form.summary} editable={!disabled} maxLength={5000} multiline error={errors.summary}
         onChangeText={(value) => onChange("summary", value)} placeholder="Describe el alcance del trabajo" /> :
         <Field label="Motivo del mantenimiento *" value={form.motive} editable={!disabled} maxLength={5000} multiline error={errors.motive}
           onChangeText={(value) => onChange("motive", value)} placeholder="Describe la falla o el motivo de detención" />}

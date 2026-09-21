@@ -36,10 +36,12 @@ export function openCreationDraftStore(key: string, kind: CreationKind, companyB
     },
     write(draft: CreationDraft): Promise<void> {
       const safe = creationDraftSchema.parse(draft);
+      const previous = confirmed.get(key);
       if ((safe.phase === "confirmed" || safe.phase === "queued") && active()) confirmed.set(key, safe);
       return enqueue(key, async () => {
         if (!active()) throw new Error("CREATION_SESSION_CLOSED");
         await AsyncStorage.setItem(key, JSON.stringify(safe));
+        if (active() && safe.phase === "editing" && confirmed.get(key) === previous) confirmed.delete(key);
       });
     },
     reset(): Promise<void> {

@@ -30,14 +30,16 @@ export class AssignmentReadBatch {
     return value;
   }
 
-  async map<T, R>(items: readonly T[], read: (item: T) => Promise<R>): Promise<R[]> {
-    let cursor = 0;
+  async map<T, R>(items: readonly T[], read: (item: T) => Promise<R>, priority?: () => T | null | undefined): Promise<R[]> {
+    const pending = items.map((item, index) => ({ item, index }));
     const results: R[] = [];
     await this.wait(() => Promise.all(Array.from({ length: Math.min(2, items.length) }, async () => {
-      while (cursor < items.length) {
+      while (pending.length > 0) {
         this.check();
-        const index = cursor++;
-        try { results[index] = await this.wait(() => read(items[index])); }
+        const preferred = priority?.();
+        const position = Math.max(0, pending.findIndex(entry => Object.is(entry.item, preferred)));
+        const next = pending.splice(position, 1)[0];
+        try { results[next.index] = await this.wait(() => read(next.item)); }
         catch (error) { this.fail(error); throw error; }
       }
     })));

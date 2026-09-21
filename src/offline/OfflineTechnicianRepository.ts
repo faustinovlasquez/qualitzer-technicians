@@ -22,6 +22,8 @@ import { workActions, workActivitySchema, type WorkActivitiesPort } from "../dom
 
 export class OfflineTechnicianRepository implements TechnicianRepository, OfflineController {
   readonly engine: OfflineEngine;
+  private readonly fileReads = new Map<string, symbol>();
+  private activityFileRevision = 0;
   constructor(readonly remote: TechnicianRepository, readonly session: Session, readonly dependencies: EngineDependencies, private readonly disableProfile: () => Promise<void> = async () => undefined) {
     this.engine = new OfflineEngine(dependencies);
   }
@@ -45,7 +47,23 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   deleteActivity: WorkActivitiesPort["deleteActivity"] = (scope, id) => this.onlineOnly(() => workActions(this.remote).deleteActivity(scope, id), scope);
   activityFiles: WorkActivitiesPort["activityFiles"] = async (scope, id) => {
     this.checklistScope(scope);
-    return this.read(`activity-files:${JSON.stringify([scope, id])}`, () => workActions(this.remote).activityFiles(scope, id), json => cachedAttachmentSchema.array().parse(JSON.parse(json)));
+    const key = `activity-files:${JSON.stringify([scope, id])}`;
+    const revision = this.activityFileRevision;
+    return this.read(key, () => workActions(this.remote).activityFiles(scope, id), json => cachedAttachmentSchema.array().parse(JSON.parse(json)), undefined, async files => {
+      await updateState(this.dependencies.store, this.dependencies.namespace, state => {
+        if (revision !== this.activityFileRevision) throw new ApiError(409, "ACTIVITY_FILES_CHANGED", "Los archivos cambiaron. Actualiza la lista.");
+        putCache(state, { key, json: JSON.stringify(files), fetchedAt: this.dependencies.now() });
+        state.revokedResources = state.revokedResources.filter(entry => entry.key !== key);
+      });
+      return files;
+    });
+  };
+  deleteActivityFile: WorkActivitiesPort["deleteActivityFile"] = async (scope, id, fileId) => {
+    await this.onlineOnly(() => workActions(this.remote).deleteActivityFile(scope, id, fileId), scope);
+    this.activityFileRevision += 1;
+    await updateState(this.dependencies.store, this.dependencies.namespace, state => {
+      state.cache = state.cache.filter(entry => !entry.key.startsWith("activity-files:"));
+    });
   };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = (scope, id, files) => this.onlineOnly(() => workActions(this.remote).uploadActivityFiles(scope, id, files), scope);
   reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.onlineOnly(() => workActions(this.remote).reopenWork(scope), scope);
@@ -162,8 +180,10 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     this.branch(branchId);
     return withAssignmentReadBatch(options, async (batch) => {
       const days = assignmentDays(range);
+      const requestedDays = options?.priorityDate && days.includes(options.priorityDate) ? [options.priorityDate, ...days.filter(date => date !== options.priorityDate)] : days;
+      const completed: Array<{ date: string; data: Assignments }> = [];
       const missingDates = new Set<string>();
-      const results = await batch.map(days, async (date) => {
+      const results = await batch.map(requestedDays, async (date) => {
         let data: Assignments;
         let timerReadOperationIds: string[] = [];
         try {
@@ -194,8 +214,12 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
         await batch.wait(() => this.assertReadable());
         const state = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
         if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
-        return { date, data: overlayCreations(data, date, state.operations, this.session) };
-      });
+        const snapshot = { date, data: overlayCreations(data, date, state.operations, this.session) };
+        completed.push(snapshot);
+        batch.check();
+        options?.onProgress?.(mergeDailyAssignments(completed, range.startDate), completed.map(item => item.date));
+        return snapshot;
+      }, options?.getPriorityDate);
       await batch.wait(() => this.assertReadable());
       const snapshots = results.filter((snapshot) => snapshot !== undefined);
       this.engine.setMissingDates(days.filter((date) => missingDates.has(date)));
@@ -271,7 +295,26 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     const parsed = creationInputSchema.parse(input);
     this.branch(parsed.companyBranchId);
     const operation: OfflineOperation = { ...this.base(parsed.clientRequestId), kind: "create", input: parsed, localGroupId: `local-${parsed.clientRequestId}`, localWorkId: `local-${parsed.clientRequestId}` };
-    const registered = await this.engine.enqueue([operation]);
+    let registered = await this.engine.enqueue([operation]);
+    if (this.getSnapshot().online && registered.some(item => item.status === "pending" || item.status === "syncing")) {
+      let unsubscribe = () => {};
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await new Promise<void>(resolve => {
+          const check = () => {
+            const snapshot = this.getSnapshot();
+            const current = snapshot.operations.find(item => item.id === operation.id);
+            if (!snapshot.online || !current || !["pending", "syncing"].includes(current.status)
+              || current.status === "pending" && current.nextAttemptAt > this.dependencies.now()) resolve();
+          };
+          unsubscribe = this.subscribe(check);
+          timeout = setTimeout(resolve, 8_000);
+          void this.engine.syncNow().then(check, () => resolve());
+          check();
+        });
+      } finally { unsubscribe(); if (timeout !== undefined) clearTimeout(timeout); }
+      registered = this.getSnapshot().operations.filter(item => item.id === operation.id);
+    }
     await this.finish(registered);
     const current = registered.find((op) => op.id === operation.id);
     if (!current || current.kind !== "create" || !current.result) throw new OfflineUnavailableError("OFFLINE_CREATION_RECEIPT_MISSING");
@@ -349,12 +392,47 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     this.branch(scope.companyBranchId);
     await this.assertReadable();
     const local = !!await this.dependency(scope);
+    const key = resourceCacheKey("files", scope, stepId);
+    const request = Symbol();
+    let fileReadOperationIds: string[] = [];
     let files: Attachment[] = [];
     if (!local) {
-      try { files = await this.read(resourceCacheKey("files", scope, stepId), load, (json) => cachedAttachmentSchema.array().parse(JSON.parse(json))); }
+      this.fileReads.set(key, request);
+      try {
+        files = await this.read(key, async () => {
+          const before = await this.dependencies.store.read(this.dependencies.namespace);
+          fileReadOperationIds = before.operations.filter(op => {
+            if (op.kind !== "document" || op.status !== "applied" || op.receipt?.fileId === undefined || op.stepId !== stepId) return false;
+            const resolved = resolveScope(op.scope, before.operations);
+            return sameResource(op.scope, scope) || resolved !== null && sameResource(resolved, scope);
+          }).map(op => op.id);
+          return load();
+        }, (json, entry) => {
+          fileReadOperationIds = entry.fileReadOperationIds ?? [];
+          return cachedAttachmentSchema.array().parse(JSON.parse(json));
+        }, undefined, async incoming => {
+          await this.assertReadable();
+          let result = incoming;
+          await updateState(this.dependencies.store, this.dependencies.namespace, state => {
+            if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
+            const cached = state.cache.find(entry => entry.key === key);
+            if (this.fileReads.get(key) !== request && cached) {
+              result = cachedAttachmentSchema.array().parse(JSON.parse(cached.json));
+              fileReadOperationIds = cached.fileReadOperationIds ?? [];
+              return;
+            }
+            putCache(state, { key, json: JSON.stringify(incoming), fetchedAt: this.dependencies.now(), fileReadOperationIds });
+            state.revokedResources = state.revokedResources.filter(entry => entry.key !== key);
+          });
+          await this.engine.refresh();
+          return result;
+        });
+      }
       catch (error) {
         const state = await this.dependencies.store.read(this.dependencies.namespace);
         if (!(error instanceof OfflineUnavailableError) || error.code !== "OFFLINE_CACHE_MISS" || !state.operations.some((op) => op.kind === "document" && sameResource(op.scope, scope) && op.stepId === stepId)) throw error;
+      } finally {
+        if (this.fileReads.get(key) === request) this.fileReads.delete(key);
       }
     }
     const state = await this.dependencies.store.read(this.dependencies.namespace);
@@ -372,7 +450,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
         files[index] = bound;
         continue;
       }
-      if (confirmed && canonicalId === undefined) continue;
+      if (confirmed && (canonicalId === undefined || fileReadOperationIds.includes(op.id))) continue;
       const localFile: OfflineAttachment = { id: canonicalId ?? `local-${op.file.id}`, name: op.file.name, type: op.file.mimeType, size: op.file.size, url: await this.dependencies.fileStore.resolveURI(op.file), createdAt: new Date(op.createdAt).toISOString(), offline: { operationId: op.id, status: op.status, downloaded: true, confirmed, localFileId: op.file.id } };
       files.push(localFile);
     }
@@ -455,8 +533,9 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   deleteGroupFile: TechnicianRepository["deleteGroupFile"] = (scope, id) => this.onlineOnly(() => this.remote.deleteGroupFile(scope, id), scope);
   startOrder: TechnicianRepository["startOrder"] = (scope) => this.onlineOnly(() => this.remote.startOrder(scope), scope);
   deliverOrder: TechnicianRepository["deliverOrder"] = (scope, input) => this.onlineOnly(() => this.remote.deliverOrder(scope, input), scope);
-  orderDelivery: TechnicianRepository["orderDelivery"] = async (scope) => {
+  orderDelivery: TechnicianRepository["orderDelivery"] = async (scope, requireFresh = false) => {
     this.branch(scope.companyBranchId);
+    if (requireFresh) return this.onlineOnly(() => this.remote.orderDelivery(scope, true), scope);
     return this.read(`delivery:${JSON.stringify(scope)}`, () => this.remote.orderDelivery(scope), (json) => cachedDeliverySchema.parse(JSON.parse(json)));
   };
   health: TechnicianRepository["health"] = () => this.remote.health();

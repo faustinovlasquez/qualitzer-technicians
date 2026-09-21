@@ -1,6 +1,6 @@
 import type { ChecklistStep, StepAnswer, StatusInput } from "../../src/domain/models";
 import { checklistStepOptions, hasChecklistStepAnswer, isChecklistStepSatisfied, normalizeChecklistAnswer } from "../../src/domain/checklistProgress";
-import { automaticExecutionTiming, canTransitionExecution, executionDatesAllowed, executionDuration, executionIntervalCovered, isExecutionFinalization } from "../../src/domain/workExecution";
+import { automaticExecutionTiming, canTransitionExecution, executionDatesAllowed, executionDuration, executionIntervalCovered, isExecutionFinalization, workedDatesAllowed } from "../../src/domain/workExecution";
 import type { OwnedWork } from "./authorization";
 import { GatewayError } from "../errors";
 
@@ -66,6 +66,9 @@ export function validateStatusScope(scope: OwnedWork, input: StatusInput): Statu
   if (!scope.work.canExecute) throw new GatewayError(409, "WORK_CANNOT_EXECUTE");
   if (!canTransitionExecution(scope.work, input.status)) throw new GatewayError(409, "INVALID_STATUS_TRANSITION");
   const executionDates = [...(input.executionDates ?? [scope.range.startDate])].sort();
+  if (input.workedDates !== undefined && (!isExecutionFinalization(input.status) || executionDates.length !== 1 || !workedDatesAllowed(input.workedDates))) {
+    throw new GatewayError(400, "INVALID_WORKED_DATES");
+  }
   if (executionDates.length > 1 && (scope.maintenanceId !== null || !isExecutionFinalization(input.status))) throw new GatewayError(400, "SINGLE_EXECUTION_DATE_REQUIRED");
   if (!executionDatesAllowed(scope.work, scope.range, executionDates, scope.maintenanceId !== null)) throw new GatewayError(400, "EXECUTION_DATES_OUTSIDE_RANGE");
   if (!isExecutionFinalization(input.status)) {
@@ -80,7 +83,7 @@ export function validateStatusScope(scope: OwnedWork, input: StatusInput): Statu
     if (checklist.steps.some((step) => step.isFilesRequired && step.attachments.length === 0)) throw new GatewayError(400, "STEP_FILES_REQUIRED");
     if (checklist.required === true && !checklist.steps.every(isChecklistStepSatisfied)) throw new GatewayError(400, "REQUIRED_CHECKLISTS_INCOMPLETE");
   }
-  return { ...input, executionDates };
+  return { ...input, executionDates, ...(input.workedDates === undefined ? {} : { workedDates: [...input.workedDates].sort() }) };
 }
 
 function resolveExecutionTimes(scope: OwnedWork, input: StatusInput): StatusInput {
@@ -98,11 +101,12 @@ function resolveExecutionTimes(scope: OwnedWork, input: StatusInput): StatusInpu
   if (hasTimes && (timing === null || input.executionStartTime !== timing.executionStartTime || input.executionEndTime !== timing.executionEndTime || (input.endDateOffset ?? 0) !== timing.endDateOffset)) {
     throw new GatewayError(403, "MANUAL_EXECUTION_TIME_FORBIDDEN", "Las horas no coinciden con el cronómetro confirmado. Actualiza la asignación o entrega sin horas manuales.");
   }
-  if (scope.maintenanceId !== null) return { status: input.status, executionDates: input.executionDates, isManual: false };
+  const workedDates = input.workedDates === undefined ? {} : { workedDates: input.workedDates };
+  if (scope.maintenanceId !== null) return { status: input.status, executionDates: input.executionDates, isManual: false, ...workedDates };
   if (timing === null) throw new GatewayError(400, "EXECUTION_TIMER_REQUIRED", "Inicia el cronómetro antes de entregar o registra horas manuales si tu sucursal lo permite.");
   if (timing.minutes <= 0) throw new GatewayError(400, "INVALID_EXECUTION_DURATION", "El cronómetro aún no registra un minuto redondeado. Espera o registra horas manuales si está permitido.");
   return {
-    status: input.status, executionDates: input.executionDates,
+    status: input.status, executionDates: input.executionDates, ...workedDates,
     executionStartTime: timing.executionStartTime, executionEndTime: timing.executionEndTime, endDateOffset: timing.endDateOffset, isManual: false,
   };
 }

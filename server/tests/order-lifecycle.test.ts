@@ -66,7 +66,7 @@ async function backend(t: TestContext) {
     if (req.method === "GET" && req.path === "/api/auth/me") { res.json(state.user); return; }
     if (req.method === "GET" && req.path === "/api/technician-dashboard/assignments") { res.json(state.assignmentSequence.shift() ?? state.assignments); return; }
     if (req.method === "GET" && req.path === "/api/maintenances/50") { res.json(state.detailSequence.shift() ?? state.detail); return; }
-    if (req.method === "POST" && ["/api/maintenances/50/start-repair", "/api/maintenances/50/finalize"].includes(req.path)) {
+    if (req.method === "POST" && ["/api/maintenances/50/start-repair", "/api/maintenances/50/finalize", "/api/maintenances/50/technician-delivery"].includes(req.path)) {
       if (state.failure) res.status(state.failure.status).json(state.failure.body); else res.json(state.result);
       return;
     }
@@ -146,6 +146,7 @@ test("order metadata is source-aware, canonical and sanitized without trusting m
     groupId: "maintenance-50", maintenanceId: 50, companyBranchId: 1, generatedAt: "2026-09-01T10:00:00.000Z",
     status: "pending", maintenanceType: "preventivo", finalizationNote: "Borrador guardado", damageType: "desgaste", durationMinutes: 70,
     startedAt: null, finalizedAt: null, incompleteChecklists: [], suggestedDurationMinutes: 0,
+    technicianDeliverySupported: true, canTechnicianDeliver: true, totalWorks: 1, pendingWorkNames: ["Inspección"], pendingDeliveryChecklists: ["Inspección — Control"],
     canStart: true, canDeliver: true, requiresClientSignature: false, faultTypes: ["operative", "wear", "undetermined"], maxSignatureBytes: MAX_SIGNATURE_BYTES,
     technician: { userId: 9, workerId: 42, name: "Técnico Prueba" },
     signatures: [{ id: 1, role: "technician", signedBy: 9, signedByName: "Autor real", signedAt: "2026-09-01T09:00:00.000Z", hasSignature: true }],
@@ -176,6 +177,24 @@ test("delivery from pending does not require completed children and maps only ex
   state.calls.length = 0;
   assert.equal((await request(orderPath("/deliver"), { method: "POST", body: { technicianSignature: signature, durationMinutes: 0 } })).response.status, 200);
   assert.deepEqual(writes(state.calls)[0]?.json, { ...input(), note: null, durationMinutes: null });
+});
+
+test("acknowledged technical delivery allows incomplete checklists and uses only the dedicated backend endpoint", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments.groups[0]!.maintenanceType = "correctivo";
+  state.detail = detail({ type: "correctivo", works: [{ id: 11, maintenanceId: 50, title: "Inspección", status: "pending", checklists: [{ checklistId: 10, name: "Seguridad", isRequired: true, steps: [rawStep({ responseValue: null })] }] }] });
+  const metadata = await request();
+  assert.deepEqual(z.object({ pendingWorkNames: z.array(z.string()), pendingDeliveryChecklists: z.array(z.string()), canTechnicianDeliver: z.boolean() }).parse(metadata.data), {
+    pendingWorkNames: ["Inspección"], pendingDeliveryChecklists: ["Inspección — Seguridad", "Inspección — Control"], canTechnicianDeliver: true,
+  });
+  const result = await request(orderPath("/deliver"), { method: "POST", body: { note: "Entrega con pendientes revisados", durationMinutes: 35, technicianSignature: signature, acknowledgeDelivery: true } });
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(writes(state.calls).map(call => [call.path, Object.fromEntries(call.query), call.json]), [["/api/maintenances/50/technician-delivery", { companyBranchId: "1" }, { note: "Entrega con pendientes revisados", durationMinutes: 35, technicianSignature: signature, acknowledgeDelivery: true }]]);
+  state.calls.length = 0;
+  assert.equal((await request(orderPath("/deliver"), { method: "POST", body: { ...input(), acknowledgeDelivery: false } })).response.status, 400);
+  assert.equal((await request(orderPath("/deliver"), { method: "POST", body: { ...clientInput(), acknowledgeDelivery: true } })).response.status, 400);
+  assert.equal((await request(orderPath("/deliver"), { method: "POST", body: { ...input(), technicianSignature: null, acknowledgeDelivery: true } })).response.status, 400);
+  assert.equal(writes(state.calls).length, 0);
 });
 
 test("correctivo and detencion require failure type, receiver and client signature derived from backend type", async (t) => {

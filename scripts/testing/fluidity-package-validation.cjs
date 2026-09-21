@@ -5,7 +5,7 @@ const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "../..");
 const backend = path.resolve(root, "../Qualitzer2.0-Backend");
-const version = "1.0.10";
+const version = "1.0.13";
 const archiveName = `qualitzer-mobile-gateway-${version}.tgz`;
 const packageName = "@qualitzer/mobile-gateway";
 const files = ["LICENSE", "README.md", "SOURCE-MANIFEST.json", "THIRD-PARTY-LICENSES.md", "embedded-contract.d.ts", "index.cjs", "index.d.ts", "package.json"];

@@ -9,26 +9,26 @@ const digest = (bytes, algorithm = "sha256", encoding = "hex") => crypto.createH
 const json = file => JSON.parse(fs.readFileSync(file, "utf8"));
 async function main() {
   const release = json(path.join(root, "artifacts/release-verification.json"));
-  assert.equal(release.version, "1.0.26");
-  assert.equal(release.versionCode, 27);
-  const apk = fs.readFileSync(path.join(root, "artifacts/qualitzer-tecnicos-1.0.26-android.apk"));
+  assert.equal(release.version, "1.0.35");
+  assert.equal(release.versionCode, 36);
+  const apk = fs.readFileSync(path.join(root, "artifacts/qualitzer-tecnicos-1.0.35-android.apk"));
   assert.equal(digest(apk), release.sha256);
-  const artifact = "infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.10.tgz";
+  const artifact = "infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.13.tgz";
   const archive = fs.readFileSync(path.join(backend, artifact));
-  assert.equal(digest(archive), "b02dcfe5e78839d6a35a7d732b3444bc9b6dce62c4aacfe21dd84205bec0b683");
+  assert.equal(digest(archive), "24c362d73d9f04f2cd3630d1cfbef9da1035e322a9ca5c78ad845e60dc591e53");
   assert.equal(digest(fs.readFileSync(path.join(root, "artifacts/mobile-gateway", path.basename(artifact)))), digest(archive));
   const manifest = json(path.join(backend, "package.json"));
   const lock = json(path.join(backend, "package-lock.json"));
   assert.equal(manifest.dependencies["@qualitzer/mobile-gateway"], `file:${artifact}`);
   assert.equal(lock.packages[""].dependencies["@qualitzer/mobile-gateway"], `file:${artifact}`);
-  assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].version, "1.0.10");
+  assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].version, "1.0.13");
   assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].resolved, `file:${artifact}`);
   assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].integrity, `sha512-${digest(archive, "sha512", "base64")}`);
   const ignored = spawnSync("C:/Program Files/Git/cmd/git.exe", ["-C", backend, "check-ignore", "--quiet", artifact], { encoding: "utf8" });
   assert.equal(ignored.status, 1, "GATEWAY_ARTIFACT_MUST_NOT_BE_IGNORED");
   const url = process.argv[2];
-  assert.ok(/^http:\/\/192\.168\.1\.106:8801\/$/.test(url), "EXPECTED_LOCAL_DELIVERY_URL");
-  const response = await fetch(`${url}qualitzer-tecnicos-1.0.26-android.apk`, { signal: AbortSignal.timeout(20000) });
+  assert.ok(/^http:\/\/192\.168\.1\.105:8810\/$/.test(url), "EXPECTED_LOCAL_DELIVERY_URL");
+  const response = await fetch(`${url}qualitzer-tecnicos-1.0.35-android.apk`, { signal: AbortSignal.timeout(20000) });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "application/vnd.android.package-archive");
   const downloaded = Buffer.from(await response.arrayBuffer());
@@ -38,8 +38,8 @@ async function main() {
   assert.equal(gatewayResponse.headers.get("content-type"), "application/gzip");
   const downloadedGateway = Buffer.from(await gatewayResponse.arrayBuffer());
   assert.equal(digest(downloadedGateway), digest(archive));
-  const report = { completedAt: new Date().toISOString(), passed: true, url, version: release.version, bytes: downloaded.length, sha256: release.sha256, gatewayVersion: "1.0.10", gatewaySha256: digest(archive), gatewayDownloadVerified: true, consumerLockMatches: true, gatewayNotIgnored: true, backendInstalled: false, remoteDeploymentTested: false, nativeDeviceTested: false };
-  fs.writeFileSync(path.join(root, "artifacts/parent-assignment-delivery-1.0.26.json"), JSON.stringify(report, null, 2));
+  const report = { completedAt: new Date().toISOString(), passed: true, url, version: release.version, bytes: downloaded.length, sha256: release.sha256, gatewayVersion: "1.0.13", gatewaySha256: digest(archive), gatewayDownloadVerified: true, consumerLockMatches: true, gatewayNotIgnored: true, backendInstalled: false, remoteDeploymentTested: false, nativeDeviceTested: false };
+  fs.writeFileSync(path.join(root, "artifacts/parent-assignment-delivery-1.0.35.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

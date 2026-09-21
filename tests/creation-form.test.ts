@@ -47,7 +47,7 @@ test("non productive other requires an explanation; comment and explanation are 
 test("date and time validation does not normalize impossible or overnight schedules", () => {
   for (const date of ["2026-02-29", "2026-02-30", "1999-12-31", "2101-01-01", "2026-9-10", ""]) assert.ok(validateCreationForm("work", form({ date })).date, date);
   assert.equal(validateCreationForm("work", form({ date: "2024-02-29" })).date, undefined);
-  for (const startTime of ["9:00", "24:00", "09:60", ""]) assert.ok(validateCreationForm("work", form({ startTime })).startTime, startTime);
+  for (const startTime of ["9:00", "24:00", "09:60"]) assert.ok(validateCreationForm("work", form({ startTime })).startTime, startTime);
   for (const endTime of ["09:00", "08:00", "00:30"]) assert.ok(validateCreationForm("work", form({ endTime })).endTime, endTime);
   assert.equal(creationDuration(form()), 90);
   assert.equal(creationDuration(form({ endTime: "08:00" })), null);
@@ -55,11 +55,27 @@ test("date and time validation does not normalize impossible or overnight schedu
 
 test("texts reject controls, missing required fields and oversize drafts", () => {
   assert.ok(validateCreationForm("work", form({ title: " " })).title);
-  assert.ok(validateCreationForm("work", form({ summary: "" })).summary);
+  assert.equal(validateCreationForm("work", form({ summary: "" })).summary, undefined);
   assert.ok(validateCreationForm("work", form({ title: "x".repeat(256) })).title);
   assert.ok(validateCreationForm("work", form({ title: "\u0000unsafe" })).title);
   assert.equal(validateCreationForm("work", form({ summary: "primera\nsegunda\tlínea" })).summary, undefined);
   assert.equal(readCreationDraft("x".repeat(80_001), "work", 1), null);
+});
+
+test("work accepts missing description and either time without inventing a duration", () => {
+  for (const times of [{ startTime: "", endTime: "" }, { startTime: "09:00", endTime: "" }, { startTime: "", endTime: "10:30" }]) {
+    const value = form({ summary: "   ", ...times });
+    assert.deepEqual(validateCreationForm("work", value), {});
+    const input = creationPayload("work", value, 1, requestId);
+    assert.equal(input.kind === "work" && input.work.summary, "");
+    assert.deepEqual(input.schedule, { date: value.date, ...times });
+    assert.equal(creationDuration(value), null);
+    const draft = { version: 1, kind: "work", phase: "pending", form: value, input };
+    assert.ok(readCreationDraft(JSON.stringify(draft), "work", 1));
+  }
+  for (const kind of ["maintenance", "non_productive"] as const) {
+    assert.ok(validateCreationForm(kind, form({ startTime: "", endTime: "" })).startTime);
+  }
 });
 
 test("pending draft restores the same UUID and exact canonical payload", () => {

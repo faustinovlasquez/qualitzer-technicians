@@ -1,10 +1,10 @@
 import type { AssignmentGroup, Assignments, AssignmentWork, Session } from "../domain/models";
 import type { OfflineAssignmentGroup, OfflineAssignmentWork, OfflineOperation } from "../domain/offline";
+import { creationPlannedMinutes } from "../domain/creation";
 
 function localGroup(operation: Extract<OfflineOperation, { kind: "create" }>, session: Session): OfflineAssignmentGroup {
   const { input, result } = operation;
   const schedule = input.schedule;
-  const minutes = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
   const title = input.kind === "work" ? input.work.title : input.kind === "maintenance" ? input.maintenance.title : input.nonProductive.reasonText ?? input.nonProductive.reason;
   const summary = input.kind === "work" ? input.work.summary : input.kind === "maintenance" ? input.maintenance.motive : input.nonProductive.initialComment ?? "";
   const offline = { operationId: operation.id, status: operation.status, downloaded: true, confirmed: operation.status === "applied" };
@@ -14,7 +14,7 @@ function localGroup(operation: Extract<OfflineOperation, { kind: "create" }>, se
     workType: input.kind === "non_productive" ? "non_productive" : "productive",
     title, summary, specialty: "", status: "pending", priority: input.kind === "work" ? input.work.priority : input.kind === "maintenance" ? input.maintenance.priority ?? "medium" : "low",
     scheduledDate: schedule.date, scheduledStartTime: schedule.startTime, scheduledEndTime: schedule.endTime,
-    plannedMinutes: minutes(schedule.endTime) - minutes(schedule.startTime), executedMinutes: 0, elapsedSeconds: 0,
+    plannedMinutes: creationPlannedMinutes(schedule) ?? 0, executedMinutes: 0, elapsedSeconds: 0,
     commentsCount: 0, filesCount: 0, checklistDone: 0, checklistTotal: 0, isOverdue: false, canExecute: false, canEditDefinition: false,
     missingRequiredInfo: [operation.status === "applied" ? "OFFLINE_AWAITING_SERVER_SNAPSHOT" : "OFFLINE_PENDING_CONFIRMATION"],
     materials: [], checklists: [], responsibles: [{ id: session.user.workerId ?? session.user.id, name: `${session.user.name} ${session.user.lastnames}`.trim() }],

@@ -42,6 +42,7 @@ export const deliveryInputSchema = z.object({
   receivedByName: z.string().max(200).trim().refine((value) => !/[\u0000-\u001f\u007f]/.test(value)).nullable().optional().default(null),
   clientSignature: signatureSchema.nullable().optional().default(null),
   technicianSignature: signatureSchema,
+  acknowledgeDelivery: z.literal(true).optional(),
 }).strict();
 export type OrderDeliveryInput = z.infer<typeof deliveryInputSchema>;
 

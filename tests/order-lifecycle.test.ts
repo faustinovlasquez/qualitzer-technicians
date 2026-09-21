@@ -4,7 +4,7 @@ import sharp from "sharp";
 import type { MaintenanceDeliveryContext } from "../src/domain/orderLifecycle";
 import { makeDemoData } from "../src/infrastructure/demoData";
 import { clearOrderLifecycleDrafts, deleteLifecycleDraft, readLifecycleDraft, saveLifecycleDraft } from "../src/screens/orders/lifecycle/lifecycleDrafts";
-import { deliveryDraftErrors, deliveryInput, incompleteDeliveryChecklists, initialDeliveryDraft, requiresClientSignature, suggestedDurationMinutes } from "../src/screens/orders/lifecycle/lifecycleRules";
+import { deliveryDraftErrors, deliveryInput, deliveryWarnings, incompleteDeliveryChecklists, initialDeliveryDraft, requiresClientSignature, suggestedDurationMinutes } from "../src/screens/orders/lifecycle/lifecycleRules";
 import { appendSignaturePoint, hasSignature, requireSignaturePng, SIGNATURE_MAX_POINTS, SIGNATURE_MAX_BYTES, signaturePoint, signaturePointCount, type SignatureStrokes } from "../src/screens/orders/lifecycle/signatureGeometry";
 
 const context: MaintenanceDeliveryContext = {
@@ -75,6 +75,21 @@ test("checklist preflight never locks children based on the parent state", () =>
   assert.deepEqual(incompleteDeliveryChecklists(group), []);
   assert.equal(group.works[0].status, "in_progress");
   assert.equal(group.works[0].canExecute, true);
+});
+
+test("delivery warning distinguishes delivered works from completed works and retains unanswered checklists", () => {
+  const group = makeDemoData().groups[0];
+  const original = JSON.stringify(group);
+  const warnings = deliveryWarnings(group, { ...context, incompleteChecklists: ["Otro trabajo - Checklist pendiente"] });
+  assert.ok(warnings.pendingWorks.length > 0);
+  assert.ok(warnings.pendingChecklists.includes("Otro trabajo - Checklist pendiente"));
+  assert.equal(warnings.allWorksDelivered, false);
+  assert.equal(JSON.stringify(group), original);
+  const delivered = { ...group, works: group.works.map(work => ({ ...work, status: "delivered" as const })) };
+  assert.equal(deliveryWarnings(delivered).allWorksDelivered, true);
+  assert.ok(deliveryWarnings(delivered).pendingChecklists.length > 0);
+  assert.equal(deliveryWarnings({ ...group, works: group.works.map(work => ({ ...work, status: "completed" as const })) }).allWorksDelivered, false);
+  assert.equal(deliveryWarnings({ ...group, works: [] }).allWorksDelivered, false);
 });
 
 test("signature coordinates are scaled and bounded; taps are not signatures", () => {

@@ -4,8 +4,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { matchesAssignmentSearch, matchesOrderSearch } from "../domain/assignmentCodes";
-import { assignmentDay, assignmentIncludesDay, assignmentPlannedMinutes, assignmentWorkForDay, assignmentWorkQueryRange, dailyRange } from "../domain/assignmentSchedule";
-import { dateKey, duration, isFinished, shiftDate, shortDate, weekRange } from "../domain/format";
+import { assignmentDay, assignmentDays, assignmentIncludesDay, assignmentPlannedMinutes, assignmentWorkForDay, assignmentWorkQueryRange, dailyRange } from "../domain/assignmentSchedule";
+import { dateKey, duration, isFinished, monthRange, shiftDate, shortDate, weekRange } from "../domain/format";
 import type { AssignmentGroup, Assignments, AssignmentWork, DateRange, StatusInput, User, WorkOpenOptions } from "../domain/models";
 import type { OfflineSnapshot } from "../domain/offline";
 import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconName } from "../ui/components";
@@ -23,11 +23,12 @@ export interface DashboardScreenProps {
   user: User;
   range: DateRange;
   loading: boolean;
+  pendingDates?: string[];
   error: string | null;
   onRefresh: () => void;
   onRangeChange: (range: DateRange) => void;
   onOpenWork: (group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions) => void;
-  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files") => void;
+  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files" | "deliver") => void;
   onWorkStatus: (group: AssignmentGroup, work: AssignmentWork, input: StatusInput) => Promise<void>;
   busy?: boolean;
   serverRemindersReady?: boolean;
@@ -105,9 +106,10 @@ function Kpi({ title, value, note, icon, tone }: { title: string; value: number 
   );
 }
 
-export function DashboardScreen({ data, user, range, loading, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, serverRemindersReady = false, offline, companyBranchId, focusDate, onFocusDate, view }: DashboardScreenProps) {
+export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, serverRemindersReady = false, offline, companyBranchId, focusDate, onFocusDate, view }: DashboardScreenProps) {
   const compact = useWindowDimensions().width < 600;
   const [agendaLayout, setAgendaLayout] = useState<"schedule" | "list">("schedule");
+  const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [daySelection, setDaySelection] = useState<DaySelection | null>(null);
@@ -129,13 +131,20 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
   const sameWeekMonth = displayedWeek.startDate.slice(0, 7) === displayedWeek.endDate.slice(0, 7);
   const crossYearWeek = displayedWeek.startDate.slice(0, 4) !== displayedWeek.endDate.slice(0, 4);
   const compactWeekLabel = `${sameWeekMonth ? Number(displayedWeek.startDate.slice(-2)) : shortDate(displayedWeek.startDate)}${crossYearWeek ? ` ${displayedWeek.startDate.slice(0, 4)}` : ""}–${shortDate(displayedWeek.endDate)}${crossYearWeek || displayedWeek.endDate.slice(0, 4) !== range.endDate.slice(0, 4) ? ` ${displayedWeek.endDate.slice(0, 4)}` : ""}`;
-  const unavailableDates = unavailableCoverageDates(offline, range, companyBranchId);
+  const unavailableDates = [...new Set([...unavailableCoverageDates(offline, range, companyBranchId), ...(view === "agenda" ? pendingDates ?? (!data ? assignmentDays(range) : []) : [])])];
   const unavailableWeekDates = unavailableCoverageDates(offline, displayedWeek, companyBranchId);
   const partial = (selectedDay ? unavailableWeekDates.includes(selectedDay) : unavailableDates.length > 0);
   const coveragePending = offline === null;
   const coverageNotice = unavailableDates.length > 0
     ? <Text accessibilityRole="alert" style={styles.coverageWarning}>{unavailableDates.length} días no descargados · no es carga cero</Text>
     : coveragePending ? <Text style={styles.preferenceError}>Verificando copia local…</Text> : null;
+
+  useEffect(() => {
+    if (view === "agenda") {
+      setAgendaLayout("schedule");
+      if (range.startDate !== monthRange(range.startDate).startDate || range.endDate !== monthRange(range.startDate).endDate) setAgendaMode("week");
+    }
+  }, [view]);
 
   useEffect(() => {
     let active = true;
@@ -209,8 +218,12 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
       : `${counts.completed} de ${counts.total} ${counts.total === 1 ? "tarea completada" : "tareas completadas"}.`;
 
   function navigateWeek(offset: number): void {
-    if (busy || loading) return;
+    if (busy || (view !== "agenda" && loading)) return;
     setDaySelection(null);
+    if (view === "agenda" && agendaMode === "month") {
+      onRangeChange(monthRange(shiftDate(offset < 0 ? range.startDate : range.endDate, offset < 0 ? -1 : 1)));
+      return;
+    }
     const date = shiftDate(displayedWeek.startDate, offset * 7);
     if (view === "today") setWeekSelection({ scope: scopeKey, date });
     else onRangeChange(weekRange(date));
@@ -223,6 +236,15 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
       setDaySelection(selectedDay === day ? null : { scope: scopeKey, date: day });
       onFocusDate?.(day);
     }
+  }
+
+  function changeAgendaMode(mode: "day" | "week" | "month", selectedDate?: string): void {
+    if (busy) return;
+    const day = selectedDate ?? focusDate ?? (today >= range.startDate && today <= range.endDate ? today : range.startDate);
+    setAgendaMode(mode);
+    setDaySelection(null);
+    const next = mode === "month" ? monthRange(day) : weekRange(day);
+    if (next.startDate < range.startDate || next.endDate > range.endDate) onRangeChange(next);
   }
 
   function clearFilters(): void {
@@ -253,21 +275,23 @@ export function DashboardScreen({ data, user, range, loading, error, onRefresh, 
     </Pressable>)}
   </View> : null;
 
-  if (view === "agenda" && agendaLayout === "schedule" && listView === "works") {
+  if (view === "agenda" && agendaLayout === "schedule") {
+    const calendarData: Assignments = data ?? { generatedAt: "", technician: { id: user.workerId, name: user.name, allowEditExecutionTime: false }, groups: [], summary: { totalGroups: 0, totalWorks: 0, activeWorks: 0, overdueWorks: 0, plannedMinutes: 0 } };
+    const calendarWeek = weekRange(focusDate && focusDate >= range.startDate && focusDate <= range.endDate ? focusDate : today >= range.startDate && today <= range.endDate ? today : range.startDate);
     const content = <>
-    {entityTabs}
     {!compact ? layoutSelector : null}
     <View style={styles.weekNavigation}>
-      <IconButton name="chevron-back-outline" label="Semana anterior" disabled={busy || loading} onPress={() => navigateWeek(-1)} />
-      <Text style={[styles.weekRange, { flex: 1 }]}>{compact ? `${shortDate(displayedWeek.startDate)} – ${shortDate(displayedWeek.endDate)}` : weekLabel}</Text>
-      <IconButton name="chevron-forward-outline" label="Semana siguiente" disabled={busy || loading} onPress={() => navigateWeek(1)} />
+      <IconButton name="chevron-back-outline" label={agendaMode === "month" ? "Mes anterior" : "Semana anterior"} disabled={busy} onPress={() => agendaMode === "month" ? navigateWeek(-1) : onRangeChange(weekRange(shiftDate(calendarWeek.startDate, -7)))} />
+      <Text style={[styles.weekRange, { flex: 1 }]}>{agendaMode === "month" ? new Intl.DateTimeFormat("es-CL", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${range.startDate}T12:00:00Z`)) : `${shortDate(calendarWeek.startDate)} – ${shortDate(calendarWeek.endDate)}`}</Text>
+      <IconButton name="chevron-forward-outline" label={agendaMode === "month" ? "Mes siguiente" : "Semana siguiente"} disabled={busy} onPress={() => agendaMode === "month" ? navigateWeek(1) : onRangeChange(weekRange(shiftDate(calendarWeek.startDate, 7)))} />
+      <IconButton name="today-outline" label="Volver a hoy" disabled={busy} onPress={() => { const next = agendaMode === "month" ? monthRange(today) : weekRange(today); if (next.startDate < range.startDate || next.endDate > range.endDate) onRangeChange(next); else onFocusDate?.(today); }} />
       {compact ? <IconButton name="options-outline" label="Filtros y OTs de agenda" disabled={busy} onPress={() => setAgendaLayout("list")} /> : null}
     </View>
     {error ? <Text accessibilityRole="alert" style={styles.preferenceError}>{error} La carga visible puede no estar actualizada.</Text> : null}
     {!data || coveragePending ? coverageNotice : null}
     {loading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={styles.loadingText}>Actualizando agenda…</Text></View> : null}
     {runningTimersFromSnapshot(data).length > 0 ? <Pressable accessibilityRole="button" onPress={() => setAgendaLayout("list")} style={styles.textButton}><Text style={styles.textButtonLabel}>Hay cronómetros activos · revisar en Lista</Text></Pressable> : null}
-    {data && !coveragePending ? <WeeklySchedule data={data} range={range} unavailableDates={unavailableDates} selectedDate={focusDate} onSelectDate={onFocusDate} onOpenWork={onOpenWork} busy={busy || loading} timezone={user.system.timezone} /> : !loading && !coveragePending ? <EmptyState title="Horario no disponible" message="Actualiza para cargar tus trabajos planificados de la semana." /> : null}
+    {!coveragePending ? <WeeklySchedule data={calendarData} range={range} viewMode={agendaMode} onViewModeChange={changeAgendaMode} unavailableDates={unavailableDates} selectedDate={focusDate} onSelectDate={onFocusDate} onOpenWork={onOpenWork} onOpenGroup={onOpenGroup} busy={busy} timezone={user.system.timezone} /> : null}
     </>;
     return compact ? <ScrollView style={styles.screen} contentContainerStyle={styles.mobileSchedule} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>{content}</ScrollView> : <View style={styles.desktopSchedule}>{content}</View>;
   }

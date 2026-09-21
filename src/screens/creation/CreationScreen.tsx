@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { creationOptionsSchema, creationResultSchema, type CreationInput, type CreationKind, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../../domain/creation";
 import { assignmentWorkCode } from "../../domain/assignmentCodes";
 import type { Assignments, Tenant, User } from "../../domain/models";
-import { isOfflineQueuedError, type OfflineQueuedOutcome } from "../../domain/offline";
+import { isOfflineQueuedError, type OfflineQueuedOutcome, type OfflineSnapshot } from "../../domain/offline";
 import { queuedCreationOutcomeSchema, queuedOutcomeData } from "../offline/offlineUi";
 import { scheduleClock } from "../../domain/weeklySchedule";
 import { useDeviceSecurity } from "../../security/DeviceSecurityContext";
@@ -18,7 +18,7 @@ import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
 import { CreationFields, creationLabels, priorityLabels } from "./CreationFields";
 import { CreationModal } from "./CreationModal";
 import { creationDraftKey, openCreationDraftStore } from "./creationDrafts";
-import { creationConflictPreview, creationDuration, creationPayload, emptyCreationForm, validateCreationForm, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
+import { creationConflictPreview, creationDuration, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
 
 export { clearCreationDrafts } from "./creationDrafts";
 export type { CreationInput, CreationKind, CreationOptions, CreationOptionsQuery, CreationResult } from "../../domain/creation";
@@ -31,6 +31,7 @@ export interface CreationScreenProps {
   companyBranchId: number;
   initialDate: string;
   data: Assignments | null;
+  offline?: OfflineSnapshot | null;
   mode: "live" | "demo";
   busy?: boolean;
   storageKey: string;
@@ -63,7 +64,7 @@ function submissionError(error: unknown): string {
   return error instanceof Error ? serverMessages.get(error.message) ?? "No se confirmó la creación. Puede haberse recibido en el servidor." : "No se confirmó la creación. Puede haberse recibido en el servidor.";
 }
 
-function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey }: CreationScreenProps & { draftKey: string }) {
+function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey }: CreationScreenProps & { draftKey: string }) {
   const security = useDeviceSecurity();
   const store = useMemo(() => openCreationDraftStore(draftKey, kind, companyBranchId), [draftKey, kind, companyBranchId]);
   const catalogCache = useMemo<CreationCatalogCache>(() => new Map(), [draftKey]);
@@ -85,8 +86,8 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const [catalog, setCatalog] = useState<"equipment" | "specialties" | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
-  const latest = useRef({ busy, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked });
-  latest.current = { busy, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked };
+  const latest = useRef({ busy, offline, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked });
+  latest.current = { busy, offline, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked };
   const changed = useRef(false);
   const loadOptionsRef = useRef(onLoadOptions);
   loadOptionsRef.current = onLoadOptions;
@@ -95,8 +96,21 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const minutes = creationDuration(form);
   const preview = useMemo(() => creationConflictPreview(data, { date: form.date, startTime: form.startTime, endTime: form.endTime }), [data, form.date, form.startTime, form.endTime]);
   const branch = user.accessBranchs.find((item) => item.id === companyBranchId);
+  const queuedState = draft.phase === "queued" ? queuedCreationState(draft, offline) : null;
 
   function replaceDraft(next: CreationDraft): void { current.current = next; setDraft(next); }
+
+  useEffect(() => {
+    if (!ready || busy || sending || lock.current || current.current !== draft || draft.phase !== "queued" || !latest.current.isUnlocked()) return;
+    const next = queuedCreationState(draft, offline).confirmed;
+    if (!next) return;
+    replaceDraft(next);
+    void store.write(next).then(() => {
+      if (mounted.current && current.current === next) setSaveError("");
+    }).catch(() => {
+      if (mounted.current && current.current === next) setSaveError("La creación está confirmada. No se pudo actualizar esta pantalla en el dispositivo; no repitas el envío.");
+    });
+  }, [draft, offline, ready, busy, sending, store]);
 
   useEffect(() => {
     let active = true;
@@ -226,13 +240,13 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   }
 
   async function editAsNew(resetForm: boolean): Promise<void> {
-    if (lock.current) return;
+    if (!mounted.current || !latest.current.isUnlocked() || latest.current.busy || lock.current) return;
     lock.current = true;
     setSending(true);
     try {
       const next: CreationDraft = { version: 1, kind, phase: "editing", form: resetForm ? emptyCreationForm(initialDate) : current.current.form };
-      await store.reset();
       await store.write(next);
+      if (!mounted.current || !latest.current.isUnlocked()) return;
       replaceDraft(next);
       setReady(true);
       setDraftError(""); setSaveError(""); setError(""); setErrors({}); setStep(0); setDialog(null);
@@ -268,8 +282,12 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const confirmedResult = draft.phase === "confirmed" ? draft.result : null;
   async function openSaved(): Promise<void> {
     if (!mounted.current || !latest.current.isUnlocked() || latest.current.busy || lock.current) return;
-    const saved = current.current;
+    let saved = current.current;
     if (saved.phase !== "confirmed" && saved.phase !== "queued") return;
+    if (saved.phase === "queued") {
+      const confirmed = queuedCreationState(saved, latest.current.offline).confirmed;
+      if (confirmed) { saved = confirmed; replaceDraft(confirmed); }
+    }
     lock.current = true;
     setSending(true);
     try { await persistAndOpen(saved, false); }
@@ -287,19 +305,21 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
         <Text style={styles.context}>{tenant.name} · {branch?.name ?? `Sucursal ${companyBranchId}`} · {user.name} {user.lastnames}</Text>
         {mode === "demo" ? <Badge label="Demostración · no crea registros reales" tone="warning" /> : null}
         {draft.phase === "queued" ? <Card style={styles.card}>
-          <Badge label="Trabajo local · pendiente" tone="warning" />
-          <Text accessibilityRole="header" style={styles.title}>Guardado en este dispositivo · Pendiente de sincronizar</Text>
+          <Badge label="Solicitud anterior" tone="neutral" />
+          <Text accessibilityRole="header" style={styles.title}>{queuedState?.status === "syncing" ? "Sincronizando solicitud" : queuedState?.status === "review" ? "Solicitud por revisar" : queuedState?.status === "auth_required" ? "Verifica tu sesión para sincronizar" : queuedState?.status === "pending" ? "Guardado · pendiente de sincronizar" : "Solicitud guardada anteriormente"}</Text>
           <Text style={styles.body}>{draft.form.title || creationLabels[kind]}</Text>
-          <Text style={styles.body}>{draft.input.schedule.date} · {draft.input.schedule.startTime}–{draft.input.schedule.endTime}</Text>
-          <Text style={styles.hint}>No está confirmado por Qualitzer. La cola conserva la misma solicitud; no hace falta volver a crearla. Puedes añadir archivos y comentarios al trabajo local.</Text>
+          <Text style={styles.body}>{draft.input.schedule.date} · {draft.input.schedule.startTime || "Sin inicio"}–{draft.input.schedule.endTime || "Sin fin"}</Text>
+          <Text style={styles.hint}>{queuedState?.status === "unavailable" ? "No se pudo comprobar su estado actual. Revisa tus asignaciones antes de repetir este trabajo." : queuedState?.status === "review" ? "La solicitud se conserva en el centro de sincronización y necesita revisión." : "La cola conserva esta solicitud. No necesitas volver a enviarla."}</Text>
+          <Text style={styles.hint}>Puedes crear otro trabajo distinto sin borrar esta solicitud.</Text>
           <Button title="Ver trabajo local" loading={sending} disabled={busy} onPress={() => void openSaved()} />
+          <Button title="Crear otro" icon="add-outline" variant="secondary" disabled={sending || busy} onPress={() => void editAsNew(true)} />
         </Card> : confirmedResult ? <Card style={styles.card}>
           <Badge label={mode === "demo" ? "Simulación confirmada" : "Creación confirmada"} tone="success" />
           <Text accessibilityRole="header" style={styles.title}>{mode === "demo" ? "La simulación está lista" : "Tu planificación está lista"}</Text>
           <Text selectable style={styles.body}>Referencia: {confirmedResult.groupId}</Text>
           <Text selectable style={styles.body}>{confirmedResult.kind === "maintenance" ? `Trabajo de mantenimiento #${confirmedResult.workId}` : assignmentWorkCode({ id: String(confirmedResult.workId) })}</Text>
-          <Text style={styles.body}>{confirmedResult.schedule.date} · {confirmedResult.schedule.startTime}–{confirmedResult.schedule.endTime}</Text>
-          <Text style={styles.body}>{confirmedResult.schedule.plannedMinutes} min · {confirmedResult.schedule.timezone}</Text>
+          <Text style={styles.body}>{confirmedResult.schedule.date} · {confirmedResult.schedule.startTime || "Sin inicio"}–{confirmedResult.schedule.endTime || "Sin fin"}</Text>
+          <Text style={styles.body}>{confirmedResult.schedule.plannedMinutes === null ? "Sin duración prevista" : `${confirmedResult.schedule.plannedMinutes} min`} · {confirmedResult.schedule.timezone}</Text>
           <Text style={styles.hint}>La creación ya se confirmó. Abrir o actualizar la agenda no volverá a enviarla.</Text>
           <Button title="Ver en mi agenda" loading={sending} disabled={busy} onPress={() => void openSaved()} />
           <Button title="Crear otro" variant="secondary" disabled={sending || busy} onPress={() => void editAsNew(true)} />
@@ -325,9 +345,11 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Field label="Fecha *" value={form.date} maxLength={10} autoCapitalize="none" placeholder="YYYY-MM-DD" editable={!frozen} error={errors.date}
                 onChangeText={(value) => change("date", value)} hint="Formato año-mes-día; por ejemplo 2026-09-10." />
               <Button title="Elegir fecha en calendario" icon="calendar-outline" variant="secondary" disabled={frozen} onPress={() => setCalendar(true)} />
-              <TimeField label="Hora de inicio *" value={form.startTime} disabled={frozen} error={errors.startTime} onChange={(value) => change("startTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Formato de 24 horas (HH:mm)." />
-              <TimeField label="Hora de fin *" value={form.endTime} disabled={frozen} error={errors.endTime} onChange={(value) => change("endTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Debe ser posterior al inicio." />
-              <Text accessibilityLiveRegion="polite" style={styles.body}>Duración prevista: {minutes === null ? "completa un horario válido" : `${minutes} min (${Math.floor(minutes / 60)} h ${minutes % 60} min)`}</Text>
+              <TimeField label={kind === "work" ? "Hora de inicio (opcional)" : "Hora de inicio *"} value={form.startTime} disabled={frozen} error={errors.startTime} onChange={(value) => change("startTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Formato de 24 horas (HH:mm)." />
+              {kind === "work" && form.startTime ? <Button title="Quitar hora de inicio" icon="close-outline" variant="ghost" disabled={frozen} onPress={() => change("startTime", "")} /> : null}
+              <TimeField label={kind === "work" ? "Hora de fin (opcional)" : "Hora de fin *"} value={form.endTime} disabled={frozen} error={errors.endTime} onChange={(value) => change("endTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Debe ser posterior al inicio cuando se indiquen ambas horas." />
+              {kind === "work" && form.endTime ? <Button title="Quitar hora de fin" icon="close-outline" variant="ghost" disabled={frozen} onPress={() => change("endTime", "")} /> : null}
+              <Text accessibilityLiveRegion="polite" style={styles.body}>Duración prevista: {minutes === null ? kind === "work" ? "sin definir" : "completa un horario válido" : `${minutes} min (${Math.floor(minutes / 60)} h ${minutes % 60} min)`}</Text>
               <Text style={styles.body}>Zona horaria de la sucursal: {options.timezone}</Text>
               <Text style={styles.hint}>Un solo día, sin pausas automáticas. Para cruzar medianoche o repetir, divide la planificación desde la web. El servidor verifica los cambios de horario.</Text>
             </Card> : null}
@@ -346,14 +368,13 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
                 {form.reasonText.trim() ? <Text style={styles.body}>{form.reasonText.trim()}</Text> : null}
                 {form.initialComment.trim() ? <Text style={styles.body}>Comentario: {form.initialComment.trim()}</Text> : null}
               </>}
-              <Text style={styles.body}>{form.date} · {form.startTime}–{form.endTime}</Text>
-              <Text style={styles.body}>{minutes ?? "—"} min · {options.timezone}</Text>
+              <Text style={styles.body}>{form.date} · {form.startTime || "Sin inicio"}–{form.endTime || "Sin fin"}</Text>
+              <Text style={styles.body}>{minutes === null ? "Sin duración prevista" : `${minutes} min`} · {options.timezone}</Text>
               <Text style={styles.hint}>Se asignará a tu trabajador activo en esta sucursal, sin iniciar su ejecución.</Text>
             </Card> : null}
-            {step > 0 ? <Card style={styles.card}>
-              <Text style={styles.warning}>{preview.message}</Text>
+            {step > 0 && preview.overlaps.length > 0 ? <Card style={styles.card}>
+              <Text style={styles.warning}>Este horario coincide con otros trabajos de tu agenda. Puedes continuar.</Text>
               {preview.overlaps.map((title) => <Text key={title} style={styles.body}>• {title}</Text>)}
-              {preview.generatedAt ? <Text style={styles.hint}>Datos cargados: {preview.generatedAt}</Text> : null}
             </Card> : null}
             {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
             {step < 2 ? <Button title={step === 0 ? "Continuar a horario" : "Revisar solicitud"} disabled={frozen} onPress={() => { if (checkForm(step === 1)) setStep(step + 1); }} /> : <>

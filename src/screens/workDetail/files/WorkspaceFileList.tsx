@@ -15,11 +15,11 @@ import { fileSizeLabel, isImageType, presentAttachment, sortedAttachments, type 
 import type { WorkspaceFileDraft } from "./WorkspaceDraftStore";
 import { workspaceStyles } from "./workspaceStyles";
 
-function DraftTile({ file, disabled, onRemove, onPreview }: { file: WorkspaceFileDraft; disabled: boolean; onRemove: () => void; onPreview: () => void }) {
+function DraftTile({ file, disabled, onRemove, onPreview, expanded = false }: { file: WorkspaceFileDraft; disabled: boolean; onRemove: () => void; onPreview: () => void; expanded?: boolean }) {
   const [failed, setFailed] = useState(false);
-  return <View style={workspaceStyles.draftRow}>
-    {isImageType(file.mimeType) && !failed ? <Pressable accessibilityRole="button" accessibilityLabel={`Ampliar archivo pendiente: ${file.name}`} onPress={onPreview}><Image source={{ uri: file.uri }} style={workspaceStyles.thumbnail} resizeMode="cover" onError={() => setFailed(true)} accessible={false} /></Pressable> : <View style={workspaceStyles.thumbnail}><Ionicons name={file.mimeType === "application/pdf" ? "document-text-outline" : "document-outline"} size={26} color={palette.primary} accessible={false} /></View>}
-    <View style={styles.grow}>
+  return <View style={expanded ? workspaceStyles.tile : workspaceStyles.draftRow}>
+    {isImageType(file.mimeType) && !failed ? <Pressable accessibilityRole="button" accessibilityLabel={`Ampliar archivo pendiente: ${file.name}`} onPress={onPreview}><Image source={{ uri: file.uri }} style={expanded ? styles.photo : workspaceStyles.thumbnail} resizeMode={expanded ? "contain" : "cover"} onError={() => setFailed(true)} accessible={false} /></Pressable> : <View style={expanded ? workspaceStyles.document : workspaceStyles.thumbnail}><Ionicons name={file.mimeType === "application/pdf" ? "document-text-outline" : "document-outline"} size={26} color={palette.primary} accessible={false} /></View>}
+    <View style={expanded ? styles.tight : styles.grow}>
       <Text selectable numberOfLines={2} style={styles.label}>{file.name}</Text>
       <Text style={styles.caption}>{fileSizeLabel(file.size)} · {file.uploaded ? "Transferido · limpiar copia" : "Sin guardar"}</Text>
       {failed ? <Text style={styles.caption}>Vista previa no disponible</Text> : null}
@@ -28,12 +28,12 @@ function DraftTile({ file, disabled, onRemove, onPreview }: { file: WorkspaceFil
   </View>;
 }
 
-export function PendingFileList({ files, disabled, onRemove }: { files: WorkspaceFileDraft[]; disabled: boolean; onRemove: (id: string) => void }) {
+export function PendingFileList({ files, disabled, onRemove, expanded = false }: { files: WorkspaceFileDraft[]; disabled: boolean; onRemove: (id: string) => void; expanded?: boolean }) {
   const [preview, setPreview] = useState<WorkspaceFileDraft | null>(null);
   const [failed, setFailed] = useState(false);
   const selected = files.find((file) => file.id === preview?.id);
   return <View style={styles.tight}>
-    <View style={styles.tight}>{files.map((file) => <DraftTile key={file.id} file={file} disabled={disabled} onRemove={() => onRemove(file.id)} onPreview={() => { setFailed(false); setPreview(file); }} />)}</View>
+    <View style={expanded ? workspaceStyles.grid : styles.tight}>{files.map((file) => <DraftTile key={file.id} file={file} expanded={expanded} disabled={disabled} onRemove={() => onRemove(file.id)} onPreview={() => { setFailed(false); setPreview(file); }} />)}</View>
     <Modal visible={selected !== undefined} animationType="fade" onRequestClose={() => setPreview(null)}>
       <SafeAreaView style={styles.viewer} accessibilityViewIsModal>
         <View style={styles.viewerHeader}><Text style={styles.viewerTitle}>{selected?.name}</Text><Button title="Cerrar vista previa" icon="close-outline" variant="secondary" onPress={() => setPreview(null)} /></View>

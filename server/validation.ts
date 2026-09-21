@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { tenantIdSchema } from "./config";
+import { workedDatesAllowed } from "../src/domain/workExecution";
 
 export const positiveId = z.string().regex(/^[1-9]\d*$/).refine((value) => Number.isSafeInteger(Number(value)));
 export const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -12,7 +13,7 @@ export const rangeQuerySchema = z.object({
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
 export const branchQuerySchema = z.object({ companyBranchId: positiveId.transform(Number).optional() }).strict();
 export const resourceParamsSchema = z.object({
-  groupId: z.string().regex(/^(?:external|maintenance|direct|direct-np)-[1-9]\d*$/), workId: positiveId, stepId: positiveId.optional(), activityId: positiveId.optional(),
+  groupId: z.string().regex(/^(?:external|maintenance|direct|direct-np)-[1-9]\d*$/), workId: positiveId, stepId: positiveId.optional(), activityId: positiveId.optional(), fileId: positiveId.optional(),
 }).strict();
 export const emptySchema = z.object({}).strict();
 export const healthQuerySchema = z.object({ tenantId: tenantIdSchema.optional() }).strict();
@@ -35,9 +36,10 @@ export const statusInputSchema = z.object({
   executionStartTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(),
   executionEndTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(),
   executionDates: z.array(isoDate).min(1).max(30).refine((dates) => new Set(dates).size === dates.length).optional(),
+  workedDates: z.array(isoDate).refine(workedDatesAllowed).optional(),
   endDateOffset: z.number().int().min(0).max(30).optional(),
   isManual: z.boolean().optional(),
-}).strict();
+}).strict().refine(value => value.workedDates === undefined || ((value.status === "completed" || value.status === "delivered") && (value.executionDates?.length ?? 1) === 1), "WORKED_DATES_ONLY_ON_SINGLE_WORK_COMPLETION");
 export const stepAnswerSchema = z.object({
   responseValue: z.union([z.string().max(10000), z.boolean(), z.array(z.object({ value: z.string().max(500), label: z.string().max(500) }).strict()).max(100)]).nullable(),
   isCompleted: z.boolean(), executionStatus: z.enum(["completed", "partial", "not_completed"]).nullable(), comment: z.string().max(10000).nullable(),

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Platform, Text, View } from "react-native";
+import { Image, Platform, Pressable, Text, View } from "react-native";
 import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { LocalPhoto } from "../../domain/models";
@@ -10,14 +10,16 @@ import { errorMessage } from "../workDetail/detailRules";
 import { styles } from "../workDetail/detailStyles";
 import { fileSizeLabel } from "../workDetail/files/fileRules";
 import { operationStatusLabels, trustedLocalFile } from "./offlineUi";
+import { workspaceStyles } from "../workDetail/files/workspaceStyles";
 
 export interface OfflineFileCardProps {
   file: OfflineAttachment;
   readLocalFile?: OfflineController["readLocalFile"];
   actionsOnly?: boolean;
+  expanded?: boolean;
 }
 
-export function OfflineFileCard({ file, readLocalFile, actionsOnly = false }: OfflineFileCardProps) {
+export function OfflineFileCard({ file, readLocalFile, actionsOnly = false, expanded = false }: OfflineFileCardProps) {
   const [preview, setPreview] = useState<LocalPhoto | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +27,18 @@ export function OfflineFileCard({ file, readLocalFile, actionsOnly = false }: Of
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const localId = file.offline.localFileId;
+  const [inlinePreview, setInlinePreview] = useState<{ file: LocalPhoto; reader: OfflineController["readLocalFile"] } | null>(null);
+  useEffect(() => {
+    let current = true;
+    setInlinePreview(null);
+    if (expanded && localId && readLocalFile && file.offline.downloaded && file.type?.startsWith("image/")) {
+      void readLocalFile(localId).then(local => {
+        if (current && trustedLocalFile(localId, local, Platform.OS)) setInlinePreview({ file: local, reader: readLocalFile });
+      }).catch(() => {});
+    }
+    return () => { current = false; };
+  }, [expanded, localId, readLocalFile, file.offline.downloaded, file.type]);
+  const visiblePreview = inlinePreview?.file.id === localId && inlinePreview?.reader === readLocalFile ? inlinePreview?.file : null;
   async function open(download: boolean): Promise<void> {
     if (!readLocalFile || !localId || lock.current || !file.offline.downloaded) return;
     lock.current = true;
@@ -45,7 +59,10 @@ export function OfflineFileCard({ file, readLocalFile, actionsOnly = false }: Of
     } catch (failure) { if (active.current) setError(`No se pudo abrir la copia local: ${errorMessage(failure)}`); }
     finally { lock.current = false; if (active.current) setBusy(false); }
   }
-  return <View style={actionsOnly ? styles.tight : styles.attachment}>
+  return <View style={actionsOnly ? styles.tight : expanded ? workspaceStyles.tile : styles.attachment}>
+    {!actionsOnly && visiblePreview ? <Pressable accessibilityRole="button" accessibilityLabel={`Ampliar archivo pendiente: ${file.name}`} onPress={() => void open(false)}>
+      <Image source={{ uri: visiblePreview.uri }} resizeMode="contain" style={styles.photo} accessibilityLabel={`Vista previa pendiente: ${file.name}`} onError={() => setInlinePreview(null)} />
+    </Pressable> : null}
     {!actionsOnly ? <>
     <Text selectable style={styles.label}>{file.name}</Text>
     <Badge label={file.offline.confirmed ? "Confirmado" : `Pendiente · ${operationStatusLabels[file.offline.status ?? "pending"]}`} tone={file.offline.confirmed ? "success" : "warning"} />

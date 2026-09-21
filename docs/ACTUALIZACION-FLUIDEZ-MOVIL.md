@@ -1,5 +1,11 @@
 # Fluidez móvil — app 1.0.11 y gateway 1.0.4
 
+Actualización del 21 de septiembre: APK 1.0.35 y gateway 1.0.13 permiten trabajos sin descripción ni horas; la app espera brevemente la confirmación de la misma solicitud conectada y conserva la cola si no llega. El backend distingue las nuevas creaciones propias para omitir su aviso de asignación. Desplegar fuentes MobileCreation/MobileNotifications y gateway 1.0.13 antes de actualizar la APK. Sin migración nueva; timer, checklist, recibos y borradores permanecen. Ver ACTUALIZACION-1.0.35.md. Las versiones posteriores en este documento son historial.
+
+Actualización actual: APK 1.0.32 y gateway 1.0.12. Agenda recupera el horario semanal independientemente del listado y añade Día/Semana/Mes. Los archivos de actividades incorporan eliminación confirmada y online mediante PanelWorkActions actualizado. Conservar timer, checklist, recibos, colas y borradores; no hay migración nueva. Primero desplegar backend, instalar gateway 1.0.12 con el proceso detenido y arrancar una sola instancia fork; después actualizar la APK. Ver ACTUALIZACION-1.0.32.md. El contenido posterior es histórico, no una instrucción para instalar paquetes anteriores.
+
+Se conserva la entrega técnica de gateway 1.0.11: nota, duración y firma, confirmación previa y estado entregado para padre/hijos sin completar respuestas pendientes. El nuevo borrado de archivos no modifica ese contrato ni la finalización del supervisor.
+
 Firmas del perfil: gateway 1.0.10 y APK 1.0.25 permiten consultar, crear, editar y eliminar firmas propias y elegirlas al entregar una OT. Desplegar las nuevas rutas userSignatures del backend antes de instalar la pasarela. Mismos registros de perfil web, sin migración nueva; timer, checklist y recibos permanecen sin cambios. Ver ACTUALIZACION-1.0.25.md.
 
 Actualización del 18 de septiembre: gateway 1.0.9 corrige listas y validaciones de pertenencia de archivos con tamaños redondeados en KB/MB. Mantiene timer, checklist y recibos. Usar la APK 1.0.24 existente; no requiere APK nueva ni migraciones. Instalar el paquete en el backend y reiniciar un único proceso. No repetir cargas ya en cola. El contenido posterior conserva el historial de entregas anteriores.

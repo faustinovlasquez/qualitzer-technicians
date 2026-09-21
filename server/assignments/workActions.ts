@@ -50,6 +50,18 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
     const { scope, query, prefix } = await owned(req, false);
     res.json(parseUpstream(attachmentSchema.array(), await upstream.request(`${prefix}/activities/${id}/files`, { token: scope.token, query })));
   });
+  router.delete(`${base}/activities/:activityId/files/:fileId`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const id = activityId(req);
+    const fileId = Number(resourceParamsSchema.parse(req.params).fileId);
+    const { scope, query, prefix } = await owned(req, true);
+    const files = parseUpstream(attachmentSchema.array(), await upstream.request(`${prefix}/activities/${id}/files`, { token: scope.token, query }));
+    if (!files.some(file => Number(file.id) === fileId)) throw new GatewayError(404, "WORK_ACTIVITY_FILE_NOT_FOUND");
+    const refreshed = await owned(req, true);
+    if (scope.token !== refreshed.scope.token || scope.user.id !== refreshed.scope.user.id || scope.user.workerId !== refreshed.scope.user.workerId) throw new GatewayError(401, "UNAUTHORIZED");
+    await upstream.request(`${refreshed.prefix}/activities/${id}/files/${fileId}`, { token: refreshed.scope.token, query: refreshed.query, method: "DELETE" });
+    res.json({ success: true });
+  });
   router.delete(`${base}/activities/:activityId`, async (req, res) => {
     emptySchema.parse(req.body ?? {});
     const id = activityId(req);

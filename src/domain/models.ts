@@ -178,6 +178,7 @@ export interface StatusInput {
   executionStartTime?: string;
   executionEndTime?: string;
   executionDates?: string[];
+  workedDates?: string[];
   endDateOffset?: number;
   isManual?: boolean;
 }
