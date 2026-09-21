@@ -2,6 +2,52 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de cronometro offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8812" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar pantalla de cronometro offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\tests\\e2e\\time-sync\\smoke.cjs", "--offline-clock"],
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar cronometro offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\tsx\\dist\\cli.mjs", "--tsconfig", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\server\\tsconfig.json", "--test", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\src\\offline\\tests\\durable-intentions.test.ts", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\server\\tests\\offline-timer-checklist.test.ts", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\src\\offline\\tests\\timer-reconciliation.test.ts", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\src\\offline\\tests\\repository.test.ts"],
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de dias trabajados",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8811" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar entrega de varios dias",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\tsx\\dist\\cli.mjs", "--tsconfig", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\server\\tsconfig.json", "--test", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\tests\\execution-parity.test.ts", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\src\\offline\\tests\\repository.test.ts"],
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar dias trabajados",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\tests\\e2e\\time-sync\\smoke.cjs", "--worked-days"],
+			"problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: descargar APK de trabajos opcionales",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
@@ -303,7 +349,7 @@
 			"label": "Qualitzer: comprobar entrega de asignaciones",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
-			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.105:8810/"],
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.105:8812/"],
 			"isBackground": false,
 			"problemMatcher": []
 		},

@@ -19,7 +19,8 @@ export function timerPendingLabel(timer: PendingTimer | null): string {
   return timer?.status === "applied" ? "Actualizando…"
     : timer?.status === "conflict" ? "Conflicto · revisar"
     : timer?.status === "needs_review" || timer?.status === "blocked" ? "Requiere revisión"
-    : timer?.status === "auth_required" ? "Verificar sesión" : PENDING_TIMER_LABEL;
+    : timer?.status === "auth_required" ? "Verificar sesión"
+    : timer?.payload.recordedAt ? timer.status === "syncing" ? "Sincronizando…" : "Guardado local" : PENDING_TIMER_LABEL;
 }
 export const queuedCreationOutcomeSchema = z.object({
   operationId: mobileUuidSchema, operationIds: z.array(mobileUuidSchema).length(1), kind: z.literal("create"),

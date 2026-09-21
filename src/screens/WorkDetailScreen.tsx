@@ -3,6 +3,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { BackHandler, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { localTimerElapsedSeconds } from "../offline/queueIntentions";
+import type { OfflineOperation } from "../domain/offline";
 import { assignmentCodes } from "../domain/assignmentCodes";
 import { answerFromStep, clock, duration, plainText, shortDate, STATUS_LABELS } from "../domain/format";
 import type { AssignmentGroup, AssignmentWork, Attachment, ChecklistStep, CommentPage, DateRange, LocalPhoto, StatusInput, StepAnswer, Tenant, WorkDetailTab, WorkStatus } from "../domain/models";
@@ -88,21 +90,23 @@ const tabs: { id: Tab; label: string; icon: IconName }[] = [
 ];
 const statusTones: { [key in WorkStatus]: BadgeTone } = { pending: "warning", in_progress: "teal", paused: "warning", completed: "success", delivered: "info" };
 
-function ElapsedTimer({ work, generatedAt, online = true, pending = false }: Pick<WorkDetailScreenProps, "work" | "generatedAt"> & { online?: boolean; pending?: boolean }) {
+function ElapsedTimer({ work, generatedAt, online = true, pending = false, localTimer }: Pick<WorkDetailScreenProps, "work" | "generatedAt"> & { online?: boolean; pending?: boolean; localTimer?: Extract<OfflineOperation, { kind: "timer" }> | null }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     setNow(Date.now());
-    if (work.status !== "in_progress" || !online || pending) return;
+    if (localTimer ? localTimer.payload.status !== "in_progress" : work.status !== "in_progress") return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [work.status, generatedAt, online, pending]);
+  }, [work.status, generatedAt, online, pending, localTimer]);
   const snapshotTime = Date.parse(generatedAt);
   const baseline = Number.isFinite(work.elapsedSeconds) ? Math.max(0, work.elapsedSeconds) : 0;
-  const extra = online && !pending && work.status === "in_progress" && Number.isFinite(snapshotTime) ? Math.max(0, Math.floor((now - snapshotTime) / 1000)) : 0;
+  const extra = !pending && work.status === "in_progress" && Number.isFinite(snapshotTime) ? Math.max(0, Math.floor((now - snapshotTime) / 1000)) : 0;
+  const localElapsed = localTimer ? localTimerElapsedSeconds(localTimer, now) : null;
+  const elapsed = localElapsed ?? baseline + extra;
   return <View style={styles.timerBox}>
     <Text style={styles.heroOverline}>TIEMPO DE EJECUCIÓN</Text>
-    <Text style={styles.timer} accessibilityLabel={`Tiempo de ejecución: ${clock(baseline + extra)}`}>{clock(baseline + extra)}</Text>
-    {pending || !online ? <Text style={styles.heroText}>Último tiempo recibido</Text> : null}
+    <Text style={styles.timer} accessibilityLabel={`Tiempo de ejecución: ${clock(elapsed)}`}>{clock(elapsed)}</Text>
+    {pending || !online ? <Text style={styles.heroText}>{localElapsed !== null || !pending ? "Tiempo local · pendiente de confirmar" : "Último tiempo recibido"}</Text> : null}
   </View>;
 }
 
@@ -156,7 +160,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const unobservedTimer = queuedTimer && !scopedOperations.some((operation) => operation.id === queuedTimer.operationId) ? queuedTimer : null;
   const desiredStatus = unobservedTimer?.status ?? pendingTimer?.payload.status ?? work.status;
   const timerPending = Boolean(pendingTimer || unobservedTimer);
-  const timerNeedsAttention = props.offline?.connection?.foreground === false || pendingTimer !== null && pendingTimer.status !== "pending" && pendingTimer.status !== "syncing";
+  const timerNeedsAttention = props.offline?.connection?.foreground === false || pendingTimer !== null && !["pending", "syncing", "applied"].includes(pendingTimer.status);
   const pendingDeliveryOperations = [...scopedOperations, ...operationsForWork(props.offline, { groupId: group.id, ...range, companyBranchId: props.companyBranchId })]
     .filter((operation) => operation.status !== "applied");
   const pendingDeliveryCount = new Set(pendingDeliveryOperations.map((operation) => operation.id)).size;
@@ -648,7 +652,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Text style={styles.heroOverline}>{maintenance ? "MANTENIMIENTO INTERNO" : group.type === "external_ot" ? "ORDEN DE TRABAJO" : "ASIGNACIÓN DIRECTA"}</Text>
             <Text accessibilityRole="header" style={styles.heroTitle}>{plainText(work.title)}</Text>
             <View style={styles.row}><Ionicons name="construct-outline" size={18} color={palette.onDark} accessible={false} /><Text style={styles.heroText}>{plainText(work.specialty) || "Especialidad no informada"}</Text></View>
-            <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending} />
+            <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending} localTimer={pendingTimer} />
             <View style={styles.heroMetrics}>
               <View style={styles.metric}><Text style={styles.heroText}>Programado</Text><Text style={styles.metricValue}>{shortDate(work.scheduledDate)}</Text></View>
               <View style={styles.metric}><Text style={styles.heroText}>Tiempo previsto</Text><Text style={styles.metricValue}>{duration(work.plannedMinutes)}</Text></View>
@@ -663,6 +667,10 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Text style={styles.caption}>Última carga: {loadedAt}</Text>
           </View>
           </> : null}
+          {tab === "work" && work.workedDates?.length ? <View style={styles.tight}>
+            <Text style={styles.label}>Días trabajados registrados</Text>
+            <BodyText>{work.workedDates.map(day => new Intl.DateTimeFormat("es", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`))).join(" · ")}</BodyText>
+          </View> : null}
           {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities
             canContinueWrite={() => executionGates.current.online && !executionGates.current.readOnly && callbacks.current.offline?.connection?.foreground !== false}
             onPanelChange={setActivityPanelOpen}

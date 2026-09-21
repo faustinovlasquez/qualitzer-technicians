@@ -11,7 +11,7 @@ export interface OfflineAttachment extends Attachment { offline: OfflineResource
 export interface OfflineAssignmentWork extends AssignmentWork { offline: OfflineResourceMetadata; }
 export interface OfflineAssignmentGroup extends AssignmentGroup { offline: OfflineResourceMetadata; works: OfflineAssignmentWork[]; }
 export type OfflineAnswer = StepAnswer | SyncStepAnswer;
-export interface OfflineTimerPayload { status: "in_progress" | "paused"; baseStatus: "pending" | "in_progress" | "paused"; }
+export interface OfflineTimerPayload { status: "in_progress" | "paused"; baseStatus: "pending" | "in_progress" | "paused"; recordedAt?: string; observedAt?: string; previousOperationId?: string; }
 export interface OfflineChecklistPayload { checklistId: number; }
 export interface OfflineTimerRead { scope: WorkScope; appliedOperationIds: string[]; }
 export interface TimerReadAssignmentWork extends AssignmentWork { offlineTimerRead?: OfflineTimerRead; }
@@ -64,7 +64,7 @@ export type OfflineOperation = OfflineOperationBase & (
   | { kind: "comment"; scope: WorkScope; text: string }
   | { kind: "answer"; scope: WorkScope; stepId: string; answer: OfflineAnswer; base: OfflineAnswer; wire?: { answer: SyncStepAnswer; base: SyncStepAnswer } }
   | { kind: "document"; scope: OfflineScope; stepId?: string; file: OfflineFile; sourceDraftId?: string }
-  | { kind: "timer"; scope: WorkScope; payload: OfflineTimerPayload }
+  | { kind: "timer"; scope: WorkScope; payload: OfflineTimerPayload; localClock?: { elapsedSeconds: number } }
   | { kind: "checklist"; scope: WorkScope; payload: OfflineChecklistPayload }
 );
 export interface OfflineCoverage { date: string; branchId: number; fetchedAt: number; }

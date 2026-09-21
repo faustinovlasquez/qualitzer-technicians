@@ -16,6 +16,7 @@ export interface OwnedWork {
   workId: number;
   maintenanceId: number | null;
   allowEditExecutionTime: boolean;
+  supportsWorkedDates?: boolean;
   generatedAt: string;
 }
 
@@ -85,6 +86,7 @@ export class AssignmentAuthorization {
       token, user, range, group, work, workId: Number(work.id),
       maintenanceId: group.type === "internal_maintenance" ? Number(group.id.slice("maintenance-".length)) : null,
       allowEditExecutionTime: data.technician.allowEditExecutionTime,
+      supportsWorkedDates: data.technician.supportsWorkedDates,
       generatedAt: data.generatedAt,
     };
   }

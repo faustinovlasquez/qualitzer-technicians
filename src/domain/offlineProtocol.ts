@@ -22,12 +22,18 @@ export const syncAnswerSchema = z.object({
     .refine((values) => new Set(values.map((value) => value.value)).size === values.length), comment: text(10000),
 }).strict();
 export type SyncStepAnswer = z.output<typeof syncAnswerSchema>;
+export const syncTimerPayloadSchema = z.object({
+  status: z.enum(["in_progress", "paused"]), baseStatus: z.enum(["pending", "in_progress", "paused"]),
+  recordedAt: z.iso.datetime().optional(), observedAt: z.iso.datetime().optional(), previousOperationId: syncOperationIdSchema.optional(),
+}).strict().refine(value => (value.recordedAt === undefined) === (value.observedAt === undefined)
+  && (value.previousOperationId === undefined || value.recordedAt !== undefined));
 export const syncCommandSchema = z.discriminatedUnion("kind", [
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("comment"), scope: syncScopeSchema, payload: z.object({ text: text(10000).transform((value) => value.trim()).pipe(z.string().min(1)) }).strict() }).strict(),
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("answer"), scope: syncScopeSchema, payload: z.object({ stepId: syncResourceIdSchema, answer: syncAnswerSchema, base: syncAnswerSchema }).strict() }).strict(),
-  z.object({ operationId: syncOperationIdSchema, kind: z.literal("timer"), scope: syncScopeSchema, payload: z.object({ status: z.enum(["in_progress", "paused"]), baseStatus: z.enum(["pending", "in_progress", "paused"]) }).strict() }).strict(),
+  z.object({ operationId: syncOperationIdSchema, kind: z.literal("timer"), scope: syncScopeSchema, payload: syncTimerPayloadSchema }).strict(),
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("checklist"), scope: syncScopeSchema, payload: z.object({ checklistId: syncPositiveIdSchema }).strict() }).strict(),
-]).refine((value) => value.kind === "comment" || value.scope.workId !== undefined);
+]).refine((value) => value.kind === "comment" || value.scope.workId !== undefined)
+  .refine(value => value.kind !== "timer" || value.payload.recordedAt === undefined || value.scope.startDate === value.scope.endDate);
 export type SyncCommand = z.output<typeof syncCommandSchema>;
 export const syncDocumentSchema = z.object({ operationId: syncOperationIdSchema, scope: syncScopeSchema, stepId: syncResourceIdSchema.optional(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()
   .refine((value) => value.stepId === undefined || value.scope.workId !== undefined);

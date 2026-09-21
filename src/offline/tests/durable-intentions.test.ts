@@ -9,7 +9,7 @@ import type { ChecklistCatalogPage } from "../../domain/checklistAssignment";
 import { ApiError, NetworkError } from "../../infrastructure/errors";
 import { OfflineTechnicianRepository } from "../OfflineTechnicianRepository";
 import { OfflineEngine } from "../engine";
-import { checklistCatalogCacheKey } from "../queueIntentions";
+import { checklistCatalogCacheKey, localTimerElapsedSeconds } from "../queueIntentions";
 import { resourceCacheKey } from "../cacheSchemas";
 import { decodeState, updateState } from "../state";
 import { assignmentsWithStep, creation, fixture, result, user } from "./fakes";
@@ -62,6 +62,7 @@ for (const stage of ["me", "receipt", "send"] as const) test(`durable acceptance
   await queued(f.repository.addComment(scope, "Seed"));
   const cycle = f.repository.syncNow();
   await entered.promise;
+  f.repository.engine.noteNetworkState(false);
   try {
     const outcomes = await Promise.all([
       queued(f.repository.createRecord(creation(22))), queued(f.repository.addComment(scope, "Unblocked comment")),
@@ -126,7 +127,7 @@ test("concurrent timer deduplication and start-pause-resume are atomic across en
   const state = await f.store.read("a"); const timers = state.operations.filter((op) => op.kind === "timer");
   assert.equal(timers.length, 3);
   assert.deepEqual(timers.map((op) => op.dependencyId), [undefined, first.operationId, pause.operationId]);
-  assert.deepEqual(timers.map((op) => op.payload), [
+  assert.deepEqual(timers.map((op) => ({ status: op.payload.status, baseStatus: op.payload.baseStatus })), [
     { status: "in_progress", baseStatus: "pending" }, { status: "paused", baseStatus: "in_progress" }, { status: "in_progress", baseStatus: "paused" },
   ]);
   const local = await f.repository.localAssignments(scope, 1);
@@ -406,4 +407,32 @@ test("cold localAssignments hydrates coverage, retains canonical creations and r
   const invalid = structuredClone(f.data); invalid.technician.id = 123;
   await updateState(f.store, "a", (state) => { state.cache.find((entry) => entry.key.startsWith("assignments:"))!.json = JSON.stringify(invalid); });
   await assert.rejects(fresh.localAssignments(scope, 1), /IDENTITY_MISMATCH/);
+});
+
+test("offline timer actions persist their capture time without changing confirmed work data", async () => {
+  const current = await setup();
+  current.connect(false);
+  await queued(current.repository.status(scope, { status: "in_progress" }));
+  current.advance(120_000);
+  await queued(current.repository.status(scope, { status: "paused" }));
+  current.advance(60_000);
+  await queued(current.repository.status(scope, { status: "in_progress" }));
+  const state = await current.store.read("a");
+  const timers = state.operations.filter(operation => operation.kind === "timer");
+  assert.equal(timers.length, 3);
+  for (const operation of timers) {
+    assert.ok("recordedAt" in operation.payload);
+    assert.equal(operation.payload.recordedAt, new Date(operation.createdAt).toISOString());
+  }
+  const local = await current.repository.localAssignments(scope, 1);
+  assert.equal(local.groups[0]?.works[0]?.elapsedSeconds, current.data.groups[0]?.works[0]?.elapsedSeconds);
+  assert.equal(current.upstream.commands.length, 0);
+  assert.equal(decodeState(JSON.stringify(state)).operations.length, 3);
+  const restored = decodeState(JSON.stringify(state)).operations.filter(operation => operation.kind === "timer");
+  const baseline = current.data.groups[0]!.works[0]!.elapsedSeconds;
+  assert.equal(localTimerElapsedSeconds(restored[0]!, 121_000), baseline + 120);
+  assert.equal(localTimerElapsedSeconds(restored[1]!, 181_000), baseline + 120);
+  assert.equal(localTimerElapsedSeconds(restored[2]!, 211_000), baseline + 150);
+  assert.equal(restored[1]!.payload.previousOperationId, restored[0]!.id);
+  assert.equal(restored[2]!.payload.previousOperationId, restored[1]!.id);
 });

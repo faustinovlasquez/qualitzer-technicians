@@ -62,7 +62,8 @@ test("preflight GET finishing after applied cannot reconcile UI or change the ne
   assert.equal(stale.status, "pending"); assert.equal(stale.elapsedSeconds, firstWork(f.data).elapsedSeconds);
   await queued(f.repository.status(scope, { status: "paused" }));
   const pause = (await f.store.read("a")).operations.at(-1); assert.ok(pause?.kind === "timer");
-  assert.deepEqual(pause.payload, { status: "paused", baseStatus: "in_progress" });
+  assert.equal(pause.payload.status, "paused");
+  assert.equal(pause.payload.baseStatus, "in_progress");
   assert.equal(pause.dependencyId, start.operationId);
 });
 
@@ -97,7 +98,8 @@ test("fresh authoritative external pause wins over an applied start and becomes 
   assert.equal(fresh.status, "paused"); assert.equal(fresh.elapsedSeconds, 91);
   await queued(f.repository.status(scope, { status: "in_progress" }));
   const resume = (await f.store.read("a")).operations.at(-1); assert.ok(resume?.kind === "timer");
-  assert.deepEqual(resume.payload, { status: "in_progress", baseStatus: "paused" });
+  assert.equal(resume.payload.status, "in_progress");
+  assert.equal(resume.payload.baseStatus, "paused");
   assert.equal(resume.dependencyId, start.operationId);
   await f.repository.syncNow();
   assert.deepEqual(f.upstream.commands.at(-1)?.payload, resume.payload);
@@ -143,8 +145,10 @@ test("fresh snapshot cannot overwrite the base of an already-queued dependent ti
   firstWork(f.data).status = "pending"; await f.repository.assignments(scope, 1);
   await queued(f.repository.status(scope, { status: "in_progress" }));
   const timers = (await f.store.read("a")).operations.filter((operation) => operation.kind === "timer");
-  assert.deepEqual(timers[1]!.payload, { status: "paused", baseStatus: "in_progress" });
-  assert.deepEqual(timers[2]!.payload, { status: "in_progress", baseStatus: "paused" });
+  assert.equal(timers[1]!.payload.status, "paused");
+  assert.equal(timers[1]!.payload.baseStatus, "in_progress");
+  assert.equal(timers[2]!.payload.status, "in_progress");
+  assert.equal(timers[2]!.payload.baseStatus, "paused");
   assert.equal(timers[2]!.dependencyId, pause.operationId);
 });
 
@@ -249,6 +253,7 @@ test("actual offline wrapper merges seven overdue query days and reconciles only
   assert.equal(pendingTimerForWork(restarted.getSnapshot(), target, assignmentWorkForQueryDate(local, target.startDate)), null);
   await queued(restarted.status(target, { status: "in_progress" }));
   const resume = (await f.store.read("a")).operations.at(-1); assert.ok(resume?.kind === "timer");
-  assert.deepEqual(resume.payload, { status: "in_progress", baseStatus: "paused" });
+  assert.equal(resume.payload.status, "in_progress");
+  assert.equal(resume.payload.baseStatus, "paused");
   assert.equal(resume.dependencyId, start.operationId);
 });

@@ -38,7 +38,7 @@ export function CreationDatePicker(props: DatePickerProps) {
         const selected = props.multiple ? selectedDates.includes(date) : date === value;
         const disabled = props.multiple && !selected && selectedDates.length >= MAX_EXECUTION_DATES;
         return <Pressable key={date} accessibilityRole={props.multiple ? "checkbox" : "button"} accessibilityLabel={new Intl.DateTimeFormat("es", { dateStyle: "full", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`))}
-          accessibilityState={{ selected, checked: props.multiple ? selected : undefined, disabled }} disabled={disabled} onPress={() => {
+          accessibilityState={{ selected, checked: props.multiple ? selected : undefined, disabled }} aria-checked={props.multiple ? selected : undefined} disabled={disabled} onPress={() => {
             if (props.multiple) setSelectedDates(current => current.includes(date) ? current.filter(item => item !== date) : [...current, date].sort());
             else { props.onChange(date); onClose(); }
           }} style={[styles.cell, selected && styles.selected, disabled && styles.disabled]}>

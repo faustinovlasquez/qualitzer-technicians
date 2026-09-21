@@ -37,8 +37,8 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
   const dates = availableExecutionDates(work, range);
   const plannedDates = dates.filter((day) => work.plannedDates?.includes(day));
   const [selectedDates, setSelectedDates] = useState<string[]>([dates.includes(initialDate) ? initialDate : range.startDate]);
-  const [multipleWorkedDays, setMultipleWorkedDays] = useState(false);
-  const [workedDates, setWorkedDates] = useState<string[]>([initialDate]);
+  const [multipleWorkedDays, setMultipleWorkedDays] = useState(Boolean(work.workedDates?.length));
+  const [workedDates, setWorkedDates] = useState<string[]>(work.workedDates ?? [initialDate]);
   const [choosingWorkedDates, setChoosingWorkedDates] = useState(false);
   const date = [...selectedDates].sort()[0] ?? range.startDate;
   const [manual, setManual] = useState(false);
@@ -162,6 +162,7 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
               <ChoiceButton multiple label="Trabajé en varios días" selected={multipleWorkedDays} disabled={busy} onPress={() => {
                 if (busy) return;
                 setMultipleWorkedDays(!multipleWorkedDays);
+                if (!multipleWorkedDays) changeEditMode("duration");
                 setSelectedDates([range.startDate]);
               }} />
               {multipleWorkedDays ? <>
@@ -178,10 +179,10 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
             </View>
             {allowEditExecutionTime ? <ChoiceButton multiple label="Editar horas de ejecución manualmente" selected={editing} disabled={busy} onPress={toggleManual} /> : null}
             {editing ? <View style={styles.stack}>
-              <View style={styles.row}>
+              {!multipleWorkedDays ? <View style={styles.row}>
                 <ChoiceButton label="Tiempo total" selected={editMode === "duration"} disabled={busy} onPress={() => changeEditMode("duration")} />
                 <ChoiceButton label="Inicio y término" selected={editMode === "interval"} disabled={busy} onPress={() => changeEditMode("interval")} />
-              </View>
+              </View> : null}
               {editMode === "duration" ? <View style={styles.columns}>
                 <NumericSelectField label="Horas trabajadas" value={hours} max={743} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} onChange={(value) => { edited.current = true; setHours(value); }} containerStyle={styles.column} />
                 <NumericSelectField label="Minutos trabajados" value={minutes} max={59} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} onChange={(value) => { edited.current = true; setMinutes(value); }} containerStyle={styles.column} />

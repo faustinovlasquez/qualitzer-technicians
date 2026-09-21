@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Assignments, AssignmentWork, Attachment } from "../domain/models";
 import type { OfflineScope } from "../domain/offline";
+import { workedDatesAllowed } from "../domain/workExecution";
 
 const nullableText = z.string().nullable();
 const resourceId = z.union([z.string(), z.number()]);
@@ -33,11 +34,12 @@ const work: z.ZodType<AssignmentWork> = z.lazy(() => z.object({
     technicalDocuments: z.array(z.object({ id: z.number(), documentName: z.string(), notes: nullableText, file: cachedAttachmentSchema.nullable() })) })).optional(),
   responsibles: z.array(z.object({ id: resourceId, name: z.string(), avatarThumbnail: nullableText.optional() })),
   workCustomerName: nullableText.optional(), workEquipment: equipment.nullish(), plannedDates: z.array(z.string()).optional(),
+  workedDates: z.array(z.string()).refine(workedDatesAllowed).optional(),
   schedules: z.array(z.object({ date: z.string(), queryDates: z.array(z.string()), generatedAt: z.string(), work })).optional(),
   systemId: z.number().nullish(), componentId: z.number().nullish(), systemName: nullableText.optional(), componentName: nullableText.optional(),
 }));
 export const cachedAssignmentsSchema: z.ZodType<Assignments> = z.object({
-  generatedAt: z.string(), technician: z.object({ id: z.number().nullable(), name: z.string(), allowEditExecutionTime: z.boolean(), avatarThumbnail: nullableText.optional() }),
+  generatedAt: z.string(), technician: z.object({ id: z.number().nullable(), name: z.string(), allowEditExecutionTime: z.boolean(), supportsWorkedDates: z.boolean().optional(), avatarThumbnail: nullableText.optional() }),
   summary: z.object({ totalGroups: z.number(), totalWorks: z.number(), activeWorks: z.number(), overdueWorks: z.number(), plannedMinutes: z.number() }),
   groups: z.array(z.object({
     id: z.string(), type: z.enum(["external_ot", "internal_maintenance", "direct_assignment"]), code: z.string(), title: z.string(), status,

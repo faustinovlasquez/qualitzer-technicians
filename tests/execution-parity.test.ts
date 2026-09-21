@@ -9,6 +9,8 @@ import { AssignmentAuthorization, type OwnedWork } from "../server/assignments/a
 import { validateAnswer, validateStatus } from "../server/assignments/rules";
 import { resolveConfig } from "../server/config";
 import { statusInputSchema } from "../server/validation";
+import { assignmentsSchema } from "../server/contracts";
+import { cachedAssignmentsSchema } from "../src/offline/cacheSchemas";
 import { Upstream } from "../server/upstream";
 import { assignments, group, step, TOKEN, user, work } from "../server/tests/fixtures";
 import { assignmentCalls, errorCode, harness, jsonRequest, writeCalls, type MockState } from "../server/tests/mock-upstream";
@@ -36,7 +38,7 @@ test("worked days allow nonconsecutive dates without changing the execution scop
 function owned(overrides: Partial<AssignmentWork> = {}, allowEditExecutionTime = false, maintenance = false): OwnedWork {
   const assignedWork = work({ scheduledDate: day, plannedDates: [day], ...overrides });
   const assignedGroup = group({ status: "completed", works: [assignedWork], ...(maintenance ? { id: "maintenance-50", type: "internal_maintenance" } : {}) });
-  return { token: TOKEN, user: user(), range: { ...range, companyBranchId: 1 }, group: assignedGroup, work: assignedWork, workId: 11, maintenanceId: maintenance ? 50 : null, allowEditExecutionTime, generatedAt: "2026-09-08T10:00:00Z" };
+  return { token: TOKEN, user: user(), range: { ...range, companyBranchId: 1 }, group: assignedGroup, work: assignedWork, workId: 11, maintenanceId: maintenance ? 50 : null, allowEditExecutionTime, supportsWorkedDates: true, generatedAt: "2026-09-08T10:00:00Z" };
 }
 
 function withRequiredSteps(steps: ChecklistStep[]): AssignmentWork["checklists"] {
@@ -50,6 +52,7 @@ test("nonconsecutive worked dates forward once with a single authorized anchor a
     const groupId = maintenance ? "maintenance-50" : "direct-11";
     state.assignments = assignments([group({ id: groupId, type: maintenance ? "internal_maintenance" : "direct_assignment", works: [work({ scheduledDate: day, plannedDates: [day], elapsedSeconds: 1200 })] })]);
     state.assignments.technician.allowEditExecutionTime = false;
+    state.assignments.technician.supportsWorkedDates = true;
     state.calls.length = 0;
     const response = await jsonRequest(baseUrl, path("/status", groupId), "POST", { ...delivery, workedDates: [...workedDates].reverse(), isManual: false });
     assert.equal(response.response.status, 200);
@@ -546,4 +549,22 @@ test("select-all is explicit and bounded to 30 dates without silently truncating
   assert.equal((await jsonRequest(baseUrl, path(), "POST", { ...input, executionDates: bounded })).response.status, 200);
   assert.equal(writeCalls(state).length, 1);
   assert.deepEqual(statusInputSchema.parse({ ...delivery, executionDates: bounded }).executionDates, bounded);
+});
+
+test("worked date delivery fails before writing when the backend lacks support", async context => {
+  const { baseUrl, state } = await harness(context);
+  state.assignments = assignments([group({ works: [work({ scheduledDate: day })] })]);
+  const response = await jsonRequest(baseUrl, path(), "POST", { ...delivery, workedDates: ["2026-09-01", day] });
+  assert.equal(response.response.status, 409);
+  assert.equal(errorCode(response.data), "WORKED_DATES_NOT_SUPPORTED");
+  assert.equal(writeCalls(state).length, 0);
+});
+
+test("confirmed worked dates survive assignment parsing and offline caching", () => {
+  const workedDates = ["2026-08-29", "2026-09-15", "2026-09-17", "2026-09-21"];
+  const data = assignments([group({ works: [work({ workedDates })] })]);
+  data.technician.supportsWorkedDates = true;
+  const cached = cachedAssignmentsSchema.parse(JSON.parse(JSON.stringify(assignmentsSchema.parse(data))));
+  assert.deepEqual(cached.groups[0]?.works[0]?.workedDates, workedDates);
+  assert.equal(cached.technician.supportsWorkedDates, true);
 });

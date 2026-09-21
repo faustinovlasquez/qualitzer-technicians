@@ -4,6 +4,8 @@ const Module = require("node:module");
 const root = path.resolve(__dirname, "../../..");
 const shared = path.join(root, "tests/e2e/picker-messages-smoke.cjs");
 const deliveryFilesOnly = process.argv.includes("--delivery-files");
+const workedDaysOnly = process.argv.includes("--worked-days");
+const offlineClockOnly = process.argv.includes("--offline-clock");
 const workActionsOnly = process.argv.includes("--work-actions");
 const checklistSummaryOnly = process.argv.includes("--checklist-summary");
 const activityPickerOnly = process.argv.includes("--activity-picker");
@@ -91,6 +93,8 @@ if (signaturesOnly) replace('    async function check(name, run) {', '    async 
 if (fileDeletionOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/file-deletion/.test(name)) return;');
 if (orderFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/order-files/.test(name)) return;');
 if (deliveryFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/completion|blocked-stays|confirmed-files/.test(name)) return;');
+if (workedDaysOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/worked-days/.test(name)) return;');
+if (offlineClockOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/offline-clock/.test(name)) return;');
 const componentStart = runner.indexOf('    report.realComponents = [');
 const componentEnd = runner.indexOf(';', componentStart);
 if(componentStart<0||componentEnd<0)throw new Error("STALE_COMPONENT_LIST");

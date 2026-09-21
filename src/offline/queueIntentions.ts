@@ -2,14 +2,21 @@ import { z } from "zod";
 import type { Assignments, AssignmentWork, User, WorkScope } from "../domain/models";
 import { OfflineUnavailableError, type OfflineOperation, type TimerReadAssignmentWork } from "../domain/offline";
 import { checklistAssignmentInputSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
-import { syncScopeSchema } from "../domain/offlineProtocol";
+import { syncScopeSchema, syncTimerPayloadSchema } from "../domain/offlineProtocol";
+import { executionElapsedSeconds } from "../domain/workExecution";
 import type { OfflineState } from "./contracts";
 import { cachedAssignmentsSchema, sameResource } from "./cacheSchemas";
 
 export const canonicalIntentionScopeSchema = syncScopeSchema.transform((scope) => ({ ...scope, workId: scope.workId === undefined ? "" : String(scope.workId) }))
   .refine((scope) => /^[1-9]\d*$/.test(scope.workId) && scope.startDate === scope.endDate
     && (!scope.groupId.startsWith("direct-") || scope.groupId.split("-").at(-1) === scope.workId));
-export const timerPayloadSchema = z.object({ status: z.enum(["in_progress", "paused"]), baseStatus: z.enum(["pending", "in_progress", "paused"]) }).strict();
+export const timerPayloadSchema = syncTimerPayloadSchema;
+
+export function localTimerElapsedSeconds(timer: Extract<OfflineOperation, { kind: "timer" }>, now: number): number | null {
+  if (!timer.localClock || !timer.payload.recordedAt) return null;
+  const running = timer.payload.status === "in_progress" && ["pending", "syncing", "applied"].includes(timer.status);
+  return timer.localClock.elapsedSeconds + (running ? Math.max(0, Math.floor((now - Date.parse(timer.payload.recordedAt)) / 1000)) : 0);
+}
 
 export function checklistCatalogCachePrefix(scope: WorkScope): string {
   return `checklist-options:${JSON.stringify([scope.companyBranchId, scope.groupId, scope.workId, scope.startDate, scope.endDate])}:`;
@@ -62,7 +69,6 @@ function assertSafeDependency(operation: OfflineOperation, operations: readonly 
   assertSafeDependency(parent, operations, visited);
 }
 
-// Runs inside the queue CAS: authorization, deduplication and chaining share the committed revision.
 export function prepareQueuedIntention(state: OfflineState, input: Extract<OfflineOperation, { kind: "timer" | "checklist" }>, user: User, branchId: number): OfflineOperation {
   const scope = canonicalIntentionScopeSchema.parse(input.scope);
   const work = executableWork(state, scope, user, branchId);
@@ -76,7 +82,13 @@ export function prepareQueuedIntention(state: OfflineState, input: Extract<Offli
     const reconciled = previous?.status === "applied" && readIds?.includes(previous.id) === true;
     const baseStatus = previous && !reconciled ? previous.payload.status : work.status;
     if (baseStatus === "completed" || baseStatus === "delivered" || (payload.status === "paused" && baseStatus !== "in_progress")) throw new OfflineUnavailableError("OFFLINE_TIMER_INVALID_TRANSITION");
-    return { ...input, scope, payload: { status: payload.status, baseStatus }, dependencyId: previous?.id };
+    if (previous?.payload.recordedAt && Date.parse(previous.payload.recordedAt) > input.createdAt) throw new OfflineUnavailableError("OFFLINE_TIMER_CLOCK_CHANGED");
+    const cached = state.cache.find(entry => entry.key === `assignments:${scope.startDate}`)!;
+    const data = cachedAssignmentsSchema.parse(JSON.parse(cached.json));
+    const elapsedSeconds = previous && !reconciled ? localTimerElapsedSeconds(previous, input.createdAt) ?? executionElapsedSeconds(work, data.generatedAt, input.createdAt)
+      : executionElapsedSeconds(work, data.generatedAt, input.createdAt);
+    return { ...input, scope, payload: { status: payload.status, baseStatus, recordedAt: new Date(input.createdAt).toISOString(), observedAt: data.generatedAt,
+      ...(previous?.payload.recordedAt && !reconciled ? { previousOperationId: previous.id } : {}) }, localClock: { elapsedSeconds }, dependencyId: previous?.id };
   }
   const payload = checklistAssignmentInputSchema.parse(input.payload);
   const prefix = checklistCatalogCachePrefix(scope);

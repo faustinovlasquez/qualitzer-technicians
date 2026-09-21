@@ -10,6 +10,23 @@ const timer = { operationId, kind: "timer", scope, payload: { status: "in_progre
 const checklist = { operationId, kind: "checklist", scope, payload: { checklistId: 41 } };
 const commandsPath = "/api/mobile-sync/commands";
 
+test("recorded timer retains captured times and waits for a compatible server before writing", async context => {
+  const { state, baseUrl } = await harness(context);
+  const command = { ...timer, scope: { ...scope, endDate: scope.startDate }, payload: { ...timer.payload,
+    recordedAt: "2026-09-21T13:00:00.000Z", observedAt: "2026-09-21T12:00:00.000Z" } };
+  const unsupported = await jsonRequest(baseUrl, "/api/offline/commands", "POST", command);
+  assert.equal(unsupported.response.status, 503);
+  assert.equal(writeCalls(state).length, 0);
+  state.assignments.technician.supportsRecordedTimer = true;
+  state.failures.set(commandsPath, { status: 200, body: { operationId, state: "applied" } });
+  const result = await jsonRequest(baseUrl, "/api/offline/commands", "POST", command);
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(writeCalls(state)[0]?.json, syncCommandSchema.parse(command));
+  for (const payload of [{ ...command.payload, observedAt: undefined }, { ...command.payload, recordedAt: "invalid" }, { ...command.payload, elapsedSeconds: 99999 }]) {
+    assert.equal(syncCommandSchema.safeParse({ ...command, payload }).success, false);
+  }
+});
+
 test("timer/checklist schema is additive, strict and normalizes only historical UUID/scope fields", () => {
   for (const command of [timer, checklist]) {
     assert.deepEqual(syncCommandSchema.parse({ ...command, operationId: operationId.toUpperCase() }), {

@@ -14,6 +14,7 @@ import { operationsForWork, pendingTimerForWork, timerPendingLabel, type Pending
 import { operationNeedsAttention, syncUserError, userActionError as errorMessage } from "../offline/syncUserPresentation";
 import { AssignmentMetadataRow } from "./AssignmentMetadataRow";
 import { equipmentLabel, fullDate, safeCount, scheduleTime, statusTones } from "./assignmentPresentation";
+import { localTimerElapsedSeconds } from "../../offline/queueIntentions";
 
 export interface AssignmentWorkCardProps {
   group: AssignmentGroup;
@@ -36,10 +37,10 @@ const priorities: { [K in AssignmentWork["priority"]]: { label: string; tone: Ba
   high: { label: "Prioridad alta", tone: "danger" },
 };
 
-function WorkExecution({ work, generatedAt, online = true, pending = false }: Pick<AssignmentWorkCardProps, "work" | "generatedAt" | "online"> & { pending?: boolean }) {
+function WorkExecution({ work, generatedAt, online = true, pending = false, localTimer }: Pick<AssignmentWorkCardProps, "work" | "generatedAt" | "online"> & { pending?: boolean; localTimer?: PendingTimer | null }) {
   const receivedAt = useMemo(() => Date.now(), [work, generatedAt]);
   const [now, setNow] = useState(Date.now);
-  const running = online && !pending && work.status === "in_progress" && !work.isManualExecution;
+  const running = localTimer?.localClock ? localTimer.payload.status === "in_progress" : !pending && work.status === "in_progress" && !work.isManualExecution;
   const snapshot = work.schedules?.find((item) => assignmentDay(item.work.scheduledDate) === assignmentDay(work.scheduledDate));
   const snapshotAt = Date.parse(generatedAt ?? snapshot?.generatedAt ?? "");
   const baseline = Number.isFinite(snapshotAt) ? snapshotAt : receivedAt;
@@ -49,9 +50,9 @@ function WorkExecution({ work, generatedAt, online = true, pending = false }: Pi
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [running, baseline]);
+  }, [running, baseline, localTimer]);
 
-  const elapsed = work.elapsedSeconds + (running ? Math.max(0, (now - baseline) / 1000) : 0);
+  const elapsed = (localTimer ? localTimerElapsedSeconds(localTimer, now) : null) ?? work.elapsedSeconds + (running ? Math.max(0, (now - baseline) / 1000) : 0);
   const timing = assignmentProgress(work, elapsed);
 
   return <View style={styles.execution}>
@@ -69,7 +70,7 @@ function WorkExecution({ work, generatedAt, online = true, pending = false }: Pi
     </View>
     {timing.overtimeMinutes > 0 ? <Text style={styles.overtime}>{duration(timing.overtimeMinutes)} sobre lo planificado</Text> : null}
     {running ? <Text style={styles.note}>En ejecución · el servidor confirma el tiempo final.</Text> : null}
-    {pending || !online ? <Text style={styles.note}>Último tiempo recibido</Text> : null}
+    {pending || !online ? <Text style={styles.note}>{localTimer?.localClock || !pending ? "Tiempo local · pendiente de confirmar" : "Último tiempo recibido"}</Text> : null}
   </View>;
 }
 
@@ -99,7 +100,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const unobservedTimer = queuedTimer && pendingTimer?.id !== queuedTimer.operationId && !scopedOperations.some((operation) => operation.id === queuedTimer.operationId) ? queuedTimer : null;
   const desiredStatus = unobservedTimer?.status ?? pendingTimer?.payload.status ?? work.status;
   const timerPending = Boolean(pendingTimer || unobservedTimer);
-  const timerNeedsAttention = offline?.connection?.foreground === false || pendingTimer !== null && pendingTimer.status !== "pending" && pendingTimer.status !== "syncing";
+  const timerNeedsAttention = offline?.connection?.foreground === false || pendingTimer !== null && !["pending", "syncing", "applied"].includes(pendingTimer.status);
   const offlineReady = offline !== null && !offline?.authBlocked;
   const verifiedOnline = online && (offline === undefined || offline?.online === true) && offlineReady;
   const executionAvailable = offlineReady && (verifiedOnline || offline !== undefined) && !localWork && !staleReadOnly && !work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT");
@@ -192,7 +193,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       {plannedDates.length > 1 ? <AssignmentMetadataRow icon="calendar-outline" text={`Fechas planificadas: ${plannedDates.map(shortDate).join(" · ")}`} /> : null}
     </View>
     {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
-    <WorkExecution work={work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending} />
+    <WorkExecution work={work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending} localTimer={pendingTimer} />
     {total > 0 ? <View style={styles.execution}>
       <View style={styles.between}><Text style={styles.note}>Verificación completada</Text><Text style={styles.count}>{done}/{total}</Text></View>
       <View accessibilityRole="progressbar" accessibilityLabel="Lista de verificación" accessibilityValue={{ min: 0, max: total, now: done, text: `${done} de ${total} completados` }} style={styles.progressTrack}>

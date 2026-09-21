@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workedDatesAllowed } from "../src/domain/workExecution";
 import type { Assignments, Attachment, LoginResult, User } from "../src/domain/models";
 import { GatewayError } from "./errors";
 
@@ -54,11 +55,12 @@ const work = z.object({
   materials: z.array(material), checklists: z.array(checklist), activities: z.array(activity).optional(),
   responsibles: z.array(z.object({ id: resourceId, name: text, avatarThumbnail: optionalLink })),
   workCustomerName: nullableText.optional(), workEquipment: equipment.nullable().optional(), plannedDates: z.array(z.string()).optional(),
+  workedDates: z.array(z.string()).refine(workedDatesAllowed).optional(),
   systemName: nullableText.optional(), componentName: nullableText.optional(),
 });
 export const assignmentsSchema: z.ZodType<Assignments> = z.object({
   generatedAt: z.string(),
-  technician: z.object({ id: id.nullable(), name: text, allowEditExecutionTime: z.boolean(), avatarThumbnail: optionalLink }),
+  technician: z.object({ id: id.nullable(), name: text, allowEditExecutionTime: z.boolean(), supportsWorkedDates: z.boolean().optional(), supportsRecordedTimer: z.boolean().optional(), avatarThumbnail: optionalLink }),
   summary: z.object({ totalGroups: number, totalWorks: number, activeWorks: number, overdueWorks: number, plannedMinutes: number }),
   groups: z.array(z.object({
     id: z.string(), type: z.enum(["external_ot", "internal_maintenance", "direct_assignment"]), code: text, title: text, status,

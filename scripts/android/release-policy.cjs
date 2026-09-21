@@ -9,8 +9,8 @@ const applicationName = "Qualitzer técnicos";
 const gatewayUrl = "https://api-demos-qz-v2.qualitzer.com/mobile";
 const certificateSha256 = "06da359352b67f02805c065a4f7054fc863cc606221dfe054462f261da32b510";
 const previous = Object.freeze({
-  name: "qualitzer-tecnicos-1.0.34-android.apk", version: "1.0.34", versionCode: 35,
-  sha256: "a8d7cbb6a85893bf38ddc17e70e32b6ab7b9559fb30a629c383cfddc599b693d",
+  name: "qualitzer-tecnicos-1.0.36-android.apk", version: "1.0.36", versionCode: 37,
+  sha256: "c15c1a182361aaed89280f4318dda923631d13c8a08bbfc0dd99a33b3cfadade",
 });
 
 function validateVersion(version, versionCode) {

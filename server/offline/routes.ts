@@ -9,6 +9,7 @@ import { releaseDocuments } from "../files/documents";
 import type { Upstream } from "../upstream";
 import { emptySchema } from "../validation";
 import { readSyncDocument } from "./upload";
+import { assignmentsSchema, parseUpstream } from "../contracts";
 
 const receiptQuery = z.object({ companyBranchId: syncResourceIdSchema }).strict();
 function respond(res: Response, result: { status: number; receipt: SyncReceipt }): void {
@@ -26,7 +27,13 @@ export function createOfflineRouter(upstream: Upstream, uploadLimiter: RequestHa
     emptySchema.parse(req.query);
     if (!req.is("application/json")) throw new GatewayError(415, "JSON_REQUIRED");
     const input = syncCommandSchema.parse(req.body);
-    const { token } = await mobileActor(upstream, req, input.scope.companyBranchId);
+    const { token, user } = await mobileActor(upstream, req, input.scope.companyBranchId);
+    if (input.kind === "timer" && input.payload.recordedAt !== undefined) {
+      const query = new URLSearchParams({ companyBranchId: String(input.scope.companyBranchId), startDate: input.scope.startDate, endDate: input.scope.startDate });
+      const data = parseUpstream(assignmentsSchema, await upstream.request("/technician-dashboard/assignments", { token, query }));
+      if (data.technician.id !== user.workerId) throw new GatewayError(403, "WORKER_MISMATCH");
+      if (data.technician.supportsRecordedTimer !== true) { res.set("Retry-After", "60"); throw new GatewayError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE"); }
+    }
     try {
       respond(res, await upstream.requestReceipt("/mobile-sync/commands", input.operationId, { method: "POST", token, json: input }));
     } catch (error) {

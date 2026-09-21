@@ -69,6 +69,7 @@ export function validateStatusScope(scope: OwnedWork, input: StatusInput): Statu
   if (input.workedDates !== undefined && (!isExecutionFinalization(input.status) || executionDates.length !== 1 || !workedDatesAllowed(input.workedDates))) {
     throw new GatewayError(400, "INVALID_WORKED_DATES");
   }
+  if (input.workedDates !== undefined && scope.supportsWorkedDates !== true) throw new GatewayError(409, "WORKED_DATES_NOT_SUPPORTED", "El servidor necesita actualizarse para guardar los días trabajados.");
   if (executionDates.length > 1 && (scope.maintenanceId !== null || !isExecutionFinalization(input.status))) throw new GatewayError(400, "SINGLE_EXECUTION_DATE_REQUIRED");
   if (!executionDatesAllowed(scope.work, scope.range, executionDates, scope.maintenanceId !== null)) throw new GatewayError(400, "EXECUTION_DATES_OUTSIDE_RANGE");
   if (!isExecutionFinalization(input.status)) {

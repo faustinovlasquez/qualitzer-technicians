@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { ScrollView, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import "../picker-messages-fixture";
-import type { Activity, AssignmentWork, Attachment, LocalPhoto, Session, StatusInput } from "../../../src/domain/models";
+import type { Activity, Assignments, AssignmentWork, Attachment, LocalPhoto, Session, StatusInput } from "../../../src/domain/models";
 import type { OfflineAttachment, OfflineCommand, OfflineController, OfflineOperation } from "../../../src/domain/offline";
 import type { NotificationPreferences } from "../../../src/domain/notifications";
 import type { NotificationAdapter, NotificationApi } from "../../../src/notifications/contracts";
@@ -40,8 +40,10 @@ import { OrderLifecyclePanel } from "../../../src/screens/orders/OrderLifecycleP
 import { AssignmentOrderCard } from "../../../src/screens/orders/AssignmentOrderCard";
 import { OfflineQueuedError } from "../../../src/domain/offline";
 import { mergeDailyAssignments } from "../../../src/domain/assignmentSchedule";
+import { AssignmentWorkCard } from "../../../src/screens/orders/AssignmentWorkCard";
+import { assignmentsWithTimerRead } from "../../../src/offline/queueIntentions";
 
-type Screen = "widget" | "invalid" | "creation" | "creation-empty" | "creation-free" | "creation-overlap" | "creation-queued" | "creation-applied" | "creation-review" | "creation-unknown" | "completion" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary" | "signatures" | "technical-delivery" | "technical-ready" | "file-delete" | "file-delete-refresh-fails" | "file-delete-rejected" | "order-files" | "order-files-queued" | "order-files-error";
+type Screen = "widget" | "invalid" | "creation" | "creation-empty" | "creation-free" | "creation-overlap" | "creation-queued" | "creation-applied" | "creation-review" | "creation-unknown" | "completion" | "worked-days" | "worked-days-manual" | "offline-clock" | "offline-clock-maintenance" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary" | "signatures" | "technical-delivery" | "technical-ready" | "file-delete" | "file-delete-refresh-fails" | "file-delete-rejected" | "order-files" | "order-files-queued" | "order-files-error";
 const date = "2026-09-14";
 const range = { startDate: date, endDate: date };
 const scope = { ...range, companyBranchId: 1, groupId: "direct-80", workId: "80" };
@@ -53,6 +55,8 @@ const clockCalls: { label: string; value: string }[] = [];
 let dispose = () => {};
 let revision = 0;
 let activeEngine: OfflineEngine | null = null;
+let timerFixture: { storage: ReturnType<typeof fixture>; data: Assignments } | null = null;
+let restartTimer = async () => {};
 let upgraded = false;
 const sent: OfflineCommand[] = [];
 let manualCalls = 0;
@@ -131,6 +135,37 @@ function SyncFixture({ engine }: { engine: OfflineEngine }) {
   </View>;
 }
 
+function OfflineTimerFixture({ current, engine }: { current: NonNullable<typeof timerFixture>; engine: OfflineEngine }) {
+  const snapshot = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+  const [data, setData] = useState(() => structuredClone(current.data));
+  const [list, setList] = useState(false);
+  const group = data.groups[0]!;
+  const work = group.works[0]!;
+  const timerScope = { ...scope, groupId: group.id };
+  const onStatus = async (input: StatusInput): Promise<void> => {
+    if (input.status !== "in_progress" && input.status !== "paused") throw new Error("UNEXPECTED_FINALIZATION");
+    const operationId = current.storage.dependencies.uuid();
+    await engine.enqueue([{ id: operationId, createdAt: Date.now(), status: "pending", attempts: 0, nextAttemptAt: 0,
+      kind: "timer", scope: timerScope, payload: { status: input.status, baseStatus: "pending" } }]);
+    throw new OfflineQueuedError({ operationId, operationIds: [operationId], kind: "timer", localGroupId: group.id, localWorkId: work.id, date, ownsFiles: false });
+  };
+  const refresh = async () => {
+    const applied = engine.getSnapshot().operations.filter(operation => operation.status === "applied").map(operation => operation.id);
+    const fresh = assignmentsWithTimerRead(structuredClone(current.data), date, 1, applied);
+    await updateState(current.storage.store, "a", state => { const cached = state.cache.find(entry => entry.key === `assignments:${date}`)!; cached.json = JSON.stringify(fresh); cached.timerReadOperationIds = applied; });
+    setData(fresh);
+  };
+  return <View style={{ flex: 1 }}>
+    <Button title={list ? "Ver ficha de prueba" : "Ver listado de prueba"} onPress={() => setList(!list)} />
+    <Button title="Reconectar prueba" onPress={() => { current.storage.connect(true); void engine.syncNow().then(refresh); }} />
+    {list ? <ScrollView><AssignmentWorkCard group={group} work={work} generatedAt={data.generatedAt} offline={snapshot} online={snapshot.online} queryDate={date} companyBranchId={1} onOpenWork={() => setList(false)} onWorkStatus={async (_group, _work, input) => onStatus(input)} /></ScrollView>
+      : <WorkDetailScreen tenant={session.tenant} branchName="Taller" group={group} work={work} generatedAt={data.generatedAt} mode="live" range={range} busy={false} error={null} storageKey={`offline-clock-${revision}`} companyBranchId={1} allowEditExecutionTime={false} offline={snapshot}
+        onBack={() => {}} onRefresh={refresh} onStatus={onStatus} onSaveStep={async () => {}} onLoadFiles={async () => []} onLoadStepFiles={async () => []}
+        onLoadChecklistOptions={async () => ({ items: [], page: 0, pageSize: 20, hasMore: false })} onAttachChecklist={async () => { throw new Error("UNEXPECTED_CHECKLIST_ATTACH"); }}
+        onUpload={async () => {}} onReport={async () => {}} onUploadDocuments={async () => {}} onDeleteFile={async () => {}} onLoadComments={async () => ({ data: [], totalRows: 0, totalPages: 0 })} onAddComment={async () => {}} />}
+  </View>;
+}
+
 function Fixture({ screen, client }: { screen: Screen; client: MobileNotificationClient | null }) {
   const security = useDeviceSecurity();
   const [value, setValue] = useState(screen === "invalid" ? "invalid-original" : "08:49");
@@ -152,6 +187,7 @@ function Fixture({ screen, client }: { screen: Screen; client: MobileNotificatio
     registrations, clockCalls, profileSignatures, signatureDeliveries, orderOperations, creationQueue, snapshot: activeEngine?.getSnapshot() ?? null, sent, manualCalls, original });
   const work: AssignmentWork = { ...assignmentsWithStep().groups[0].works[0], scheduledDate: date, plannedDates: [date], status: "paused", canExecute: true,
     firstInProgressTime: "08:00", elapsedSeconds: 1489 * 60, executedMinutes: 1489, missingRequiredInfo: [], checklists: [] };
+  if (screen.startsWith("offline-clock") && timerFixture && activeEngine) return <OfflineTimerFixture key={scopeKey} current={timerFixture} engine={activeEngine} />;
   const record = (name: string, next: string, setter: (value: string) => void) => { calls.push({ name, value: next }); setter(next); };
   if (screen === "technical-delivery" || screen === "technical-ready") {
     const ready = screen === "technical-ready";
@@ -257,6 +293,7 @@ function Fixture({ screen, client }: { screen: Screen; client: MobileNotificatio
     upload: async (id, files) => { calls.push({ name: "upload", value: { id, count: files.length } }); activityFiles = [...activityFiles, ...files.map((file, index) => ({ id: index + 400 + activityFiles.length, name: file.name, type: file.mimeType, url: "https://files.invalid/evidence.txt" }))]; }
   }} />;
   if (screen === "completion" || screen === "blocked") return <CompletionDialog maintenance={false} work={work} allowEditExecutionTime generatedAt={`${date}T12:00:00Z`} initialDate={date} range={range} reasons={screen === "blocked" ? ["Completa el checklist obligatorio."] : []} canSubmit={screen !== "blocked"} busy={false} error={null} mode="live" onClose={() => {}} onSubmit={input => { submitted.push(input); }} />;
+  if (screen === "worked-days" || screen === "worked-days-manual") return <CompletionDialog maintenance={screen === "worked-days"} work={{ ...work, elapsedSeconds: 21600 }} allowEditExecutionTime={screen === "worked-days-manual"} generatedAt={`${date}T12:00:00Z`} initialDate={date} range={range} reasons={[]} canSubmit busy={false} error={null} mode="live" onClose={() => {}} onSubmit={input => { submitted.push(input); }} />;
   if (screen === "files") return <FileWorkspace compact scopeKey={`files-${revision}`} resourceKey="fixture-files" mode="live" readOnly={false} readLocalFile={readLocalFile} onLoad={async () => listedFiles} onUpload={async () => { throw new Error("UNEXPECTED_UPLOAD"); }} onDelete={async () => { throw new Error("UNEXPECTED_DELETE"); }} />;
   if (screen === "file-delete" || screen === "file-delete-refresh-fails" || screen === "file-delete-rejected") return <FileWorkspace compact scopeKey={`delete-${revision}`} resourceKey="checklist-step-files" mode="live" readOnly={false}
     onLoad={async () => {
@@ -307,6 +344,33 @@ async function render(screen: Screen) {
   activityRows = [{ id: 71, activity: "Revisar cierre", executionTime: 30, isStarted: false, isCompleted: false, technicalDocuments: [{ id: 1, documentName: "Manual del supervisor", notes: null, file: { id: 2, name: "manual.pdf", url: "https://files.invalid/manual.pdf", type: "application/pdf" } }] }]; activityFiles = [];
   activityRows.push({ id: 73, activity: "Ruedas y torque pernos", isChecklist: true, executionTime: 0, isStarted: false, isCompleted: true, technicalDocuments: [] });
   let client: MobileNotificationClient | null = null;
+  if (screen.startsWith("offline-clock")) {
+    const storage = fixture(); storage.dependencies.now = () => Date.now(); storage.connect(false);
+    const data = assignmentsWithStep(); data.generatedAt = new Date().toISOString();
+    const group = data.groups[0]!; group.id = screen === "offline-clock-maintenance" ? "maintenance-80" : "direct-80"; group.type = screen === "offline-clock-maintenance" ? "internal_maintenance" : "direct_assignment";
+    Object.assign(group.works[0]!, { canExecute: true, scheduledDate: date, plannedDates: [date], status: "pending", elapsedSeconds: 720, executedMinutes: 12, missingRequiredInfo: [] });
+    await updateState(storage.store, "a", state => {
+      state.cache.push({ key: `assignments:${date}`, json: JSON.stringify(data), fetchedAt: Date.now(), coverage: { date, branchId: 1, fetchedAt: Date.now() } });
+      state.operations.push({ id: uuid(999), kind: "comment", scope: { ...scope, groupId: group.id }, text: "Nota previa conservada", createdAt: Date.now() - 1, status: "pending", attempts: 0, nextAttemptAt: 0 });
+    });
+    let startedAt: number | null = null;
+    const send = storage.upstream.offlineCommand.bind(storage.upstream);
+    storage.upstream.offlineCommand = async command => {
+      if (!storage.upstream.receipts.has(command.operationId) && command.kind === "timer") {
+        const captured = Date.parse(command.payload.recordedAt!);
+        if (command.payload.status === "in_progress") startedAt = captured;
+        else if (startedAt !== null) { group.works[0]!.elapsedSeconds += Math.floor((captured - startedAt) / 1000); startedAt = null; }
+        group.works[0]!.status = command.payload.status;
+      }
+      sent.push(structuredClone(command)); data.generatedAt = new Date().toISOString();
+      return send(command);
+    };
+    timerFixture = { storage, data };
+    activeEngine = new OfflineEngine(storage.dependencies); await activeEngine.refresh();
+    activeEngine.noteNetworkState(false);
+    dispose = () => activeEngine?.stop(); readState = () => storage.store.read("a");
+    restartTimer = async () => { activeEngine?.stop(); activeEngine = new OfflineEngine(storage.dependencies); await activeEngine.refresh(); activeEngine.noteNetworkState(false); changeScope(); };
+  }
   if (screen.startsWith("creation")) {
     const key = creationDraftKey(`time-sync-${revision}`, session.tenant.id, user.id, 1, "work", "live");
     const store = openCreationDraftStore(key, "work", 1);
@@ -340,6 +404,7 @@ async function render(screen: Screen) {
   root.render(<SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: innerWidth, height: innerHeight }, insets: { top: 0, right: 0, bottom: 0, left: 0 } }}><DeviceSecurityProvider><Fixture key={revision} screen={screen} client={client} /></DeviceSecurityProvider></SafeAreaProvider>);
 }
 const api = { render, metrics: () => metrics(), scope: () => changeScope(), creation: () => readCreation?.(), state: () => readState?.(),
+  restartTimer: () => restartTimer(),
   confirmCreation: () => confirmCreation(),
   activityDeletionCase: (mode: typeof activityDeletionMode) => {
     activityDeletionMode = mode;

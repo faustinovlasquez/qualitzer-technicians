@@ -22,7 +22,7 @@ const operation = z.discriminatedUnion("kind", [
   common.extend({ kind: z.literal("comment"), scope: workScope, text: z.string() }),
   common.extend({ kind: z.literal("answer"), scope: workScope, stepId: z.string(), answer, base: answer, wire: z.object({ answer: syncAnswerSchema, base: syncAnswerSchema }).optional() }),
   common.extend({ kind: z.literal("document"), scope, stepId: z.string().optional(), file: fileSchema, sourceDraftId: z.string().min(1).optional() }),
-  common.extend({ kind: z.literal("timer"), scope: canonicalIntentionScopeSchema, payload: timerPayloadSchema }),
+  common.extend({ kind: z.literal("timer"), scope: canonicalIntentionScopeSchema, payload: timerPayloadSchema, localClock: z.object({ elapsedSeconds: z.number().finite().nonnegative() }).strict().optional() }),
   common.extend({ kind: z.literal("checklist"), scope: canonicalIntentionScopeSchema, payload: checklistAssignmentInputSchema }),
 ]);
 const tenant = z.object({ id: z.string(), name: z.string(), portalOrigin: z.string(), environment: z.enum(["development", "production"]), logo: z.string().nullish(), description: z.string().nullish() });
