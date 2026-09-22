@@ -36,12 +36,12 @@ const sha256 = createHash("sha256").update(apkContent).digest("hex");
 if (sha256 !== report.sha256 || report.debuggable !== false || report.variant !== "release") throw new Error("APK_RELEASE_VERIFICATION_REQUIRED");
 const size = apkContent.length;
 if (size !== report.bytes) throw new Error("APK_RELEASE_SIZE_MISMATCH");
-const gatewayVersion = "1.0.15";
+const gatewayVersion = "1.0.22";
 const gatewayArchiveName = `qualitzer-mobile-gateway-${gatewayVersion}.tgz`;
 const gatewayArchivePath = `artifacts/mobile-gateway/${gatewayArchiveName}`;
 const gatewayContent = readPublicFile(root, gatewayArchivePath, 32 * 1024 * 1024);
 const gatewaySha256 = createHash("sha256").update(gatewayContent).digest("hex");
-if (gatewaySha256 !== "fb3b46078798b62880979f2d030e5db79b83654eb5e78160169d0dc136a2fe18") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
+if (gatewaySha256 !== "1ebd9460ab31fa1b1ee1428f2442e146c92239deaaa80dca604f036d3a482ebd") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
 const validationDirectory = "artifacts/logs/fluidity-package";
 const validationName = readdirSync(publicPath(root, validationDirectory, true), { withFileTypes: true })
   .filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-zA-Z0-9]{6}$/.test(entry.name))
@@ -75,15 +75,16 @@ async function main() {
 <style>body{font:16px system-ui;background:#f3f7f8;color:#153c46;margin:0;padding:24px}main{max-width:560px;background:white;border-radius:20px;padding:24px;margin:auto}a{display:block;padding:16px;background:#007f80;color:white;text-decoration:none;text-align:center;border-radius:12px;font-weight:700;margin:12px 0}img{display:block;margin:20px auto}small{word-break:break-all}p,li{line-height:1.55}li{margin:8px 0}details{margin:20px 0}</style>
 <main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
 <p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
-<p><strong>Cronómetro sin conexión.</strong> Inicia, pausa y reanuda trabajos descargados. El teléfono conserva los instantes y muestra el avance local pendiente de confirmar.</p>
-<p>Al reconectar se envía la secuencia guardada sin reemplazar el tiempo anterior ni duplicar tramos. Si el trabajo cambió en otro dispositivo, se conserva para revisión.</p>
-<p><strong>Primero actualiza el backend y el gateway ${gatewayVersion}.</strong> Despliega MobileSync, TechnicianDashboard y app.logbooks actualizados e instala la pasarela; después instala esta APK como actualización. Sin migración nueva.</p>
+<p><strong>Ubicación por acciones, sin seguimiento continuo.</strong> Al entrar solicita consentimiento y permiso durante el uso. Registra ubicación al iniciar, pausar o entregar trabajos, gestionar actividades, checklists, equipo, archivos y órdenes. No captura por permanecer en la app ni al reintentar una sincronización.</p>
+<p><strong>Configuración Google pendiente.</strong> La clave existente está configurada en la app, pero Google rechazó la consulta de prueba: Places API (New) deshabilitada. Habilitarla, revisar Maps SDK for Android y autorizar el paquete y certificado de la APK. No quitar restricciones de la clave ni afectar la clave web en uso.</p>
+<p>Se conservan cronómetro, reportes y cierre de tareas offline. Actividades, borrados, firmas y entrega de la OT completa aún requieren conexión.</p>
+<p><strong>Publicar workerLocations actualizado e instalar gateway ${gatewayVersion}.</strong> Acepta el contrato de acciones y conserva puntos antiguos. Sin migración nueva ni cambios del frontend. Se retiran permisos y servicios de ubicación de fondo; los puntos pendientes anteriores no se borran.</p>
 <a href="/${name}">Descargar APK ${version}</a><img src="/qr.svg" width="260" height="260" alt="QR para descargar la actualización en el teléfono">
 <p>Elige <strong>Actualizar</strong> sobre la app instalada. No desinstales ni borres datos o pendientes.</p>
 <p>Guardado local no significa envío confirmado ni ficha actualizada. La sincronización requiere conexión, sesión válida y la app en primer plano y desbloqueada. El cronómetro conserva el tiempo oficial del servidor.</p>
 <a href="/actualizacion.txt">Detalles de esta actualización</a>
 <a href="/fluidez.txt">Guía de fluidez y preparación del gateway</a>
-<details><summary>Requisitos de servidor para soporte</summary><a href="/${gatewayArchiveName}">Gateway ${gatewayVersion}</a><a href="/actualizacion-servidor.txt">Despliegue de asignaciones completas</a><small>SHA-256 gateway: ${gatewaySha256}</small><p>Paquete reproducible verificado en Node 20.12.2. También deben desplegarse las fuentes de asignaciones y notificaciones del backend. Sin migración nueva. Se conservan los paquetes anteriores; no se borran sesiones ni pendientes. La verificación local no acredita el despliegue remoto.</p></details>
+<details><summary>Requisitos de servidor para soporte</summary><a href="/${gatewayArchiveName}">Gateway ${gatewayVersion}</a><a href="/actualizacion-servidor.txt">Guía de despliegue del servidor</a><small>SHA-256 gateway: ${gatewaySha256}</small><p>Paquete reproducible verificado en Node 20.12.2. Se conservan los paquetes anteriores; no se borran sesiones ni pendientes. La verificación local no acredita la recuperación de una tarea concreta del teléfono ni el despliegue remoto.</p></details>
 <p>La misma Wi-Fi se necesita solo para descargar. La app instalada no necesita Expo Go, Metro ni el computador.</p><small>SHA-256 APK: ${sha256}</small></main></html>`;
   const server = createServer((req, res) => {
     res.setHeader("Cache-Control", "no-store");

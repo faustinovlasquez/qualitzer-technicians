@@ -27,6 +27,11 @@ export class MemoryFiles implements DurableFileStore {
   removes: string[] = [];
   sequence = 0;
   used = 0;
+  async ownText(namespace: string, text: string, name: string): Promise<OfflineFile> {
+    const uri = `report:${++this.sequence}`;
+    this.sources.set(uri, new TextEncoder().encode(text));
+    return this.own(namespace, { id: uri, uri, name, mimeType: "text/plain" });
+  }
   failOn = 0;
   async fingerprint(photo: LocalPhoto): Promise<Pick<OfflineFile, "size" | "sha256"> | null> {
     const bytes = photo.uri.startsWith("memory:") ? this.contents.get(photo.uri.slice(7)) : this.sources.get(photo.uri);

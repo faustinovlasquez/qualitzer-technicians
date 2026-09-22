@@ -3,6 +3,7 @@ import type { LocalPhoto } from "../domain/models";
 import { OfflineUnavailableError, type OfflineFile } from "../domain/offline";
 import type { DurableFileStore, DurableStore } from "./contracts";
 import { validateQuota } from "./state";
+import { storageCapacity } from "./storageCapacity";
 import { openOfflineDatabase, transactionComplete } from "./indexedDatabase.web";
 
 interface StoredBlob { blob: Blob; namespace: string; }
@@ -12,6 +13,24 @@ function storedBlob(value: unknown): StoredBlob {
 }
 export class IndexedDBFileStore implements DurableFileStore {
   private urls = new Map<string, string>();
+  async storageUsage() {
+    const db = await openOfflineDatabase(); const tx = db.transaction("blobs", "readonly"); const completed = transactionComplete(tx);
+    let used = 0; const cursor = tx.objectStore("blobs").openCursor();
+    cursor.onsuccess = () => { if (cursor.result) { used += storedBlob(cursor.result.value).blob.size; cursor.result.continue(); } };
+    await completed;
+    const capacity = storageCapacity(used);
+    const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+    if (estimate?.quota !== undefined && estimate.usage !== undefined) {
+      capacity.availableBytes = Math.min(capacity.availableBytes, Math.max(0, estimate.quota - estimate.usage));
+      capacity.capacityBytes = used + capacity.availableBytes;
+    }
+    return capacity;
+  }
+  async ownText(namespace: string, text: string, name: string): Promise<OfflineFile> {
+    const uri = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    try { return await this.own(namespace, { id: Crypto.randomUUID(), uri, name, mimeType: "text/plain" }); }
+    finally { URL.revokeObjectURL(uri); }
+  }
   async fingerprint(photo: LocalPhoto): Promise<Pick<OfflineFile, "size" | "sha256"> | null> {
     if (!/^(blob:|data:)/.test(photo.uri)) throw new OfflineUnavailableError("OFFLINE_EXPECTS_LOCAL_BLOB");
     let response: Response;

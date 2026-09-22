@@ -30,6 +30,8 @@ import { createConnectivity } from "../offline/connectivity";
 import { bindForeground, readForeground } from "../offline/foreground";
 import { checklistAssignmentResultSchema, checklistCatalogPageSchema, type ChecklistAssignmentResult, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
 import type { OfflineController, OfflineQueuedOutcome, OfflineSnapshot } from "../domain/offline";
+import { isOfflineQueuedError } from "../domain/offline";
+import type { LocationAction, LocationActionRecorder } from "../domain/locationTracking";
 import { loginConnectionError, requireConfiguredGateway, storedGatewayMismatch, suggestedExpoGatewayUrl } from "../infrastructure/gatewayConnection";
 import { gatewayConfiguration } from "../infrastructure/gatewayConfig";
 
@@ -105,6 +107,11 @@ function defaultGateway(): string {
   return gatewayConfiguration.url;
 }
 export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boolean }) {
+  const locationActions = useRef<LocationActionRecorder | null>(null);
+  const bindLocationActions = useCallback((recorder: LocationActionRecorder) => {
+    locationActions.current = recorder;
+    return () => { if (locationActions.current === recorder) locationActions.current = null; };
+  }, []);
   const accessAllowed = access?.allowed ?? true;
   const isAccessAllowed = access?.isAllowed ?? alwaysAllowed;
   const [gatewayUrl, setGatewayUrl] = useState(defaultGateway);
@@ -120,6 +127,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const [selectedOrder, setSelectedOrder] = useState<SelectedOrder | null>(null);
   const [selectedCreationKind, setSelectedCreationKind] = useState<CreationKind | null>(null);
   const [tab, setTab] = useState<AppTab>("today");
+  const [creationNotice, setCreationNotice] = useState<{ token: string; branchId: number; groupId: string; workId?: string; kind: CreationResult["kind"]; confirmed: boolean; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -307,30 +315,19 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (version !== sessionVersion.current) { wrapped.stop(); return false; }
     if (wrapped.getSnapshot().authBlocked) { wrapped.stop(); return false; }
     const today = scheduleClock(next.user.system.timezone)?.day ?? dateKey();
-    const week = weekRange(today);
-    const snapshot = wrapped.getSnapshot();
-    const downloaded = snapshot.coverage.filter((entry) => entry.branchId === next.branchId)
-      .sort((left, right) => right.fetchedAt - left.fetchedAt || right.date.localeCompare(left.date));
-    const coverage = new Set(downloaded.map((entry) => entry.date));
-    const localCreations = snapshot.operations.filter((operation) => operation.kind === "create" && operation.input.companyBranchId === next.branchId)
-      .sort((left, right) => right.createdAt - left.createdAt);
-    const createdToday = localCreations.some((operation) => operation.kind === "create" && operation.input.schedule.date === today);
-    const latestCreation = localCreations[0];
-    const initialDay = coverage.has(today) || createdToday ? today : downloaded[0]?.date ?? (latestCreation?.kind === "create" ? latestCreation.input.schedule.date : today);
-    const nextRange = assignmentDays(week).every((day) => coverage.has(day)) ? week
-      : initialDay !== today ? weekRange(initialDay) : dailyRange(today);
+    const nextRange = dailyRange(today);
     let cachedData: Assignments | null = null;
     let warning: string | null = null;
     try { cachedData = await wrapped.localAssignments(nextRange, stored.branchId); }
     catch (failure) { warning = `No hay una copia disponible para todo este período. Revisa la cobertura en Sin conexión. ${errorText(failure)}`; }
     if (version !== sessionVersion.current) { wrapped.stop(); return false; }
     allowNetwork();
-    const nextTab = nextRange.startDate === nextRange.endDate ? "today" : "agenda";
+    const nextTab = "today";
     repository.current = wrapped;
     sessionSetup.current = null;
     manualRefresh.current = { session: next, range: nextRange };
     state.current = { ...state.current, session: next, data: cachedData, range: nextRange, selected: null, selectedOrder: null, selectedCreationKind: null, tab: nextTab };
-    setSession(next); setSelectedTenant(next.tenant); setData(cachedData); setRange(nextRange); setTab(nextTab); setAgendaFocusDate(initialDay);
+    setSession(next); setSelectedTenant(next.tenant); setData(cachedData); setRange(nextRange); setTab(nextTab); setAgendaFocusDate(null);
     setSelected(null); setSelectedOrder(null); setSelectedCreationKind(null); setSelectedOffline(false);
     setOfflineController(wrapped); setOfflineVerifiedAt(profile.verifiedAt); setLiveVerified(false);
     setForcePassword(false); setFinalizingSession(false); setError(warning); setLoading(false);
@@ -446,6 +443,10 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   useEffect(() => {
     if (offline?.authBlocked && repository.current === offlineController) unauthorized();
   }, [offline?.authBlocked, offlineController, unauthorized]);
+
+  const visibleCreationNotice = creationNotice?.token === session?.token && creationNotice?.branchId === session?.branchId
+    && (selected?.groupId === creationNotice?.groupId && selected?.workId === creationNotice?.workId || selectedOrder?.id === creationNotice?.groupId) ? creationNotice : null;
+  useEffect(() => { if (creationNotice && !visibleCreationNotice) setCreationNotice(null); }, [creationNotice, visibleCreationNotice]);
 
   const refreshAssignments = useCallback(async (background = false, reportError = true): Promise<void> => {
     const { session: current, range: currentRange } = state.current;
@@ -1011,17 +1012,31 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (result.kind !== selectedCreationKind || actionLock.current) return;
     const version = sessionVersion.current;
     const action = beginAction();
-    const nextTab = state.current.tab === "agenda" ? "agenda" : "today";
-    const nextRange = nextTab === "agenda" ? weekRange(result.schedule.date) : dailyRange(result.schedule.date);
-    creationVersion.current += 1;
+    const nextTab = "today";
+    const nextRange = dailyRange(result.schedule.date);
+    const nextWork: SelectedWork | null = result.kind === "maintenance" ? null : { groupId: result.groupId, workId: String(result.workId), queryDate: result.schedule.date, scheduledDate: result.schedule.date, initialTab: "work" };
+    const nextOrder: SelectedOrder | null = result.kind === "maintenance" ? { id: result.groupId, queryDate: result.schedule.date, initialTab: "works" } : null;
     requestVersion.current += 1;
     manualRefresh.current = { session: current, range: nextRange };
-    state.current = { ...state.current, selectedCreationKind: null, selected: null, selectedOrder: null, data: null, range: nextRange, tab: nextTab };
-    setSelectedCreationKind(null); setSelected(null); setSelectedOrder(null); setData(null); setRange(nextRange); setTab(nextTab);
+    state.current = { ...state.current, selected: null, selectedOrder: null, data: null, range: nextRange, tab: nextTab };
+    setSelected(null); setSelectedOrder(null); setData(null); setRange(nextRange); setTab(nextTab);
     setAgendaFocusDate(result.schedule.date);
-    try { await refreshAssignments(); }
+    try {
+      await refreshAssignments();
+      if (version !== sessionVersion.current || repository.current !== repo || state.current.session !== current
+        || state.current.range !== nextRange || state.current.selectedCreationKind !== result.kind || !isAccessAllowed()) return;
+      const createdGroup = state.current.data?.groups.find(group => group.id === result.groupId);
+      const createdWork = createdGroup?.works.find(work => work.id === String(result.workId));
+      if (!createdGroup || !createdWork) throw new Error("La ficha creada todavía no está disponible para esta sesión.");
+      creationVersion.current += 1;
+      state.current = { ...state.current, selectedCreationKind: null, selected: nextWork, selectedOrder: nextOrder };
+      setSelectedCreationKind(null); setSelected(nextWork); setSelectedOrder(nextOrder); setError(null);
+      setCreationNotice({ token: current.token, branchId: result.companyBranchId, groupId: result.groupId, workId: nextWork?.workId,
+        kind: result.kind, confirmed: true, name: result.kind === "maintenance" ? createdGroup.title : createdWork.title });
+    }
     catch (caught) {
-      if (version === sessionVersion.current && repository.current === repo) setError(`La creación está confirmada. No repitas el envío; no se pudo actualizar la agenda. ${errorText(caught)}`);
+      if (version === sessionVersion.current && repository.current === repo) setError(`La creación está confirmada. No repitas el envío; no se pudo cargar la ficha. ${errorText(caught)}`);
+      throw caught;
     } finally { endAction(action); }
   }
 
@@ -1053,14 +1068,21 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       const found = candidates.find((candidate) => local.groups.some((group) => group.id === candidate.groupId && group.works.some((work) => work.id === candidate.workId)));
       if (!found) throw new Error("No se pudo encontrar la creación en la copia local. Revisa la cola antes de repetir el envío.");
       const next: SelectedWork = { ...found, draftGroupId: operation.localGroupId, draftWorkId: operation.localWorkId, queryDate: outcome.date, scheduledDate: outcome.date, initialTab: "work" };
+      const nextWork = operation.input.kind === "maintenance" ? null : next;
+      const nextOrder: SelectedOrder | null = operation.input.kind === "maintenance" ? { id: found.groupId, draftGroupId: operation.localGroupId, queryDate: outcome.date, initialTab: "works" } : null;
       creationVersion.current += 1;
       manualRefresh.current = { session: current, range: nextRange };
-      state.current = { ...state.current, selectedCreationKind: null, selected: next, selectedOrder: null, data: local, range: nextRange, tab: "today" };
-      setSelectedCreationKind(null); setSelected(next); setSelectedOrder(null); setData(local); setRange(nextRange); setTab("today"); setAgendaFocusDate(outcome.date);
+      state.current = { ...state.current, selectedCreationKind: null, selected: nextWork, selectedOrder: nextOrder, data: local, range: nextRange, tab: "today" };
+      setSelectedCreationKind(null); setSelected(nextWork); setSelectedOrder(nextOrder); setData(local); setRange(nextRange); setTab("today"); setAgendaFocusDate(outcome.date);
+      const createdGroup = local.groups.find(group => group.id === found.groupId);
+      const name = operation.input.kind === "maintenance" ? createdGroup?.title : createdGroup?.works.find(work => work.id === found.workId)?.title;
+      setCreationNotice({ token: current.token, branchId: current.branchId, groupId: found.groupId, workId: nextWork?.workId,
+        kind: operation.input.kind, confirmed: Boolean(result), name: name ?? "" });
       setError(null);
       if (result) void refreshAssignments(true).catch(() => undefined);
     } catch (caught) {
       if (version === sessionVersion.current && repository.current === repo) setError(`La creación sigue guardada en la cola. No repitas el envío; no se pudo abrir la ficha. ${errorText(caught)}`);
+      throw caught;
     } finally { endAction(action); }
   }
 
@@ -1095,13 +1117,15 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     } finally { if (action !== null) endAction(action); }
   }
 
-  async function performMutation<T extends GroupScope, Result = void>(value: T, operation: (repo: TechnicianRepository, value: T) => Promise<Result>, refreshAfter = false): Promise<Result> {
+  async function performMutation<T extends GroupScope, Result = void>(value: T, operation: (repo: TechnicianRepository, value: T) => Promise<Result>, refreshAfter = false, locationAction?: LocationAction, targetId?: string): Promise<Result> {
     if (!isAccessAllowed()) throw new Error("Desbloquea la aplicación antes de continuar.");
     if (actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
     const repo = repository.current;
     if (!repo) throw new Error("La sesión no está disponible.");
     const version = sessionVersion.current;
     const action = beginAction();
+    let locationComplete: ReturnType<LocationActionRecorder> | undefined;
+    try { if (locationAction) locationComplete = locationActions.current?.(locationAction, value, targetId); } catch {}
     assignmentRead.current?.controller.abort();
     baselineRead.current?.abort();
     requestVersion.current += 1;
@@ -1109,29 +1133,33 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     try {
       const result = await operation(repo, value);
       if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la operación. Verifica el resultado antes de repetir el envío.");
+      void locationComplete?.("CONFIRMED").catch(() => {});
       if (refreshAfter) {
         void refreshAssignments(true).catch((caught: unknown) => {
           if (version === sessionVersion.current && repository.current === repo) setError(`El cambio fue confirmado, pero no se pudo actualizar la información. No repitas el envío; actualiza las asignaciones. ${errorText(caught)}`);
         });
       }
       return result;
+    } catch (error: unknown) {
+      if (version === sessionVersion.current && repository.current === repo && isOfflineQueuedError(error)) void locationComplete?.("QUEUED", error.operationId).catch(() => {});
+      throw error;
     } finally { endAction(action); }
   }
 
-  function mutation(operation: (repo: TechnicianRepository, value: WorkScope) => Promise<void>, stepId?: string, retainCreationDependency = false): Promise<void> {
+  function mutation(operation: (repo: TechnicianRepository, value: WorkScope) => Promise<void>, stepId?: string, retainCreationDependency = false, action?: LocationAction): Promise<void> {
     const value = scope(stepId);
     if (retainCreationDependency && !stepId && selected?.draftGroupId && selected.draftWorkId) {
       value.groupId = selected.draftGroupId; value.workId = selected.draftWorkId;
     }
-    return performMutation(value, operation);
+    return performMutation(value, operation, false, action, stepId);
   }
 
   function saveAnswer(stepId: string, answer: StepAnswer): Promise<void> {
-    return performMutation(scope(stepId), (repo, value) => repo.answer(value, stepId, answer), true);
+    return performMutation(scope(stepId), (repo, value) => repo.answer(value, stepId, answer), true, "CHECKLIST_SAVED", stepId);
   }
 
-  function performMutationGroup(operation: (repo: TechnicianRepository, value: GroupScope) => Promise<void>): Promise<void> {
-    return performMutation(groupScope(), operation);
+  function performMutationGroup(operation: (repo: TechnicianRepository, value: GroupScope) => Promise<void>, action: LocationAction): Promise<void> {
+    return performMutation(groupScope(), operation, false, action);
   }
 
   async function readWork<T>(operation: (repo: TechnicianRepository, value: WorkScope) => Promise<T>): Promise<T> {
@@ -1143,18 +1171,24 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     return result;
   }
 
+  async function loadEquipmentLocation(target: import("../domain/equipmentLocation").EquipmentLocationTarget) {
+    return readWork((repo, value) => {
+      if (!repo.equipmentLocation) throw new Error("Conecta con un servidor actualizado para consultar la ubicación del equipo.");
+      return repo.equipmentLocation(value, target);
+    });
+  }
+  async function saveEquipmentLocation(target: import("../domain/equipmentLocation").EquipmentLocationTarget, input: import("../domain/equipmentLocation").EquipmentLocationUpdate) {
+    return performMutation(scope(), (repo, value) => {
+      if (!repo.updateEquipmentLocation) throw new Error("La edición de ubicación del equipo no está disponible.");
+      return repo.updateEquipmentLocation(value, target, input);
+    }, false, "EQUIPMENT_LOCATION_CHANGED", target);
+  }
+
   async function attachChecklist(checklistId: number): Promise<ChecklistAssignmentResult> {
     const value = scope();
     const repo = repository.current;
     if (!repo?.attachChecklist) throw new Error("La asociación de checklists no está disponible.");
-    if (actionLock.current) throw new Error("Espera a que termine la operación actual.");
-    const version = sessionVersion.current;
-    const action = beginAction();
-    try {
-      const result = checklistAssignmentResultSchema.parse(await repo.attachChecklist(value, checklistId));
-      if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió. Actualiza el trabajo antes de repetir la asociación.");
-      return result;
-    } finally { endAction(action); }
+    return performMutation(value, async () => checklistAssignmentResultSchema.parse(await repo.attachChecklist!(value, checklistId)), false, "CHECKLIST_ATTACHED", String(checklistId));
   }
 
   async function readGroup<T>(operation: (repo: TechnicianRepository, value: GroupScope) => Promise<T>): Promise<T> {
@@ -1290,7 +1324,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     await performMutation(value, async (repo, scope) => {
       await repo.status(scope, { ...input, executionDates: input.executionDates ?? [scope.startDate] });
       if (input.status === "delivered" && work.status !== "delivered") await guideOrderDelivery(repo, scope);
-    }, true);
+    }, true, statusLocationAction(input, work.status));
   }
 
   async function guideOrderDelivery(repo: TechnicianRepository, value: WorkScope): Promise<void> {
@@ -1317,7 +1351,13 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     return performMutation(value, async (repo, scope) => {
       await repo.status(scope, input);
       if (input.status === "delivered" && previousStatus !== "delivered") await guideOrderDelivery(repo, scope);
-    }, true);
+    }, true, statusLocationAction(input, previousStatus));
+  }
+
+  function statusLocationAction(input: StatusInput, previous?: string): LocationAction {
+    if (input.status === "in_progress") return previous === "paused" ? "WORK_RESUMED" : "WORK_STARTED";
+    if (input.status === "paused") return "WORK_PAUSED";
+    return input.status === "delivered" ? "WORK_DELIVERED" : "WORK_COMPLETED";
   }
 
   function closeWork(): void {
@@ -1387,6 +1427,11 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
 
   return {
     signatureAccess,
+    bindLocationActions,
+    equipmentLocation: { load: loadEquipmentLocation, save: saveEquipmentLocation },
+    creationNotice: visibleCreationNotice,
+    dismissCreationNotice: () => setCreationNotice(null),
+    locationPort: remoteRepository(repository.current),
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,
     consumeOrderDeliveryIntent,
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,
@@ -1399,15 +1444,15 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     login, demo, changePassword, retrySessionSetup, branch, logout, checkConnection, refresh, changeRange, agendaFocusDate, focusAgendaDay, openGroup, closeOrder, openWork, closeWork, closeDetails, homeFromDetails, backTab, homeTab, onWorkStatus,
     openCreate, closeCreate, creationOptions, createRecord, onCreated, onOfflineQueuedCreate,
     changeStatus,
-    reopenWork: () => performMutation(scope(), (repo, value) => workActions(repo).reopenWork(value), true),
+    reopenWork: () => performMutation(scope(), (repo, value) => workActions(repo).reopenWork(value), true, "WORK_REOPENED"),
     loadActivities: () => readWork((repo, value) => workActions(repo).activities(value)),
-    createActivity: (input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).createActivity(value, input), true),
-    updateActivity: (id: number, input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).updateActivity(value, id, input), true),
-    completeActivity: (id: number, isCompleted = true) => performMutation(scope(), (repo, value) => workActions(repo).completeActivity(value, id, isCompleted), true),
-    deleteActivity: (id: number) => performMutation(scope(), (repo, value) => workActions(repo).deleteActivity(value, id), true),
+    createActivity: (input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).createActivity(value, input), true, "ACTIVITY_CREATED"),
+    updateActivity: (id: number, input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).updateActivity(value, id, input), true, "ACTIVITY_UPDATED", String(id)),
+    completeActivity: (id: number, isCompleted = true) => performMutation(scope(), (repo, value) => workActions(repo).completeActivity(value, id, isCompleted), true, isCompleted ? "ACTIVITY_COMPLETED" : "ACTIVITY_REOPENED", String(id)),
+    deleteActivity: (id: number) => performMutation(scope(), (repo, value) => workActions(repo).deleteActivity(value, id), true, "ACTIVITY_DELETED", String(id)),
     loadActivityFiles: (id: number) => readWork((repo, value) => workActions(repo).activityFiles(value, id)),
-    deleteActivityFile: (id: number, fileId: string) => performMutation(scope(), (repo, value) => workActions(repo).deleteActivityFile(value, id, requireFileId(fileId))),
-    uploadActivityFiles: (id: number, files: LocalPhoto[]) => performMutation(scope(), (repo, value) => workActions(repo).uploadActivityFiles(value, id, files)),
+    deleteActivityFile: (id: number, fileId: string) => performMutation(scope(), (repo, value) => workActions(repo).deleteActivityFile(value, id, requireFileId(fileId)), false, "FILE_DELETED", String(id)),
+    uploadActivityFiles: (id: number, files: LocalPhoto[]) => performMutation(scope(), (repo, value) => workActions(repo).uploadActivityFiles(value, id, files), false, "FILE_UPLOADED", String(id)),
     saveAnswer,
     loadChecklistOptions: (query: ChecklistCatalogQuery) => readWork(async (repo, value) => {
       if (!repo.checklistOptions) throw new Error("El catálogo de checklists no está disponible.");
@@ -1416,20 +1461,20 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     attachChecklist,
     loadFiles: (): Promise<Attachment[]> => readWork((repo, value) => repo.files(value)),
     loadStepFiles: (stepId: string): Promise<Attachment[]> => readWork((repo, value) => repo.stepFiles(value, stepId)),
-    upload: (photos: LocalPhoto[], stepId?: string) => mutation((repo, value) => repo.upload(value, photos, stepId), stepId, true),
-    uploadDocuments: (files: LocalPhoto[], stepId?: string) => mutation((repo, value) => repo.uploadDocuments(value, files, stepId), stepId, true),
-    deleteFile: (fileId: string, stepId?: string) => mutation((repo, value) => repo.deleteFile(value, requireFileId(fileId), stepId), stepId),
+    upload: (photos: LocalPhoto[], stepId?: string) => mutation((repo, value) => repo.upload(value, photos, stepId), stepId, true, "FILE_UPLOADED"),
+    uploadDocuments: (files: LocalPhoto[], stepId?: string) => mutation((repo, value) => repo.uploadDocuments(value, files, stepId), stepId, true, "FILE_UPLOADED"),
+    deleteFile: (fileId: string, stepId?: string) => mutation((repo, value) => repo.deleteFile(value, requireFileId(fileId), stepId), stepId, false, "FILE_DELETED"),
     loadComments: (page: number): Promise<CommentPage> => readWork((repo, value) => {
       if (!Number.isSafeInteger(page) || page < 0) throw new Error("La página de comentarios no es válida.");
       return repo.comments(value, page);
     }),
-    addComment: (text: string) => mutation((repo, value) => repo.addComment(value, text), undefined, true),
+    addComment: (text: string) => mutation((repo, value) => repo.addComment(value, text), undefined, true, "COMMENT_ADDED"),
     loadGroupFiles: (): Promise<Attachment[]> => readGroup((repo, value) => repo.groupFiles(value)),
-    uploadGroupFiles: (files: LocalPhoto[]) => performMutationGroup((repo, value) => repo.uploadGroupFiles(value, files)),
-    deleteGroupFile: (fileId: string) => performMutationGroup((repo, value) => repo.deleteGroupFile(value, requireFileId(fileId))),
+    uploadGroupFiles: (files: LocalPhoto[]) => performMutationGroup((repo, value) => repo.uploadGroupFiles(value, files), "FILE_UPLOADED"),
+    deleteGroupFile: (fileId: string) => performMutationGroup((repo, value) => repo.deleteGroupFile(value, requireFileId(fileId)), "FILE_DELETED"),
     loadOrderDelivery: () => readGroup((repo, value) => repo.orderDelivery(value, true)),
-    startOrder: () => performMutation(groupScope(), (repo, value) => repo.startOrder(value), true),
-    deliverOrder: (input: MaintenanceDeliveryInput) => performMutation(groupScope(), (repo, value) => repo.deliverOrder(value, input), true),
-    report: (note: string) => mutation((repo, value) => repo.report(value, note)),
+    startOrder: () => performMutation(groupScope(), (repo, value) => repo.startOrder(value), true, "ORDER_STARTED"),
+    deliverOrder: (input: MaintenanceDeliveryInput) => performMutation(groupScope(), (repo, value) => repo.deliverOrder(value, input), true, "ORDER_DELIVERED"),
+    report: (note: string) => mutation((repo, value) => repo.report(value, note), undefined, true, "REPORT_SAVED"),
   };
 }

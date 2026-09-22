@@ -3,19 +3,28 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import type { Session, User } from "../src/domain/models";
 import type { StoredSession } from "../src/infrastructure/sessionStorage";
 import { ApiError, NetworkError } from "../src/infrastructure/errors";
 import * as tenantSession from "../src/domain/tenantSession";
 import * as gatewayPolicy from "../config/gatewayPolicy";
-import { weekRange } from "../src/domain/format";
 import { OfflineTechnicianRepository } from "../src/offline/OfflineTechnicianRepository";
 import * as offlineState from "../src/offline/state";
 import { assignmentsWithStep, MemoryFiles, uuid, user } from "../src/offline/tests/fakes";
 import { agendaFixture } from "./helpers/agenda-load-lifecycle";
 import { loadSource } from "./helpers/tenant-challenge";
+
+interface ISqliteTestDatabase {
+  exec(sql: string): void;
+  close(): void;
+  prepare(sql: string): {
+    get(...params: Array<string | number>): unknown;
+    all(): unknown[];
+    run(...params: Array<string | number>): unknown;
+  };
+}
+const { DatabaseSync }: { DatabaseSync: new (path: string) => ISqliteTestDatabase } = require("node:sqlite");
 
 const gatewayUrl = "https://gateway.example.test/mobile";
 const session: Session = { token: `qzm_${"a".repeat(43)}`, user, branchId: 1, tenant: user.tenant!, mode: "live" };
@@ -122,8 +131,6 @@ test("cold app restart restores SQLite work, checklist and pending changes witho
     assert.ok(namespace);
     const downloadedState = await (await runtime.store()).read(namespace);
     assert.ok(downloadedState.cache.some(entry => entry.key === `assignments:${day}`), "The network read must be persisted before the work is shown");
-    const lastDownloadedDay = downloadedState.cache.flatMap(entry => entry.coverage ? [entry.coverage] : [])
-      .sort((left, right) => right.fetchedAt - left.fetchedAt || right.date.localeCompare(left.date))[0].date;
     await offlineState.updateState(await runtime.store(), namespace, state => {
       state.operations.push({ id: uuid(601), kind: "comment", text: "Reporte pendiente", scope: { ...range, groupId: "direct-80", workId: "80", companyBranchId: 1 }, createdAt: Date.now(), status: "pending", nextAttemptAt: 0, attempts: 0 });
     });
@@ -145,8 +152,13 @@ test("cold app restart restores SQLite work, checklist and pending changes witho
     assert.equal(app.restoring, false);
     assert.equal(app.finalizingSession, false);
     assert.equal(app.session?.user.id, user.id);
-    assert.equal(app.range.startDate, weekRange(lastDownloadedDay).startDate);
-    assert.equal(app.range.endDate, weekRange(lastDownloadedDay).endDate);
+    assert.equal(app.tab, "today");
+    assert.equal(app.range.startDate, "2026-09-15");
+    assert.equal(app.range.endDate, "2026-09-15");
+    assert.equal(app.data, null);
+    assert.equal(app.offline?.pending, 1);
+    app.changeRange(range);
+    app = await appFixture.flush();
     assert.equal(app.data?.groups[0].works[0].title, "Revision guardada");
     assert.equal(app.data?.groups[0].works[0].checklists[0].steps[0].selectValue, "a");
     assert.equal(app.data?.groups[0].equipment?.identifier, "EQ-53");

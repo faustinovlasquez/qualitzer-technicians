@@ -1,4 +1,22 @@
+# Ubicacion por acciones: gateway 1.0.22 / APK 1.0.47
+
+Contrato nuevo de ubicacion consentimiento2 por acciones confirmadas o guardadas en cola. No modifica timer, checklist, completion ni sus recibos. Publicar workerLocations actualizado antes de gateway1.0.22; sin migracion nueva. La captura periodica y servicios de fondo se detienen, sin borrar puntos anteriores pendientes. Google nativo no depende del frontend; su autorizacion en Cloud sigue siendo necesaria.
+
+# Actualizacion de mapas y equipo: gateway 1.0.21
+
+APK 1.0.44 incorpora Google Maps mediante el visor del portal y edicion online de la direccion registrada del equipo. Publicar PanelEquipmentLocation y las referencias canonicas en Backend; publicar src/app/api/mobile-map/route.ts y public/mobile-map.js en Frontend con la configuracion Google existente. No modifica timer, checklist, completion, recibos, colas ni datos de versiones anteriores. Sin migracion nueva.
+
+Con el backend detenido y drenado: `npm install ./infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.21.tgz --ignore-scripts --no-audit --no-fund`, despues `node scripts/check-mobile-sync-deployment.cjs`, y arrancar una sola instancia fork. Detalles y limites en ACTUALIZACION-1.0.44.md. No borrar app/datos ni pendientes.
+
 # Fluidez móvil — app 1.0.11 y gateway 1.0.4
+
+Paquete final de esta corrección: **gateway 1.0.19 con APK 1.0.40**. Sustituye la referencia de entrega 1.0.18 del párrafo siguiente; mantiene el mismo contrato timer/checklist/completion y conserva el artefacto 1.0.18 previo sin sobrescribirlo.
+
+Actualización vigente: APK 1.0.40 y gateway 1.0.18 incorporan recuperación acotada de rechazos INVALID_INPUT sin recibo, con los mismos UUID y dependencia timer/checklist/completion, y capacidad dinámica de archivos en el teléfono con indicador solo offline. Instalar el gateway actualizado y conservar las fuentes backend de entrega offline. Sin migración nueva para esta corrección; los requisitos de ubicación de 1.0.39 siguen vigentes. Ver ACTUALIZACION-1.0.40.md. No se ha reproducido el fallo concreto del teléfono contra su servidor.
+
+Actualización vigente: APK 1.0.39 y gateway 1.0.17 añaden ubicación laboral con consentimiento, horario configurable y cola independiente. Conservan timer, checklist, completion y recibos. Requiere desplegar workerLocations y la migración tenant 20260921200000-Create-WorkerLocationHistory.js, no ejecutada aquí. Ver ACTUALIZACION-1.0.39.md. Las versiones siguientes son historial, no instrucciones de la entrega actual.
+
+Actualización vigente: APK 1.0.38 y gateway 1.0.16 incorporan cierre de tareas offline durable, dependiente de respuestas, archivos y timer pendientes, con recibo transaccional en backend. Reportes técnicos se guardan en cola como comentario o documento según su destino. Preservan UUID, información anterior y fechas trabajadas; no muestran cierre confirmado hasta recibo. Sin migración nueva. Requiere fuentes MobileSync/TechnicianDashboard/app.logbooks actualizadas antes de instalar la APK. Ver ACTUALIZACION-1.0.38.md y OFFLINE.md para la matriz real: actividades, borrados, firmas y cierre de OT completa siguen online. El contenido siguiente es histórico.
 
 Actualización vigente: APK 1.0.37 y gateway 1.0.15 incorporan cronómetro offline con instantes de inicio/pausa/reanudación persistidos, avance local visible y secuencia idempotente. Desplegar MobileSync, TechnicianDashboard y app.logbooks actualizados antes de instalar la APK. Mantiene acumulados anteriores; cambios externos quedan en conflicto sin sobrescritura. No cambia checklist, archivos, comentarios, recibos ni colas existentes. Sin migración nueva. Ver ACTUALIZACION-1.0.37.md. El contenido siguiente es histórico.
 

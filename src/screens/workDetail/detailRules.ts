@@ -42,7 +42,7 @@ export function answerError(step: ChecklistStep, answer: StepAnswer): string | n
   return checklistAnswerError(step, answer);
 }
 
-export function completionReasons(group: AssignmentGroup, work: AssignmentWork, files: Attachment[] | null, filesError: string | null): string[] {
+export function completionReasons(group: AssignmentGroup, work: AssignmentWork, files: Attachment[] | null, filesError: string | null, offlineSnapshotEvidence = false): string[] {
   const reasons: string[] = [];
   if (readOnlyWork(group, work)) reasons.push("La asignación está cerrada y es de solo lectura.");
   if (!work.canExecute) reasons.push("Qualitzer no habilita la ejecución de este trabajo.");
@@ -52,8 +52,10 @@ export function completionReasons(group: AssignmentGroup, work: AssignmentWork, 
       if (step.isFilesRequired && step.attachments.length === 0) reasons.push(`Falta evidencia confirmada: ${step.title}.`);
     }
   }
-  if (work.isFilesRequired && (filesError !== null || files === null)) reasons.push("Actualiza las evidencias para verificar los archivos obligatorios.");
-  else if (work.isFilesRequired && files?.length === 0) reasons.push("Adjunta al menos una evidencia al trabajo.");
+  if (work.isFilesRequired && !(offlineSnapshotEvidence && work.filesCount > 0)) {
+    if (filesError !== null || files === null) reasons.push("Actualiza las evidencias para verificar los archivos obligatorios.");
+    else if (files.length === 0) reasons.push("Adjunta al menos una evidencia al trabajo.");
+  }
   return reasons;
 }
 

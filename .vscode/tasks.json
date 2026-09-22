@@ -2,6 +2,198 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de ubicacion por acciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8822" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de Google nativo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8821" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: comprobar Places existente",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/android/configure-google-maps.cjs", "--probe-existing-places"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: comprobar acceso directo a Google",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/android/configure-google-maps.cjs", "--probe-places"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: configurar clave Google de la app",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/android/configure-google-maps.cjs"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: instalar Google Maps nativo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["node_modules/expo/bin/cli", "install", "react-native-maps", "--npm"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile", "env": { "EXPO_NO_DOTENV": "1", "CI": "1" } },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de recuperacion de ubicacion",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8820" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de Google Maps y equipo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8819" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: verificar mapa y ubicacion de equipo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/location/smoke.cjs", "--equipment-map"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: instalar visor Google Maps",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["node_modules/expo/bin/cli", "install", "react-native-webview", "--npm"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile", "env": { "EXPO_NO_DOTENV": "1", "CI": "1" } },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de creacion e historial",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8818" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar creacion e historial",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "scripts/testing/user-signatures-validation.cjs", "--locations", "--creation-history"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de entrega sin conexion",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8817" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de jornada inicial",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8816" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de recuperacion offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8815" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar recuperacion y espacio offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "scripts/testing/user-signatures-validation.cjs", "--locations", "--sync-recovery"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de ubicacion laboral",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8814" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: auditar permisos APK ubicacion",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\audit-update.cjs"],
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar ubicacion laboral",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["--max-old-space-size=8192", "scripts/testing/user-signatures-validation.cjs", "--locations"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: verificar panel de ubicacion",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/location/smoke.cjs"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: instalar ubicacion Expo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["node_modules/expo/bin/cli", "install", "expo-location", "expo-task-manager", "expo-background-task", "--npm"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile", "env": { "EXPO_NO_DOTENV": "1", "CI": "1" } },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de cierre offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8813" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar persistencia de cierre offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\tsx\\dist\\cli.mjs", "--tsconfig", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\server\\tsconfig.json", "--test", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\src\\offline\\tests\\file-fingerprint.test.ts", "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\src\\offline\\tests\\deployment-scheduling.test.ts"],
+			"problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: descargar APK de cronometro offline",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
@@ -349,7 +541,7 @@
 			"label": "Qualitzer: comprobar entrega de asignaciones",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
-			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.105:8812/"],
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.102:8822/"],
 			"isBackground": false,
 			"problemMatcher": []
 		},

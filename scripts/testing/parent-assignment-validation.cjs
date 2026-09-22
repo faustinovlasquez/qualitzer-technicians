@@ -12,6 +12,9 @@ const targets = ["src/screens/DashboardScreen.tsx", "src/screens/orders/Assignme
 targets.push("tests/offline-cold-start.test.ts", "src/offline/cacheSchemas.ts", "src/offline/profiles.ts");
 targets.push("src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/WorkActivities.tsx", "src/domain/workActivities.ts", "src/infrastructure/HttpTechnicianRepository.ts", "src/infrastructure/DemoTechnicianRepository.ts", "src/offline/OfflineTechnicianRepository.ts", "server/assignments/workActions.ts", "server/contracts.ts", "tests/work-activities.test.ts", "App.tsx");
 targets.push("src/screens/workDetail/WorkInformation.tsx", "src/screens/workDetail/ChecklistTab.tsx", "src/screens/workDetail/FileWorkspace.tsx", "src/screens/workDetail/detailStyles.ts", "src/screens/OrderDetailScreen.tsx", "src/screens/creation/CreationScreen.tsx", "tests/delivery-review-ui.test.ts", "tests/checklist-resume-ui.test.ts");
+const jornadaOnly = process.argv.includes("--jornada-defaults");
+const jornadaTests = ["tests/agenda-load-lifecycle.test.ts", "tests/parent-assignment-ui.test.ts", "tests/offline-cold-start.test.ts"];
+if (jornadaOnly) targets.splice(0, targets.length, "App.tsx", "src/application/useTechnicianApp.ts", "src/screens/DashboardScreen.tsx", "tests/e2e/compact-overview-fixture.tsx", ...jornadaTests);
 try {
   console.log("Checking assignment types");
   const configPath = path.join(root, "tsconfig.json");
@@ -31,6 +34,7 @@ try {
   files.push("tests/offline-cold-start.test.ts", "src/offline/tests/profiles-basepath.test.ts", "src/offline/tests/repository.test.ts", "src/offline/tests/connection-reliability.test.ts");
   files.push("tests/work-activities.test.ts", "tests/delivery-review-ui.test.ts", "tests/timer-reconciliation-ui.test.ts");
   files.push("tests/checklist-resume-ui.test.ts", "tests/creation-auto-advance.test.ts");
+  if (jornadaOnly) files.splice(0, files.length, ...jornadaTests);
   const result = spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", ...files], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 120000 });
   const log = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   fs.writeFileSync(path.join(output, "tests.log"), log);

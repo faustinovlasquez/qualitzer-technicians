@@ -111,7 +111,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
   const [agendaLayout, setAgendaLayout] = useState<"schedule" | "list">("schedule");
   const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<StatusFilter>("all");
+  const [filter, setFilter] = useState<StatusFilter[]>(() => view === "today" ? ["pending", "in_progress"] : ["all"]);
   const [daySelection, setDaySelection] = useState<DaySelection | null>(null);
   const [weekSelection, setWeekSelection] = useState<DaySelection | null>(null);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -140,6 +140,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
     : coveragePending ? <Text style={styles.preferenceError}>Verificando copia local…</Text> : null;
 
   useEffect(() => {
+    setFilter(view === "today" ? ["pending", "in_progress"] : ["all"]);
     if (view === "agenda") {
       setAgendaLayout("schedule");
       if (range.startDate !== monthRange(range.startDate).startDate || range.endDate !== monthRange(range.startDate).endDate) setAgendaMode("week");
@@ -174,7 +175,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
     };
   }, [scopedEntries, selectedDay]);
 
-  const filteredEntries = useMemo(() => scopedEntries.filter(({ group, work }) => matchesStatus(work, filter) && matchesAssignmentSearch(group, work, query)), [scopedEntries, query, filter]);
+  const filteredEntries = useMemo(() => scopedEntries.filter(({ group, work }) => filter.some(status => matchesStatus(work, status)) && matchesAssignmentSearch(group, work, query)), [scopedEntries, query, filter]);
   const scopedOrders = (data?.groups ?? []).filter((group) => {
     if (group.type === "direct_assignment") return false;
     if (scopedEntries.some((entry) => groupKey(entry.group) === groupKey(group))) return true;
@@ -185,7 +186,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
     return !day || (day >= start && day <= end) || (day < start && open);
   });
   const emptyOrders = scopedOrders.filter((group) => group.works.length === 0);
-  const filteredOrders = scopedOrders.filter((group) => matchesStatus(group, filter) && matchesOrderSearch(group, query));
+  const filteredOrders = scopedOrders.filter((group) => filter.some(status => matchesStatus(group, status)) && matchesOrderSearch(group, query));
   const filteredMaintenances = filteredOrders.filter((group) => group.type === "internal_maintenance");
   const filteredWorkOrders = filteredOrders.filter((group) => group.type === "external_ot");
   const visibleOrders = listView === "maintenances" ? filteredMaintenances : filteredWorkOrders;
@@ -204,7 +205,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
   const sections = useMemo(() => buildSections(filteredEntries, view === "agenda"), [filteredEntries, view]);
   const remaining = counts.total - counts.completed;
   const hasData = data !== null;
-  const isFiltered = query.trim().length > 0 || filter !== "all";
+  const isFiltered = query.trim().length > 0 || !filter.includes("all");
   const heroTitle = coveragePending ? "Verificando datos locales" : partial ? "Cobertura parcial" : !hasData
     ? loading ? "Preparando tu jornada" : "Tu jornada, en un solo lugar"
     : counts.total === 0 ? emptyOrders.length > 0 ? `${emptyOrders.length} ${emptyOrders.length === 1 ? "orden asignada" : "órdenes asignadas"}` : "Todo listo para tu próxima tarea"
@@ -249,7 +250,17 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
 
   function clearFilters(): void {
     setQuery("");
-    setFilter("all");
+    setFilter(["all"]);
+  }
+
+  function toggleFilter(value: StatusFilter): void {
+    if (busy) return;
+    setFilter(current => {
+      if (value === "all") return ["all"];
+      const selected = current.filter(status => status !== "all");
+      const next = selected.includes(value) ? selected.filter(status => status !== value) : [...selected, value];
+      return next.length === 0 || next.length === 3 ? ["all"] : next;
+    });
   }
 
   function selectListView(value: AssignmentListView): void {
@@ -408,12 +419,12 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.filters}>
         {filters.map((item) => (
-          <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityState={{ selected: filter === item.value }} onPress={() => setFilter(item.value)} style={({ pressed }) => [styles.filter, filter === item.value && styles.filterSelected, pressed && styles.pressed]}>
-            <Text style={[styles.filterText, filter === item.value && styles.filterTextSelected]}>{item.label}</Text>
+          <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityState={{ selected: filter.includes(item.value), disabled: busy }} aria-pressed={filter.includes(item.value)} disabled={busy} onPress={() => toggleFilter(item.value)} style={({ pressed }) => [styles.filter, filter.includes(item.value) && styles.filterSelected, pressed && styles.pressed]}>
+            <Text style={[styles.filterText, filter.includes(item.value) && styles.filterTextSelected]}>{item.label}</Text>
           </Pressable>
         ))}
       </ScrollView>
-      {filter === "in_progress" ? <Text style={styles.filterNote}>Incluye tareas en pausa; cada tarjeta muestra su estado real.</Text> : filter === "completed" ? <Text style={styles.filterNote}>Incluye tareas completadas y entregadas.</Text> : null}
+      {filter.length === 1 && filter.includes("in_progress") ? <Text style={styles.filterNote}>Incluye tareas en pausa; cada tarjeta muestra su estado real.</Text> : filter.length === 1 && filter.includes("completed") ? <Text style={styles.filterNote}>Incluye tareas completadas y entregadas.</Text> : null}
 
       {error ? (
         <Card style={styles.errorCard}>

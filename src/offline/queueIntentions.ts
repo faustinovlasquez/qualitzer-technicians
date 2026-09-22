@@ -2,8 +2,8 @@ import { z } from "zod";
 import type { Assignments, AssignmentWork, User, WorkScope } from "../domain/models";
 import { OfflineUnavailableError, type OfflineOperation, type TimerReadAssignmentWork } from "../domain/offline";
 import { checklistAssignmentInputSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
-import { syncScopeSchema, syncTimerPayloadSchema } from "../domain/offlineProtocol";
-import { executionElapsedSeconds } from "../domain/workExecution";
+import { syncScopeSchema, syncTimerPayloadSchema, syncCompletionInputSchema } from "../domain/offlineProtocol";
+import { executionElapsedSeconds, executionDuration } from "../domain/workExecution";
 import type { OfflineState } from "./contracts";
 import { cachedAssignmentsSchema, sameResource } from "./cacheSchemas";
 
@@ -34,7 +34,7 @@ export function assignmentsWithTimerRead(data: Assignments, date: string, branch
     offlineTimerRead: { scope: { groupId: group.id, workId: work.id, companyBranchId: branchId, startDate: date, endDate: date }, appliedOperationIds: [...appliedOperationIds] },
   })) })) };
 }
-export function timerReconciledWithWork(operation: Extract<OfflineOperation, { kind: "timer" }>, work?: AssignmentWork): boolean {
+export function timerReconciledWithWork(operation: Extract<OfflineOperation, { kind: "timer" | "completion" }>, work?: AssignmentWork): boolean {
   if (operation.status !== "applied" || !work || work.id !== operation.scope.workId || !("offlineTimerRead" in work)) return false;
   const read = z.object({ scope: canonicalIntentionScopeSchema, appliedOperationIds: z.array(z.string()) }).safeParse(work.offlineTimerRead);
   return read.success && sameIntentionScope(operation.scope, read.data.scope) && read.data.appliedOperationIds.includes(operation.id);
@@ -69,9 +69,36 @@ function assertSafeDependency(operation: OfflineOperation, operations: readonly 
   assertSafeDependency(parent, operations, visited);
 }
 
-export function prepareQueuedIntention(state: OfflineState, input: Extract<OfflineOperation, { kind: "timer" | "checklist" }>, user: User, branchId: number): OfflineOperation {
+export function prepareQueuedIntention(state: OfflineState, input: Extract<OfflineOperation, { kind: "timer" | "checklist" | "completion" }>, user: User, branchId: number): OfflineOperation {
   const scope = canonicalIntentionScopeSchema.parse(input.scope);
+  const readIds = state.cache.find(entry => entry.key === `assignments:${scope.startDate}`)?.timerReadOperationIds ?? [];
+  const completion = state.operations.find(entry => entry.kind === "completion" && sameIntentionScope(entry.scope, scope)
+    && !(entry.status === "applied" && readIds.includes(entry.id)));
+  if (completion?.kind === "completion") {
+    if (input.kind === "completion" && JSON.stringify(completion.payload.input) === JSON.stringify(syncCompletionInputSchema.parse(input.payload.input))) return completion;
+    throw new OfflineUnavailableError("OFFLINE_COMPLETION_ALREADY_QUEUED");
+  }
   const work = executableWork(state, scope, user, branchId);
+  if (input.kind === "completion") {
+    const value = syncCompletionInputSchema.parse(input.payload.input);
+    if (value.executionDates && (value.executionDates.length !== 1 || value.executionDates[0] !== scope.startDate)) throw new OfflineUnavailableError("OFFLINE_COMPLETION_INVALID_DATES");
+    const cached = state.cache.find(entry => entry.key === `assignments:${scope.startDate}`)!;
+    const data = cachedAssignmentsSchema.parse(JSON.parse(cached.json));
+    if (value.isManual && (!data.technician.allowEditExecutionTime || executionDuration(value) === null)) throw new OfflineUnavailableError("OFFLINE_COMPLETION_MANUAL_FORBIDDEN");
+    if (!value.isManual && (value.executionStartTime !== undefined || value.executionEndTime !== undefined)) throw new OfflineUnavailableError("OFFLINE_COMPLETION_INVALID_INPUT");
+    const prerequisites = state.operations.filter(entry => entry.kind !== "create" && entry.scope.companyBranchId === branchId && entry.scope.groupId === scope.groupId
+      && (entry.scope.workId === scope.workId || entry.scope.workId === undefined));
+    for (const operation of prerequisites) assertSafeDependency(operation, state.operations);
+    const timer = prerequisites.filter((entry): entry is Extract<OfflineOperation, { kind: "timer" }> => entry.kind === "timer" && sameIntentionScope(entry.scope, scope)).at(-1);
+    const reconciled = timer?.status === "applied" && cached.timerReadOperationIds?.includes(timer.id) === true;
+    const baseStatus = timer && !reconciled ? timer.payload.status : work.status;
+    if (baseStatus === "completed" || baseStatus === "delivered") throw new OfflineUnavailableError("OFFLINE_WORK_NOT_EXECUTABLE");
+    const seconds = timer && !reconciled ? localTimerElapsedSeconds(timer, input.createdAt) ?? work.elapsedSeconds : executionElapsedSeconds(work, data.generatedAt, input.createdAt);
+    return { ...input, scope, prerequisiteIds: prerequisites.filter(entry => entry.status !== "applied").map(entry => entry.id),
+      localClock: { elapsedSeconds: value.isManual ? (executionDuration(value) ?? 0) * 60 : seconds },
+      payload: { input: value, recordedAt: new Date(input.createdAt).toISOString(), observedAt: data.generatedAt, baseStatus,
+        ...(timer?.payload.recordedAt && !reconciled ? { previousTimerOperationId: timer.id } : {}) } };
+  }
   if (input.kind === "timer") {
     const payload = timerPayloadSchema.parse(input.payload);
     const timers = state.operations.filter((entry): entry is Extract<OfflineOperation, { kind: "timer" }> => entry.kind === "timer" && sameIntentionScope(entry.scope, scope));

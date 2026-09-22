@@ -33,9 +33,11 @@ export interface DurableStore {
   namespaces(): Promise<string[]>;
 }
 export interface DurableFileStore {
+  storageUsage?(): Promise<import("../domain/offline").OfflineStorageUsage>;
   // Null means the local source is unavailable; readable sources must return a SHA-256 of their bytes without reserving storage.
   fingerprint?(photo: LocalPhoto): Promise<Pick<OfflineFile, "size" | "sha256"> | null>;
   own(namespace: string, photo: LocalPhoto): Promise<OfflineFile>;
+  ownText?(namespace: string, text: string, name: string): Promise<OfflineFile>;
   resolveURI(file: OfflineFile): Promise<string>;
   remove(file: OfflineFile): Promise<void>;
   releaseURLs(): void;

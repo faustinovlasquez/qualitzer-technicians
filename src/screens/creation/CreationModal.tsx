@@ -24,6 +24,6 @@ const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: "center", alignItems: "center", padding: 16, backgroundColor: "rgba(18,44,58,0.6)" },
   panel: { width: "100%", maxWidth: 560, maxHeight: "92%", backgroundColor: palette.surface, borderRadius: radius.lg, overflow: "hidden", flexShrink: 1 },
   header: { flexDirection: "row", alignItems: "center", padding: 16, borderBottomWidth: 1, borderColor: palette.border, gap: 8 },
-  title: { ...typography.heading, color: palette.text, flex: 1 },
+  title: { ...typography.heading, color: palette.text, flex: 1, minWidth: 0, flexShrink: 1 },
   content: { padding: 16, gap: 12 },
 });

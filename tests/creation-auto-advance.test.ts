@@ -160,12 +160,12 @@ test("queued screen follows confirmed operation without auto-navigation or resub
   fixture.props.offline = snapshot(); fixture.render();
   const previous = JSON.stringify(fixture.props.offline);
   fixture.props.offline = snapshot("applied"); fixture.render(); await settle();
-  assert.ok(action(fixture.render(), "Ver en mi agenda"));
+  assert.ok(action(fixture.render(), "Gestionar trabajo"));
   assert.equal(fixture.created.length + fixture.queued.length + fixture.submitted.length, 0);
   const store = fixture.drafts.openCreationDraftStore(fixture.key(), "work", 1);
   assert.equal((await store.read())?.phase, "confirmed");
   assert.equal(JSON.stringify(snapshot()), previous);
-  action(fixture.render(), "Ver en mi agenda").onPress(); await settle();
+  action(fixture.render(), "Gestionar trabajo").onPress(); await settle();
   assert.deepEqual(fixture.created, [result]);
   assert.equal(fixture.submitted.length, 0);
 });
@@ -221,7 +221,7 @@ test("header back traverses creation steps while list exit retains the draft gua
 });
 
 for (const phase of ["queued", "confirmed"] as const) {
-  const label = phase === "queued" ? "Ver trabajo local" : "Ver en mi agenda";
+  const label = phase === "queued" ? "Ver trabajo local" : "Gestionar trabajo";
   const complete = (f: Awaited<ReturnType<typeof creationFixture>>): void => {
     if (phase === "queued") f.submit.reject(new OfflineQueuedError(outcome));
     else f.submit.resolve(result);

@@ -8,7 +8,7 @@
       const source = ts.createSourceFile(file, fs.readFileSync(path.join(root,file),"utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
       const fields = [];
       const visit = node => { if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source)==="TimeField") fields.push(node); ts.forEachChild(node,visit); };
-      visit(source); assert.equal(fields.length,2);
+      visit(source); assert.equal(fields.length,file.endsWith("CompletionDialog.tsx") ? 3 : 2);
       for(const [label,value,change] of expected) {
         const field=fields.find(node=>node.attributes.properties.some(prop=>ts.isJsxAttribute(prop)&&prop.name.getText(source)==="label"&&(ts.isStringLiteral(prop.initializer)?prop.initializer.text===label:ts.isJsxExpression(prop.initializer)&&ts.isConditionalExpression(prop.initializer.expression)&&prop.initializer.expression.whenTrue.text===label)));
         assert.ok(field,label);
@@ -274,6 +274,11 @@
       });
       for (const screen of ["offline-clock", "offline-clock-maintenance"]) await check(label+"-"+screen,async()=>{
         await fresh(screen,scale);
+        const storageLabel = page.getByTestId("offline-storage-summary");
+        await storageLabel.waitFor();
+        assert.match(await storageLabel.textContent(), /800.0 MiB usados.*8.0 GiB disponibles/);
+        const storageBox = await storageLabel.boundingBox();
+        assert.ok(storageBox && storageBox.x >= 0 && storageBox.x + storageBox.width <= width + 1);
         const saved=await page.evaluate(()=>window.timeSync.state());
         await button("Iniciar trabajo").waitFor();await button("Iniciar trabajo").click();await button("Pausar trabajo").waitFor();
         await page.clock.runFor(5100);await settle();
@@ -298,11 +303,60 @@
         assert.deepEqual(queued.cache,saved.cache);
         await button("Reconectar prueba").click();await settle();
         await page.waitForFunction(()=>window.timeSync.metrics().snapshot.operations.every(operation=>operation.status==="applied"));
+        assert.equal(await page.getByTestId("offline-storage-summary").count(), 0);
         await page.getByLabel("Tiempo de ejecución: 00:12:07",{exact:true}).waitFor();
         const sent=(await metrics()).sent;assert.equal(sent.filter(command=>command.kind==="timer").length,4);
         assert.equal(sent.filter(command=>command.kind==="comment").length,1);
         await button("Reconectar prueba").click();await settle();assert.equal((await metrics()).sent.length,5);
         await screenshot(label+"-"+screen+"-confirmed");
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      });
+      for (const screen of ["offline-clock-completion", "offline-clock-completion-maintenance", "offline-clock-completion-manual", "offline-clock-completion-maintenance-manual"]) await check(label+"-"+screen,async()=>{
+        await fresh(screen,scale);
+        await button("Reporte técnico").click();
+        await page.getByRole("textbox",{name:"Nota del reporte (obligatoria)",exact:true}).fill("Trabajo realizado sin red");
+        await button("Guardar reporte").click();await page.getByText("Reporte guardado · pendiente de sincronizar",{exact:true}).waitFor();
+        assert.equal(await button("Guardar reporte").isDisabled(),true);
+        await button("Iniciar trabajo").click();await button("Pausar trabajo").waitFor();await page.clock.runFor(5100);await settle();
+        await button("Pausar trabajo").click();await button("Reanudar trabajo").waitFor();await page.clock.runFor(3000);
+        await button("Reanudar trabajo").click();await button("Pausar trabajo").waitFor();await page.clock.runFor(2100);await settle();
+        await button("Entregar trabajo").click();await button("Guardar entrega").waitFor();
+        assert.equal(await button("Guardar entrega").isEnabled(),true);
+        if (screen.endsWith("-manual")) {
+          await page.getByRole("checkbox", {name:"Editar horas de ejecución manualmente",exact:true}).click();
+          await trigger("Horas trabajadas").click();
+          await page.getByRole("radio", {name:"1 h",exact:true}).click(); await button("Confirmar selección").click();
+          await trigger("Minutos trabajados").click();
+          await button("Elegir cero").click(); await button("Confirmar selección").click();
+          assert.equal(await button("Guardar entrega").isEnabled(),true);
+        }
+        await screenshot(label+"-"+screen+"-review");await button("Guardar entrega").click();
+        await page.getByText("Entrega guardada en este dispositivo · pendiente de sincronización.",{exact:true}).waitFor();
+        const state=await page.evaluate(()=>window.timeSync.state());
+        const closures=state.operations.filter(operation=>operation.kind==="completion");assert.equal(closures.length,1);
+        if (screen.endsWith("-manual")) {
+          assert.equal(closures[0].localClock.elapsedSeconds, 3600);
+          const firstStart = state.operations.find(operation=>operation.kind==="timer" && operation.payload.status==="in_progress");
+          assert.ok(firstStart?.payload.recordedAt);
+          assert.equal(closures[0].payload.input.executionStartTime, new Intl.DateTimeFormat("en-GB",{timeZone:"America/Santiago",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date(firstStart.payload.recordedAt)));
+        }
+        assert.equal(state.operations.filter(operation=>operation.kind==="timer").length,3);
+        await page.getByText("Entregado local · pendiente",{exact:true}).first().waitFor();
+        const frozen=await page.getByLabel(/^Tiempo de ejecución:/).textContent();
+        await page.clock.runFor(5000);await settle();assert.equal(await page.getByLabel(/^Tiempo de ejecución:/).textContent(),frozen);
+        await page.evaluate(()=>window.timeSync.restartTimer());await page.getByText("Entrega guardada en este dispositivo · pendiente de sincronización.",{exact:true}).waitFor();
+        assert.equal(await page.getByLabel(/^Tiempo de ejecución:/).textContent(),frozen);
+        assert.equal(await button("Iniciar trabajo").count()+await button("Reanudar trabajo").count()+await button("Pausar trabajo").count(),0);
+        assert.equal((await metrics()).sent.length,0);
+        await button("Ver listado de prueba").click();
+        await page.getByText("Entregado local · pendiente",{exact:true}).waitFor();
+        await button("Ver ficha de prueba").click();
+        await screenshot(label+"-"+screen+"-queued");
+        await button("Reconectar prueba").click();await page.waitForFunction(()=>window.timeSync.metrics().snapshot.operations.every(operation=>operation.status==="applied"));await settle();
+        assert.equal((await metrics()).sent.filter(command=>command.kind==="completion").length,1);
+        assert.equal((await metrics()).sent.filter(command=>command.kind==="comment").length,screen.includes("maintenance")?1:2);
+        assert.equal(await page.getByLabel(/^Tiempo de ejecución:/).textContent(),frozen);
+        await button("Reconectar prueba").click();await settle();assert.equal((await metrics()).sent.filter(command=>command.kind==="completion").length,1);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       });
       await check(label+"-blocked-stays-blocked",async()=>{

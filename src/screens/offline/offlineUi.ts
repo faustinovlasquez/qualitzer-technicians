@@ -13,6 +13,34 @@ export type PendingAnswer = Extract<OfflineOperation, { kind: "answer" }>;
 export type PendingDocument = Extract<OfflineOperation, { kind: "document" }>;
 export type PendingTimer = Extract<OfflineOperation, { kind: "timer" }>;
 export type PendingChecklist = Extract<OfflineOperation, { kind: "checklist" }>;
+export type PendingCompletion = Extract<OfflineOperation, { kind: "completion" }>;
+
+export function completionStatusLabel(completion: PendingCompletion): string {
+  if (["conflict", "blocked", "needs_review", "auth_required"].includes(completion.status)) return "Entrega por revisar";
+  const status = completion.payload.input.status === "delivered" ? "Entregado" : "Completado";
+  return completion.status === "applied" ? `${status} · actualizando` : `${status} local · pendiente`;
+}
+
+export function completionForWork(operations: readonly OfflineOperation[], work: AssignmentWork): PendingCompletion | undefined {
+  return operations.find((operation): operation is PendingCompletion => operation.kind === "completion"
+    && !timerReconciledWithWork(operation, work)
+    && !(operation.status === "applied" && work.status === operation.payload.input.status));
+}
+
+export function locallySavedWork(work: AssignmentWork, operations: readonly OfflineOperation[]): AssignmentWork {
+  return { ...work, checklists: work.checklists.map(list => ({ ...list, steps: list.steps.map(step => {
+    const answer = operations.filter((operation): operation is PendingAnswer => operation.kind === "answer" && String(operation.stepId) === String(step.stepId)
+      && ["pending", "syncing", "applied"].includes(operation.status)).at(-1);
+    const saved = answer?.answer;
+    const value = saved ? "executionStatus" in saved ? saved.responseValue : syncResponseForStep(step, saved) : undefined;
+    const documents = operations.filter((operation): operation is PendingDocument => operation.kind === "document" && operation.stepId === String(step.stepId)
+      && ["pending", "syncing", "applied"].includes(operation.status));
+    return { ...step, ...(saved ? { isCompleted: saved.isCompleted, comment: saved.comment ?? "",
+      responseValue: typeof value === "string" ? value : step.responseValue,
+      selectValue: typeof value === "string" ? value : step.selectValue, optionsSelectValue: Array.isArray(value) ? value : step.optionsSelectValue } : {}),
+      attachments: [...step.attachments.filter(isConfirmedAttachment), ...documents.map(pendingDocumentAttachment)] };
+  }) })) };
+}
 export interface QueuedTimerMarker { operationId: string; status: "in_progress" | "paused"; }
 export const PENDING_TIMER_LABEL = "Guardando…";
 export function timerPendingLabel(timer: PendingTimer | null): string {
@@ -137,6 +165,7 @@ export function operationTitle(operation: OfflineOperation): string {
   if (operation.kind === "answer") return "Respuesta de checklist";
   if (operation.kind === "timer") return operation.payload.status === "paused" ? "Pausar trabajo" : "Iniciar o reanudar trabajo";
   if (operation.kind === "checklist") return `Asociar checklist · ${operation.payload.checklistId}`;
+  if (operation.kind === "completion") return operation.payload.input.status === "delivered" ? "Entregar trabajo" : "Terminar trabajo";
   const input = operation.input;
   return input.kind === "work" ? `Crear trabajo · ${input.work.title}` : input.kind === "maintenance" ? `Crear mantenimiento · ${input.maintenance.title}` : "Registrar tiempo no productivo";
 }
@@ -163,6 +192,11 @@ export interface OperationDependencyInfo {
   parent?: OfflineOperation;
 }
 export function dependencyInfo(operation: OfflineOperation, operations: readonly OfflineOperation[] | ReadonlyMap<string, OfflineOperation>): OperationDependencyInfo {
+  if (operation.kind === "completion" && operation.status !== "applied") {
+    const items = [...operations.values()];
+    const id = operation.prerequisiteIds.find(id => items.find(item => item.id === id)?.status !== "applied");
+    if (id) return dependencyInfo({ ...operation, kind: "comment", text: "", dependencyId: id }, operations);
+  }
   if (!operation.dependencyId || operation.status === "applied") return { status: "ready", title: "", reason: "" };
   const parent = "get" in operations ? operations.get(operation.dependencyId) : operations.find((entry) => entry.id === operation.dependencyId);
   if (!parent) return { status: "missing", title: "Esperando operación anterior", reason: "No se encontró la operación anterior en esta cola. Los cambios siguen guardados; requieren revisión." };

@@ -11,6 +11,7 @@ import type { LocalPhoto } from "../../domain/models";
 import type { DurableFileStore, DurableStore } from "../contracts";
 import { updateState, validateQuota } from "../state";
 import { MemoryStore, uuid } from "./fakes";
+import { storageCapacity } from "../storageCapacity";
 
 const photo: LocalPhoto = { id: "persisted-draft", name: "proof.png", mimeType: "image/png", uri: "file:///sandbox/proof.png", size: 3 };
 const bytes = new Uint8Array([1, 2, 3]);
@@ -29,6 +30,9 @@ function adapter(platform: "native" | "web", source?: { bytes: Uint8Array | null
     get exists(): boolean { return source?.bytes !== null; }
     get size(): number { return source?.bytes?.length ?? 0; }
     async bytes(): Promise<Uint8Array> { if (source?.error) throw source.error; return source?.bytes ?? new Uint8Array(); }
+    create(): void { if (source) source.bytes = new Uint8Array(); }
+    write(text: string): void { if (source) source.bytes = new TextEncoder().encode(text); }
+    delete(): void { if (source) source.bytes = null; }
   }
   const code = ts.transpileModule(readFileSync(resolve(__dirname, platform === "native" ? "../FileStore.ts" : "../FileStore.web.ts"), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -36,10 +40,11 @@ function adapter(platform: "native" | "web", source?: { bytes: Uint8Array | null
   runInNewContext(code, {
     module, exports, Uint8Array, Blob, URL, TypeError, fetch,
     require: (id: string): unknown => {
-      if (id === "expo-crypto") return { CryptoDigestAlgorithm: { SHA256: "SHA-256" }, digest: async (_algorithm: string, data: Uint8Array | ArrayBuffer) => Uint8Array.from(createHash("sha256").update(data instanceof Uint8Array ? data : new Uint8Array(data)).digest()).buffer };
-      if (id === "expo-file-system") return { File: SourceFile, Directory: class {}, Paths: { document: "file:///sandbox" } };
+      if (id === "expo-crypto") return { randomUUID: () => uuid(42), CryptoDigestAlgorithm: { SHA256: "SHA-256" }, digest: async (_algorithm: string, data: Uint8Array | ArrayBuffer) => Uint8Array.from(createHash("sha256").update(data instanceof Uint8Array ? data : new Uint8Array(data)).digest()).buffer };
+      if (id === "expo-file-system") return { File: SourceFile, Directory: class {}, Paths: { document: "file:///sandbox", cache: "file:///sandbox/cache" } };
       if (id === "../domain/offline") return { OfflineUnavailableError };
       if (id === "./state") return { validateQuota };
+      if (id === "./storageCapacity") return { storageCapacity };
       if (id === "./indexedDatabase.web") return { openOfflineDatabase: () => { throw new Error("FINGERPRINT_MUST_NOT_OPEN_DATABASE"); } };
       throw new Error(`UNEXPECTED_ADAPTER_IMPORT:${id}`);
     },
@@ -130,6 +135,7 @@ test("web owned URI rechecks persisted ownership and fresh bytes despite a cache
       if (id === "expo-crypto") return { CryptoDigestAlgorithm: { SHA256: "SHA-256" }, digest: async (_algorithm: string, data: ArrayBuffer) => Uint8Array.from(createHash("sha256").update(new Uint8Array(data)).digest()).buffer };
       if (id === "../domain/offline") return { OfflineUnavailableError };
       if (id === "./state") return { validateQuota };
+      if (id === "./storageCapacity") return { storageCapacity };
       if (id === "./indexedDatabase.web") return {
         openOfflineDatabase: async () => ({ transaction: () => new ReadTransaction() }),
         transactionComplete: (tx: ReadTransaction) => tx.completed,
@@ -156,4 +162,24 @@ test("web owned URI rechecks persisted ownership and fresh bytes despite a cache
     stored = undefined;
     await assert.rejects(store.resolveURI(file), /OFFLINE_INVALID_BLOB/);
   } finally { store.releaseURLs(); }
+});
+
+for (const platform of ["native", "web"] as const) test(`${platform} report text delegates to durable ownership and cleans only its temporary source`, async () => {
+  const source = { bytes: null as Uint8Array | null };
+  const store = adapter(platform, source);
+  const text = "Revision completada\nConservar observaciones";
+  let incoming: LocalPhoto | undefined;
+  const saved = { id: uuid(43), namespace: "a", name: "reporte.txt", size: new TextEncoder().encode(text).length, sha256: "a".repeat(64), mimeType: "text/plain" };
+  store.own = async (namespace, photo) => {
+    incoming = photo; assert.equal(namespace, "a"); assert.ok(photo.id);
+    const actual = platform === "native" ? new TextDecoder().decode(source.bytes!) : await (await fetch(photo.uri)).text();
+    assert.equal(actual, text); return saved;
+  };
+  assert.deepEqual(await store.ownText!("a", text, saved.name), saved);
+  assert.ok(incoming);
+  if (platform === "native") assert.equal(source.bytes, null);
+  else await assert.rejects(fetch(incoming.uri));
+  store.own = async () => { throw new Error("STORAGE_FAILED"); };
+  await assert.rejects(store.ownText!("a", text, saved.name), /STORAGE_FAILED/);
+  if (platform === "native") assert.equal(source.bytes, null);
 });

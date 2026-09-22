@@ -7,10 +7,23 @@ import type { Upstream } from "../upstream";
 import { emptySchema, resourceParamsSchema } from "../validation";
 import { AssignmentAuthorization } from "./authorization";
 import type { UploadConcurrency } from "./routes";
+import { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } from "../../src/domain/equipmentLocation";
 
 export function registerWorkActions(router: Router, upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency): void {
   const authorization = new AssignmentAuthorization(upstream);
   const base = "/:groupId/works/:workId";
+  router.get(`${base}/equipment-location/:target`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const target = equipmentLocationTargetSchema.parse(req.params.target);
+    const { scope, query, prefix } = await owned(req, false);
+    res.json(parseUpstream(equipmentLocationSchema, await upstream.request(`${prefix}/equipment-location/${target}`, { token: scope.token, query })));
+  });
+  router.patch(`${base}/equipment-location/:target`, async (req, res) => {
+    const target = equipmentLocationTargetSchema.parse(req.params.target);
+    const input = equipmentLocationUpdateSchema.parse(req.body);
+    const { scope, query, prefix } = await owned(req, false);
+    res.json(parseUpstream(equipmentLocationSchema, await upstream.request(`${prefix}/equipment-location/${target}`, { token: scope.token, query, method: "PATCH", json: input })));
+  });
   async function owned(req: Request, mutation: boolean) {
     const scope = await authorization.work(req, mutation);
     const query = new URLSearchParams({ startDate: scope.range.startDate, endDate: scope.range.endDate, companyBranchId: String(scope.range.companyBranchId), groupType: scope.group.type });

@@ -1,10 +1,14 @@
 import { z } from "zod";
 import type { ChecklistStep, StepAnswer } from "./models";
 import { checklistStepOptions } from "./checklistProgress";
+import { workedDatesAllowed } from "./workExecution";
 
 export const syncOperationIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i).transform((value) => value.toLowerCase());
 export const syncPositiveIdSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const syncResourceIdSchema = z.union([syncPositiveIdSchema, z.string().regex(/^[1-9]\d*$/).transform(Number).pipe(syncPositiveIdSchema)]);
+export const syncCapabilitiesSchema = z.object({ protocolVersion: z.literal(1), companyBranchId: syncPositiveIdSchema,
+  userId: syncPositiveIdSchema, workerId: syncPositiveIdSchema, optionalWorkFields: z.literal(true), recordedTimer: z.literal(true), completion: z.literal(true) }).strict();
+export type SyncCapabilities = z.infer<typeof syncCapabilitiesSchema>;
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
@@ -27,13 +31,27 @@ export const syncTimerPayloadSchema = z.object({
   recordedAt: z.iso.datetime().optional(), observedAt: z.iso.datetime().optional(), previousOperationId: syncOperationIdSchema.optional(),
 }).strict().refine(value => (value.recordedAt === undefined) === (value.observedAt === undefined)
   && (value.previousOperationId === undefined || value.recordedAt !== undefined));
+export const syncCompletionInputSchema = z.object({
+  status: z.enum(["completed", "delivered"]), executionDates: z.array(date).min(1).max(30).refine(values => new Set(values).size === values.length).optional(),
+  workedDates: z.array(date).refine(workedDatesAllowed).optional(), isManual: z.boolean().optional(),
+  executionStartTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(),
+  executionEndTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(), endDateOffset: z.number().int().min(0).max(30).optional(),
+}).strict();
+export const syncCompletionPayloadSchema = z.object({
+  input: syncCompletionInputSchema, recordedAt: z.iso.datetime(), observedAt: z.iso.datetime(),
+  baseStatus: z.enum(["pending", "in_progress", "paused"]), previousTimerOperationId: syncOperationIdSchema.optional(),
+}).strict();
+export type SyncCompletionPayload = z.infer<typeof syncCompletionPayloadSchema>;
 export const syncCommandSchema = z.discriminatedUnion("kind", [
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("comment"), scope: syncScopeSchema, payload: z.object({ text: text(10000).transform((value) => value.trim()).pipe(z.string().min(1)) }).strict() }).strict(),
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("answer"), scope: syncScopeSchema, payload: z.object({ stepId: syncResourceIdSchema, answer: syncAnswerSchema, base: syncAnswerSchema }).strict() }).strict(),
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("timer"), scope: syncScopeSchema, payload: syncTimerPayloadSchema }).strict(),
   z.object({ operationId: syncOperationIdSchema, kind: z.literal("checklist"), scope: syncScopeSchema, payload: z.object({ checklistId: syncPositiveIdSchema }).strict() }).strict(),
+  z.object({ operationId: syncOperationIdSchema, kind: z.literal("completion"), scope: syncScopeSchema, payload: syncCompletionPayloadSchema }).strict(),
 ]).refine((value) => value.kind === "comment" || value.scope.workId !== undefined)
-  .refine(value => value.kind !== "timer" || value.payload.recordedAt === undefined || value.scope.startDate === value.scope.endDate);
+  .refine(value => value.kind !== "timer" || value.payload.recordedAt === undefined || value.scope.startDate === value.scope.endDate)
+  .refine(value => value.kind !== "completion" || value.scope.startDate === value.scope.endDate
+    && (value.payload.input.executionDates === undefined || value.payload.input.executionDates.length === 1 && value.payload.input.executionDates[0] === value.scope.startDate));
 export type SyncCommand = z.output<typeof syncCommandSchema>;
 export const syncDocumentSchema = z.object({ operationId: syncOperationIdSchema, scope: syncScopeSchema, stepId: syncResourceIdSchema.optional(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()
   .refine((value) => value.stepId === undefined || value.scope.workId !== undefined);

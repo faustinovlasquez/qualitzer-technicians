@@ -3,7 +3,7 @@ import { creationInputSchema, creationResultSchema } from "../domain/creation";
 import { OfflineUnavailableError, type OfflineOperation } from "../domain/offline";
 import type { CacheEntry, DurableStore, OfflineState } from "./contracts";
 import { OFFLINE_LIMITS } from "./contracts";
-import { syncAnswerSchema, syncAnswerFromStep, toSyncAnswer } from "../domain/offlineProtocol";
+import { syncAnswerSchema, syncAnswerFromStep, toSyncAnswer, syncCompletionPayloadSchema } from "../domain/offlineProtocol";
 import { answerFromStep } from "../domain/format";
 import { cachedAssignmentsSchema, resourceCacheKey, sameResource } from "./cacheSchemas";
 import { canonicalIntentionScopeSchema, timerPayloadSchema } from "./queueIntentions";
@@ -16,14 +16,16 @@ const scope = z.object({ groupId: z.string(), workId: z.string().optional(), sta
 const workScope = scope.extend({ workId: z.string() });
 const fileSchema = z.object({ id: z.string(), namespace: z.string(), name: z.string(), mimeType: z.string(), size: z.number(), sha256: z.string() });
 export const receiptSchema = z.object({ operationId: z.string(), state: z.enum(["applied", "conflict", "rejected", "needs_review"]), error: z.string().optional(), fileId: z.union([z.string(), z.number()]).optional() });
-const common = z.object({ id: z.string(), createdAt: z.number(), status: z.enum(["pending", "syncing", "applied", "blocked", "auth_required", "needs_review", "conflict"]), attempts: z.number(), nextAttemptAt: z.number(), lastError: z.string().optional(), dependencyId: z.string().optional(), receipt: receiptSchema.optional() });
+const common = z.object({ id: z.string(), createdAt: z.number(), status: z.enum(["pending", "syncing", "applied", "blocked", "auth_required", "needs_review", "conflict"]), attempts: z.number(), nextAttemptAt: z.number(), lastError: z.string().optional(), contractRecoveryVersion: z.literal(1).optional(), dependencyId: z.string().optional(), receipt: receiptSchema.optional() });
 const operation = z.discriminatedUnion("kind", [
   common.extend({ kind: z.literal("create"), input: creationInputSchema, localGroupId: z.string(), localWorkId: z.string(), result: creationResultSchema.optional() }),
   common.extend({ kind: z.literal("comment"), scope: workScope, text: z.string() }),
   common.extend({ kind: z.literal("answer"), scope: workScope, stepId: z.string(), answer, base: answer, wire: z.object({ answer: syncAnswerSchema, base: syncAnswerSchema }).optional() }),
-  common.extend({ kind: z.literal("document"), scope, stepId: z.string().optional(), file: fileSchema, sourceDraftId: z.string().min(1).optional() }),
+  common.extend({ kind: z.literal("document"), scope, stepId: z.string().optional(), file: fileSchema, sourceDraftId: z.string().min(1).optional(), reportText: z.string().min(1).max(10000).optional() }),
   common.extend({ kind: z.literal("timer"), scope: canonicalIntentionScopeSchema, payload: timerPayloadSchema, localClock: z.object({ elapsedSeconds: z.number().finite().nonnegative() }).strict().optional() }),
   common.extend({ kind: z.literal("checklist"), scope: canonicalIntentionScopeSchema, payload: checklistAssignmentInputSchema }),
+  common.extend({ kind: z.literal("completion"), scope: canonicalIntentionScopeSchema, payload: syncCompletionPayloadSchema,
+    prerequisiteIds: z.array(z.string()), localClock: z.object({ elapsedSeconds: z.number().finite().nonnegative() }).strict() }),
 ]);
 const tenant = z.object({ id: z.string(), name: z.string(), portalOrigin: z.string(), environment: z.enum(["development", "production"]), logo: z.string().nullish(), description: z.string().nullish() });
 export const offlineUserSchema = z.object({
@@ -110,7 +112,7 @@ export function putCache(state: OfflineState, entry: CacheEntry): void {
   while (entries.length > OFFLINE_LIMITS.cacheEntries || bytes > OFFLINE_LIMITS.cacheBytes) bytes -= (entries.shift()?.json.length ?? 0) * 2;
   state.cache = entries;
 }
-export function validateQuota(size: number, used: number): void {
+export function validateQuota(size: number, used: number, limit: number = OFFLINE_LIMITS.totalFileBytes): void {
   if (!Number.isSafeInteger(size) || size <= 0 || size > OFFLINE_LIMITS.fileBytes) throw new OfflineUnavailableError("OFFLINE_FILE_LIMIT_25_MIB");
-  if (used + size > OFFLINE_LIMITS.totalFileBytes) throw new OfflineUnavailableError("OFFLINE_STORAGE_FULL");
+  if (!Number.isSafeInteger(used) || used < 0 || !Number.isSafeInteger(limit) || limit < 0 || used + size > limit) throw new OfflineUnavailableError("OFFLINE_STORAGE_FULL");
 }

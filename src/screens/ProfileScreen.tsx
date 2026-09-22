@@ -9,13 +9,16 @@ import type { DeviceSecurityUi } from "../security/DeviceSecurityContext";
 import { DeviceSecurityCard } from "../security/DeviceSecurityCard";
 import type { UserSignatureAccess } from "../domain/userSignatures";
 import { UserSignaturesPanel } from "./signatures/UserSignaturesPanel";
+import { LocationSettingsPanel } from "../location/LocationSettingsPanel";
+import type { LocationTrackingUi } from "../location/useLocationTracking";
 
-export function ProfileScreen({ session, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck }: {
+export function ProfileScreen({ session, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, locationTracking, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck }: {
   session: Session; gatewayUrl: string; busy: boolean; error: string | null; health: Health | null;
   companyBranding: CompanyBrandingUi;
   deviceSecurity?: DeviceSecurityUi;
   onNotificationSettings?: () => void;
   signatureAccess?: UserSignatureAccess;
+  locationTracking?: LocationTrackingUi;
   offline?: OfflineSnapshot | null; offlineVerifiedAt?: number | null; onOffline?: () => void;
   onBranch: (id: number) => void; onLogout: () => void; onCheck: () => void;
 }) {
@@ -41,6 +44,7 @@ export function ProfileScreen({ session, companyBranding, deviceSecurity, onNoti
       <Button title="Configurar mis firmas" icon="create-outline" variant="secondary" disabled={busy} onPress={() => setSignaturesOpen(true)} />
     </Card> : null}
     {deviceSecurity && session.mode === "live" ? <DeviceSecurityCard security={deviceSecurity} disabled={busy} /> : null}
+    {locationTracking && session.mode === "live" ? <LocationSettingsPanel key={`${session.tenant.id}:${session.user.id}:${session.user.workerId}:${session.branchId}`} tracking={locationTracking} disabled={busy} /> : null}
     <Card style={styles.stack}>
       <SectionTitle title="Empresa actual" />
       <Brand tenant={session.tenant} />

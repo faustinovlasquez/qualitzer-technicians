@@ -275,7 +275,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     } catch {
       if (mounted.current) setSaveError(saved.phase === "queued"
         ? "El trabajo sigue guardado en la cola local. No se pudo abrir la ficha; usa Ver trabajo local para reintentar sin crear otro."
-        : "La creación está confirmada. No se pudo abrir la agenda; reintenta sin volver a crear.");
+        : "La creación está confirmada. No se pudo abrir la ficha; reintenta sin volver a crear.");
     }
   }
 
@@ -321,7 +321,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
           <Text style={styles.body}>{confirmedResult.schedule.date} · {confirmedResult.schedule.startTime || "Sin inicio"}–{confirmedResult.schedule.endTime || "Sin fin"}</Text>
           <Text style={styles.body}>{confirmedResult.schedule.plannedMinutes === null ? "Sin duración prevista" : `${confirmedResult.schedule.plannedMinutes} min`} · {confirmedResult.schedule.timezone}</Text>
           <Text style={styles.hint}>La creación ya se confirmó. Abrir o actualizar la agenda no volverá a enviarla.</Text>
-          <Button title="Ver en mi agenda" loading={sending} disabled={busy} onPress={() => void openSaved()} />
+          <Button title={kind === "maintenance" ? "Gestionar mantenimiento" : "Gestionar trabajo"} loading={sending} disabled={busy} onPress={() => void openSaved()} />
           <Button title="Crear otro" variant="secondary" disabled={sending || busy} onPress={() => void editAsNew(true)} />
         </Card> : <>
           <View style={styles.steps} accessibilityLabel={`Paso ${step + 1} de 3: ${steps[step]}`}>

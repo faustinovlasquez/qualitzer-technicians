@@ -227,6 +227,25 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     answer = answer;
     localAssignments = async (): Promise<Assignments> => { calls.localAssignments++; return localGate ? localGate() : structuredClone(data); };
     status = async (): Promise<void> => { calls.statuses++; await statusGate?.(); };
+    createActivity = async () => ({ id: 77 });
+    activities = async () => [];
+    activityFiles = async () => [];
+    uploadActivityFiles = async () => {};
+    deleteActivityFile = async () => {};
+    updateActivity = async () => {};
+    completeActivity = async () => {};
+    deleteActivity = async () => {};
+    reopenWork = async () => {};
+    upload = async () => {};
+    uploadDocuments = async () => {};
+    deleteFile = async () => {};
+    report = async () => {};
+    addComment = async () => {};
+    uploadGroupFiles = async () => {};
+    deleteGroupFile = async () => {};
+    startOrder = async () => {};
+    deliverOrder = async () => {};
+    updateEquipmentLocation = async () => ({ equipmentId: 5 });
     orderDelivery = async (scope: WorkScope, requireFresh?: boolean): Promise<MaintenanceDeliveryContext> => {
       deliveryReads.push({ scope, requireFresh });
       if (!deliveryGate) throw new Error("DELIVERY_READ_NOT_CONFIGURED");
@@ -254,6 +273,7 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     if (id === "../domain/assignmentSchedule") return schedule;
     if (id === "../domain/format") return format;
     if (id === "../domain/creation") return creation;
+    if (id === "../domain/offline") return { isOfflineQueuedError: (error: unknown) => error instanceof Error && error.name === "OfflineQueuedError" };
     if (id === "../domain/workActivities") return workActivities;
     if (id === "../domain/userSignatures") return userSignatures;
     if (id === "../domain/weeklySchedule") return weeklySchedule;

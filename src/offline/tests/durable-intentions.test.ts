@@ -143,6 +143,34 @@ test("concurrent timer deduplication and start-pause-resume are atomic across en
   assert.ok((await f.store.read("a")).operations.every((op) => op.status === "applied"));
 });
 
+test("offline start pause resume and manual delivery retain one ordered chain after restart", async () => {
+  const fixture = await setup();
+  fixture.connect(false);
+  fixture.data.technician.allowEditExecutionTime = true;
+  await updateState(fixture.store, "a", state => {
+    const cached = state.cache.find(entry => entry.key === `assignments:${scope.startDate}`)!;
+    cached.json = JSON.stringify(fixture.data);
+  });
+  const started = await queued(fixture.repository.status(scope, { status: "in_progress" }));
+  fixture.advance(120000);
+  const paused = await queued(fixture.repository.status(scope, { status: "paused" }));
+  fixture.advance(60000);
+  const resumed = await queued(fixture.repository.status(scope, { status: "in_progress" }));
+  fixture.advance(120000);
+  const delivered = await queued(fixture.repository.status(scope, { status: "delivered", isManual: true,
+    executionDates: [scope.startDate], executionStartTime: "08:00", executionEndTime: "09:30", endDateOffset: 0 }));
+  const before = await fixture.store.read("a");
+  const completion = before.operations.find(operation => operation.id === delivered.operationId);
+  assert.ok(completion?.kind === "completion");
+  assert.equal(completion.payload.previousTimerOperationId, resumed.operationId);
+  assert.deepEqual(completion.prerequisiteIds, [started.operationId, paused.operationId, resumed.operationId]);
+  assert.equal(completion.localClock.elapsedSeconds, 5400);
+  fixture.connect(true);
+  await new OfflineEngine(fixture.dependencies).syncNow();
+  assert.deepEqual(fixture.upstream.commands.map(command => command.operationId), [started.operationId, paused.operationId, resumed.operationId, delivered.operationId]);
+  assert.ok((await fixture.store.read("a")).operations.every(operation => operation.status === "applied"));
+});
+
 for (const status of ["conflict", "needs_review", "blocked", "auth_required"] as const) test(`timer ${status} cannot be bypassed by its dependent pause or a new intention`, async () => {
   const f = await setup(); const first = await queued(f.repository.status(scope, { status: "in_progress" }));
   await queued(f.repository.status(scope, { status: "paused" }));
@@ -365,13 +393,12 @@ test("multiple visible works with the same numeric ID in different groups keep s
   assert.ok((await f.store.read("a")).operations.every((operation) => operation.dependencyId === undefined));
 });
 
-test("timer rejects initial pause, pending reset, manual clocks and multi-date input; finalization remains online-only", async () => {
+test("timer rejects initial pause, pending reset, manual clocks and multi-date input", async () => {
   const f = await setup(); f.connect(false);
   await assert.rejects(f.repository.status(scope, { status: "paused" }), /INVALID_TRANSITION/);
   await assert.rejects(f.repository.status(scope, { status: "pending" }), /INVALID_TRANSITION/);
   await assert.rejects(f.repository.status(scope, { status: "in_progress", executionStartTime: "09:00" }), /INVALID_INPUT/);
   await assert.rejects(f.repository.status(scope, { status: "in_progress", executionDates: [scope.startDate, "2026-09-09"] }), /INVALID_INPUT/);
-  await assert.rejects(f.repository.status(scope, { status: "delivered" }), /REQUIRES_CONNECTION/);
   assert.equal((await f.store.read("a")).operations.length, 0);
 });
 
@@ -435,4 +462,115 @@ test("offline timer actions persist their capture time without changing confirme
   assert.equal(localTimerElapsedSeconds(restored[2]!, 211_000), baseline + 150);
   assert.equal(restored[1]!.payload.previousOperationId, restored[0]!.id);
   assert.equal(restored[2]!.payload.previousOperationId, restored[1]!.id);
+});
+
+test("offline completion survives restart without changing the confirmed work or duplicating submission", async () => {
+  const current = await setup(); current.connect(false);
+  const original = await current.store.read("a");
+  const input = { status: "delivered" as const, executionDates: [scope.startDate], workedDates: ["2026-09-01", scope.startDate], isManual: false };
+  const first = await queued(current.repository.status(scope, input));
+  const restarted = new OfflineTechnicianRepository(current.remote, current.session, current.dependencies);
+  const second = await queued(restarted.status(scope, input));
+  assert.equal(second.operationId, first.operationId);
+  const saved = decodeState(JSON.stringify(await current.store.read("a")));
+  assert.equal(saved.operations.filter(operation => operation.id === first.operationId).length, 1);
+  assert.deepEqual(saved.cache, original.cache);
+  assert.equal(current.upstream.commands.length, 0);
+});
+
+test("completion waits for every queued prerequisite and keeps the same receipt on retry", async () => {
+  const current = await setup(); current.connect(false);
+  await queued(current.repository.status(scope, { status: "in_progress" }));
+  await queued(current.repository.answer(scope, "9", answer));
+  await queued(current.repository.uploadDocuments(scope, [photo]));
+  await queued(current.repository.addComment(scope, "Preservar nota"));
+  const finished = await queued(current.repository.status(scope, { status: "completed", executionDates: [scope.startDate] }));
+  const saved = await current.store.read("a");
+  const closure = saved.operations.find(operation => operation.id === finished.operationId);
+  assert.ok(closure?.kind === "completion");
+  assert.equal(closure.prerequisiteIds.length, 4);
+  current.connect(true); await current.repository.syncNow();
+  assert.equal(current.upstream.commands.at(-1)?.kind, "completion");
+  assert.equal(current.upstream.documents.length, 1);
+  assert.equal((await current.store.read("a")).operations.find(operation => operation.id === finished.operationId)?.status, "applied");
+  await current.repository.status(scope, { status: "completed", executionDates: [scope.startDate] });
+  assert.equal(current.upstream.commands.filter(command => command.kind === "completion").length, 1);
+});
+
+test("completion never passes a conflicting prerequisite and preserves its frozen time", async () => {
+  const current = await setup();
+  const timer = await queued(current.repository.status(scope, { status: "in_progress" }));
+  current.advance(120_000);
+  const closure = await queued(current.repository.status(scope, { status: "delivered" }));
+  await updateState(current.store, "a", state => { state.operations.find(operation => operation.id === timer.operationId)!.status = "conflict"; });
+  await current.repository.syncNow();
+  const saved = (await current.store.read("a")).operations.find(operation => operation.id === closure.operationId);
+  assert.ok(saved?.kind === "completion");
+  assert.equal(saved.status, "pending");
+  assert.equal(saved.localClock.elapsedSeconds, 120);
+  assert.equal(current.upstream.commands.length, 0);
+  await assert.rejects(current.repository.status(scope, { status: "paused" }), /COMPLETION_ALREADY_QUEUED/);
+});
+
+test("completion storage failure does not report acceptance and invalid dates never enter the queue", async () => {
+  const current = await setup(); current.store.failWrites = true;
+  await assert.rejects(current.repository.status(scope, { status: "delivered" }), /DISK_FULL/);
+  assert.equal((await current.store.read("a")).operations.length, 0);
+  current.store.failWrites = false;
+  await assert.rejects(current.repository.status(scope, { status: "delivered", executionDates: ["2026-09-01"] }), /INVALID_DATES/);
+  await assert.rejects(current.repository.status(scope, { status: "delivered", isManual: true, executionStartTime: "08:00", executionEndTime: "09:00" }), /MANUAL_FORBIDDEN/);
+});
+
+test("lost completion response recovers with the same UUID and frozen payload after restart", async () => {
+  const current = await setup();
+  const finish = await queued(current.repository.status(scope, { status: "delivered" }));
+  current.upstream.failAfterApply = true;
+  await current.repository.syncNow();
+  const first = current.upstream.commands.find(command => command.operationId === finish.operationId);
+  assert.ok(first?.kind === "completion");
+  const saved = await current.store.read("a");
+  assert.notEqual(saved.operations[0]?.status, "applied");
+  current.upstream.failAfterApply = false;
+  await updateState(current.store, "a", state => { state.operations[0]!.status = "pending"; state.operations[0]!.nextAttemptAt = 0; });
+  const restarted = new OfflineEngine(current.dependencies);
+  await restarted.syncNow();
+  assert.deepEqual(current.upstream.commands.at(-1), first);
+  assert.equal(current.upstream.receipts.size, 1);
+  assert.equal((await current.store.read("a")).operations[0]?.status, "applied");
+});
+
+test("a fresh reopened work permits a new closure without deleting its earlier receipt", async () => {
+  const current = await setup();
+  const input = { status: "delivered" as const, executionDates: [scope.startDate] };
+  const first = await queued(current.repository.status(scope, input));
+  await current.repository.syncNow();
+  current.data.groups[0]!.works[0]!.status = "paused";
+  await current.repository.assignments(scope, 1);
+  const second = await queued(current.repository.status(scope, input));
+  assert.notEqual(first.operationId, second.operationId);
+  const saved = await current.store.read("a");
+  assert.equal(saved.operations.find(operation => operation.id === first.operationId)?.status, "applied");
+  assert.equal(saved.operations.find(operation => operation.id === second.operationId)?.status, "pending");
+});
+
+test("maintenance report is durable text, reused on retry and sent before completion", async () => {
+  const current = await setup(); current.connect(false);
+  const maintenanceScope = { ...scope, groupId: "maintenance-80" };
+  await updateState(current.store, "a", state => {
+    const data = structuredClone(current.data); data.groups[0]!.id = maintenanceScope.groupId; data.groups[0]!.type = "internal_maintenance";
+    state.cache[0]!.json = JSON.stringify(data);
+  });
+  const first = await queued(current.repository.report(maintenanceScope, "Trabajo realizado y observaciones"));
+  const second = await queued(current.repository.report(maintenanceScope, "Trabajo realizado y observaciones"));
+  assert.equal(first.operationId, second.operationId); assert.equal(current.files.files.size, 1);
+  const closure = await queued(current.repository.status(maintenanceScope, { status: "delivered" }));
+  const state = await current.store.read("a");
+  const pending = state.operations.find(operation => operation.id === closure.operationId);
+  assert.ok(pending?.kind === "completion"); assert.deepEqual(pending.prerequisiteIds, [first.operationId]);
+  const report = state.operations.find(operation => operation.id === first.operationId);
+  assert.ok(report?.kind === "document");
+  assert.equal(new TextDecoder().decode(current.files.contents.get(report.file.id)), "Trabajo realizado y observaciones");
+  current.connect(true); await current.repository.syncNow();
+  assert.equal(current.upstream.documents.length, 1);
+  assert.equal(current.upstream.commands.at(-1)?.kind, "completion");
 });

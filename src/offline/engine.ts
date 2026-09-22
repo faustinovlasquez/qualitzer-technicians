@@ -1,9 +1,9 @@
+import { syncCapabilitiesSchema, syncCommandSchema, syncScopeSchema } from "../domain/offlineProtocol";
 import { creationInputSchema, creationResultSchema } from "../domain/creation";
 import type { LocalPhoto, User, WorkScope } from "../domain/models";
 import { sameTenant } from "../domain/tenantSession";
 import { OfflineUnavailableError, type OfflineCommand, type OfflineConnection, type OfflineOperation, type OfflineReceipt, type OfflineScope, type OfflineSnapshot } from "../domain/offline";
 import { ApiError, NetworkError } from "../infrastructure/errors";
-import { syncScopeSchema } from "../domain/offlineProtocol";
 import { OFFLINE_LIMITS, type EngineDependencies, type OfflineState } from "./contracts";
 import { cloneState, emptyState, hasPendingChanges, pendingOperation, receiptSchema, updateState } from "./state";
 import { resourceCacheKey, sameResource } from "./cacheSchemas";
@@ -60,6 +60,13 @@ export function findDraftDocument(operations: readonly OfflineOperation[], names
     && entry.file.namespace === namespace && entry.sourceDraftId === sourceDraftId && entry.stepId === stepId
     && sameSubmissionScope(entry.scope, scope, operations));
 }
+function recoverableContractRejection(operation: OfflineOperation): boolean {
+  if (operation.status !== "blocked" || operation.lastError !== "INVALID_INPUT" || operation.receipt || operation.contractRecoveryVersion) return false;
+  if (operation.kind === "create") return !operation.result && operation.input.clientRequestId === operation.id && operation.input.kind === "work"
+    && (!operation.input.work.summary || !operation.input.schedule.startTime || !operation.input.schedule.endTime) && creationInputSchema.safeParse(operation.input).success;
+  if (operation.kind !== "completion" && operation.kind !== "timer" && operation.kind !== "checklist") return false;
+  return syncCommandSchema.safeParse({ operationId: operation.id, kind: operation.kind, scope: operation.scope, payload: operation.payload }).success;
+}
 export class OfflineEngine {
   private state: OfflineState = emptyState();
   private connection: OfflineConnection = { status: "checking", networkConnected: null, foreground: true, checkedAt: null };
@@ -83,6 +90,7 @@ export class OfflineEngine {
   private manualRequest?: Promise<void>;
   private lastManualRequestAt?: number;
   private manualRetryGeneration?: number;
+    private compatibilityNextAt = 0;
   constructor(readonly dependencies: EngineDependencies) {}
 
   getSnapshot = (): OfflineSnapshot => this.snapshot;
@@ -111,7 +119,8 @@ export class OfflineEngine {
       this.authBlock = undefined;
       this.authBlockComplete = false;
     }
-    this.publish();
+    const storage = await this.dependencies.fileStore.storageUsage?.().catch(() => undefined);
+    this.publish({ storage });
   }
   setPreparing(preparing: boolean): void { this.publish({ preparing }); }
   setMissingDates(missingDates: string[]): void { this.publish({ missingDates }); }
@@ -206,7 +215,7 @@ export class OfflineEngine {
       registered = [];
       if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
       for (const input of operations) {
-        const operation = input.kind === "timer" || input.kind === "checklist"
+        const operation = input.kind === "timer" || input.kind === "checklist" || input.kind === "completion"
           ? prepareQueuedIntention(state, input, this.dependencies.user, this.dependencies.branchId) : input;
         if (operation.kind === "create") creationInputSchema.parse(operation.input);
         const draft = operation.kind === "document" && operation.sourceDraftId
@@ -376,6 +385,22 @@ export class OfflineEngine {
       if (generation !== this.generation) return;
       await this.revalidate();
       if (generation !== this.generation) return;
+      if (this.state.operations.some(recoverableContractRejection) && this.dependencies.upstream.offlineCapabilities && (manualRetry || now() >= this.compatibilityNextAt)) {
+        this.compatibilityNextAt = now() + 60_000;
+        try {
+          const capabilities = syncCapabilitiesSchema.parse(await this.dependencies.upstream.offlineCapabilities(this.dependencies.branchId));
+          if (capabilities.userId !== this.dependencies.user.id || capabilities.workerId !== this.dependencies.user.workerId || capabilities.companyBranchId !== this.dependencies.branchId) throw new ApiError(401, "OFFLINE_IDENTITY_CHANGED", "La identidad de la sesión cambió.");
+          this.state = await updateState(store, namespace, state => {
+            if (generation !== this.generation || state.authBlocked || state.lease?.owner !== owner || state.lease.until <= now()) return;
+            for (const operation of state.operations) if (recoverableContractRejection(operation)) {
+              operation.status = "pending"; operation.nextAttemptAt = 0; operation.contractRecoveryVersion = 1;
+            }
+          });
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 401) throw error;
+          this.publish({ lastError: "MOBILE_SYNC_ACTIONS_UNAVAILABLE" });
+        }
+      }
       this.probeFailures = 0;
       this.noteConnectionSuccess(generation);
       const skippedKinds = new Set<OfflineOperation["kind"]>();
@@ -507,6 +532,7 @@ export class OfflineEngine {
       if (operation.kind === "comment") command = { ...common, kind: "comment", payload: { text: operation.text } };
       else if (operation.kind === "timer") command = { ...common, kind: "timer", payload: operation.payload };
       else if (operation.kind === "checklist") command = { ...common, kind: "checklist", payload: operation.payload };
+      else if (operation.kind === "completion") command = { ...common, kind: "completion", payload: operation.payload };
       else {
         if (!operation.wire) throw new OfflineUnavailableError("OFFLINE_ANSWER_TYPE_UNKNOWN");
         command = { ...common, kind: "answer", payload: { stepId: operation.stepId, answer: operation.wire.answer, base: operation.wire.base } };

@@ -7,8 +7,13 @@ import type { ChecklistAssignmentPort } from "./checklistAssignment";
 import type { AssignmentReadOptions } from "./assignmentRead";
 import type { WorkActivitiesPort } from "./workActivities";
 import type { UserSignaturesPort } from "./userSignatures";
+import type { LocationPoint } from "./locationTracking";
 
 export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort> {
+  equipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget): Promise<import("./equipmentLocation").EquipmentLocation>;
+  updateEquipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget, input: import("./equipmentLocation").EquipmentLocationUpdate): Promise<import("./equipmentLocation").EquipmentLocation>;
+  uploadLocations?(companyBranchId: number, points: LocationPoint[], expectedActor: { userId: number; workerId: number }): Promise<{ acceptedIds: string[] }>;
+  locationHistory?(companyBranchId: number, date: string, page: number, resource?: import("./locationTracking").LocationHistoryResource): Promise<import("zod").infer<typeof import("./locationTracking").locationHistorySchema>>;
   createRecord(input: CreationInput): Promise<CreationResult>;
   creationOptions(query: CreationOptionsQuery): Promise<CreationOptions>;
   notificationStatus(branch: number): Promise<NotificationStatus>;

@@ -1,6 +1,6 @@
 # Trabajo sin conexión
 
-Estado **10-09-2026**: núcleo offline integrado en [../App.tsx](../App.tsx) y [../src/application/useTechnicianApp.ts](../src/application/useTechnicianApp.ts), incluida jornada/agenda, sucursal, detalles y centro **Sin conexión**. No es una promesa de paridad administrativa ni una validación en teléfonos físicos.
+Estado **21-09-2026, APK 1.0.40 / gateway 1.0.19**: núcleo offline integrado en [../App.tsx](../App.tsx) y [../src/application/useTechnicianApp.ts](../src/application/useTechnicianApp.ts), incluida jornada/agenda, sucursal, detalles y centro **Sin conexión**. La revisión confirma cobertura parcial, no toda la app offline ni validación en teléfono físico.
 
 ## Antes de salir a terreno
 
@@ -23,19 +23,28 @@ La preparación explícita guarda hasta siete snapshots diarios (con los checkli
 | Añadir un comentario nuevo | Cola durable; útil para dejar un mensaje técnico sin usar el reporte legacy |
 | Guardar fotos/documentos de OT, trabajo o paso | Bytes propios persistidos al confirmar **Guardar archivos**; un UUID por archivo |
 | Buscar equipo por número interno | Sólo consultas cacheadas con coincidencia exacta y selección manual; no garantiza disponibilidad actual |
-| Asociar checklist de la empresa | **Sólo online**, sobre trabajo canónico no terminal; no se encola ni se inventa para `local-*` |
-| Iniciar, pausar, reanudar, cronometrar o entregar | **No se encola**; requiere conexión y recurso canónico verificado |
-| Borrar archivos, reporte legacy, firmas/entrega OT y mutaciones de avisos | **Sólo online**; no se convierten silenciosamente en otra operación |
+| Asociar checklist de la empresa | Cola durable sobre trabajo autorizado y catálogo previamente descargado; no se inventan pasos |
+| Iniciar, pausar y reanudar | Cola durable con instantes capturados; contador local separado del confirmado |
+| Terminar o entregar tarea/trabajo, incluido hijo de mantenimiento | Cola durable; detiene tiempo local y espera todas las operaciones previas del destino. Permisos/evidencia se revalidan al sincronizar |
+| Reporte técnico | Cola durable: comentario técnico para trabajo, archivo TXT propio para mantenimiento; borrador conservado antes de guardar |
+| Crear/editar/completar/eliminar actividades y sus archivos | **Pendiente de implementación offline**. Formularios existentes conservan su borrador, pero mutaciones y envío requieren conexión |
+| Iniciar o entregar la OT completa con firmas | **Pendiente de implementación offline**. No equivale a entregar una tarea hija; firmas de entrega aún temporales |
+| Borrar archivos o reabrir trabajo | **Pendiente de implementación offline**; no se encola ni se simula confirmación |
+| Consultar/gestionar firmas de perfil y mutar avisos | **Online**; bandeja previamente cacheada disponible para lectura |
+| Primer inicio de sesión, contraseña, permisos y datos nunca descargados | Requieren servidor. Acceso local sólo con identidad offline ya verificada |
 
-La creación sigue limitada a una fecha/franja del mismo día, sin recurrencia, otros responsables ni creación preventiva/rutinaria/checklist. Un trabajo local no recibe cronómetro, permisos ni checklists inventados. Al sincronizar se resuelven sus IDs canónicos y dependencias sin duplicar la ficha. Más límites en [PLANIFICACION-Y-AVISOS.md](PLANIFICACION-Y-AVISOS.md).
+La creación sigue limitada a una fecha del mismo día, sin recurrencia, otros responsables ni creación preventiva/rutinaria/checklist. En trabajos, descripción y horas son opcionales; mantenimiento/no productivo conservan su validación. Un trabajo local aún no confirmado no recibe cronómetro, permisos ni checklists inventados. Al sincronizar se resuelven sus IDs canónicos y dependencias sin duplicar la ficha. Más límites en [PLANIFICACION-Y-AVISOS.md](PLANIFICACION-Y-AVISOS.md).
 
-**Guardado local no significa confirmado en Qualitzer.** La cola se confirma en almacenamiento antes de intentar la escritura remota, incluso estando online. La UI distingue pendiente de aplicado; respuestas/fotos pendientes no cuentan como evidencia confirmada para entregar. El reporte legacy conserva su contrato online: para un mensaje offline usa **Comentarios**, sin asumir una migración de reportes antiguos.
+**Guardado local no significa confirmado en Qualitzer.** La cola se confirma en almacenamiento antes de intentar la escritura remota, incluso estando online. La entrega puede guardarse localmente con respuestas/fotos ya en cola: captura sus dependencias, no las considera confirmadas. El servidor sólo aplica el cierre después de sus recibos y de comprobar los requisitos vigentes. Los borradores aún sin guardar bloquean el cierre. Conflictos se conservan para revisión, nunca se sobrescribe automáticamente información remota.
+
+La entrega usa un UUID y payload inmutables al reintentar; el tiempo se detiene en la hora capturada, no al recuperar internet. Recibo, auditoría y estado se confirman en la misma transacción Backend. Una lectura fresca después del cierre permite reconciliar la ficha y, si el trabajo se reabre, generar un nuevo cierre independiente sin borrar el anterior. No usar downgrade ni borrar datos para resolver pendientes.
 
 ### Fotos y documentos
 
 - Android/iOS: base SQLite en WAL y archivos propios persistentes. Web: IndexedDB para estado y blobs reales; las URL `blob:` se reconstruyen al abrir.
 - En navegador, **seleccionar una foto antes de pulsar Guardar archivos sigue siendo temporal**. Recargar antes de ese guardado puede perder la selección. Después del commit, la cola es dueña de los bytes.
-- Límites actuales: **25 MiB por archivo**, **4 seleccionados / 40 MiB** en UI y **500 MiB** de archivos offline entre identidades. Si no hay espacio, se rechaza el nuevo guardado sin expulsar pendientes. Caché JSON: 180 entradas / 16 MiB.
+- Límites actuales: **25 MiB por archivo**, **4 seleccionados / 40 MiB** en UI. Android/iOS ya no tienen tope fijo de 500 MiB: pueden guardar hasta el espacio libre que informa el sistema menos una reserva del mayor entre **512 MiB y 5 % del disco**. Se consulta antes de cada copia, que se serializa con las demás copias locales. Si el sistema no informa espacio, se usa el límite precautorio de 500 MiB. Web mantiene esa cuota y su límite real IndexedDB. No se expulsan pendientes. Caché JSON separada: 180 entradas / 16 MiB por perfil.
+- Solo offline, la franja superior y el centro muestran archivos usados/reservados globalmente entre perfiles y espacio adicional estimado. No representan RAM, ni todo el tamaño de la app, ni los bytes de agenda/SQLite/borradores. El disco libre ya descuenta el resto del uso del teléfono. Las copias confirmadas conservadas cuentan también; no hay borrado automático. Un cambio de espacio por otras apps puede hacer fallar una copia y se comunica sin afirmar que quedó guardada.
 - Transporte offline: JPEG/PNG/WebP/GIF, PDF, DOCX/XLSX y TXT/CSV, sujetos a validación de contenido. HEIC debe convertirse antes a JPEG/PNG, conservando los mismos bytes para reintentos; no se admiten SVG/HTML, ejecutables ni ZIP genérico. Validar formato no equivale a antivirus.
 - Los archivos confirmados se vinculan por el `fileId` del recibo, nunca por nombre ni por «último archivo». Se conservan también sus copias locales. Imágenes locales tienen visor; PDF/otros documentos locales nativos aún requieren un visor/compartidor no integrado.
 
@@ -58,13 +67,15 @@ El motor sincroniza automáticamente **con la app en primer plano**, al arrancar
 
 NetInfo no garantiza internet ni disponibilidad del backend. La antigüedad de agenda/caché es información secundaria; no sustituye el estado de conexión. `foreground` se muestra por separado: tener conexión no implica estar sincronizando en segundo plano.
 
-La franja superior muestra dos líneas: conexión y resumen de pendientes/revisiones. Ya no repite el nombre de la sucursal. Pulsarla abre el centro con cobertura, fechas y detalles; la identidad de sucursal no se modifica. La agenda de teléfonos usa tarjetas cronológicas y siete días ajustados al ancho; [AGENDA-MOVIL.md](AGENDA-MOVIL.md) describe el alcance.
+La franja superior muestra conexión y resumen de pendientes/revisiones, más una línea pequeña de almacenamiento únicamente cuando está sin red o sin acceso a Qualitzer. Ya no repite el nombre de la sucursal. Pulsarla abre el centro con cobertura, fechas y detalles; la identidad de sucursal no se modifica. La agenda de teléfonos usa tarjetas cronológicas y siete días ajustados al ancho; [AGENDA-MOVIL.md](AGENDA-MOVIL.md) describe el alcance.
 
 ### Dependencias y esperas
 
 Los comentarios e imágenes de una creación local esperan primero su confirmación y remapeo a IDs canónicos. El centro muestra el trabajo, motivo humano de espera y estado/error de la creación padre; los IDs y JSON quedan en **detalles contraídos**. No confundir varios pendientes dependientes con varios trabajos nuevos.
 
-Sólo `MOBILE_CREATION_SCHEMA_NOT_READY`, `MOBILE_SYNC_SCHEMA_NOT_READY` y `OFFLINE_SYNC_ROUTE_NOT_FOUND` permiten espera automática de despliegue de **al menos 60 segundos**, conservando UUID, payload y bytes. También se recuperan bloqueos/conflictos antiguos de creación sin resultado/recibo cuyo código exacto sea `MOBILE_CREATION_SCHEMA_NOT_READY`, incluidos los antiguos 409 de ese caso. **No se reinician** conflictos 409 genéricos, rechazos, revisiones con recibo ni colisiones de operación. La única recuperación adicional de una revisión local es el caso específico de documento descrito abajo. El reintento no crea tablas ni despliega rutas: el servidor debe estar preparado.
+`MOBILE_CREATION_SCHEMA_NOT_READY`, `MOBILE_SYNC_SCHEMA_NOT_READY`, `MOBILE_SYNC_ACTIONS_UNAVAILABLE` y `OFFLINE_SYNC_ROUTE_NOT_FOUND` permiten espera automática de despliegue de **al menos 60 segundos**, conservando UUID, payload y bytes. También se recuperan bloqueos/conflictos antiguos de creación sin resultado/recibo cuyo código exacto sea `MOBILE_CREATION_SCHEMA_NOT_READY`, incluidos los antiguos 409 de ese caso. **No se reinician** conflictos 409 genéricos, rechazos con recibo, revisiones con recibo ni colisiones de operación. El reintento no crea tablas ni despliega rutas: el servidor debe estar preparado.
+
+Desde 1.0.40, `INVALID_INPUT` HTTP 400 de una entrega localmente válida se conserva en espera de compatibilidad, igual que timer/checklist. Para un trabajo con descripción u horas vacías sucede lo mismo. Un recibo backend válido de rechazo tiene prioridad y no se transforma en espera. Los bloqueados anteriores con ese código, sin recibo/resultado, se recuperan una sola vez tras GET capabilities del gateway 1.0.18 y coincidencia exacta de actor/sucursal; marcador durable `contractRecoveryVersion: 1`. Se mantiene la solicitud original y todas sus dependencias. Si falta capacidad, no se reenvía. El mensaje no demuestra por sí solo cuál versión ejecuta el servidor: comprobar instalación y proceso reales.
 
 ### Recuperación del error de archivo mostrado
 

@@ -138,6 +138,13 @@ export class DemoTechnicianRepository implements TechnicianRepository {
     if (input.scope.workId === undefined) return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_COMMENT_WORK_REQUIRED" };
     const scope = { ...input.scope, workId: String(input.scope.workId) };
     if (input.kind === "comment") { await this.addComment(scope, input.payload.text); return; }
+    if (input.kind === "completion") {
+      const { work } = this.find(scope);
+      if (work.status !== input.payload.baseStatus) return { operationId: input.operationId, state: "conflict", error: "MOBILE_SYNC_STATUS_CONFLICT" };
+      await this.status(scope, input.payload.input);
+      work.workedDates = input.payload.input.workedDates;
+      return;
+    }
     if (input.kind === "timer" || input.kind === "checklist") {
       const { work } = this.find(scope);
       if (!work.canExecute || work.status === "completed" || work.status === "delivered") return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_ACTOR_NOT_AUTHORIZED" };

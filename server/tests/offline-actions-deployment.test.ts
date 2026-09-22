@@ -18,6 +18,16 @@ const legacy = [
 ];
 const upstreamPath = "/api/mobile-sync/commands";
 const deploymentCode = "MOBILE_SYNC_ACTIONS_UNAVAILABLE";
+test("gateway capabilities are authenticated and branch-scoped without writes", async t => {
+  const { state, baseUrl } = await harness(t);
+  const result = await jsonRequest(baseUrl, "/api/offline/capabilities?companyBranchId=1");
+  assert.equal(result.response.status, 200);
+  assert.equal(result.response.headers.get("cache-control"), "no-store");
+  assert.ok(result.data && typeof result.data === "object" && "protocolVersion" in result.data && result.data.protocolVersion === 1);
+  assert.equal((await jsonRequest(baseUrl, "/api/offline/capabilities?companyBranchId=999")).response.status, 403);
+  assert.equal((await jsonRequest(baseUrl, "/api/offline/capabilities?companyBranchId=1&userId=999")).response.status, 400);
+  assert.equal(writeCalls(state).length, 0);
+});
 
 test("legacy comment/answer-only gateway schema emits the actual INVALID_INPUT middleware code", async (t) => {
   const legacySchema = z.discriminatedUnion("kind", [syncCommandSchema.options[0], syncCommandSchema.options[1]]);

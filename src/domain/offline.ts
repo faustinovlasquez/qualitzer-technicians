@@ -1,8 +1,8 @@
 import type { CreationInput, CreationResult } from "./creation";
-import type { SyncStepAnswer } from "./offlineProtocol";
+import type { SyncStepAnswer, SyncCompletionPayload } from "./offlineProtocol";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, DateRange, GroupScope, LocalPhoto, StepAnswer, User, WorkScope } from "./models";
 
-export type OfflineOperationKind = "create" | "comment" | "answer" | "document" | "timer" | "checklist";
+export type OfflineOperationKind = "create" | "comment" | "answer" | "document" | "timer" | "checklist" | "completion";
 export type OfflineDeploymentCounts = { [Kind in OfflineOperationKind]: number };
 export type OfflineOperationStatus = "pending" | "syncing" | "applied" | "blocked" | "auth_required" | "needs_review" | "conflict";
 export type OfflineScope = GroupScope & { workId?: string };
@@ -23,6 +23,7 @@ export type OfflineCommand = {
   | { kind: "answer"; payload: { stepId: string; answer: OfflineAnswer; base: OfflineAnswer } }
   | { kind: "timer"; payload: OfflineTimerPayload }
   | { kind: "checklist"; payload: OfflineChecklistPayload }
+  | { kind: "completion"; payload: SyncCompletionPayload }
 );
 export interface OfflineDocumentMetadata {
   operationId: string;
@@ -37,6 +38,7 @@ export interface OfflineReceipt {
   fileId?: string | number;
 }
 export interface OfflineSyncPort {
+  offlineCapabilities?(companyBranchId: number): Promise<import("./offlineProtocol").SyncCapabilities>;
   offlineCommand(command: OfflineCommand): Promise<OfflineReceipt>;
   offlineReceipt(operationId: string, companyBranchId: number): Promise<OfflineReceipt | null>;
   offlineDocument(metadata: OfflineDocumentMetadata, file: LocalPhoto): Promise<OfflineReceipt>;
@@ -56,6 +58,7 @@ export interface OfflineOperationBase {
   attempts: number;
   nextAttemptAt: number;
   lastError?: string;
+  contractRecoveryVersion?: 1;
   dependencyId?: string;
   receipt?: OfflineReceipt;
 }
@@ -63,9 +66,10 @@ export type OfflineOperation = OfflineOperationBase & (
   | { kind: "create"; input: CreationInput; localGroupId: string; localWorkId: string; result?: CreationResult }
   | { kind: "comment"; scope: WorkScope; text: string }
   | { kind: "answer"; scope: WorkScope; stepId: string; answer: OfflineAnswer; base: OfflineAnswer; wire?: { answer: SyncStepAnswer; base: SyncStepAnswer } }
-  | { kind: "document"; scope: OfflineScope; stepId?: string; file: OfflineFile; sourceDraftId?: string }
+  | { kind: "document"; scope: OfflineScope; stepId?: string; file: OfflineFile; sourceDraftId?: string; reportText?: string }
   | { kind: "timer"; scope: WorkScope; payload: OfflineTimerPayload; localClock?: { elapsedSeconds: number } }
   | { kind: "checklist"; scope: WorkScope; payload: OfflineChecklistPayload }
+  | { kind: "completion"; scope: WorkScope; payload: SyncCompletionPayload; prerequisiteIds: string[]; localClock: { elapsedSeconds: number } }
 );
 export interface OfflineCoverage { date: string; branchId: number; fetchedAt: number; }
 export interface OfflineConnection {
@@ -76,6 +80,7 @@ export interface OfflineConnection {
   errorCode?: string;
 }
 export interface OfflineSnapshot {
+  storage?: OfflineStorageUsage;
   connection?: OfflineConnection;
   online: boolean;
   preparing: boolean;
@@ -90,6 +95,14 @@ export interface OfflineSnapshot {
   missingDates?: string[];
   awaitingDeploymentByKind?: OfflineDeploymentCounts;
   operations: OfflineOperation[];
+}
+export interface OfflineStorageUsage {
+  usedBytes: number;
+  availableBytes: number;
+  capacityBytes: number;
+  reserveBytes: number;
+  deviceAvailableBytes: number | null;
+  capacitySource: "device" | "application";
 }
 export interface OfflineController {
   getSnapshot(): OfflineSnapshot;

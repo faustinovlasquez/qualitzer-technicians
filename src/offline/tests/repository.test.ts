@@ -306,10 +306,9 @@ test("throwing UI observer cannot delete already committed photo", async () => {
   await assert.rejects(f.repository.uploadDocuments(scope, [{ id: "1", uri: "fake:", name: "1.png", mimeType: "image/png" }]), OfflineQueuedError);
   assert.equal(f.files.files.size, 1); assert.equal((await f.store.read("a")).operations.length, 1);
 });
-test("offline status report and delete never pretend success or enqueue", async () => {
+test("missing work snapshot and online-only delete never pretend success", async () => {
   const f = repositoryFixture(); f.connect(false);
-  await assert.rejects(f.repository.status(scope, { status: "delivered" }), /REQUIRES_CONNECTION/);
-  await assert.rejects(f.repository.report(scope, "Report"), /REQUIRES_CONNECTION/);
+  await assert.rejects(f.repository.status(scope, { status: "delivered" }), /WORK_SNAPSHOT_REQUIRED/);
   await assert.rejects(f.repository.deleteFile(scope, "1"), /REQUIRES_CONNECTION/);
   assert.equal((await f.store.read("a")).operations.length, 0);
 });

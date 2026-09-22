@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { locationAckSchema, locationBatchSchema, locationHistoryQuerySchema, locationHistorySchema, type LocationPoint } from "../domain/locationTracking";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { userSignatureInputSchema, userSignatureOptionsSchema, type UserSignatureInput } from "../domain/userSignatures";
 import { checklistAssignmentInputSchema, checklistAssignmentResultSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
@@ -8,7 +9,7 @@ import { ApiError, apiMessage, classifyTransportError } from "./errors";
 import { OfflineUnavailableError, type OfflineCommand, type OfflineDocumentMetadata } from "../domain/offline";
 import { receiptSchema } from "../offline/state";
 import { cachedAssignmentsSchema } from "../offline/cacheSchemas";
-import { receiptForOperation, syncCommandSchema, syncDocumentSchema, syncOperationIdSchema } from "../domain/offlineProtocol";
+import { receiptForOperation, syncCapabilitiesSchema, syncCommandSchema, syncDocumentSchema, syncOperationIdSchema } from "../domain/offlineProtocol";
 import { appendPhoto, uploadFetch } from "./photos";
 import { requireSessionTenant } from "../domain/tenantSession";
 import { loginStartSchema, tenantListSchema, tenantLoginSchema, tenantSchema } from "./tenantSchemas";
@@ -23,6 +24,24 @@ import { notificationDeleteResultSchema, notificationDeviceInputSchema, notifica
 
 
 export class HttpTechnicianRepository implements TechnicianRepository {
+  async equipmentLocation(scope: import("../domain/models").WorkScope, target: import("../domain/equipmentLocation").EquipmentLocationTarget) {
+    const { equipmentLocationSchema, equipmentLocationTargetSchema } = await import("../domain/equipmentLocation");
+    return equipmentLocationSchema.parse(await this.request<unknown>(this.scopePath(scope, `/equipment-location/${equipmentLocationTargetSchema.parse(target)}`)));
+  }
+  async updateEquipmentLocation(scope: import("../domain/models").WorkScope, target: import("../domain/equipmentLocation").EquipmentLocationTarget, input: import("../domain/equipmentLocation").EquipmentLocationUpdate) {
+    const { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } = await import("../domain/equipmentLocation");
+    return equipmentLocationSchema.parse(await this.request<unknown>(this.scopePath(scope, `/equipment-location/${equipmentLocationTargetSchema.parse(target)}`), "PATCH", equipmentLocationUpdateSchema.parse(input)));
+  }
+  async locationHistory(companyBranchId: number, date: string, page: number, resource?: import("../domain/locationTracking").LocationHistoryResource) {
+    const input = locationHistoryQuerySchema.parse({ companyBranchId, startDate: date, endDate: date, page, ...resource });
+    const query = new URLSearchParams({ companyBranchId: String(input.companyBranchId), startDate: input.startDate, endDate: input.endDate, page: String(input.page) });
+    if (input.groupId !== undefined) query.set("groupId", input.groupId);
+    if (input.workId !== undefined) query.set("workId", String(input.workId));
+    return locationHistorySchema.parse(await this.request<unknown>(`/api/worker-locations/me?${query}`));
+  }
+  async uploadLocations(companyBranchId: number, points: LocationPoint[], expectedActor: { userId: number; workerId: number }) {
+    return locationAckSchema.parse(await this.request<unknown>("/api/worker-locations/batch", "POST", locationBatchSchema.parse({ companyBranchId, points, expectedActor })));
+  }
   token = "";
   onUnauthorized: (() => void) | null = null;
   constructor(readonly baseUrl: string, public tenant?: Tenant) {}
@@ -71,12 +90,15 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     try {
       return receiptSchema.parse(await this.request<unknown>("/api/offline/commands", "POST", input, input.operationId));
     } catch (error) {
-      if ((input.kind === "timer" || input.kind === "checklist") && error instanceof ApiError && error.status === 400
+      if ((input.kind === "timer" || input.kind === "checklist" || input.kind === "completion") && error instanceof ApiError && error.status === 400
         && (error.code === "INVALID_INPUT" || error.code === "MOBILE_SYNC_INVALID_KIND")) {
-        throw new ApiError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE", "El cronómetro y la asociación de checklists requieren actualizar el servidor. La operación se conserva para reintentar.");
+        throw new ApiError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE", "El servicio aún no admite esta operación offline. Se conserva para reintentar tras actualizar el servidor.");
       }
       throw error;
     }
+  }
+  async offlineCapabilities(companyBranchId: number) {
+    return syncCapabilitiesSchema.parse(await this.request<unknown>(`/api/offline/capabilities?companyBranchId=${positiveCreationIdSchema.parse(companyBranchId)}`));
   }
   async offlineReceipt(operationId: string, companyBranchId: number) {
     try {
@@ -99,7 +121,14 @@ export class HttpTechnicianRepository implements TechnicianRepository {
 
   async createRecord(input: CreationInput) {
     const body = creationInputSchema.parse(input);
-    return creationResultSchema.parse(await this.request<unknown>("/api/creation", "POST", body));
+    try { return creationResultSchema.parse(await this.request<unknown>("/api/creation", "POST", body)); }
+    catch (error) {
+      if (body.kind === "work" && (!body.work.summary || !body.schedule.startTime || !body.schedule.endTime)
+        && error instanceof ApiError && error.status === 400 && error.code === "INVALID_INPUT") {
+        throw new ApiError(503, "MOBILE_CREATION_SCHEMA_NOT_READY", "El servicio requiere actualizarse para aceptar trabajos con campos opcionales. La solicitud se conserva.");
+      }
+      throw error;
+    }
   }
   async creationOptions(input: CreationOptionsQuery) {
     const parsed = creationOptionsQuerySchema.parse(input);

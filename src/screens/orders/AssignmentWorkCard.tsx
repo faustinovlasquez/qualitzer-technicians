@@ -15,6 +15,7 @@ import { operationNeedsAttention, syncUserError, userActionError as errorMessage
 import { AssignmentMetadataRow } from "./AssignmentMetadataRow";
 import { equipmentLabel, fullDate, safeCount, scheduleTime, statusTones } from "./assignmentPresentation";
 import { localTimerElapsedSeconds } from "../../offline/queueIntentions";
+import { completionForWork, completionStatusLabel } from "../offline/offlineUi";
 
 export interface AssignmentWorkCardProps {
   group: AssignmentGroup;
@@ -96,6 +97,8 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const date = queryDate ?? assignmentDay(work.scheduledDate);
   const scope = { groupId: group.id, workId: work.id, startDate: date, endDate: date, companyBranchId };
   const scopedOperations = operationsForWork(offline, scope);
+  const completion = completionForWork(scopedOperations, work);
+  const statusLabel = completion ? completionStatusLabel(completion) : STATUS_LABELS[work.status];
   const pendingTimer = offline !== undefined || suppliedTimer === undefined ? pendingTimerForWork(offline, scope, work) : suppliedTimer;
   const unobservedTimer = queuedTimer && pendingTimer?.id !== queuedTimer.operationId && !scopedOperations.some((operation) => operation.id === queuedTimer.operationId) ? queuedTimer : null;
   const desiredStatus = unobservedTimer?.status ?? pendingTimer?.payload.status ?? work.status;
@@ -116,7 +119,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const locked = busy || acting;
   const pausing = desiredStatus === "in_progress";
   const actionTitle = pausing ? "Pausar" : desiredStatus === "paused" ? "Reanudar" : "Iniciar";
-  const canChangeStatus = executionAvailable && !finished && !timerNeedsAttention && (pausing || work.canExecute);
+  const canChangeStatus = executionAvailable && !finished && !completion && !timerNeedsAttention && (pausing || work.canExecute);
   const canReviewDelivery = offlineReady && offline?.connection?.foreground !== false;
   const gates = useRef({ canChangeStatus, canReviewDelivery, desiredStatus });
   gates.current = { canChangeStatus, canReviewDelivery, desiredStatus };
@@ -130,7 +133,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     if (!queuedTimerRef.current || (pendingTimer?.id !== queuedTimerRef.current.operationId && !scopedOperations.some((operation) => operation.id === queuedTimerRef.current?.operationId))) return;
     queuedTimerRef.current = null;
     setQueuedTimer(null);
-  }, [offline?.operations, pendingTimer?.id]);
+  }, [offline?.operations, pendingTimer?.id, queuedTimer?.operationId]);
 
   async function changeStatus(): Promise<void> {
     const status = pausing ? "paused" : "in_progress";
@@ -164,14 +167,14 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
         {localWork ? <Badge label="Guardado local · pendiente" tone="warning" /> : null}
         {codeLabels.map((code) => <Text key={code} style={styles.code}>{code}</Text>)}
       </View>
-      <Badge label={STATUS_LABELS[work.status]} tone={statusTones[work.status]} />
+      <Badge label={statusLabel} tone={completion ? "warning" : statusTones[work.status]} />
     </View>
     <Pressable
       onPress={() => openWork()}
       disabled={locked}
       accessibilityRole="button"
       accessibilityState={{ disabled: locked }}
-      accessibilityLabel={`${codeLabels.join(". ")}. ${title}. ${STATUS_LABELS[work.status]}. ${priority.label}`}
+      accessibilityLabel={`${codeLabels.join(". ")}. ${title}. ${statusLabel}. ${priority.label}`}
       accessibilityHint="Abre el detalle del trabajo."
       style={({ pressed }) => [styles.titleButton, pressed && styles.pressed]}
     >
@@ -193,7 +196,8 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       {plannedDates.length > 1 ? <AssignmentMetadataRow icon="calendar-outline" text={`Fechas planificadas: ${plannedDates.map(shortDate).join(" · ")}`} /> : null}
     </View>
     {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
-    <WorkExecution work={work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending} localTimer={pendingTimer} />
+    {completion ? <Notice message={completion.status === "applied" ? "Entrega confirmada · actualizando" : "Entrega guardada · pendiente de sincronizar"} /> : null}
+    <WorkExecution work={completion ? { ...work, status: "paused", elapsedSeconds: completion.localClock.elapsedSeconds } : work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending || Boolean(completion)} localTimer={completion ? null : pendingTimer} />
     {total > 0 ? <View style={styles.execution}>
       <View style={styles.between}><Text style={styles.note}>Verificación completada</Text><Text style={styles.count}>{done}/{total}</Text></View>
       <View accessibilityRole="progressbar" accessibilityLabel="Lista de verificación" accessibilityValue={{ min: 0, max: total, now: done, text: `${done} de ${total} completados` }} style={styles.progressTrack}>

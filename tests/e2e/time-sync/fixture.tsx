@@ -22,6 +22,7 @@ import { CreationScreen } from "../../../src/screens/creation/CreationScreen";
 import { creationDraftKey, openCreationDraftStore } from "../../../src/screens/creation/creationDrafts";
 import { creationPayload, emptyCreationForm } from "../../../src/screens/creation/creationForm";
 import { creationPlannedMinutes } from "../../../src/domain/creation";
+import { syncCompletionInputSchema } from "../../../src/domain/offlineProtocol";
 import { MaintenanceDeliveryDialog } from "../../../src/screens/orders/lifecycle/MaintenanceDeliveryDialog";
 import type { DeliveryDraft } from "../../../src/screens/orders/lifecycle/lifecycleRules";
 import { NotificationSettingsScreen } from "../../../src/screens/notifications/NotificationSettingsScreen";
@@ -42,8 +43,9 @@ import { OfflineQueuedError } from "../../../src/domain/offline";
 import { mergeDailyAssignments } from "../../../src/domain/assignmentSchedule";
 import { AssignmentWorkCard } from "../../../src/screens/orders/AssignmentWorkCard";
 import { assignmentsWithTimerRead } from "../../../src/offline/queueIntentions";
+import { executionDuration } from "../../../src/domain/workExecution";
 
-type Screen = "widget" | "invalid" | "creation" | "creation-empty" | "creation-free" | "creation-overlap" | "creation-queued" | "creation-applied" | "creation-review" | "creation-unknown" | "completion" | "worked-days" | "worked-days-manual" | "offline-clock" | "offline-clock-maintenance" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary" | "signatures" | "technical-delivery" | "technical-ready" | "file-delete" | "file-delete-refresh-fails" | "file-delete-rejected" | "order-files" | "order-files-queued" | "order-files-error";
+type Screen = "widget" | "invalid" | "creation" | "creation-empty" | "creation-free" | "creation-overlap" | "creation-queued" | "creation-applied" | "creation-review" | "creation-unknown" | "completion" | "worked-days" | "worked-days-manual" | "offline-clock" | "offline-clock-maintenance" | "offline-clock-completion" | "offline-clock-completion-maintenance" | "offline-clock-completion-manual" | "offline-clock-completion-maintenance-manual" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary" | "signatures" | "technical-delivery" | "technical-ready" | "file-delete" | "file-delete-refresh-fails" | "file-delete-rejected" | "order-files" | "order-files-queued" | "order-files-error";
 const date = "2026-09-14";
 const range = { startDate: date, endDate: date };
 const scope = { ...range, companyBranchId: 1, groupId: "direct-80", workId: "80" };
@@ -143,8 +145,13 @@ function OfflineTimerFixture({ current, engine }: { current: NonNullable<typeof 
   const work = group.works[0]!;
   const timerScope = { ...scope, groupId: group.id };
   const onStatus = async (input: StatusInput): Promise<void> => {
-    if (input.status !== "in_progress" && input.status !== "paused") throw new Error("UNEXPECTED_FINALIZATION");
     const operationId = current.storage.dependencies.uuid();
+    if (input.status === "delivered" || input.status === "completed") {
+      const operations = await engine.enqueue([{ id: operationId, createdAt: Date.now(), status: "pending", attempts: 0, nextAttemptAt: 0, kind: "completion", scope: timerScope,
+        payload: { input: syncCompletionInputSchema.parse(input), recordedAt: new Date().toISOString(), observedAt: data.generatedAt, baseStatus: "pending" }, prerequisiteIds: [], localClock: { elapsedSeconds: 0 } }]);
+      throw new OfflineQueuedError({ operationId: operations[0]!.id, operationIds: [operations[0]!.id], kind: "completion", localGroupId: group.id, localWorkId: work.id, date, ownsFiles: false });
+    }
+    if (input.status !== "in_progress" && input.status !== "paused") throw new Error("UNEXPECTED_STATUS");
     await engine.enqueue([{ id: operationId, createdAt: Date.now(), status: "pending", attempts: 0, nextAttemptAt: 0,
       kind: "timer", scope: timerScope, payload: { status: input.status, baseStatus: "pending" } }]);
     throw new OfflineQueuedError({ operationId, operationIds: [operationId], kind: "timer", localGroupId: group.id, localWorkId: work.id, date, ownsFiles: false });
@@ -155,14 +162,25 @@ function OfflineTimerFixture({ current, engine }: { current: NonNullable<typeof 
     await updateState(current.storage.store, "a", state => { const cached = state.cache.find(entry => entry.key === `assignments:${date}`)!; cached.json = JSON.stringify(fresh); cached.timerReadOperationIds = applied; });
     setData(fresh);
   };
+  const saveReport = async (text: string) => {
+    const operationId = current.storage.dependencies.uuid();
+    const base = { id: operationId, createdAt: Date.now(), status: "pending" as const, attempts: 0, nextAttemptAt: 0, scope: timerScope };
+    const maintenance = group.type === "internal_maintenance";
+    if (maintenance) {
+      const file = await current.storage.files.own("a", { id: operationId, uri: "fixture:report", name: "reporte.txt", mimeType: "text/plain" });
+      await engine.enqueue([{ ...base, kind: "document", file, reportText: text }]);
+    } else await engine.enqueue([{ ...base, kind: "comment", text }]);
+    throw new OfflineQueuedError({ operationId, operationIds: [operationId], kind: maintenance ? "document" : "comment", localGroupId: group.id, localWorkId: work.id, date, ownsFiles: maintenance });
+  };
   return <View style={{ flex: 1 }}>
+    <OfflineStatusBar snapshot={snapshot} onOpen={() => {}} onSync={() => engine.syncNow()} />
     <Button title={list ? "Ver ficha de prueba" : "Ver listado de prueba"} onPress={() => setList(!list)} />
     <Button title="Reconectar prueba" onPress={() => { current.storage.connect(true); void engine.syncNow().then(refresh); }} />
     {list ? <ScrollView><AssignmentWorkCard group={group} work={work} generatedAt={data.generatedAt} offline={snapshot} online={snapshot.online} queryDate={date} companyBranchId={1} onOpenWork={() => setList(false)} onWorkStatus={async (_group, _work, input) => onStatus(input)} /></ScrollView>
-      : <WorkDetailScreen tenant={session.tenant} branchName="Taller" group={group} work={work} generatedAt={data.generatedAt} mode="live" range={range} busy={false} error={null} storageKey={`offline-clock-${revision}`} companyBranchId={1} allowEditExecutionTime={false} offline={snapshot}
+      : <WorkDetailScreen tenant={session.tenant} branchName="Taller" group={group} work={work} generatedAt={data.generatedAt} mode="live" range={range} busy={false} error={null} storageKey={`offline-clock-${revision}`} companyBranchId={1} timezone={user.system.timezone} allowEditExecutionTime={data.technician.allowEditExecutionTime} offline={snapshot}
         onBack={() => {}} onRefresh={refresh} onStatus={onStatus} onSaveStep={async () => {}} onLoadFiles={async () => []} onLoadStepFiles={async () => []}
         onLoadChecklistOptions={async () => ({ items: [], page: 0, pageSize: 20, hasMore: false })} onAttachChecklist={async () => { throw new Error("UNEXPECTED_CHECKLIST_ATTACH"); }}
-        onUpload={async () => {}} onReport={async () => {}} onUploadDocuments={async () => {}} onDeleteFile={async () => {}} onLoadComments={async () => ({ data: [], totalRows: 0, totalPages: 0 })} onAddComment={async () => {}} />}
+        onUpload={async () => {}} onReport={saveReport} onUploadDocuments={async () => {}} onDeleteFile={async () => {}} onLoadComments={async () => ({ data: [], totalRows: 0, totalPages: 0 })} onAddComment={async () => {}} />}
   </View>;
 }
 
@@ -346,9 +364,14 @@ async function render(screen: Screen) {
   let client: MobileNotificationClient | null = null;
   if (screen.startsWith("offline-clock")) {
     const storage = fixture(); storage.dependencies.now = () => Date.now(); storage.connect(false);
+    Object.assign(storage.files, { storageUsage: async () => ({ usedBytes: 800 * 1024 ** 2 + storage.files.used,
+      availableBytes: 8 * 1024 ** 3 - storage.files.used, capacityBytes: 800 * 1024 ** 2 + 8 * 1024 ** 3,
+      reserveBytes: 4 * 1024 ** 3, deviceAvailableBytes: 12 * 1024 ** 3 - storage.files.used, capacitySource: "device" as const }) });
     const data = assignmentsWithStep(); data.generatedAt = new Date().toISOString();
-    const group = data.groups[0]!; group.id = screen === "offline-clock-maintenance" ? "maintenance-80" : "direct-80"; group.type = screen === "offline-clock-maintenance" ? "internal_maintenance" : "direct_assignment";
+    data.technician.allowEditExecutionTime = screen.endsWith("-manual");
+    const group = data.groups[0]!; group.id = screen.includes("maintenance") ? "maintenance-80" : "direct-80"; group.type = screen.includes("maintenance") ? "internal_maintenance" : "direct_assignment";
     Object.assign(group.works[0]!, { canExecute: true, scheduledDate: date, plannedDates: [date], status: "pending", elapsedSeconds: 720, executedMinutes: 12, missingRequiredInfo: [] });
+    if (screen.includes("completion")) Object.assign(group.works[0]!, { checklists: [], scheduledStartTime: "", scheduledEndTime: "", firstInProgressTime: null });
     await updateState(storage.store, "a", state => {
       state.cache.push({ key: `assignments:${date}`, json: JSON.stringify(data), fetchedAt: Date.now(), coverage: { date, branchId: 1, fetchedAt: Date.now() } });
       state.operations.push({ id: uuid(999), kind: "comment", scope: { ...scope, groupId: group.id }, text: "Nota previa conservada", createdAt: Date.now() - 1, status: "pending", attempts: 0, nextAttemptAt: 0 });
@@ -361,6 +384,12 @@ async function render(screen: Screen) {
         if (command.payload.status === "in_progress") startedAt = captured;
         else if (startedAt !== null) { group.works[0]!.elapsedSeconds += Math.floor((captured - startedAt) / 1000); startedAt = null; }
         group.works[0]!.status = command.payload.status;
+      }
+      if (!storage.upstream.receipts.has(command.operationId) && command.kind === "completion") {
+        if (startedAt !== null) group.works[0]!.elapsedSeconds += Math.floor((Date.parse(command.payload.recordedAt) - startedAt) / 1000);
+        if (command.payload.input.isManual) group.works[0]!.elapsedSeconds = (executionDuration(command.payload.input) ?? 0) * 60;
+        startedAt = null; group.works[0]!.status = command.payload.input.status;
+        group.works[0]!.workedDates = command.payload.input.workedDates;
       }
       sent.push(structuredClone(command)); data.generatedAt = new Date().toISOString();
       return send(command);

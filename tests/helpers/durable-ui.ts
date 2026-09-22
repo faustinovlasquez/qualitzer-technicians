@@ -67,6 +67,7 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id.endsWith("/ui/components")) return { Badge: "Badge", BodyText: "BodyText", Button: "Button", Card: "Card", Field: "Field", IconButton: "IconButton", SectionTitle: "SectionTitle" };
     if (id.endsWith("/ui/time/TimeField")) return { TimeField: "TimeField" };
     if (id.endsWith("/ui/time/NumericSelectField")) return { NumericSelectField: "NumericSelectField", DayOffsetField: "DayOffsetField" };
+    if (id.endsWith("/creation/CreationDatePicker")) return { CreationDatePicker: "CreationDatePicker" };
     if (id.endsWith("/DetailUi")) return { Notice: "Notice", AttachmentList: "AttachmentList" };
     if (id.endsWith("/DeliverySuccess")) return { DeliverySuccess: "DeliverySuccess" };
     if (id.endsWith("/WorkActivities")) return { WorkActivities: "WorkActivities" };

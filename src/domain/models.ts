@@ -121,7 +121,7 @@ export interface AssignmentGroup {
 }
 export interface Assignments {
   generatedAt: string;
-  technician: { id: number | null; name: string; allowEditExecutionTime: boolean; supportsWorkedDates?: boolean; supportsRecordedTimer?: boolean; avatarThumbnail?: string | null };
+  technician: { id: number | null; name: string; allowEditExecutionTime: boolean; supportsWorkedDates?: boolean; supportsRecordedTimer?: boolean; supportsOfflineCompletion?: boolean; avatarThumbnail?: string | null };
   summary: { totalGroups: number; totalWorks: number; activeWorks: number; overdueWorks: number; plannedMinutes: number };
   groups: AssignmentGroup[];
 }

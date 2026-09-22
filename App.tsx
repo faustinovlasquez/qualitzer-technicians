@@ -29,6 +29,11 @@ import { companyBrandingContext } from "./src/branding/companyBrandingContext";
 import { gatewayConfiguration } from "./src/infrastructure/gatewayConfig";
 import { DeviceSecurityProvider } from "./src/security/DeviceSecurityProvider";
 import { PrivateModal as Modal, useDeviceSecurity } from "./src/security/DeviceSecurityContext";
+import { useLocationTracking } from "./src/location/useLocationTracking";
+import { CreationSuccess } from "./src/screens/creation/CreationSuccess";
+import { CreationModal } from "./src/screens/creation/CreationModal";
+import { LocationHistoryPanel } from "./src/location/LocationHistoryPanel";
+import { LocationSettingsPanel } from "./src/location/LocationSettingsPanel";
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -40,6 +45,12 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
   }
 }
 function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTechnicianApp>; allowAutomaticPin: boolean }) {
+  const locationTracking = useLocationTracking(app.session, app.gatewayUrl, app.offline, app.offlineVerifiedAt, app.locationPort, !app.restoring && !app.busy);
+  useEffect(() => app.bindLocationActions(locationTracking.capture), [app.bindLocationActions, locationTracking.capture]);
+  const [locationHistoryKey, setLocationHistoryKey] = useState<string | null>(null);
+  const [locationSettingsOpen, setLocationSettingsOpen] = useState(false);
+  const locationViewKey = JSON.stringify([app.session?.token, app.storageKey, app.session?.branchId, app.selected?.groupId, app.selected?.workId, app.selectedOrder?.id]);
+  useEffect(() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }, [locationViewKey]);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState(false);
   const security = useDeviceSecurity();
@@ -86,9 +97,17 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     <NotificationSettingsScreen notifications={app.notifications} onBack={() => { if (security.isUnlocked()) setNotificationSettings(false); }} />
   </SafeAreaView>;
   const unreadNotifications = app.notifications.state?.unreadCount ?? 0;
-  const connectionStatus = app.offlineController ? <View pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
+  const connectionStatus = <>{app.offlineController ? <View pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
     <OfflineStatusBar key={`${app.storageKey}:${app.session.user.workerId}`} snapshot={app.offline} onOpen={app.openOffline} onSync={app.syncOffline} embedded />
-  </View> : app.offlineSetupError ? <Button title="Almacenamiento offline no disponible · revisar" variant="secondary" disabled={app.busy} onPress={app.openOffline} /> : null;
+  </View> : app.offlineSetupError ? <Button title="Almacenamiento offline no disponible · revisar" variant="secondary" disabled={app.busy} onPress={app.openOffline} /> : null}
+    {locationHistoryKey === locationViewKey ? <CreationModal title={locationSettingsOpen ? "Configurar ubicación" : "Mi historial de ubicación"} onClose={() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }}>
+      {locationSettingsOpen ? <>
+        <Button title="Volver al historial" icon="arrow-back-outline" variant="secondary" disabled={locationTracking.busy} onPress={() => setLocationSettingsOpen(false)} />
+        <LocationSettingsPanel tracking={locationTracking} disabled={app.busy} />
+      </> : <LocationHistoryPanel key={locationViewKey} tracking={locationTracking} initialDate={app.selected?.queryDate ?? app.selectedOrder?.queryDate ?? app.range.startDate}
+        onConfigure={() => setLocationSettingsOpen(true)} resource={app.selected ? { groupId: app.selected.groupId, workId: Number(app.selected.workId) } : app.selectedOrder ? { groupId: app.selectedOrder.id } : undefined} />}
+    </CreationModal> : null}
+  </>;
   if (app.selectedCreationKind) {
     if (!app.session.branchId || !app.session.user.workerId) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Creación no disponible" message="Necesitas un trabajador y una sucursal habilitada en tu sesión." /><Button title="Volver" disabled={app.busy} onPress={app.closeCreate} /></SafeAreaView>;
     return <CreationScreen
@@ -113,6 +132,8 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   if (app.selected) {
     if (!app.canonicalDetailGroup || !app.canonicalDetailWork || !app.data) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Asignación no disponible" message="Puede haber cambiado de responsable, estado o período. Vuelve al listado y actualiza las asignaciones." /><Button title={app.selectedOrder ? "Volver a la orden" : "Volver a mi jornada"} disabled={app.busy} onPress={app.closeWork} /></SafeAreaView>;
     return <WorkDetailScreen
+      timezone={app.session.user.system.timezone}
+      equipmentLocation={app.equipmentLocation}
       tenant={app.session.tenant}
       branchName={branchName}
       connectionStatus={connectionStatus}
@@ -129,6 +150,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       allowEditExecutionTime={app.data.technician.allowEditExecutionTime}
       onBack={app.closeWork}
       onHome={app.closeDetails}
+      onLocationHistory={() => setLocationHistoryKey(locationViewKey)}
       onRefresh={app.refresh}
       onStatus={app.changeStatus}
       onReopen={app.reopenWork}
@@ -165,6 +187,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         onDeliveryIntentConsumed={app.consumeOrderDeliveryIntent}
         onBack={app.closeOrder}
         onHome={app.homeFromDetails}
+        onLocationHistory={() => setLocationHistoryKey(locationViewKey)}
         onOpenWork={app.openWork}
         onWorkStatus={app.onWorkStatus}
         onRefresh={app.refresh}
@@ -207,7 +230,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "profile" ? <ProfileScreen session={app.session} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
+      </> : app.tab === "profile" ? <ProfileScreen session={app.session} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
       {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy || logoutConfirm} /> : null}
     </View>
     <View style={styles.nav}>{navigation.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "notifications" && unreadNotifications > 0 ? `${item.label}, ${unreadNotifications} sin leer` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
@@ -256,6 +279,7 @@ function ApplicationRoot() {
   const branchName = app.session?.user.accessBranchs.find((branch) => branch.id === app.session?.branchId)?.name;
   return <View style={[styles.app, reserveQrSpace && { paddingRight: 184 }]}>
     <View style={styles.body}><Application app={app} allowAutomaticPin={securityConsidered === app.session?.token} /></View>
+    {app.creationNotice && app.session && !app.busy ? <CreationSuccess {...app.creationNotice} demo={app.session.mode === "demo"} onContinue={app.dismissCreationNotice} /> : null}
     <Modal visible={Boolean(app.session && app.selectedOffline)} animationType="slide" onRequestClose={app.closeOffline}>
       <View style={styles.app}>
         {app.offlineController && app.session?.branchId ? <>

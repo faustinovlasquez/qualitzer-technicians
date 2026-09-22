@@ -1,5 +1,7 @@
 # UI offline integrada
 
+Actualización 21-09-2026: timer y reporte ya tienen cola durable; completar/entregar tarea usa `completion` con dependencias e instante capturado. La UI muestra entrega guardada pendiente, congela el reloj local y no confunde ese estado con confirmación. Las respuestas y fotos ya guardadas en cola pueden permitir registrar el cierre local; sus recibos y la validación remota son necesarios para aplicarlo. La matriz vigente está en [../../../docs/OFFLINE.md](../../../docs/OFFLINE.md). Las referencias online-only al cronómetro/reporte/entrega de tarea más abajo describen la integración inicial, no esta versión. La entrega de OT completa y sus firmas siguen online.
+
 ## Cableado actual y contrato de componentes
 
 El cableado ya está en [../../../App.tsx](../../../App.tsx) y [../../application/useTechnicianApp.ts](../../application/useTechnicianApp.ts), incluido dashboard con `offline` y `companyBranchId`. Los componentes reciben la instancia/snapshot de la sesión/sucursal actual; no usan un singleton de datos. Guía funcional en [../../../docs/OFFLINE.md](../../../docs/OFFLINE.md).

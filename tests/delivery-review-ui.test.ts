@@ -2,10 +2,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ReactNode } from "react";
-import type { AssignmentWork, StatusInput, StepAnswer, WorkOpenOptions } from "../src/domain/models";
+import type { AssignmentWork, Attachment, StatusInput, StepAnswer, WorkOpenOptions } from "../src/domain/models";
+import { completionStatusLabel } from "../src/screens/offline/offlineUi";
+import { syncCompletionInputSchema } from "../src/domain/offlineProtocol";
 import { answerFromStep } from "../src/domain/format";
 import { manualDurationCompletion } from "../src/screens/workDetail/completionTiming";
-import type { OfflineOperation, TimerReadAssignmentWork } from "../src/domain/offline";
+import { OfflineQueuedError, type OfflineOperation, type TimerReadAssignmentWork } from "../src/domain/offline";
 import type { WorkDetailScreenProps } from "../src/screens/WorkDetailScreen";
 import type { CompletionDialogProps } from "../src/screens/workDetail/CompletionDialog";
 import type { AssignmentWorkCardProps } from "../src/screens/orders/AssignmentWorkCard";
@@ -23,6 +25,7 @@ function readyWork(): AssignmentWork {
 
 async function detailFixture(initialAction?: "deliver", storedAnswer?: StepAnswer) {
   const hooks = durableReactFixture(); const dialogHooks = durableReactFixture(); const memory = memoryDraftStorage();
+  const fileState: { files: Attachment[] | null; error: string | null } = { files: [], error: null };
   const drafts = uiModule<typeof import("../src/screens/workDetail/useWorkDraft")>("screens/workDetail/useWorkDraft.ts", hooks, {
     "@react-native-async-storage/async-storage": memory.storage, "./localPhotos": {},
   });
@@ -31,7 +34,7 @@ async function detailFixture(initialAction?: "deliver", storedAnswer?: StepAnswe
     "./workDetail/ChecklistTab": { ChecklistTab: "ChecklistTab" }, "./workDetail/CompletionDialog": { CompletionDialog: "CompletionDialog" },
     "./workDetail/DeliverySuccess": { DeliverySuccess: "DeliverySuccess" },
     "./workDetail/EvidenceTab": { EvidenceTab: "EvidenceTab" }, "./workDetail/localPhotos": { openLocalPhotoScope: () => {} },
-    "./workDetail/useAttachmentFiles": { useAttachmentFiles: () => ({ files: [], error: null, loading: false, load: async () => {} }) },
+    "./workDetail/useAttachmentFiles": { useAttachmentFiles: () => ({ ...fileState, loading: false, load: async () => {} }) },
     "./workDetail/useWorkDraft": drafts, "./workDetail/WorkInformation": { WorkTab: "WorkTab", EquipmentTab: "EquipmentTab" },
     "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
     "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
@@ -59,13 +62,12 @@ async function detailFixture(initialAction?: "deliver", storedAnswer?: StepAnswe
   const render = () => renderWrapped(hooks, component.WorkDetailScreen, props);
   const review = () => { const found = elements<CompletionDialogProps>(render(), "CompletionDialog")[0]; assert.ok(found); return found.props; };
   const renderReview = () => { const tree = dialogHooks.render(() => dialog.CompletionDialog(review())); dialogHooks.flush(); return tree; };
+  const confirm = () => action(renderReview(), review().durable ? "Guardar entrega" : "Confirmar y entregar");
   render(); await settle(); render();
-  return { props, calls, render, review, renderReview, refresh, refreshes: () => refreshes, close: () => { hooks.unmount(); dialogHooks.unmount(); } };
+  return { props, calls, render, review, renderReview, confirm, refresh, fileState, refreshes: () => refreshes, close: () => { hooks.unmount(); dialogHooks.unmount(); } };
 }
 
 const blockers: { name: string; apply(props: WorkDetailScreenProps): void; reason: RegExp }[] = [
-  { name: "five pending changes and unavailable service", apply: (props) => { props.offline = { ...uiSnapshot(pending(5)), connection: { status: "service_error", networkConnected: true, foreground: true, checkedAt: 1, errorCode: "MOBILE_SYNC_ACTIONS_UNAVAILABLE" } }; }, reason: /los 5 cambios pendientes/ },
-  { name: "offline", apply: (props) => { props.offline = uiSnapshot(); }, reason: /Conéctate/ },
   { name: "canExecute false", apply: (props) => { props.work = { ...props.work, canExecute: false }; }, reason: /no habilita/ },
   { name: "stale snapshot", apply: (props) => { props.staleReadOnly = true; }, reason: /verificar los datos y permisos/ },
   { name: "local work", apply: (props) => { props.work = { ...props.work, id: "local-unconfirmed" }; }, reason: /Sincroniza la creación/ },
@@ -77,7 +79,6 @@ const blockers: { name: string; apply(props: WorkDetailScreenProps): void; reaso
   { name: "invalid required answer", apply: (props) => { props.work = { ...props.work, checklists: [{ ...props.work.checklists[0], steps: [step({ selectValue: "not-in-options" })] }] }; }, reason: /respuestas válidas/ },
   { name: "local evidence", apply: (props) => { props.work = { ...props.work, checklists: [{ ...props.work.checklists[0], steps: [{ ...props.work.checklists[0].steps[0], isFilesRequired: true, attachments: [{ id: "local-file", name: "proof.png", url: "", type: "image/png" }] }] }] }; }, reason: /evidencia/ },
   { name: "conflict", apply: (props) => { props.offline = { ...uiSnapshot(pending(1).map((operation) => ({ ...operation, status: "conflict", lastError: "MOBILE_SYNC_OPERATION_REUSED" }))), online: true }; }, reason: /requieren atención/ },
-  { name: "applied without causal proof", apply: (props) => { props.offline = { ...uiSnapshot([{ ...uiOperation, kind: "timer", status: "applied", payload: { status: "paused", baseStatus: "in_progress" }, receipt: { operationId: uiOperation.id, state: "applied" } }]), online: true }; }, reason: /último cambio del cronómetro/ },
 ];
 
 test("back returns through files and checklist before leaving the work", async t => {
@@ -217,7 +218,7 @@ test("synchronized answer left as a local draft does not block delivery when it 
   const f = await detailFixture("deliver", confirmed); t.after(f.close);
   assert.equal(f.review().canSubmit, true);
   assert.doesNotMatch(f.review().reasons.join(" "), /borrador/);
-  action(f.renderReview(), "Confirmar y entregar").onPress(); await settle();
+  f.confirm().onPress(); await settle();
   assert.equal(f.calls.length, 1);
 });
 
@@ -238,7 +239,7 @@ for (const scenario of blockers) test(`delivery review opens for ${scenario.name
   assert.equal(f.calls.length, 0); assert.equal(f.refreshes(), 0);
   assert.equal(f.review().canSubmit, false); assert.match(f.review().reasons.join(" "), scenario.reason);
   assert.doesNotMatch(f.review().reasons.join(" "), /MOBILE_|[0-9a-f]{8}-[0-9a-f]{4}-/);
-  const tree = f.renderReview(); const confirm = action(tree, "Confirmar y entregar"); assert.equal(confirm.disabled, true);
+  const confirm = f.confirm(); assert.equal(confirm.disabled, true);
   confirm.onPress(); f.review().onSubmit(input); await settle();
   assert.equal(f.calls.length, 0); assert.equal(JSON.stringify(f.props.work), before);
 });
@@ -251,9 +252,10 @@ test("review count is scoped to work and shared files rather than five changes e
     { ...comments[3], scope: { ...uiScope, workId: "12" } },
     { ...comments[4], scope: { ...uiScope, companyBranchId: 2 } }];
   f.props.offline = { ...uiSnapshot(operations), online: true };
-  assert.equal(f.props.offline.pending, 5); assert.match(f.review().reasons[0], /los 3 cambios pendientes/);
-  const body = elements<{ children: ReactNode }>(f.renderReview(), "BodyText").map((element) => JSON.stringify(element.props.children)).join(" ");
-  assert.ok(body.includes("los 3 cambios"), "scoped blockers remain visible in the review");
+  assert.equal(f.props.offline.pending, 5);
+  assert.equal(f.review().canSubmit, true);
+  assert.equal(f.confirm().disabled, false);
+  assert.doesNotMatch(f.review().reasons.join(" "), /cambios pendientes/);
 });
 
 test("valid online required checklist sends exactly once, even through retained and forced callbacks", async (t) => {
@@ -261,7 +263,7 @@ test("valid online required checklist sends exactly once, even through retained 
   const tree = f.render(); assert.equal(elements<{ title: string }>(tree, "Button").filter(({ props }) => props.title === "Entregar trabajo").length, 1);
   action(tree, "Entregar trabajo").onPress(); assert.equal(f.calls.length, 0);
   assert.equal(f.review().canSubmit, true);
-  const submit = f.review().onSubmit; const confirm = action(f.renderReview(), "Confirmar y entregar");
+  const submit = f.review().onSubmit; const confirm = f.confirm();
   assert.equal(confirm.disabled, false); confirm.onPress(); confirm.onPress(); submit(input); await settle();
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].status, "delivered");
   assert.equal(elements(f.render(), "DeliverySuccess").length, 1);
@@ -269,10 +271,11 @@ test("valid online required checklist sends exactly once, even through retained 
 
 test("review remains mounted across pending/read-only updates and refresh never submits", async (t) => {
   const f = await detailFixture("deliver"); t.after(f.close);
-  const retained = action(f.renderReview(), "Confirmar y entregar");
-  f.props.offline = uiSnapshot(pending(1)); f.renderReview(); retained.onPress(); await settle(); assert.equal(f.calls.length, 0);
+  const retained = f.confirm();
+  f.props.offline = { ...uiSnapshot(pending(1).map(operation => ({ ...operation, status: "conflict", lastError: "MOBILE_SYNC_STATUS_CONFLICT" }))), online: true };
+  f.renderReview(); retained.onPress(); await settle(); assert.equal(f.calls.length, 0);
   const refresh = action(f.renderReview(), "Actualizar ficha"); refresh.onPress(); refresh.onPress();
-  assert.equal(f.refreshes(), 1); assert.equal(action(f.renderReview(), "Confirmar y entregar").disabled, true);
+  assert.equal(f.refreshes(), 1); assert.equal(f.confirm().disabled, true);
   f.review().onSubmit(input); assert.equal(f.calls.length, 0);
   f.props.staleReadOnly = true; f.refresh.resolve(); await settle(); assert.equal(f.review().canSubmit, false);
 });
@@ -298,7 +301,7 @@ test("initial delivery review preserves readiness and foreground gates and canno
   f.props.allowEditExecutionTime = true; f.render();
   f.review().onSubmit({ ...input, isManual: true, executionStartTime: "25:00", executionEndTime: "09:00" });
   f.props.work = { ...f.props.work, elapsedSeconds: 0 }; f.render(); f.review().onSubmit(input);
-  assert.equal(action(f.renderReview(), "Confirmar y entregar").disabled, true);
+  assert.equal(f.confirm().disabled, true);
   await settle(); assert.equal(f.calls.length, 0);
 });
 
@@ -306,10 +309,10 @@ test("causally reconciled timer permits review confirmation without reclassifyin
   const f = await detailFixture("deliver"); t.after(f.close);
   const timer: OfflineOperation = { ...uiOperation, kind: "timer", status: "applied", payload: { status: "paused", baseStatus: "in_progress" }, receipt: { operationId: uiOperation.id, state: "applied" } };
   f.props.offline = { ...uiSnapshot([timer]), online: true };
-  assert.equal(f.review().canSubmit, false);
+  assert.equal(f.review().canSubmit, true);
   const candidate: TimerReadAssignmentWork = { ...f.props.work, offlineTimerRead: { scope: uiScope, appliedOperationIds: [timer.id] } };
   f.props.work = candidate; assert.equal(f.review().canSubmit, true);
-  action(f.renderReview(), "Confirmar y entregar").onPress(); await settle(); assert.equal(f.calls.length, 1);
+  f.confirm().onPress(); await settle(); assert.equal(f.calls.length, 1);
 });
 
 test("actual order-to-card callback retains delivery review action for offline, local, stale and unexecutable work", () => {
@@ -356,9 +359,9 @@ test("manual duration prefills timer total, preserves corrections on refresh and
   fields()[0].props.onChange("8"); fields()[1].props.onChange("0");
   f.props.work = { ...f.props.work, elapsedSeconds: 38 * 3600 }; f.renderReview();
   assert.deepEqual(fields().map(({ props }) => props.value), ["8", "0"]);
-  action(f.renderReview(), "Confirmar y entregar").onPress(); f.render(); await settle();
+  f.confirm().onPress(); f.render(); await settle();
   assert.equal(f.calls.length, 1);
-  assert.deepEqual(f.calls[0], { status: "delivered", isManual: true, executionDates: [uiScope.startDate], executionStartTime: "08:00", executionEndTime: "16:00", endDateOffset: 0 });
+  assert.deepEqual(structuredClone(f.calls[0]), { status: "delivered", isManual: true, executionDates: [uiScope.startDate], executionStartTime: "08:00", executionEndTime: "16:00", endDateOffset: 0 });
 });
 
 test("manual totals retain single-day and authorized multi-day duration contracts", () => {
@@ -419,4 +422,75 @@ for (const type of ["internal_maintenance", "external_ot"] as const) test(`${typ
   action(render(), "Volver a mis asignaciones").onPress();
   assert.equal(exits, 1);
   hooks.unmount();
+});
+
+test("offline untimed work can save a manual delivery without a downloaded start clock", async context => {
+  const fixture = await detailFixture("deliver"); context.after(fixture.close);
+  fixture.props.timezone = "America/Santiago";
+  fixture.props.allowEditExecutionTime = true;
+  fixture.props.work = { ...readyWork(), firstInProgressTime: null, scheduledStartTime: "", scheduledEndTime: "", elapsedSeconds: 0 };
+  const start: OfflineOperation = { ...uiOperation, kind: "timer", payload: { status: "in_progress", baseStatus: "paused", recordedAt: "2026-09-01T12:00:00.000Z", observedAt: fixture.props.generatedAt }, localClock: { elapsedSeconds: 0 } };
+  const pause: OfflineOperation = { ...start, id: "00000000-0000-4000-8000-000000000002", payload: { status: "paused", baseStatus: "in_progress", recordedAt: "2026-09-01T12:03:00.000Z", observedAt: fixture.props.generatedAt, previousOperationId: start.id }, localClock: { elapsedSeconds: 180 } };
+  fixture.props.offline = uiSnapshot([start, pause]);
+  const render = fixture.renderReview;
+  render();
+  elements<{ label: string; onPress(): void }>(render(), "ChoiceButton").find(node => node.props.label === "Editar horas de ejecución manualmente")!.props.onPress();
+  const fields = elements<{ label: string; onChange(value: string): void }>(render(), "NumericSelectField");
+  fields.find(node => node.props.label === "Horas trabajadas")!.props.onChange("1");
+  fields.find(node => node.props.label === "Minutos trabajados")!.props.onChange("30");
+  const button = action(render(), "Guardar entrega");
+  assert.equal(button.disabled, false);
+  button.onPress(); button.onPress();
+  await settle();
+  assert.equal(fixture.calls.length, 1);
+  assert.equal(fixture.calls[0].status, "delivered");
+  assert.equal(fixture.calls[0].isManual, true);
+  assert.equal(fixture.calls[0].executionStartTime, "08:00");
+  assert.equal(fixture.calls[0].executionEndTime, "09:30");
+});
+
+test("offline delivery uses downloaded evidence counts but never an empty or unverified file list online", async context => {
+  const fixture = await detailFixture("deliver"); context.after(fixture.close);
+  fixture.props.offline = uiSnapshot();
+  fixture.props.work = { ...fixture.props.work, isFilesRequired: true, filesCount: 1 };
+  fixture.fileState.files = null; fixture.fileState.error = "No hay copia local de la lista de archivos";
+  assert.equal(action(fixture.renderReview(), "Guardar entrega").disabled, false);
+  assert.equal(fixture.review().onRefresh, undefined);
+  fixture.props.work.filesCount = 0;
+  assert.equal(action(fixture.renderReview(), "Guardar entrega").disabled, true);
+  fixture.props.work.filesCount = 1; fixture.fileState.files = [];
+  assert.equal(action(fixture.renderReview(), "Guardar entrega").disabled, true);
+  fixture.fileState.files = null; fixture.props.offline = { ...uiSnapshot(), online: true };
+  assert.equal(action(fixture.renderReview(), "Guardar entrega").disabled, true);
+});
+
+test("offline delivery label distinguishes local completion, confirmation and conflict", () => {
+  const completion: Extract<OfflineOperation, { kind: "completion" }> = { ...uiOperation, kind: "completion", prerequisiteIds: [], localClock: { elapsedSeconds: 90 },
+    payload: { input: syncCompletionInputSchema.parse(input), recordedAt: "2026-09-01T10:00:00Z", observedAt: "2026-09-01T09:00:00Z", baseStatus: "paused" } };
+  assert.equal(completionStatusLabel(completion), "Entregado local · pendiente");
+  assert.equal(completionStatusLabel({ ...completion, status: "applied" }), "Entregado · actualizando");
+  assert.equal(completionStatusLabel({ ...completion, status: "conflict" }), "Entrega por revisar");
+});
+
+for (const mode of ["offline", "unavailable", "storage-failure"] as const) test(`offline delivery confirmation ${mode} keeps pending changes and waits for a durable save`, async context => {
+  const fixture = await detailFixture("deliver"); context.after(fixture.close);
+  const operations: OfflineOperation[] = pending(5);
+  fixture.props.offline = { ...uiSnapshot(operations), connection: { status: mode === "unavailable" ? "service_error" : "offline", networkConnected: mode === "unavailable", foreground: true, checkedAt: 1 } };
+  let calls = 0;
+  fixture.props.onStatus = async value => {
+    calls++;
+    if (mode === "storage-failure") throw new Error("DISK_FULL");
+    operations.push({ ...uiOperation, id: "00000000-0000-4000-8000-000000000099", kind: "completion", prerequisiteIds: operations.map(operation => operation.id),
+      localClock: { elapsedSeconds: fixture.props.work.elapsedSeconds }, payload: { input: syncCompletionInputSchema.parse(value), baseStatus: "paused", recordedAt: "2026-09-01T10:00:00Z", observedAt: fixture.props.generatedAt } });
+    fixture.props.offline = uiSnapshot(operations);
+    throw new OfflineQueuedError({ kind: "completion", operationId: operations.at(-1)!.id, operationIds: [operations.at(-1)!.id], date: uiScope.startDate, ownsFiles: false });
+  };
+  const button = fixture.confirm(); assert.equal(button.disabled, false);
+  button.onPress(); button.onPress(); await settle(); fixture.render();
+  assert.equal(calls, 1);
+  assert.equal(fixture.props.work.status, "paused", "the server snapshot must remain unchanged");
+  assert.equal(elements(fixture.render(), "DeliverySuccess").length, 0);
+  assert.equal(operations.length, mode === "storage-failure" ? 5 : 6);
+  if (mode !== "storage-failure") assert.match(JSON.stringify(fixture.render()), /Entregado local/);
+  else assert.equal(elements(fixture.render(), "CompletionDialog").length, 1);
 });

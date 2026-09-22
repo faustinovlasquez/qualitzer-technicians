@@ -3,6 +3,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const root = path.resolve(__dirname, "../..");
 const agendaOnly = process.argv.includes("--agenda-layout");
+const jornadaOnly = process.argv.includes("--jornada-defaults");
 const outputRoot = path.join(root, "artifacts/logs/compact-overview-ui");
 const runtimeFiles = ["src/screens/LoginScreen.tsx", "src/screens/DashboardScreen.tsx"];
 const hash = text => crypto.createHash("sha256").update(text).digest("hex");
@@ -64,7 +65,7 @@ async function main() {
     report.sourceHashes = Object.fromEntries(Object.entries(current).map(([file, text]) => [file, hash(text)]));
     report.testSourceHashes = Object.fromEntries(["tests/e2e/compact-overview-fixture.tsx", "tests/e2e/compact-overview-smoke.cjs"].map(file => [file, hash(fs.readFileSync(path.join(root, file)))]));
     const bundles = { after: await bundle(current) };
-    if (report.baseline.comparable && !process.argv.includes("--parent-orders") && !agendaOnly) bundles.before = await bundle(baseline.sources);
+    if (report.baseline.comparable && !process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly) bundles.before = await bundle(baseline.sources);
     report.bundleInputs = Object.keys(bundles.after.metafile.inputs);
     for (const file of runtimeFiles) assert.ok(report.bundleInputs.includes(file), `Missing real screen: ${file}`);
     assert.ok(!report.bundleInputs.some(file => /(^|\/)App\.tsx$|HttpTechnicianRepository|sessionStorage|expo-secure-store|(?:^|\/)\.env$/.test(file)), "Forbidden runtime imported");
@@ -193,6 +194,38 @@ async function main() {
         new MutationObserver(apply).observe(document.body, { childList: true, subtree: true }); apply();
       }, factor);
     }
+    if (jornadaOnly) for (const width of [360, 390, 1024]) for (const scale of [1, 2]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`${origin}/after`);
+      await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
+      await scaleText(scale);
+      await check(`jornada-defaults-${width}-text${scale * 100}`, async () => {
+        const filter = name => page.getByRole("button", { name, exact: true });
+        const task = index => page.getByText(`Tarea de prueba ${index}`, { exact: true });
+        for (const scenario of ["full", "supplemental"]) {
+          await fresh("dashboard", scenario);
+          assert.equal(await page.getByTestId("agenda-layout-selector").count(), 0);
+          for (const name of ["Pendientes", "En curso"]) assert.equal(await filter(name).getAttribute("aria-pressed"), "true");
+          for (const name of ["Todos", "Completados"]) assert.equal(await filter(name).getAttribute("aria-pressed"), "false");
+          for (const index of [1, 2, 3]) assert.equal(await task(index).count(), 1);
+          assert.equal(await task(4).count(), 0);
+          await reachable(filter("En curso"));
+          await shot(`jornada-defaults-${width}-text${scale * 100}-${scenario}`);
+          await filter("Pendientes").click(); await settle();
+          assert.equal(await task(1).count() + await task(2).count(), 0);
+          assert.equal(await task(3).count(), 1);
+          await filter("Completados").click(); await task(4).waitFor();
+          assert.equal(await task(3).count(), 1);
+          await filter("Todos").click(); await task(1).waitFor();
+          for (const index of [1, 2, 3, 4]) assert.equal(await task(index).count(), 1);
+          await filter("Completados").click(); await settle();
+          assert.equal(await task(1).count() + await task(2).count() + await task(3).count(), 0);
+          assert.equal(await task(4).count(), 1);
+          assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).statusCalls, 0);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        }
+      });
+    }
     if (agendaOnly) for (const width of [320, 360, 390, 1024]) for (const scale of [1, 2]) {
       await page.setViewportSize({ width, height: 844 });
       await page.goto(`${origin}/after`);
@@ -293,7 +326,7 @@ async function main() {
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       });
     }
-    if (!process.argv.includes("--parent-orders") && !agendaOnly) for (const phase of Object.keys(bundles).sort().reverse()) {
+    if (!process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly) for (const phase of Object.keys(bundles).sort().reverse()) {
       for (const [width, height] of [[320, 740], [360, 740], [390, 740], [1024, 800]]) for (const scale of phase === "before" ? [1] : [1, 2]) {
         const label = `${phase}-${width}x${height}-text${scale * 100}`;
         await page.setViewportSize({ width, height });
@@ -361,7 +394,7 @@ async function main() {
     }
     await page.setViewportSize({ width: 390, height: 740 }); await page.goto(`${origin}/after`);
     await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
-    if (!process.argv.includes("--parent-orders") && !agendaOnly) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
+    if (!process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
       await fresh("login");
       const username = page.getByRole("textbox", { name: "Correo o usuario", exact: true });
       const password = page.getByLabel("Contraseña", { exact: true });
@@ -386,7 +419,7 @@ async function main() {
       assert.equal(await username.isEditable(), false); assert.equal(await password.isEditable(), false);
       assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).gatewayChanges, 0);
     });
-    if (!agendaOnly) for (const width of [360, 1024]) for (const scale of [1, 2]) for (const scenario of ["empty-maintenance", "empty-ot"]) {
+    if (!agendaOnly && !jornadaOnly) for (const width of [360, 1024]) for (const scale of [1, 2]) for (const scenario of ["empty-maintenance", "empty-ot"]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`${origin}/after`);
       await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
@@ -412,6 +445,7 @@ async function main() {
         await search.fill("no corresponde");
         await page.getByText("No encontramos coincidencias", { exact: true }).waitFor();
         await search.fill("");
+        await page.getByRole("button", { name: "Todos", exact: true }).click();
         await page.getByRole("button", { name: "Completados", exact: true }).click();
         assert.equal(await open.count(), 0);
         await page.getByRole("button", { name: "Pendientes", exact: true }).click();

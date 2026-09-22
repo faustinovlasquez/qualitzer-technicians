@@ -1,4 +1,5 @@
 import { registerRootComponent } from 'expo';
+import './src/location/locationRuntime';
 
 import App from './App';
 

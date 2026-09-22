@@ -15,7 +15,7 @@ import { isServiceFailure, requiresDeployment } from "../connection";
 import { OfflineEngine } from "../engine";
 import { checklistCatalogCacheKey } from "../queueIntentions";
 import { updateState } from "../state";
-import { assignmentsWithStep, fixture, user, uuid } from "./fakes";
+import { assignmentsWithStep, creation, fixture, user, uuid } from "./fakes";
 
 const scope = { groupId: "direct-80", workId: "80", companyBranchId: 1, startDate: "2026-09-08", endDate: "2026-09-08" };
 const timer: OfflineCommand = { operationId: uuid(1), kind: "timer", scope, payload: { status: "in_progress", baseStatus: "pending" } };
@@ -27,6 +27,8 @@ const legacy: OfflineCommand[] = [
 ];
 const deploymentCode = "MOBILE_SYNC_ACTIONS_UNAVAILABLE";
 const legacyCodes = ["INVALID_INPUT", "MOBILE_SYNC_INVALID_KIND"] as const;
+const completion: OfflineCommand = { operationId: uuid(9), kind: "completion", scope,
+  payload: { input: { status: "delivered", executionDates: [scope.startDate], isManual: false }, recordedAt: "2026-09-21T16:13:55.393Z", observedAt: "2026-09-21T16:10:05.682Z", baseStatus: "paused", previousTimerOperationId: uuid(8) } };
 interface HttpCall { url: string; method: string; body: string | undefined; }
 
 function repository(reply: (call: HttpCall) => Promise<Response>) {
@@ -52,6 +54,22 @@ function repository(reply: (call: HttpCall) => Promise<Response>) {
 }
 
 const apiFailure = (status: number, code: string) => (error: unknown): boolean => error instanceof ApiError && error.status === status && error.code === code;
+test("completion generic rejection waits for deployment but a durable rejection remains definitive", async () => {
+  const old = repository(async () => Response.json({ error: "INVALID_INPUT" }, { status: 400 }));
+  await assert.rejects(old.client.offlineCommand(completion), apiFailure(503, deploymentCode));
+  assert.deepEqual(JSON.parse(old.calls[0].body!), syncCommandSchema.parse(completion));
+  const rejected = repository(async () => Response.json({ operationId: completion.operationId, state: "rejected", error: "MOBILE_SYNC_INVALID_INPUT" }, { status: 400 }));
+  assert.equal((await rejected.client.offlineCommand(completion)).state, "rejected");
+});
+test("empty-hour creation preserves exact input on old gateway without relaxing other validation errors", async () => {
+  const input = creation(); assert.equal(input.kind, "work"); if (input.kind !== "work") throw new Error("WORK_REQUIRED");
+  input.schedule.startTime = ""; input.schedule.endTime = ""; input.work.summary = "";
+  const old = repository(async () => Response.json({ error: "INVALID_INPUT" }, { status: 400 }));
+  await assert.rejects(old.client.createRecord(input), apiFailure(503, "MOBILE_CREATION_SCHEMA_NOT_READY"));
+  assert.deepEqual(JSON.parse(old.calls[0].body!), input);
+  const denied = repository(async () => Response.json({ error: "MOBILE_CREATION_INVALID_INPUT" }, { status: 400 }));
+  await assert.rejects(denied.client.createRecord(input), apiFailure(400, "MOBILE_CREATION_INVALID_INPUT"));
+});
 const operation = (command: OfflineCommand): OfflineOperation => {
   assert.ok(command.kind === "timer" || command.kind === "checklist");
   const { operationId, ...input } = command;

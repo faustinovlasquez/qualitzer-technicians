@@ -32,6 +32,7 @@ async function run(name, executable, arguments_, extraEnvironment = {}) {
     .map(([, value]) => value))];
   const emit = (text) => {
     for (const secret of secrets) text = text.replaceAll(secret, "[REDACTED]");
+    text = text.replace(/AIza[A-Za-z0-9_-]{35}/g, "[GOOGLE_API_KEY_REDACTED]");
     output.write(text);
     process.stdout.write(text);
   };
@@ -134,7 +135,7 @@ async function main() {
     if (config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.enabled !== false || config.android?.package !== "com.qualitzer.field" || config.version !== expected.version || config.android.versionCode !== expected.versionCode) throw new Error("INVALID_PUBLIC_RELEASE_CONFIG");
     const profile = JSON.parse(fs.readFileSync(path.join(root, "eas.json"), "utf8")).build?.["standalone-apk"];
     if (profile?.developmentClient !== false || profile.android?.buildType !== "apk" || profile.env?.EXPO_PUBLIC_GATEWAY_URL !== gatewayUrl || profile.env.EXPO_PUBLIC_STANDALONE !== "true") throw new Error("INVALID_STANDALONE_EAS_PROFILE");
-    fs.writeFileSync(path.join(logs, "release-config.json"), JSON.stringify(config, null, 2));
+    fs.writeFileSync(path.join(logs, "release-config.json"), JSON.stringify(config, null, 2).replace(/AIza[A-Za-z0-9_-]{35}/g, "[GOOGLE_API_KEY_REDACTED]"));
     if (!args.includes("--skip-prebuild") && !args.includes("--verify-only")) {
       await run("prebuild", process.execPath, [path.join(root, "node_modules/expo/bin/cli"), "prebuild", "--platform", "android", "--no-clean", "--no-install", "--skip-dependency-update", "react-native,react"]);
     }

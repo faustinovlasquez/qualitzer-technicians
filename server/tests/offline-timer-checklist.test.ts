@@ -10,6 +10,27 @@ const timer = { operationId, kind: "timer", scope, payload: { status: "in_progre
 const checklist = { operationId, kind: "checklist", scope, payload: { checklistId: 41 } };
 const commandsPath = "/api/mobile-sync/commands";
 
+test("completion requires backend capability and preserves dates and identity in its receipt request", async context => {
+  const { state, baseUrl } = await harness(context);
+  const command = { operationId, kind: "completion", scope: { ...scope, endDate: scope.startDate }, payload: {
+    input: { status: "delivered", executionDates: [scope.startDate], workedDates: ["2026-08-29", scope.startDate], isManual: false },
+    recordedAt: "2026-09-21T13:00:00.000Z", observedAt: "2026-09-21T12:00:00.000Z", baseStatus: "paused"
+  } };
+  assert.equal((await jsonRequest(baseUrl, "/api/offline/commands", "POST", command)).response.status, 503);
+  assert.equal(writeCalls(state).length, 0);
+  state.assignments.technician.supportsOfflineCompletion = true;
+  state.failures.set(commandsPath, { status: 200, body: { operationId, state: "applied" } });
+  const response = await jsonRequest(baseUrl, "/api/offline/commands", "POST", command);
+  assert.equal(response.response.status, 200);
+  assert.deepEqual(writeCalls(state)[0]?.json, syncCommandSchema.parse(command));
+  assert.deepEqual(response.data, { operationId, state: "applied" });
+  assert.equal(syncCommandSchema.safeParse({ ...command, scope: { ...command.scope, endDate: "2026-09-02" } }).success, false);
+  assert.equal(syncCommandSchema.safeParse({ ...command, payload: { ...command.payload, input: { ...command.payload.input, executionDates: ["2026-08-29"] } } }).success, false);
+  for (const input of [{ ...command.payload.input, workerId: 77 }, { ...command.payload.input, finalizeAll: true }, { ...command.payload.input, status: "paused" }]) {
+    assert.equal(syncCommandSchema.safeParse({ ...command, payload: { ...command.payload, input } }).success, false);
+  }
+});
+
 test("recorded timer retains captured times and waits for a compatible server before writing", async context => {
   const { state, baseUrl } = await harness(context);
   const command = { ...timer, scope: { ...scope, endDate: scope.startDate }, payload: { ...timer.payload,

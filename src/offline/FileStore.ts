@@ -4,8 +4,10 @@ import type { LocalPhoto } from "../domain/models";
 import { OfflineUnavailableError, type OfflineFile } from "../domain/offline";
 import type { DurableFileStore, DurableStore } from "./contracts";
 import { updateState, validateQuota } from "./state";
+import { storageCapacity } from "./storageCapacity";
 
 const ledger = "offline-file-reservations-v1";
+let copies: Promise<void> = Promise.resolve();
 const directory = () => new Directory(Paths.document, "offline");
 function sourceFile(photo: LocalPhoto): File {
   if (!/^(file:\/\/\/|content:\/\/)/.test(photo.uri)) throw new OfflineUnavailableError("OFFLINE_EXPECTS_LOCAL_FILE");
@@ -17,6 +19,23 @@ function localFile(id: string): File {
 }
 export class NativeDurableFileStore implements DurableFileStore {
   constructor(private readonly store: DurableStore) {}
+  async storageUsage() {
+    const used = (await this.store.read(ledger)).reservations.reduce((total, reservation) => total + reservation.size, 0);
+    return this.capacity(used);
+  }
+  private capacity(used: number) {
+    try { return storageCapacity(used, Paths.availableDiskSpace, Paths.totalDiskSpace); }
+    catch { return storageCapacity(used); }
+  }
+  async ownText(namespace: string, text: string, name: string): Promise<OfflineFile> {
+    const id = Crypto.randomUUID();
+    const temporary = new File(Paths.cache, `${id}.txt`);
+    try {
+      temporary.create();
+      temporary.write(text);
+      return await this.own(namespace, { id, uri: temporary.uri, name, mimeType: "text/plain" });
+    } finally { try { if (temporary.exists) temporary.delete(); } catch {} }
+  }
   async fingerprint(photo: LocalPhoto): Promise<Pick<OfflineFile, "size" | "sha256"> | null> {
     const source = sourceFile(photo);
     if (!source.exists) return null;
@@ -25,13 +44,19 @@ export class NativeDurableFileStore implements DurableFileStore {
     const hash = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes);
     return { size: bytes.length, sha256: Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("") };
   }
-  async own(namespace: string, photo: LocalPhoto): Promise<OfflineFile> {
+  own(namespace: string, photo: LocalPhoto): Promise<OfflineFile> {
+    const result = copies.then(() => this.copyOwned(namespace, photo));
+    copies = result.then(() => undefined, () => undefined);
+    return result;
+  }
+  private async copyOwned(namespace: string, photo: LocalPhoto): Promise<OfflineFile> {
     const source = sourceFile(photo);
     if (!source.exists) throw new OfflineUnavailableError("OFFLINE_SOURCE_FILE_MISSING");
     const id = Crypto.randomUUID();
     const size = source.size;
     await updateState(this.store, ledger, (state) => {
-      validateQuota(size, state.reservations.reduce((total, reservation) => total + reservation.size, 0));
+      const used = state.reservations.reduce((total, reservation) => total + reservation.size, 0);
+      validateQuota(size, used, this.capacity(used).capacityBytes);
       state.reservations.push({ id, size, namespace });
     });
     const target = localFile(id);

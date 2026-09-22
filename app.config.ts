@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import type { ConfigContext, ExpoConfig } from "expo/config";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { parseEnv } from "node:util";
 import { isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import { standaloneGatewayUrl } from "./config/gatewayPolicy";
@@ -87,6 +88,15 @@ export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   }
   requireBaseConfig(config);
   const brandFile = process.env.QUALITZER_BRAND_FILE;
+  const mapsFile = resolve(projectRoot, ".env");
+  const mapsKey = process.env.GOOGLE_MAPS_API_KEY ?? (existsSync(mapsFile) ? parseEnv(readFileSync(mapsFile, "utf8")).GOOGLE_MAPS_API_KEY : undefined);
+  if (mapsKey !== undefined && !/^AIza[A-Za-z0-9_-]{35}$/.test(mapsKey)) throw new Error("GOOGLE_MAPS_API_KEY_INVALID");
+  if (standalone && !mapsKey) throw new Error("GOOGLE_MAPS_API_KEY_REQUIRED");
+  if (mapsKey) config = { ...config,
+    plugins: [...(config.plugins ?? []).filter(plugin => (Array.isArray(plugin) ? plugin[0] : plugin) !== "react-native-maps"), ["react-native-maps", { androidGoogleMapsApiKey: mapsKey }]],
+    extra: { ...config.extra, googleMaps: { native: true } },
+  };
+  requireBaseConfig(config);
   if (brandFile === undefined) return config;
 
   const brand = readBrand(projectRoot, brandFile);

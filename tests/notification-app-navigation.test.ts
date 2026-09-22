@@ -25,7 +25,7 @@ type FixtureApp = Pick<AppModel,
   "offlineVerifiedAt" | "gatewayUrl" | "storageKey" | "data" | "range" | "agendaFocusDate" |
   "error" | "health" | "liveVerified" | "logout" | "refresh" | "openOffline" | "syncOffline" |
   "branch" | "checkConnection" | "closeOffline" | "focusAgendaDay" | "changeRange" | "openGroup" |
-  "openWork" | "onWorkStatus" | "openCreate">;
+  "openWork" | "onWorkStatus" | "openCreate" | "bindLocationActions">;
 
 interface Props {
   children?: unknown;
@@ -113,6 +113,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
   const tabCalls: FixtureApp["tab"][] = [];
   const backHandlers = new Set<() => boolean>();
   const app: FixtureApp = {
+    bindLocationActions: () => noop,
     session: session(mode), tab, notifications: { client: null, state: notificationState(unreadCount), storageKey: "fixture-notifications", revokeForSession: resolved },
     setTab(next) { tabCalls.push(next); app.tab = next; },
     backTab() { tabCalls.push("today"); app.tab = "today"; },
@@ -154,6 +155,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     if (id === "../ui/theme") return theme;
     if (id === "../security/DeviceSecurityCard") return { DeviceSecurityCard: "DeviceSecurityCard" };
     if (id === "./signatures/UserSignaturesPanel") return { UserSignaturesPanel: "UserSignaturesPanel" };
+    if (id === "../location/LocationSettingsPanel") return { LocationSettingsPanel: "LocationSettingsPanel" };
     return forbidden(id);
   });
   const imports = new Map<string, unknown>([
@@ -162,6 +164,11 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["react-native-safe-area-context", { SafeAreaView: "SafeAreaView", SafeAreaProvider: "SafeAreaProvider" }],
     ["./src/application/useTechnicianApp", { useTechnicianApp(access: Access) { accessCalls.push(access); return app; } }],
     ["./src/screens/ProfileScreen", profile], ["./src/ui/components", ui], ["./src/ui/theme", theme],
+    ["./src/screens/creation/CreationSuccess", { CreationSuccess: "CreationSuccess" }],
+    ["./src/screens/creation/CreationModal", { CreationModal: "CreationModal" }],
+    ["./src/location/LocationHistoryPanel", { LocationHistoryPanel: "LocationHistoryPanel" }],
+    ["./src/location/LocationSettingsPanel", { LocationSettingsPanel: "LocationSettingsPanel" }],
+    ["./src/location/useLocationTracking", { useLocationTracking: () => ({ available: false, state: null, error: null, busy: false, timezone: "UTC", save: resolved }) }],
     ["./src/branding/companyBrandingContext", { companyBrandingContext }],
     ["./src/branding/useCompanyBranding", { useCompanyBranding(input: CompanyBrandingInput, busy: boolean, automatic: boolean) {
       brandingCalls.push({ input, busy, automatic }); return branding;

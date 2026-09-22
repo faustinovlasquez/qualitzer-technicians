@@ -1,10 +1,93 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import { test, type TestContext } from "node:test";
 import { weekRange } from "../src/domain/format";
+import { assignmentDays, dailyRange } from "../src/domain/assignmentSchedule";
+import { user } from "../server/tests/fixtures";
 import { NetworkError } from "../src/infrastructure/errors";
 import { checklistDate, equipmentChecklistPayload } from "./helpers/assignment-checklist";
 import { agendaFixture, agendaReactFixture, frozenNow } from "./helpers/agenda-load-lifecycle";
 import type { MaintenanceDeliveryContext } from "../src/domain/orderLifecycle";
+
+test("confirmed creation stays recoverable when its exact resource is missing and retries only the read", async context => {
+  const current = fixture(context); const app = await current.loadDay(); app.openCreate("work"); await current.flush();
+  const result = { kind: "work" as const, groupId: "direct-72", workId: 72, companyBranchId: 1,
+    schedule: { date: checklistDate, startTime: "09:00", endTime: "10:00", plannedMinutes: 60, timezone: "America/Santiago" } };
+  const opening = current.render().onCreated(result); const rejected = assert.rejects(opening, /todavía no está disponible/);
+  await current.flush(); current.reads.at(-1)!.resolve(); await rejected;
+  const failed = await current.flush();
+  assert.equal(failed.selectedCreationKind, "work"); assert.equal(failed.selected, null); assert.equal(failed.creationNotice, null);
+  const retry = failed.onCreated(result); await current.flush();
+  const data = equipmentChecklistPayload(); data.groups = [{ ...data.groups[0], id: result.groupId, works: [{ ...data.groups[0].works[0], id: "72" }] }];
+  current.reads.at(-1)!.resolve(data); await retry;
+  const opened = await current.flush(); assert.equal(opened.selected?.workId, "72"); assert.equal(opened.creationNotice?.confirmed, true);
+  opened.closeWork(); const closed = await current.flush(); assert.equal(closed.creationNotice, null);
+  closed.openWork(data.groups[0], data.groups[0].works[0]); assert.equal((await current.flush()).creationNotice, null);
+});
+
+test("locked creation handoff never opens a detail or success notice", async context => {
+  const current = fixture(context); const app = await current.loadDay(); app.openCreate("maintenance"); await current.flush();
+  const result = { kind: "maintenance" as const, groupId: "maintenance-73", workId: 73, companyBranchId: 1,
+    schedule: { date: checklistDate, startTime: "09:00", endTime: "10:00", plannedMinutes: 60, timezone: "America/Santiago" } };
+  const opening = current.render().onCreated(result); await current.flush(); current.access.allowed = false;
+  const data = equipmentChecklistPayload(); data.groups = [{ ...data.groups[0], id: result.groupId, works: [{ ...data.groups[0].works[0], id: "73" }] }];
+  current.reads.at(-1)!.resolve(data); await opening; const after = await current.flush();
+  assert.equal(after.selectedOrder, null); assert.equal(after.creationNotice, null); assert.equal(after.selectedCreationKind, "maintenance");
+});
+
+for (const kind of ["work", "maintenance"] as const) test(`confirmed ${kind} opens the created resource instead of returning to agenda`, async context => {
+  const current = fixture(context);
+  const app = await current.loadDay();
+  app.openCreate(kind); await current.flush();
+  const created = { kind, groupId: kind === "maintenance" ? "maintenance-71" : "direct-71", workId: 71, companyBranchId: 1,
+    schedule: { date: checklistDate, startTime: "09:00", endTime: "10:00", plannedMinutes: 60, timezone: "America/Santiago" } };
+  const opening = current.render().onCreated(created);
+  await current.flush();
+  const data = equipmentChecklistPayload();
+  data.groups = [{ ...data.groups[0], id: created.groupId, type: kind === "maintenance" ? "internal_maintenance" : "direct_assignment",
+    works: [{ ...data.groups[0].works[0], id: "71" }] }];
+  current.reads.at(-1)!.resolve(data); await opening;
+  const opened = await current.flush();
+  assert.equal(opened.selectedCreationKind, null);
+  assert.equal(opened.tab, "today");
+  assert.equal(opened.creationNotice?.confirmed, true);
+  assert.equal(opened.creationNotice?.kind, kind);
+  if (kind === "maintenance") { assert.equal(opened.selectedOrder?.id, created.groupId); assert.equal(opened.selected, null); }
+  else { assert.equal(opened.selected?.workId, "71"); assert.equal(opened.selected?.groupId, created.groupId); assert.equal(opened.selectedOrder, null); }
+  opened.dismissCreationNotice(); assert.equal((await current.flush()).creationNotice, null);
+});
+
+for (const fullWeek of [true, false]) test(`cold offline startup opens today's jornada with ${fullWeek ? "a full downloaded week" : "only older coverage"}`, async () => {
+  const filename = new URL("../src/application/useTechnicianApp.ts", import.meta.url);
+  const source = ts.createSourceFile(filename.pathname, readFileSync(filename, "utf8"), ts.ScriptTarget.Latest, true);
+  let restore: ts.FunctionDeclaration | undefined;
+  const visit = (node: ts.Node): void => { if (ts.isFunctionDeclaration(node) && node.name?.text === "restoreCachedSession") restore = node; ts.forEachChild(node, visit); };
+  visit(source); assert.ok(restore);
+  const today = "2026-09-21";
+  const snapshot = { authBlocked: false, coverage: (fullWeek ? assignmentDays(weekRange(today)) : ["2026-09-18"]).map(date => ({ date, branchId: 1, fetchedAt: 100 })), operations: [] };
+  const original = structuredClone(snapshot);
+  const changes = new Map<string, unknown>();
+  const reads: unknown[] = [];
+  const profile = { user: user(), verifiedAt: 100 };
+  const wrapped = { stop() { assert.fail("UNEXPECTED_STOP"); }, getSnapshot: () => snapshot,
+    localAssignments: async (range: unknown) => { reads.push(range); if (!fullWeek) throw new Error("OFFLINE_CACHE_MISS"); return equipmentChecklistPayload(); } };
+  const module = { exports: {} as { restoreCachedSession(stored: object, repo: object, version: number): Promise<boolean> } };
+  const state: { current: object } = { current: {} };
+  runInNewContext(ts.transpileModule(`export ${restore.getText(source)}`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+    module, exports: module.exports, state, repository: { current: null }, sessionSetup: { current: null }, sessionVersion: { current: 1 }, manualRefresh: { current: null },
+    restoreOfflineProfile: async () => profile, bindOffline: async () => ({ wrapped, allowNetwork() {} }), scheduleClock: () => ({ day: today }), dateKey: () => today,
+    weekRange, assignmentDays, dailyRange, errorText: (error: Error) => error.message,
+    ...Object.fromEntries(["Session", "SelectedTenant", "Data", "Range", "Tab", "AgendaFocusDate", "Selected", "SelectedOrder", "SelectedCreationKind", "SelectedOffline", "OfflineController", "OfflineVerifiedAt", "LiveVerified", "ForcePassword", "FinalizingSession", "Error", "Loading"].map(name => [`set${name}`, (value: unknown) => { changes.set(name, value); }])),
+  });
+  assert.equal(await module.exports.restoreCachedSession({ token: "fixture", tenant: { id: "fixture" }, branchId: 1, gatewayUrl: "https://fixture.invalid" }, {}, 1), true);
+  assert.equal(changes.get("Tab"), "today");
+  assert.deepEqual(reads, [dailyRange(today)]);
+  assert.equal(changes.get("AgendaFocusDate"), null);
+  if (!fullWeek) { assert.equal(changes.get("Data"), null); assert.match(String(changes.get("Error")), /OFFLINE_CACHE_MISS/); }
+  assert.deepEqual(snapshot, original);
+});
 
 test("agenda publishes completed dates before the batch and ignores late progress after range change", async t => {
   const current = fixture(t);

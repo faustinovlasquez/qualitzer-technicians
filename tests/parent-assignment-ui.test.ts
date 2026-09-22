@@ -8,6 +8,43 @@ import type { DashboardScreenProps } from "../src/screens/DashboardScreen";
 import { durableReactFixture, elements, uiModule, uiSnapshot } from "./helpers/durable-ui";
 import { agendaFixture } from "./helpers/agenda-load-lifecycle";
 
+test("jornada initially selects pending and in-progress together and preserves manual filter choices", () => {
+  const hooks = durableReactFixture();
+  const data = assignments();
+  const example = data.groups[0].works[0];
+  data.groups[0].works = (["pending", "in_progress", "paused", "completed", "delivered"] as const).map((status, index) => ({ ...example, id: String(index + 1), status }));
+  const module = uiModule<{ DashboardScreen(props: DashboardScreenProps): ReactNode }>("screens/DashboardScreen.tsx", hooks, {
+    "react-native": { ActivityIndicator: "ActivityIndicator", Pressable: "Pressable", RefreshControl: "RefreshControl", ScrollView: "ScrollView", StyleSheet: { create: (styles: object) => styles }, Text: "Text", TextInput: "TextInput", View: "View", useWindowDimensions: () => ({ width: 390 }) },
+    "@react-native-async-storage/async-storage": { default: { getItem: async () => null, setItem: async () => {} } },
+    "../ui/components": { Badge: "Badge", Button: "Button", Card: "Card", EmptyState: "EmptyState", IconButton: "IconButton", SectionTitle: "SectionTitle" },
+    "./orders/AssignmentOrderCard": { AssignmentOrderCard: "AssignmentOrderCard" },
+    "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" },
+    "./schedule/WeeklySchedule": { WeeklySchedule: "WeeklySchedule" },
+    "./notifications/RunningTimersNotice": { RunningTimersNotice: "RunningTimersNotice" },
+  });
+  const props: DashboardScreenProps = { data, user: user(), range: { startDate: "2026-09-21", endDate: "2026-09-21" }, view: "today", loading: false, error: null,
+    onRefresh() {}, onRangeChange() {}, onOpenWork() {}, onOpenGroup() {}, async onWorkStatus() {} };
+  const render = () => hooks.render(() => module.DashboardScreen(props));
+  const control = (label: string) => {
+    const found = elements<{ accessibilityLabel?: string; accessibilityState?: { selected: boolean }; onPress(): void }>(render(), "Pressable").find(node => node.props.accessibilityLabel === label);
+    assert.ok(found); return found.props;
+  };
+  const statuses = () => elements<{ work: { status: string } }>(render(), "AssignmentWorkCard").map(node => node.props.work.status).sort();
+  assert.equal(control("Pendientes").accessibilityState?.selected, true);
+  assert.equal(control("En curso").accessibilityState?.selected, true);
+  assert.equal(control("Todos").accessibilityState?.selected, false);
+  assert.equal(control("Completados").accessibilityState?.selected, false);
+  assert.deepEqual(statuses(), ["in_progress", "paused", "pending"]);
+  control("Pendientes").onPress();
+  assert.deepEqual(statuses(), ["in_progress", "paused"]);
+  control("Completados").onPress();
+  assert.deepEqual(statuses(), ["completed", "delivered", "in_progress", "paused"]);
+  control("Todos").onPress(); assert.equal(statuses().length, 5);
+  control("Pendientes").onPress(); assert.deepEqual(statuses(), ["pending"]);
+  props.busy = true; control("En curso").onPress(); assert.deepEqual(statuses(), ["pending"]);
+  hooks.unmount();
+});
+
 test("compact agenda layout selector has a bounded full-width row and preserves both view actions", () => {
   const hooks = durableReactFixture();
   const module = uiModule<{ DashboardScreen(props: DashboardScreenProps): ReactNode }>("screens/DashboardScreen.tsx", hooks, {

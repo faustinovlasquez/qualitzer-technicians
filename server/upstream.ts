@@ -5,6 +5,7 @@ import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, syncReceip
 export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
 type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_password" |
   "/user_signatures/me" | `/user_signatures/me/${number}` |
+  "/worker-locations/batch" | "/worker-locations/me" |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |
@@ -26,6 +27,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/files` |
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/files/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/reopen` |
+  `/technician-dashboard/panel/${string}/works/${number}/equipment-location/${"work" | "group"}` |
   `/technician-dashboard/panel/${string}/works/${number}/steps/${number}/files`;
 interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -114,6 +116,21 @@ export class Upstream {
         throw new GatewayError(response.status >= 500 ? 503 : 502, "UPSTREAM_INVALID_RESPONSE");
       }
       if (!response.ok) {
+        if (/\/equipment-location\/(?:work|group)$/.test(path) && [400, 401, 404, 409].includes(response.status)) {
+          const text = await readBody(response);
+          let value: unknown;
+          try { value = JSON.parse(text); } catch { value = null; }
+          const failure = z.object({ error: z.enum(["PERMISSION_REQUIRED", "EQUIPMENT_LOCATION_CHANGED", "EQUIPMENT_LOCATION_NOT_AVAILABLE", "EQUIPMENT_NOT_FOUND", "EQUIPMENT_LOCATION_INVALID_ADDRESS", "EQUIPMENT_LOCATION_INVALID_COORDINATES", "EQUIPMENT_LOCATION_ADDRESS_REQUIRED", "EQUIPMENT_LOCATION_INVALID_INPUT"]) }).safeParse(value);
+          if (failure.success) {
+            const code = failure.data.error;
+            const message = code === "PERMISSION_REQUIRED" ? "No tienes permiso para editar la ubicación de este equipo."
+              : code === "EQUIPMENT_LOCATION_CHANGED" ? "La ubicación o el equipo cambió. Actualiza la ficha antes de guardar."
+              : code === "EQUIPMENT_LOCATION_NOT_AVAILABLE" || code === "EQUIPMENT_NOT_FOUND" ? "No hay una ubicación de equipo disponible para esta asignación."
+              : "Revisa la dirección y las coordenadas del equipo.";
+            throw new GatewayError(code === "PERMISSION_REQUIRED" ? 403 : response.status, code, message);
+          }
+          throw new GatewayError(response.status, response.status === 401 ? "UNAUTHORIZED" : "UPSTREAM_REJECTED");
+        }
         if ((path.startsWith("/mobile-notifications/") || path.startsWith("/technician-dashboard/mobile-creations") || path.startsWith("/user_signatures/")) && [400, 401, 403, 404, 409, 429, 500, 503].includes(response.status)) {
           const text = await readBody(response);
           let failure: unknown;

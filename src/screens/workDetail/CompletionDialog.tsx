@@ -17,6 +17,7 @@ import { CreationDatePicker } from "../creation/CreationDatePicker";
 
 export interface CompletionDialogProps {
   maintenance: boolean;
+  durable?: boolean;
   work: AssignmentWork;
   allowEditExecutionTime: boolean;
   generatedAt: string;
@@ -33,8 +34,8 @@ export interface CompletionDialogProps {
   onSubmit: (input: StatusInput) => void;
 }
 
-export function CompletionDialog({ maintenance, work, allowEditExecutionTime, generatedAt, status = "delivered", initialDate, range, reasons, canSubmit: submitAllowed, onRefresh, error, busy, mode, onClose, onSubmit }: CompletionDialogProps) {
-  const dates = availableExecutionDates(work, range);
+export function CompletionDialog({ maintenance, durable = false, work, allowEditExecutionTime, generatedAt, status = "delivered", initialDate, range, reasons, canSubmit: submitAllowed, onRefresh, error, busy, mode, onClose, onSubmit }: CompletionDialogProps) {
+  const dates = durable ? [range.startDate] : availableExecutionDates(work, range);
   const plannedDates = dates.filter((day) => work.plannedDates?.includes(day));
   const [selectedDates, setSelectedDates] = useState<string[]>([dates.includes(initialDate) ? initialDate : range.startDate]);
   const [multipleWorkedDays, setMultipleWorkedDays] = useState(Boolean(work.workedDates?.length));
@@ -69,7 +70,7 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
   const blocked = reasons.length > 0 || !canSubmit;
   const autoError = selectedDates.length > 1 && timing && !executionIntervalCovered(selectedDates, timing.endDateOffset)
     ? "Selecciona todos los días que abarca el intervalo o corrige el tiempo trabajado."
-    : !maintenance && anchorWork !== undefined && (timing === null || timing.minutes <= 0)
+    : !maintenance && anchorWork !== undefined && (durable ? Math.round(elapsed / 60) <= 0 : timing === null || timing.minutes <= 0)
     ? allowEditExecutionTime
       ? "No hay tiempo de cronómetro suficiente para entregar automáticamente. Inicia el cronómetro o activa la edición manual."
       : "Inicia el cronómetro antes de entregar. La sucursal no permite registrar horas manuales; si acaba de iniciar, espera a que acumule tiempo."
@@ -183,6 +184,7 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
                 <ChoiceButton label="Tiempo total" selected={editMode === "duration"} disabled={busy} onPress={() => changeEditMode("duration")} />
                 <ChoiceButton label="Inicio y término" selected={editMode === "interval"} disabled={busy} onPress={() => changeEditMode("interval")} />
               </View> : null}
+              {editMode === "duration" && !executionStartTime(work) ? <TimeField label="Inicio real (HH:mm)" value={start} onChange={(value) => { edited.current = true; setStart(value); }} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} /> : null}
               {editMode === "duration" ? <View style={styles.columns}>
                 <NumericSelectField label="Horas trabajadas" value={hours} max={743} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} onChange={(value) => { edited.current = true; setHours(value); }} containerStyle={styles.column} />
                 <NumericSelectField label="Minutos trabajados" value={minutes} max={59} disabled={busy} scopeKey={JSON.stringify([work.id, selectedDates, range])} onChange={(value) => { edited.current = true; setMinutes(value); }} containerStyle={styles.column} />
@@ -198,7 +200,7 @@ export function CompletionDialog({ maintenance, work, allowEditExecutionTime, ge
           </ScrollView>
           <View style={[styles.tight, { padding: 16 }]}>
             {error || validationError ? <Text accessibilityRole="alert" style={styles.errorText}>{error ?? validationError}</Text> : blocked ? <Text style={styles.caption}>{reasons[0] ?? "Revisa los requisitos de entrega antes de confirmar."}</Text> : null}
-            <Button title={mode === "demo" ? "Entregar en demostración" : "Confirmar y entregar"} icon="checkmark-circle-outline" loading={busy} disabled={busy || blocked || (editing ? result.input === null : autoError !== null)} onPress={submit} />
+            <Button title={mode === "demo" ? "Entregar en demostración" : durable ? "Guardar entrega" : "Confirmar y entregar"} icon="checkmark-circle-outline" loading={busy} disabled={busy || blocked || (editing ? result.input === null : autoError !== null)} onPress={submit} />
             <Button title="Seguir trabajando" variant="secondary" disabled={busy} onPress={onClose} />
           </View>
         </KeyboardAvoidingView>

@@ -6,7 +6,7 @@ import { MAX_EXECUTION_DATES } from "../../domain/workExecution";
 import { palette, radius, typography } from "../../ui/theme";
 import { CreationModal } from "./CreationModal";
 
-type DatePickerProps = { value: string; onClose: () => void } & (
+type DatePickerProps = { value: string; onClose: () => void; showInputHint?: boolean } & (
   { multiple?: false; onChange: (date: string) => void }
   | { multiple: true; selectedDates: string[]; onChange: (dates: string[]) => void }
 );
@@ -50,7 +50,7 @@ export function CreationDatePicker(props: DatePickerProps) {
       <Text accessibilityLiveRegion="polite" style={styles.hint}>{selectedDates.length} de {MAX_EXECUTION_DATES} días seleccionados</Text>
       <Button title="Usar fechas seleccionadas" icon="checkmark-outline" disabled={selectedDates.length === 0} onPress={() => { props.onChange(selectedDates); onClose(); }} />
       <Button title="Cancelar" variant="secondary" onPress={onClose} />
-    </> : <Text style={styles.hint}>También puedes escribir la fecha directamente en formato YYYY-MM-DD.</Text>}
+    </> : props.showInputHint !== false ? <Text style={styles.hint}>También puedes escribir la fecha directamente en formato YYYY-MM-DD.</Text> : null}
   </CreationModal>;
 }
 

@@ -36,6 +36,7 @@ export interface OrderDetailScreenProps {
   onDeliveryIntentConsumed?: () => void;
   onBack: () => void;
   onHome?: () => void;
+  onLocationHistory?: () => void;
   onOpenWork: (group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions) => void;
   onWorkStatus: (group: AssignmentGroup, work: AssignmentWork, input: StatusInput) => Promise<void>;
   onRefresh: () => Promise<void>;
@@ -200,6 +201,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       </View>
       <IconButton name="home-outline" label="Ir a mi jornada" disabled={locked} onPress={() => leaveDetails(true)} />
       <IconButton name="ellipsis-horizontal" label="Opciones de la orden" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) setSectionsOpen(true); }} />
+      {props.onLocationHistory ? <IconButton name="location-outline" label="Mi historial de ubicación" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) props.onLocationHistory?.(); }} /> : null}
       <IconButton name="refresh-outline" label="Actualizar orden y trabajos" disabled={locked} onPress={refresh} />
       </View>
       <Text numberOfLines={1} style={styles.headerSubtitle}>{plainText(group.title)}</Text>
@@ -287,6 +289,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       <View style={styles.menuOverlay}><ScrollView style={styles.menu} contentContainerStyle={styles.menuContent} accessibilityViewIsModal>
         <SectionTitle title="Secciones de la orden" />
         {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); selectTab(item.id); }} />)}
+        {props.onLocationHistory ? <Button title="Mi historial de ubicación" icon="location-outline" variant="secondary" disabled={locked} onPress={() => { setSectionsOpen(false); props.onLocationHistory?.(); }} /> : null}
         <Button title="Ir a mi jornada" icon="home-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(true); }} />
         <Button title="Volver a mis asignaciones" icon="list-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(); }} />
         <Button title="Cerrar menu" icon="close-outline" variant="ghost" onPress={() => setSectionsOpen(false)} />

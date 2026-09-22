@@ -10,7 +10,7 @@ import { OFFLINE_LIMITS, type CacheEntry, type EngineDependencies } from "./cont
 import { OfflineEngine, canUseCache, findDraftDocument, resolveScope, sameOfflineUser } from "./engine";
 import { offlineUserSchema, putCache, updateState } from "./state";
 import { overlayCreations } from "./overlay";
-import { syncAnswerFromStep, toSyncAnswer } from "../domain/offlineProtocol";
+import { syncAnswerFromStep, toSyncAnswer, syncCompletionInputSchema } from "../domain/offlineProtocol";
 import { notificationInboxSchema, notificationStatusSchema } from "../domain/notifications";
 import { cachedAssignmentsSchema, cachedAttachmentSchema, cachedCommentsSchema, cachedDeliverySchema, resourceCacheKey, sameResource } from "./cacheSchemas";
 import { checklistAssignmentInputSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistAssignmentPort } from "../domain/checklistAssignment";
@@ -67,6 +67,14 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = (scope, id, files) => this.onlineOnly(() => workActions(this.remote).uploadActivityFiles(scope, id, files), scope);
   reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.onlineOnly(() => workActions(this.remote).reopenWork(scope), scope);
+  equipmentLocation: NonNullable<TechnicianRepository["equipmentLocation"]> = (scope, target) => this.onlineOnly(() => {
+    if (!this.remote.equipmentLocation) throw new Error("La ubicación del equipo no está disponible.");
+    return this.remote.equipmentLocation(scope, target);
+  }, scope);
+  updateEquipmentLocation: NonNullable<TechnicianRepository["updateEquipmentLocation"]> = (scope, target, input) => this.onlineOnly(() => {
+    if (!this.remote.updateEquipmentLocation) throw new Error("La edición de ubicación no está disponible.");
+    return this.remote.updateEquipmentLocation(scope, target, input);
+  }, scope);
   private branch(branchId: number): void {
     if (branchId !== this.dependencies.branchId) throw new OfflineUnavailableError("OFFLINE_BRANCH_NAMESPACE_MISMATCH");
   }
@@ -191,7 +199,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
             const beforeRead = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
             if (beforeRead.authBlocked || (this.dependencies.canAccessLocal && !await this.dependencies.canAccessLocal())) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
             batch.check();
-            timerReadOperationIds = beforeRead.operations.filter((operation) => operation.kind === "timer" && operation.status === "applied"
+            timerReadOperationIds = beforeRead.operations.filter((operation) => (operation.kind === "timer" || operation.kind === "completion") && operation.status === "applied"
               && operation.scope.companyBranchId === branchId && operation.scope.startDate === date && operation.scope.endDate === date).map((operation) => operation.id);
             const value = await this.remote.assignments(dailyRange(date), branchId, { signal: batch.signal });
             batch.check();
@@ -519,7 +527,15 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     return { checklistId, alreadyAssigned: true };
   };
   status: TechnicianRepository["status"] = async (scope, input) => {
-    if (input.status === "completed" || input.status === "delivered") return this.onlineOnly(() => this.remote.status(scope, input), scope);
+    if (input.status === "completed" || input.status === "delivered") {
+      this.branch(scope.companyBranchId);
+      const canonical = canonicalIntentionScopeSchema.parse(scope);
+      const operation: OfflineOperation = { ...this.base(), kind: "completion", scope: canonical,
+        payload: { input: syncCompletionInputSchema.parse(input), recordedAt: new Date(this.dependencies.now()).toISOString(), observedAt: new Date(this.dependencies.now()).toISOString(), baseStatus: "pending" },
+        prerequisiteIds: [], localClock: { elapsedSeconds: 0 } };
+      await this.finish(await this.engine.enqueue([operation]));
+      return;
+    }
     if (input.status !== "in_progress" && input.status !== "paused") throw new OfflineUnavailableError("OFFLINE_TIMER_INVALID_TRANSITION");
     if (Object.keys(input).some((key) => key !== "status" && key !== "executionDates")
       || input.executionDates !== undefined && (input.executionDates.length !== 1 || input.executionDates[0] !== scope.startDate)) throw new OfflineUnavailableError("OFFLINE_TIMER_INVALID_INPUT");
@@ -528,7 +544,37 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     const registered = await this.engine.enqueue([{ ...this.base(), kind: "timer", scope: canonical, payload: { status: input.status, baseStatus: "pending" } }]);
     await this.finish(registered);
   };
-  report: TechnicianRepository["report"] = (scope, note) => this.onlineOnly(() => this.remote.report(scope, note), scope);
+  report: TechnicianRepository["report"] = async (scope, note) => {
+    this.branch(scope.companyBranchId);
+    const canonical = canonicalIntentionScopeSchema.parse(scope);
+    const text = note.trim();
+    if (!text || text.length > 10000 || text.includes("\u0000")) throw new OfflineUnavailableError("OFFLINE_REPORT_INVALID");
+    await this.assertReadable();
+    if (!canonical.groupId.startsWith("maintenance-")) return this.addComment(canonical, text);
+    const state = await this.dependencies.store.read(this.dependencies.namespace);
+    const previous = state.operations.find(operation => operation.kind === "document" && sameResource(operation.scope, canonical)
+      && operation.scope.startDate === canonical.startDate && operation.reportText === text);
+    if (previous?.kind === "document") {
+      await this.dependencies.fileStore.resolveURI(previous.file);
+      await this.finish([previous]); return;
+    }
+    const files = this.dependencies.fileStore;
+    if (!files.ownText) throw new OfflineUnavailableError("OFFLINE_REPORT_STORAGE_UNAVAILABLE");
+    const file = await files.ownText(this.dependencies.namespace, text, `reporte-tecnico-${canonical.startDate}.txt`);
+    let registered: OfflineOperation[] = [];
+    let committed = false;
+    try {
+      registered = await this.engine.enqueue([{ ...this.base(), kind: "document", scope: canonical, file,
+        sourceDraftId: `report-${file.sha256}`, reportText: text }]);
+      committed = true;
+    } finally {
+      if (!committed) await files.remove(file);
+    }
+    if (!registered.some(operation => operation.kind === "document" && operation.file.id === file.id)) {
+      try { await files.remove(file); } catch {}
+    }
+    await this.finish(registered);
+  };
   deleteFile: TechnicianRepository["deleteFile"] = (scope, id, stepId) => this.onlineOnly(() => this.remote.deleteFile(scope, id, stepId), scope);
   deleteGroupFile: TechnicianRepository["deleteGroupFile"] = (scope, id) => this.onlineOnly(() => this.remote.deleteGroupFile(scope, id), scope);
   startOrder: TechnicianRepository["startOrder"] = (scope) => this.onlineOnly(() => this.remote.startOrder(scope), scope);

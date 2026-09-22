@@ -20,6 +20,12 @@ function respond(res: Response, result: { status: number; receipt: SyncReceipt }
 export function createOfflineRouter(upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency): Router {
   const router = Router();
   router.use((req, res, next) => { bearer(req); res.set("Cache-Control", "no-store"); next(); });
+  router.get("/capabilities", async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const { companyBranchId } = receiptQuery.parse(req.query);
+    const { user } = await mobileActor(upstream, req, companyBranchId);
+    res.json({ protocolVersion: 1, companyBranchId, userId: user.id, workerId: user.workerId, optionalWorkFields: true, recordedTimer: true, completion: true });
+  });
   router.post("/commands", (req, _res, next) => {
     if (req.headers["content-encoding"] !== undefined && req.headers["content-encoding"] !== "identity") throw new GatewayError(415, "UNSUPPORTED_CONTENT_ENCODING");
     next();
@@ -28,11 +34,11 @@ export function createOfflineRouter(upstream: Upstream, uploadLimiter: RequestHa
     if (!req.is("application/json")) throw new GatewayError(415, "JSON_REQUIRED");
     const input = syncCommandSchema.parse(req.body);
     const { token, user } = await mobileActor(upstream, req, input.scope.companyBranchId);
-    if (input.kind === "timer" && input.payload.recordedAt !== undefined) {
+    if (input.kind === "completion" || input.kind === "timer" && input.payload.recordedAt !== undefined) {
       const query = new URLSearchParams({ companyBranchId: String(input.scope.companyBranchId), startDate: input.scope.startDate, endDate: input.scope.startDate });
       const data = parseUpstream(assignmentsSchema, await upstream.request("/technician-dashboard/assignments", { token, query }));
       if (data.technician.id !== user.workerId) throw new GatewayError(403, "WORKER_MISMATCH");
-      if (data.technician.supportsRecordedTimer !== true) { res.set("Retry-After", "60"); throw new GatewayError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE"); }
+      if ((input.kind === "completion" ? data.technician.supportsOfflineCompletion : data.technician.supportsRecordedTimer) !== true) { res.set("Retry-After", "60"); throw new GatewayError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE"); }
     }
     try {
       respond(res, await upstream.requestReceipt("/mobile-sync/commands", input.operationId, { method: "POST", token, json: input }));

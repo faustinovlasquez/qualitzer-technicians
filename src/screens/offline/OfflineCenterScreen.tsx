@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { DateRange } from "../../domain/models";
 import type { OfflineController, OfflineOperation, OfflineSnapshot } from "../../domain/offline";
 import { OFFLINE_LIMITS } from "../../offline/contracts";
+import { storageBytesLabel } from "../../offline/storageCapacity";
 import { requiresDeployment } from "../../offline/connection";
 import { connectionPresentation } from "../../offline/connectionPresentation";
 import { Badge, BodyText, Button, Card, IconButton, SectionTitle } from "../../ui/components";
@@ -46,7 +47,7 @@ function OperationDetails({ operation, title = "Ver detalles técnicos" }: { ope
         <Text selectable style={styles.caption}>Base confirmada al editar: {JSON.stringify(operation.base, null, 2)}</Text>
         <BodyText>El estado actual del servidor debe reconsultarse antes de resolver un conflicto.</BodyText>
       </> : null}
-      {operation.kind === "timer" || operation.kind === "checklist" ? <Text selectable style={styles.caption}>Solicitud local: {JSON.stringify(operation.payload, null, 2)}</Text> : null}
+      {operation.kind === "timer" || operation.kind === "checklist" || operation.kind === "completion" ? <Text selectable style={styles.caption}>Solicitud local: {JSON.stringify(operation.payload, null, 2)}</Text> : null}
     </>}
     {operation.receipt ? <Text selectable style={styles.caption}>Recibo: {JSON.stringify(operation.receipt, null, 2)}</Text> : null}
     </> : null}
@@ -99,7 +100,7 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
     setNow(Date.now());
     setSyncResult({ attempt, key: syncSnapshotKey(controller.getSnapshot()) });
   }
-  const files = new Map((snapshot?.operations ?? []).flatMap((operation) => operation.kind === "document" ? [[operation.file.id, operation.file.size] as const] : []));
+  const offlineStorageVisible = snapshot?.connection && ["offline", "unreachable"].includes(snapshot.connection.status);
   return <SafeAreaView style={styles.safe}>
     <View style={styles.header}><IconButton name="arrow-back-outline" label="Volver" onPress={onBack} /><SectionTitle title="Centro offline" subtitle={branchName ?? `Sucursal ${branchId}`} /></View>
     <ScrollView contentContainerStyle={styles.content}>
@@ -121,7 +122,7 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         </> : null}
         <Button title="Sincronizar ahora" loading={action === "sync" || snapshot?.syncing} disabled={!presentation.canSync || !!action} onPress={() => void run("sync", sync)} />
         {feedback ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{syncAttemptMessage(feedback, now)}</Text> : null}
-        <BodyText>Mantén la app abierta para enviar los cambios. La entrega requiere conexión y no tener pendientes.</BodyText>
+        <BodyText>Mantén la app abierta para enviar los cambios. Una entrega guardada offline se confirma después de sincronizar sus operaciones anteriores.</BodyText>
       </Card>
       <Card style={styles.stack}>
         <SectionTitle title="Preparar hasta 7 fechas" subtitle={`${range.startDate} — ${range.endDate}`} />
@@ -133,12 +134,13 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         <Button title="Preparar este período" icon="download-outline" loading={action === "prepare" || snapshot?.preparing} disabled={!snapshot || !presentation.ready || !presentation.canSync || !!action || snapshot.preparing || !validWeek} onPress={() => void run("prepare", onPrepare ?? (() => controller.prepareWeek(range, branchId)))} />
         <BodyText>La cobertura no es exhaustiva: agenda, primeras páginas y hasta {OFFLINE_LIMITS.prepareWorks} trabajos/grupos. Solo los archivos marcados como descargados tienen bytes locales. {onPrepare ? "La descarga depende del presupuesto configurado; no asegura todos los archivos." : "Esta preparación guarda datos y metadatos; no descarga archivos remotos."}</BodyText>
       </Card>
-      <Card style={styles.stack}>
+      {offlineStorageVisible ? <View style={styles.stack}>
         <SectionTitle title="Almacenamiento del dispositivo" />
-        <BodyText>Archivos de operaciones visibles: {fileSizeLabel([...files.values()].reduce((sum, size) => sum + size, 0))}. No es el uso total del dispositivo.</BodyText>
-        <BodyText>Límites: {fileSizeLabel(OFFLINE_LIMITS.fileBytes)} por archivo · {fileSizeLabel(OFFLINE_LIMITS.totalFileBytes)} globales · caché de datos {fileSizeLabel(OFFLINE_LIMITS.cacheBytes)}. Espacio libre y descargas confirmadas: no informados por este controlador.</BodyText>
+        <BodyText>{snapshot.storage ? `Archivos offline: ${storageBytesLabel(snapshot.storage.usedBytes)} usados · ${storageBytesLabel(snapshot.storage.availableBytes)} disponibles aproximadamente.` : "No se pudo consultar el espacio disponible."}</BodyText>
+        {snapshot.storage?.capacitySource === "device" ? <BodyText>Se reservan {storageBytesLabel(snapshot.storage.reserveBytes)} para el teléfono. El disponible cambia con el uso de otras apps.</BodyText> : <BodyText>Cuota local precautoria: {fileSizeLabel(OFFLINE_LIMITS.totalFileBytes)}. No representa todo el espacio libre del dispositivo.</BodyText>}
+        <BodyText>Incluye archivos guardados y reservados por todos los perfiles en este teléfono. Máximo {fileSizeLabel(OFFLINE_LIMITS.fileBytes)} por archivo. La caché de datos usa hasta {fileSizeLabel(OFFLINE_LIMITS.cacheBytes)} por perfil, separada de los pendientes.</BodyText>
         <Notice message="No se borran pendientes para liberar espacio. Borrar los datos del navegador, desinstalar o perder el dispositivo puede destruir las copias locales aún no sincronizadas." tone="warning" />
-      </Card>
+      </View> : null}
       {message ? <Notice message={userErrorText(message)} tone="error" onDismiss={() => setMessage(null)} /> : null}
       <SectionTitle title="Registro de operaciones" subtitle="El texto local, la base y los recibos se conservan para revisión." />
       {[...(snapshot?.operations ?? [])].sort((a, b) => b.createdAt - a.createdAt).map((operation) => {

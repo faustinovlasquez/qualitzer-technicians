@@ -9,6 +9,8 @@ import { Badge, BodyText, Button, Card, EmptyState, Field, SectionTitle } from "
 import { AttachmentList, Fact, HttpLink, Notice } from "./DetailUi";
 import { styles } from "./detailStyles";
 import { palette } from "../../ui/theme";
+import type { EquipmentLocationPort } from "../../domain/equipmentLocation";
+import { EquipmentLocationPanel } from "../../location/EquipmentLocationPanel";
 
 function Materials({ materials }: { materials: Material[] }) {
   const states: { [key in Material["stockStatus"]]: string } = { in_stock: "En stock", requested: "Solicitado", reserved: "Reservado" };
@@ -37,6 +39,7 @@ interface WorkTabProps {
   work: AssignmentWork;
   report: string;
   savedReport: string | null;
+  pendingReport?: boolean;
   disabled: boolean;
   readOnly: boolean;
   submitting: boolean;
@@ -45,7 +48,7 @@ interface WorkTabProps {
   onReportSubmit: () => void;
 }
 
-export function WorkTab({ group, work, report, savedReport, disabled, readOnly, submitting, mode, onReportChange, onReportSubmit, activitiesPanel, onChecklist }: WorkTabProps) {
+export function WorkTab({ group, work, report, savedReport, pendingReport = false, disabled, readOnly, submitting, mode, onReportChange, onReportSubmit, activitiesPanel, onChecklist }: WorkTabProps) {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(report.trim().length > 0);
   const saved = savedReport !== null && savedReport === report.trim();
@@ -80,10 +83,10 @@ export function WorkTab({ group, work, report, savedReport, disabled, readOnly, 
           <Ionicons name="document-text-outline" size={22} color={palette.primary} /><Text style={styles.sectionTitle}>Reporte técnico</Text><Ionicons name={reportOpen ? "chevron-up-outline" : "chevron-down-outline"} size={22} color={palette.primary} />
         </Pressable>
         {reportOpen ? <View style={styles.stack}>
-        {saved ? <Badge label={mode === "demo" ? "Guardado localmente · demo" : "Guardado en Qualitzer"} tone="info" /> : report.length > 0 ? <Badge label="Borrador en dispositivo" tone="warning" /> : null}
+        {pendingReport ? <Badge label="Reporte guardado · pendiente de sincronizar" tone="warning" /> : saved ? <Badge label={mode === "demo" ? "Guardado localmente · demo" : "Guardado en Qualitzer"} tone="info" /> : report.length > 0 ? <Badge label="Borrador en dispositivo" tone="warning" /> : null}
         <Field label="Nota del reporte (obligatoria)" value={report} onChangeText={onReportChange} editable={!disabled && !readOnly} multiline maxLength={10000} style={styles.multiline} placeholder="Trabajo realizado, condiciones del equipo y observaciones…" error={reportError} hint={`${report.length}/10000 caracteres. El texto se guarda como borrador mientras escribes; solo se envía al pulsar Guardar reporte.`} />
         {group.type === "internal_maintenance" ? <BodyText>El reporte de mantenimiento se envía para guardarlo como un archivo de texto adjunto al trabajo.</BodyText> : null}
-        {!readOnly ? <Button title={mode === "demo" ? "Guardar reporte en demo" : "Guardar reporte"} icon="document-text-outline" disabled={disabled || saved} loading={submitting} onPress={() => {
+        {!readOnly ? <Button title={mode === "demo" ? "Guardar reporte en demo" : "Guardar reporte"} icon="document-text-outline" disabled={disabled || saved || pendingReport} loading={submitting} onPress={() => {
           if (!report.trim()) { setReportError("Escribe una nota antes de guardar el reporte."); return; }
           setReportError(null);
           onReportSubmit();
@@ -94,24 +97,29 @@ export function WorkTab({ group, work, report, savedReport, disabled, readOnly, 
   );
 }
 
-function EquipmentCard({ equipment, title }: { equipment: Equipment; title: string }) {
+function EquipmentCard({ equipment, title, children }: { equipment: Equipment; title: string; children?: ReactNode }) {
   return <Card style={styles.stack}>
     <SectionTitle title={title} subtitle={plainText(equipment.label)} />
     <View style={styles.columns}>
       <View style={styles.column}><Fact label="Identificación" value={equipment.identifier} /><Fact label="Número interno" value={equipment.internalNumber} /></View>
       <View style={styles.column}><Fact label="Propietario" value={equipment.ownerLabel} /></View>
     </View>
+    {children}
   </Card>;
 }
 
-export function EquipmentTab({ group, work }: { group: AssignmentGroup; work: AssignmentWork }) {
+export function EquipmentTab({ group, work, locationPort, identity = "", disabled = false, online = true }: { group: AssignmentGroup; work: AssignmentWork; locationPort?: EquipmentLocationPort; identity?: string; disabled?: boolean; online?: boolean }) {
   const [linkError, setLinkError] = useState<string | null>(null);
   const equipment = work.workEquipment ?? group.equipment;
   const showGroupEquipment = work.workEquipment && group.equipment && JSON.stringify(work.workEquipment) !== JSON.stringify(group.equipment);
   return <View style={styles.stack}>
     <SectionTitle title="Ficha de la asignación" subtitle="Datos de equipo recibidos con este trabajo. No corresponde a una ficha completa del catálogo." />
-    {equipment ? <EquipmentCard equipment={equipment} title={work.workEquipment ? "Equipo del trabajo" : "Equipo de la asignación"} /> : <Card><EmptyState title="Sin equipo informado" message="La asignación no incluye datos de un equipo. No se consultan ni infieren equipos por identificador." icon="hardware-chip-outline" /></Card>}
-    {showGroupEquipment && group.equipment ? <EquipmentCard equipment={group.equipment} title="Equipo de la asignación general" /> : null}
+    {equipment ? <EquipmentCard equipment={equipment} title={work.workEquipment ? "Equipo del trabajo" : "Equipo de la asignación"}>
+      {locationPort ? <EquipmentLocationPanel key={`${identity}:work`} port={locationPort} target="work" identity={identity} disabled={disabled} online={online} /> : null}
+    </EquipmentCard> : <Card><EmptyState title="Sin equipo informado" message="La asignación no incluye datos de un equipo. No se consultan ni infieren equipos por identificador." icon="hardware-chip-outline" /></Card>}
+    {showGroupEquipment && group.equipment ? <EquipmentCard equipment={group.equipment} title="Equipo de la asignación general">
+      {locationPort ? <EquipmentLocationPanel key={`${identity}:group`} port={locationPort} target="group" identity={identity} disabled={disabled} online={online} /> : null}
+    </EquipmentCard> : null}
     <Card style={styles.stack}>
       <SectionTitle title="Ubicación y contexto" />
       <View style={styles.columns}>

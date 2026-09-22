@@ -17,6 +17,8 @@ export function syncUserError(code: string | null | undefined): string {
   if (!code) return "";
   if (requiresDeployment(code)) return SYNC_SUPPORT_MESSAGE;
   switch (code) {
+    case "INVALID_INPUT":
+      return "El servidor rechazó el formato del envío. Los datos siguen guardados; revisa la actualización del servicio antes de repetir la operación.";
     case "TRUSTED_NATIVE_INTERACTION_REVOKED":
       return "La selección se interrumpió o tardó demasiado. Vuelve a tomar o elegir el archivo.";
     case "TRUSTED_NATIVE_INTERACTION_NOT_ALLOWED":

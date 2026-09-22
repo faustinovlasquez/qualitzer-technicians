@@ -26,10 +26,18 @@ const aapt = path.join(toolRoot, "sdk/build-tools/36.0.0/aapt.exe");
 const oldBadging = execFileSync(aapt, ["dump", "badging", path.join(root, "artifacts", previous.name)], { encoding: "utf8" });
 const previousPermissions = [...oldBadging.matchAll(/uses-permission(?:-sdk-\d+)?: name='([^']+)'/g)].map(match => match[1]);
 const addedPermissions = report.permissions.filter(permission => !previousPermissions.includes(permission));
-assert.deepEqual(addedPermissions, []);
+const locationPermissions = ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"].map(name => `android.permission.${name}`);
+assert.equal(report.actionLocationConfigured, true);
+assert(!report.permissions.includes("android.permission.ACCESS_BACKGROUND_LOCATION"));
+assert(!report.permissions.includes("android.permission.FOREGROUND_SERVICE_LOCATION"));
+assert.equal(report.locationConfigured, true);
+assert(addedPermissions.every(permission => locationPermissions.includes(permission)), "UNEXPECTED_NEW_PERMISSION");
+assert(locationPermissions.every(permission => report.permissions.includes(permission)), "LOCATION_PERMISSION_MISSING");
 assert.equal(report.deviceSecurityConfigured, true);
 const bytes = fs.readFileSync(apk);
 const entries = zipEntries(bytes);
+const nativeGoogleMapsCompiled = [...entries].some(([name, entry]) => /^classes\d*\.dex$/.test(name) && entryBytes(bytes, entry).includes(Buffer.from("QualitzerPlacesModule")));
+assert(nativeGoogleMapsCompiled && report.nativeGoogleMapsConfigured, "GOOGLE_MAP_NATIVE_MODULE_MISSING");
 const resourceLines = execFileSync(aapt, ["dump", "--values", "resources", apk], { encoding: "utf8", maxBuffer: 24 * 1024 * 1024 }).split(/\r?\n/);
 const iconPaths = new Map();
 const notificationPaths = new Map();
@@ -85,6 +93,7 @@ const audit = {
   checkedAt: new Date().toISOString(), apk: report.apk, sha256: report.sha256, bytes: report.bytes,
   certificateMatchesPrevious: true, previousApkUnchanged: true, addedPermissions, nativeIcons, notificationIcons,
   companyBrandingCompiled: report.companyBrandingModule, sourceProvenanceMatches: report.provenance.sources.every(source => source.matches),
+  nativeGoogleMapsCompiled,
   health: report.health, compileSeconds: report.phases.find(phase => phase.name === "assemble-release")?.elapsedSeconds ?? null,
   buildLockReleased: true, physicalDeviceTested: false,
 };

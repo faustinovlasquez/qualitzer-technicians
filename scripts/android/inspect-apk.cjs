@@ -53,6 +53,13 @@ function inspectApk(filename, { gatewayUrl, architectures, badging, manifest, ve
     if (!manifest.includes(`expo.modules.companybranding.${component}`)) throw new Error("APK_COMPANY_BRANDING_COMPONENT_MISSING");
   }
   const dex = [...entries].filter(([name]) => /^classes\d*\.dex$/.test(name)).map(([, entry]) => entryBytes(bytes, entry));
+  const nativeGoogleMapsConfigured = config.extra?.googleMaps?.native === true;
+  if (nativeGoogleMapsConfigured) {
+    if (!manifest.includes("com.google.android.geo.API_KEY")) throw new Error("APK_GOOGLE_MAPS_CONFIGURATION_MISSING");
+    for (const marker of ["QualitzerPlacesModule", "com/rnmaps/maps/MapView", "com/google/android/libraries/places"]) {
+      if (!dex.some(content => content.includes(Buffer.from(marker)))) throw new Error("APK_NATIVE_GOOGLE_MODULE_MISSING");
+    }
+  }
   if (!dex.some(content => content.includes(Buffer.from("Lexpo/modules/companybranding/CompanyBrandingModule;")))) throw new Error("APK_COMPANY_BRANDING_MODULE_MISSING");
   const deviceSecurityConfigured = config.plugins?.some(plugin => (Array.isArray(plugin) ? plugin[0] : plugin) === "expo-local-authentication") === true;
   if (deviceSecurityConfigured) {
@@ -63,6 +70,18 @@ function inspectApk(filename, { gatewayUrl, architectures, badging, manifest, ve
     if (badging.includes("name='android.permission.READ_MEDIA_IMAGES'")) throw new Error("APK_UNEXPECTED_MEDIA_PERMISSION");
   }
   const abis = [...new Set([...entries.keys()].filter((name) => name.startsWith("lib/")).map((name) => name.split("/")[1]))].sort();
+  const actionLocationConfigured = config.extra?.locationTrackingMode === "actions";
+  const locationConfigured = config.plugins?.some(plugin => Array.isArray(plugin) && plugin[0] === "expo-location") === true;
+  if (locationConfigured) {
+    for (const permission of actionLocationConfigured ? ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"] : ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION"]) {
+      if (!badging.includes(`name='android.permission.${permission}'`)) throw new Error("APK_LOCATION_PERMISSION_MISSING");
+    }
+    if (actionLocationConfigured && ["ACCESS_BACKGROUND_LOCATION", "FOREGROUND_SERVICE_LOCATION"].some(permission => badging.includes(`name='android.permission.${permission}'`))) throw new Error("ACTION_LOCATION_BACKGROUND_PERMISSION_FORBIDDEN");
+    for (const module of ["LocationModule", "TaskManagerModule", "BackgroundTaskModule"]) {
+      if (!dex.some(content => content.includes(Buffer.from(module)))) throw new Error("APK_LOCATION_MODULE_MISSING");
+    }
+    if (!manifest.includes("expo.modules.location.services.LocationTaskService") || config.android.allowBackup !== false || !/android:allowBackup[^\n]*0x0\b/.test(manifest)) throw new Error("APK_LOCATION_PRIVACY_CONFIGURATION_MISSING");
+  }
   if (abis.join(",") !== architectures.split(",").sort().join(",")) throw new Error("APK_ABI_MISMATCH");
   for (const abi of abis) {
     for (const library of ["libhermesvm.so", "libhermestooling.so", "libreactnative.so"]) {
@@ -71,7 +90,7 @@ function inspectApk(filename, { gatewayUrl, architectures, badging, manifest, ve
   }
   if ([...entries.keys()].some((name) => /(?:^|\/)(?:\.env[^/]*|credentials\.json|[^/]*\.(?:p12|jks|key))$/i.test(name))) throw new Error("APK_CONTAINS_PRIVATE_FILE");
   return {
-    package: config.android.package, version: config.version, applicationName: config.name, companyBrandingModule: true, deviceSecurityConfigured,
+    package: config.android.package, version: config.version, applicationName: config.name, companyBrandingModule: true, deviceSecurityConfigured, locationConfigured, nativeGoogleMapsConfigured, actionLocationConfigured,
     versionCode,
     minSdk: Number(badging.match(/sdkVersion:'(\d+)'/)?.[1]),
     targetSdk: Number(badging.match(/targetSdkVersion:'(\d+)'/)?.[1]),

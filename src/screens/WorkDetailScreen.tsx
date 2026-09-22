@@ -4,6 +4,7 @@ import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { BackHandler, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { localTimerElapsedSeconds } from "../offline/queueIntentions";
+import { completionForWork, completionStatusLabel, locallySavedWork, pendingDocumentAttachment } from "./offline/offlineUi";
 import type { OfflineOperation } from "../domain/offline";
 import { assignmentCodes } from "../domain/assignmentCodes";
 import { answerFromStep, clock, duration, plainText, shortDate, STATUS_LABELS } from "../domain/format";
@@ -13,6 +14,7 @@ import { palette } from "../ui/theme";
 import { SessionContextBar } from "../ui/SessionContextBar";
 import { ChecklistTab } from "./workDetail/ChecklistTab";
 import { CompletionDialog } from "./workDetail/CompletionDialog";
+import { completionStartTime } from "./workDetail/completionTiming";
 import { DeliverySuccess } from "./workDetail/DeliverySuccess";
 import { Notice } from "./workDetail/DetailUi";
 import { answerError, completionReasons, executionDate, manualCompletion, readOnlyWork, withinRange } from "./workDetail/detailRules";
@@ -56,6 +58,7 @@ export interface WorkDetailScreenProps {
   error: string | null;
   onBack: () => void;
   onHome?: () => void;
+  onLocationHistory?: () => void;
   onRefresh: () => Promise<void>;
   onStatus: (input: StatusInput) => Promise<void>;
   onSaveStep: (stepId: string, answer: StepAnswer) => Promise<void>;
@@ -77,6 +80,8 @@ export interface WorkDetailScreenProps {
   staleReadOnly?: boolean;
   offline?: OfflineSnapshot | null;
   companyBranchId?: number;
+  timezone?: string;
+  equipmentLocation?: import("../domain/equipmentLocation").EquipmentLocationPort;
   readLocalFile?: OfflineController["readLocalFile"];
 }
 
@@ -90,19 +95,19 @@ const tabs: { id: Tab; label: string; icon: IconName }[] = [
 ];
 const statusTones: { [key in WorkStatus]: BadgeTone } = { pending: "warning", in_progress: "teal", paused: "warning", completed: "success", delivered: "info" };
 
-function ElapsedTimer({ work, generatedAt, online = true, pending = false, localTimer }: Pick<WorkDetailScreenProps, "work" | "generatedAt"> & { online?: boolean; pending?: boolean; localTimer?: Extract<OfflineOperation, { kind: "timer" }> | null }) {
+function ElapsedTimer({ work, generatedAt, online = true, pending = false, localTimer, completion }: Pick<WorkDetailScreenProps, "work" | "generatedAt"> & { online?: boolean; pending?: boolean; localTimer?: Extract<OfflineOperation, { kind: "timer" }> | null; completion?: Extract<OfflineOperation, { kind: "completion" }> }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     setNow(Date.now());
-    if (localTimer ? localTimer.payload.status !== "in_progress" : work.status !== "in_progress") return;
+    if (completion || (localTimer ? localTimer.payload.status !== "in_progress" : work.status !== "in_progress")) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [work.status, generatedAt, online, pending, localTimer]);
+  }, [work.status, generatedAt, online, pending, localTimer, completion]);
   const snapshotTime = Date.parse(generatedAt);
   const baseline = Number.isFinite(work.elapsedSeconds) ? Math.max(0, work.elapsedSeconds) : 0;
   const extra = !pending && work.status === "in_progress" && Number.isFinite(snapshotTime) ? Math.max(0, Math.floor((now - snapshotTime) / 1000)) : 0;
   const localElapsed = localTimer ? localTimerElapsedSeconds(localTimer, now) : null;
-  const elapsed = localElapsed ?? baseline + extra;
+  const elapsed = completion?.localClock.elapsedSeconds ?? localElapsed ?? baseline + extra;
   return <View style={styles.timerBox}>
     <Text style={styles.heroOverline}>TIEMPO DE EJECUCIÓN</Text>
     <Text style={styles.timer} accessibilityLabel={`Tiempo de ejecución: ${clock(elapsed)}`}>{clock(elapsed)}</Text>
@@ -148,8 +153,13 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const offlineReady = props.offline !== null && !props.offline?.authBlocked;
   const localWork = work.id.startsWith("local-") || group.id.startsWith("local-");
   const staleReadOnly = props.staleReadOnly === true || work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT");
-  const evidenceWork = confirmedEvidenceWork(work);
   const scopedOperations = operationsForWork(props.offline, { groupId: group.id, workId: work.id, ...range, companyBranchId: props.companyBranchId });
+  const reportOperation = scopedOperations.filter(operation => operation.kind === "document" ? operation.reportText === draft.data.report.trim()
+    : operation.kind === "comment" && operation.text === draft.data.report.trim()).at(-1);
+  const queuedCompletion = completionForWork(scopedOperations, work);
+  const statusLabel = queuedCompletion ? completionStatusLabel(queuedCompletion) : STATUS_LABELS[work.status];
+  const durableDelivery = props.offline != null && offlineReady;
+  const evidenceWork = durableDelivery ? locallySavedWork(work, scopedOperations) : confirmedEvidenceWork(work);
   const answerOperations = scopedOperations.filter((operation): operation is PendingAnswer => operation.kind === "answer");
   const pendingAnswers = answerOperations.filter((operation) => operation.status !== "applied");
   const pendingComments = scopedOperations.filter((operation): operation is PendingComment => operation.kind === "comment");
@@ -213,18 +223,21 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const parentBusy = useRef(busy);
   parentBusy.current = busy;
   const maintenance = group.type === "internal_maintenance";
-  const readOnly = readOnlyWork(group, work) || localWork || staleReadOnly;
+  const readOnly = readOnlyWork(group, work) || localWork || staleReadOnly || Boolean(queuedCompletion);
   const awaitingConfirmation = awaitingStatus !== null && awaitingStatus !== work.status;
   const locked = busy || action !== null;
   const disabled = locked || !draft.hydrated || !offlineReady || awaitingConfirmation;
   const executionGates = useRef({ readOnly, disabled, online, hasPendingOperations, desiredStatus, timerNeedsAttention });
   executionGates.current = { readOnly, disabled, online, hasPendingOperations, desiredStatus, timerNeedsAttention };
   const selectedDate = executionDate(work, range);
-  const reasons = completionReasons(group, evidenceWork, files.files?.filter(isConfirmedAttachment) ?? null, files.error);
-  if (pendingDeliveryCount > 0) reasons.unshift(`Envía ${pendingDeliveryCount === 1 ? "el cambio pendiente" : `los ${pendingDeliveryCount} cambios pendientes`} de este trabajo y sus archivos compartidos.`);
+  const savedFiles = durableDelivery ? [...(files.files ?? []), ...allPendingDocuments.filter(item => item.stepId === undefined).map(pendingDocumentAttachment)] : files.files?.filter(isConfirmedAttachment) ?? null;
+  const reasons = completionReasons(group, evidenceWork, savedFiles, durableDelivery && savedFiles?.length ? null : files.error,
+    durableDelivery && !online && files.files === null);
+  if (!durableDelivery && pendingDeliveryCount > 0) reasons.unshift(`Envía ${pendingDeliveryCount === 1 ? "el cambio pendiente" : `los ${pendingDeliveryCount} cambios pendientes`} de este trabajo y sus archivos compartidos.`);
   if (pendingDeliveryOperations.some(operationNeedsAttention)) reasons.push("Revisa los cambios que requieren atención en el centro de sincronización.");
-  if (timerPending && pendingDeliveryCount === 0) reasons.push("Actualiza la ficha para confirmar el último cambio del cronómetro.");
-  if (!online) reasons.push("Conéctate a Qualitzer para confirmar la entrega.");
+  if (!durableDelivery && timerPending && pendingDeliveryCount === 0) reasons.push("Actualiza la ficha para confirmar el último cambio del cronómetro.");
+  if (!online && !durableDelivery) reasons.push("Conéctate a Qualitzer para confirmar la entrega.");
+  if (queuedCompletion) reasons.push("La entrega ya está guardada. Espera su confirmación o revisa la sincronización.");
   if (localWork) reasons.push("Sincroniza la creación de este trabajo para poder entregarlo.");
   if (staleReadOnly) reasons.push("Actualiza la ficha para verificar los datos y permisos del trabajo.");
   if (work.missingRequiredInfo.length > 0 && !staleReadOnly) reasons.push("Completa la información requerida del trabajo y actualiza la ficha.");
@@ -240,14 +253,15 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const photoCallbacks = useRef(choosePhotos);
   photoCallbacks.current = choosePhotos;
   const cameraGuide = useCameraPermissionGuide(photoScope, () => mounted.current && photoGates.current && !callbacks.current.busy && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.offline?.connection?.foreground !== false);
-  if (draft.data.report.trim() && draft.data.report.trim() !== draft.data.savedReport) reasons.push("Guarda el reporte pendiente o vacía el texto antes de cerrar.");
+  if (draft.data.report.trim() && draft.data.report.trim() !== draft.data.savedReport && !reportOperation) reasons.push("Guarda el reporte pendiente o vacía el texto antes de cerrar.");
   if (work.checklists.some((checklist) => checklist.steps.some((step) => {
     const answer = draft.data.answers[String(step.stepId)];
-    return answer && !answer.saved && answerKey(step, answer.answer) !== answerKey(step, answerFromStep(step));
+    return answer && !answer.saved && answerKey(step, answer.answer) !== answerKey(step, answerFromStep(step))
+      && registeredAnswerKey(answerOperations, step, queuedAnswersRef.current[String(step.stepId)]) !== answerKey(step, answer.answer);
   }))) reasons.push("Guarda o descarta las respuestas que aún están en borrador antes de cerrar.");
   if (draft.data.photos.some((item) => !item.uploaded)) reasons.push("Sube o quita las fotos pendientes antes de cerrar el trabajo.");
   const canReviewDelivery = !disabled && props.offline?.connection?.foreground !== false;
-  const canSubmitDelivery = !readOnly && online && !hasPendingOperations && work.canExecute === true && reasons.length === 0;
+  const canSubmitDelivery = !readOnly && (durableDelivery || online && !hasPendingOperations) && work.canExecute === true && reasons.length === 0;
   const deliveryGates = useRef({ canReviewDelivery, canSubmitDelivery });
   deliveryGates.current = { canReviewDelivery, canSubmitDelivery };
 
@@ -262,7 +276,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     if (!queuedTimerRef.current || !scopedOperations.some((operation) => operation.id === queuedTimerRef.current?.operationId)) return;
     queuedTimerRef.current = null;
     setQueuedTimer(null);
-  }, [props.offline?.operations]);
+  }, [props.offline?.operations, queuedTimer?.operationId]);
   const previousResource = useRef(resourceKey);
   useEffect(() => {
     if (previousResource.current === resourceKey) return;
@@ -355,9 +369,11 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     if (!canTransitionExecution(current.work, input.status) || !input.executionDates || !executionDatesAllowed(current.work, current.range, input.executionDates, current.group.type === "internal_maintenance")) return false;
     if (input.isManual) return current.allowEditExecutionTime && manualCompletion(input.executionDates, input.executionStartTime ?? "", input.executionEndTime ?? "", input.endDateOffset ?? 0, current.range, input.status === "completed" ? "completed" : "delivered", current.work).input !== null;
     if (current.group.type === "internal_maintenance") return true;
+    if (durableDelivery && pendingTimer?.localClock) return Math.round((localTimerElapsedSeconds(pendingTimer, Date.now()) ?? 0) / 60) > 0;
     const date = [...input.executionDates].sort()[0];
     const snapshot = current.work.schedules?.find((entry) => date !== undefined && entry.queryDates.includes(date));
     const anchor = date === current.range.startDate ? current.work : snapshot?.work;
+    if (durableDelivery && anchor) return Math.round(executionElapsedSeconds(anchor, date === current.range.startDate ? current.generatedAt : snapshot?.generatedAt, Date.now()) / 60) > 0;
     return anchor === undefined || (automaticExecutionTiming(anchor, executionElapsedSeconds(anchor, date === current.range.startDate ? current.generatedAt : snapshot?.generatedAt, Date.now()))?.minutes ?? 0) > 0;
   }
 
@@ -377,6 +393,10 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       if (finalizing && !deliveryInputAllowed(input)) return;
       try { await onStatus(input); }
       catch (error) {
+        if (finalizing && isOfflineQueuedError(error) && error.kind === "completion") {
+          if (mounted.current) { setCompleting(false); setOperationError(null); setMessage("Entrega guardada en este dispositivo. Se confirmará al sincronizar."); }
+          return;
+        }
         if (!finalizing && isOfflineQueuedError(error) && error.kind === "timer" && (input.status === "in_progress" || input.status === "paused")) {
           queuedTimerRef.current = { operationId: error.operationId, status: input.status };
           if (mounted.current) { setQueuedTimer(queuedTimerRef.current); setOperationError(null); setCompleting(false); }
@@ -432,13 +452,20 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   }
 
   function saveReport(): void {
-    if (readOnly || disabled || !online) return;
+    if (readOnly || disabled || !offlineReady) return;
     void runAction("report", async () => {
       const note = draft.store.getSnapshot().data.report.trim();
       if (!note) throw new Error("Escribe una nota antes de guardar el reporte.");
       if (note === draft.store.getSnapshot().data.savedReport) return;
       await draft.store.flush();
-      await onReport(note);
+      try { await onReport(note); }
+      catch (error) {
+        if (isOfflineQueuedError(error) && (error.kind === "comment" || error.kind === "document")) {
+          if (mounted.current) setMessage("Reporte guardado en este dispositivo · pendiente de sincronizar.");
+          return;
+        }
+        throw error;
+      }
       draft.store.confirmReport(note);
       if (mounted.current) setMessage(mode === "demo" ? "Reporte guardado localmente en demostración." : "Reporte guardado en Qualitzer.");
       await draft.store.flush();
@@ -602,7 +629,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.headerCodes} contentContainerStyle={styles.headerCodeRow}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{localWork ? "Local" : codes.workCode ?? "Trabajo"}</Text>
             {codes.workOrderCode ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{codes.workOrderCode}</Text> : null}
-            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerStatus}>{STATUS_LABELS[work.status]}</Text>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerStatus}>{statusLabel}</Text>
           </ScrollView>
           <IconButton name="home-outline" label="Ir al inicio del trabajo" disabled={locked} onPress={workHome} />
           <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
@@ -615,7 +642,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{localWork ? "Local" : codes.workCode ?? "Trabajo"}</Text>
           {!localWork && codes.workOrderCode ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{codes.workOrderCode}</Text> : null}
           {!localWork && codes.negotiationCode ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{codes.negotiationCode}</Text> : null}
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerStatus}>{STATUS_LABELS[work.status]}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerStatus}>{statusLabel}</Text>
         </ScrollView>
         <IconButton name="home-outline" label="Ir al inicio del trabajo" disabled={locked} onPress={workHome} />
         <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
@@ -628,6 +655,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           </Pressable>)}
         </ScrollView>
         <IconButton name="ellipsis-horizontal" label="Más secciones del trabajo" disabled={locked} onPress={() => setSectionsOpen(true)} />
+        {props.onLocationHistory ? <IconButton name="location-outline" label="Mi historial de ubicación" disabled={locked} onPress={props.onLocationHistory} /> : null}
       </View>
       {work.status === "delivered" || work.status === "completed" ? <View style={styles.closedBanner} testID="work-closed-banner">
         <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
@@ -645,14 +673,14 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Button title="Volver sin copia duradera" variant="danger" disabled={locked} onPress={onBack} />
           </Card> : null}
           {message ? <Notice message={message} tone={props.offline !== undefined ? "info" : "success"} onDismiss={() => setMessage(null)} /> : null}
-          {readOnly ? <Notice message={localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o completado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
+          {readOnly ? <Notice message={queuedCompletion ? queuedCompletion.status === "applied" ? "Entrega confirmada. Actualizando ficha." : "Entrega guardada en este dispositivo · pendiente de sincronización." : localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o completado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
           {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
           {!compactDetail ? <>
           <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
             <Text style={styles.heroOverline}>{maintenance ? "MANTENIMIENTO INTERNO" : group.type === "external_ot" ? "ORDEN DE TRABAJO" : "ASIGNACIÓN DIRECTA"}</Text>
             <Text accessibilityRole="header" style={styles.heroTitle}>{plainText(work.title)}</Text>
             <View style={styles.row}><Ionicons name="construct-outline" size={18} color={palette.onDark} accessible={false} /><Text style={styles.heroText}>{plainText(work.specialty) || "Especialidad no informada"}</Text></View>
-            <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending} localTimer={pendingTimer} />
+            <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending || Boolean(queuedCompletion)} localTimer={pendingTimer} completion={queuedCompletion} />
             <View style={styles.heroMetrics}>
               <View style={styles.metric}><Text style={styles.heroText}>Programado</Text><Text style={styles.metricValue}>{shortDate(work.scheduledDate)}</Text></View>
               <View style={styles.metric}><Text style={styles.heroText}>Tiempo previsto</Text><Text style={styles.metricValue}>{duration(work.plannedMinutes)}</Text></View>
@@ -671,17 +699,17 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Text style={styles.label}>Días trabajados registrados</Text>
             <BodyText>{work.workedDates.map(day => new Intl.DateTimeFormat("es", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`))).join(" · ")}</BodyText>
           </View> : null}
-          {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={draft.data.savedReport} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities
+          {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={reportOperation?.status === "applied" ? draft.data.report.trim() : draft.data.savedReport} pendingReport={Boolean(reportOperation && reportOperation.status !== "applied")} disabled={disabled || !offlineReady || localWork || staleReadOnly} readOnly={readOnly} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities
             canContinueWrite={() => executionGates.current.online && !executionGates.current.readOnly && callbacks.current.offline?.connection?.foreground !== false}
             onPanelChange={setActivityPanelOpen}
             onCreated={() => { scrollPositions.current.work = workTabOffset.current; detailScroll.current?.scrollTo({ y: workTabOffset.current, animated: true }); }} backHandler={childBack} key={resourceKey} scopeKey={`${storageKey}:${resourceKey}`} mode={mode} activities={work.activities ?? []} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} />} /></View> : null}
             {tab === "comments" ? <CommentsTab scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:comments`} resourceKey={resourceKey} mode={mode} busy={locked || staleReadOnly} pending={props.offline !== undefined ? pendingComments : undefined} offlineReady={offlineReady} onLoad={props.onLoadComments} onSubmit={props.onAddComment} /> : null}
-          {tab === "equipment" ? <EquipmentTab group={group} work={work} /> : null}
+          {tab === "equipment" ? <EquipmentTab group={group} work={work} locationPort={props.equipmentLocation} identity={identity} disabled={locked} online={props.offline?.online ?? true} /> : null}
         </ScrollView>}
         {tab !== "checklist" && tab !== "evidence" && !activityPanelOpen ? <View style={styles.executionFooter} testID="work-execution-footer">
           <View style={styles.executionButtons}>
             {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
-            <Button title={work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" style={styles.executionButton} disabled={!canReviewDelivery} onPress={openDeliveryReview} />
+            <Button title={queuedCompletion ? "Entrega pendiente" : work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" style={styles.executionButton} disabled={!canReviewDelivery} onPress={openDeliveryReview} />
             {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" style={styles.executionButton} disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
           </View>
           {busy || action === "status" || timerPending ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{timerPending ? timerPendingLabel(pendingTimer) : "Guardando cambio…"}</Text> : null}
@@ -692,6 +720,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           <ScrollView contentContainerStyle={styles.modalContent}>
             <View style={styles.between}><SectionTitle title="Secciones del trabajo" /><IconButton name="close-outline" label="Cerrar secciones" onPress={() => setSectionsOpen(false)} /></View>
             {tabs.map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); navigateTab(item.id); }} />)}
+            {props.onLocationHistory ? <Button title="Mi historial de ubicación" icon="location-outline" variant="secondary" disabled={locked} onPress={() => { setSectionsOpen(false); props.onLocationHistory?.(); }} /> : null}
             <Button title="Volver a mis asignaciones" icon="list-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(); }} />
           </ScrollView>
         </View></View>
@@ -710,7 +739,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         {operationError ? <Notice message={operationError} tone="error" /> : null}
       </View></View></PrivateModal> : null}
       {deliverySucceeded ? <DeliverySuccess title="Trabajo entregado" name={plainText(work.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
-      {completing ? <CompletionDialog work={evidenceWork} allowEditExecutionTime={props.allowEditExecutionTime} generatedAt={generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} canSubmit={canSubmitDelivery && canReviewDelivery} error={operationError} busy={locked} mode={mode} onRefresh={offlineReady && props.offline?.connection?.foreground !== false ? refreshDeliveryReview : undefined} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null}
+      {completing ? <CompletionDialog work={pendingTimer?.localClock ? { ...evidenceWork, status: pendingTimer.payload.status, elapsedSeconds: pendingTimer.localClock.elapsedSeconds, firstInProgressTime: completionStartTime(evidenceWork, pendingTimer, scopedOperations, props.timezone) } : evidenceWork} durable={durableDelivery} allowEditExecutionTime={props.allowEditExecutionTime} generatedAt={pendingTimer?.payload.recordedAt ?? generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} canSubmit={canSubmitDelivery && canReviewDelivery} error={operationError} busy={locked} mode={mode} onRefresh={online ? refreshDeliveryReview : undefined} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null}
     </SafeAreaView>
   );
 }
