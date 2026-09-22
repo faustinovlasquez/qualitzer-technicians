@@ -3,7 +3,7 @@ const { randomBytes, createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { inspectApk } = require("./inspect-apk.cjs");
-const { expectedRelease, gatewayUrl, certificateSha256: pinnedCertificate, verifyPrevious, previous, sha256File } = require("./release-policy.cjs");
+const { expectedRelease, certificateSha256: pinnedCertificate, verifyPrevious, previous, sha256File } = require("./release-policy.cjs");
 const { captureSources, protectedSnapshot, verifySources, checkHealth } = require("./release-provenance.cjs");
 const { releaseEnvironment, resolveReleaseConfig, verifyPushConfig, readApkResources, verifyCompiledPush } = require("./release-push.cjs");
 
@@ -18,6 +18,7 @@ const artifacts = path.join(root, "artifacts");
 const logs = path.join(artifacts, "logs", new Date().toISOString().replace(/[:.]/g, "-"));
 fs.mkdirSync(logs, { recursive: true });
 const environment = releaseEnvironment(process.env);
+const gatewayUrl = environment.EXPO_PUBLIC_GATEWAY_URL;
 const javaHome = path.join(toolRoot, "jdk/jdk-17.0.20.1+1");
 const buildTools = path.join(toolRoot, "sdk/build-tools/36.0.0");
 const phases = [];
@@ -134,7 +135,7 @@ async function main() {
     const pushConfig = verifyPushConfig(root, config);
     if (config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.enabled !== false || config.android?.package !== "com.qualitzer.field" || config.version !== expected.version || config.android.versionCode !== expected.versionCode) throw new Error("INVALID_PUBLIC_RELEASE_CONFIG");
     const profile = JSON.parse(fs.readFileSync(path.join(root, "eas.json"), "utf8")).build?.["standalone-apk"];
-    if (profile?.developmentClient !== false || profile.android?.buildType !== "apk" || profile.env?.EXPO_PUBLIC_GATEWAY_URL !== gatewayUrl || profile.env.EXPO_PUBLIC_STANDALONE !== "true") throw new Error("INVALID_STANDALONE_EAS_PROFILE");
+    if (profile?.developmentClient !== false || profile.android?.buildType !== "apk" || profile.env?.EXPO_PUBLIC_GATEWAY_URL !== undefined || profile.env?.BACKEND_URL !== undefined || profile.env?.EXPO_PUBLIC_STANDALONE !== "true") throw new Error("INVALID_STANDALONE_EAS_PROFILE");
     fs.writeFileSync(path.join(logs, "release-config.json"), JSON.stringify(config, null, 2).replace(/AIza[A-Za-z0-9_-]{35}/g, "[GOOGLE_API_KEY_REDACTED]"));
     if (!args.includes("--skip-prebuild") && !args.includes("--verify-only")) {
       await run("prebuild", process.execPath, [path.join(root, "node_modules/expo/bin/cli"), "prebuild", "--platform", "android", "--no-clean", "--no-install", "--skip-dependency-update", "react-native,react"]);
@@ -167,7 +168,7 @@ async function main() {
     const provenance = verifySources(root, sourcesBefore, inspection.bundleSha256);
     if (JSON.stringify(protectedBefore) !== JSON.stringify(protectedSnapshot(root))) throw new Error("PROTECTED_PROJECT_FILES_CHANGED_DURING_BUILD");
     const previousApk = { ...verifyPrevious(root), certificateSha256: pinnedCertificate, signerMatches: certificateSha256 === pinnedCertificate };
-    const health = await checkHealth();
+    const health = await checkHealth(gatewayUrl);
     const destination = path.join(artifacts, expected.name);
     if (fs.existsSync(destination)) {
       if (sha256File(destination) !== sha256File(sourceApk)) throw new Error("VERSIONED_APK_ALREADY_EXISTS_WITH_DIFFERENT_BYTES");

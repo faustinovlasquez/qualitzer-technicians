@@ -1,5 +1,3 @@
-const RELEASE_GATEWAY_URL = "https://api-demos-qz-v2.qualitzer.com/mobile";
-
 function privateHost(hostname) {
   const host = hostname.replace(/^\[|\]$/g, "");
   if (/^(fc|fd)[\da-f]{2}:/i.test(host) || /^fe[89ab][\da-f]:/i.test(host)) return true;
@@ -40,4 +38,4 @@ function standaloneGatewayUrl(value) {
   return base;
 }
 
-module.exports = { RELEASE_GATEWAY_URL, canonicalGatewayUrl, standaloneGatewayUrl, privateHost, loopbackHost };
+module.exports = { canonicalGatewayUrl, standaloneGatewayUrl, privateHost, loopbackHost };

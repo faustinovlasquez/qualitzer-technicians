@@ -1,7 +1,8 @@
 const fs = require("node:fs");
 const { inflateRawSync } = require("node:zlib");
 const { createHash } = require("node:crypto");
-const { validateVersion, packageName, applicationName, gatewayUrl: pinnedGatewayUrl } = require("./release-policy.cjs");
+const { validateVersion, packageName, applicationName } = require("./release-policy.cjs");
+const { standaloneGatewayUrl } = require("../../config/gatewayPolicy");
 
 function zipEntries(bytes) {
   let end = bytes.length - 22;
@@ -37,14 +38,13 @@ function entryBytes(bytes, entry, maxOutputLength) {
 
 function inspectApk(filename, { gatewayUrl, architectures, badging, manifest, version, versionCode }) {
   validateVersion(version, versionCode);
-  if (gatewayUrl !== pinnedGatewayUrl || !badging.includes(`package: name='${packageName}'`) || !badging.includes(`versionName='${version}'`) || !badging.includes(`versionCode='${versionCode}'`)) throw new Error("APK_IDENTITY_MISMATCH");
+  if (gatewayUrl !== standaloneGatewayUrl(gatewayUrl) || !badging.includes(`package: name='${packageName}'`) || !badging.includes(`versionName='${version}'`) || !badging.includes(`versionCode='${versionCode}'`)) throw new Error("APK_IDENTITY_MISMATCH");
   if (/application-debuggable/.test(badging) || /android:debuggable[^\n]*0xffffffff/i.test(manifest)) throw new Error("APK_IS_DEBUGGABLE");
   if (!badging.includes("sdkVersion:'24'") || !badging.includes("targetSdkVersion:'36'")) throw new Error("APK_SDK_MISMATCH");
   const bytes = fs.readFileSync(filename);
   const entries = zipEntries(bytes);
   const bundle = entryBytes(bytes, entries.get("assets/index.android.bundle"));
   if (bundle.subarray(0, 8).toString("hex") !== "c61fbc03c103191f") throw new Error("APK_BUNDLE_IS_NOT_HERMES_BYTECODE");
-  if (!bundle.includes(Buffer.from(gatewayUrl))) throw new Error("APK_BUNDLE_GATEWAY_MISSING");
   const config = JSON.parse(entryBytes(bytes, entries.get("assets/app.config")).toString("utf8"));
   if (config.android?.package !== packageName || config.version !== version || config.android.versionCode !== versionCode || config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.enabled !== false || config.updates.useEmbeddedUpdate !== true) throw new Error("APK_EMBEDDED_CONFIG_INVALID");
   if (config.name !== applicationName || !badging.includes(`application-label:'${applicationName}'`)) throw new Error("APK_APPLICATION_NAME_MISMATCH");

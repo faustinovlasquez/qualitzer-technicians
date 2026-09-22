@@ -3,18 +3,22 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
+const { expectedRelease, releaseEndpoints } = require("../android/release-policy.cjs");
+const { privateHost } = require("../../config/gatewayPolicy");
 const root = path.resolve(__dirname, "../..");
 const backend = path.resolve(root, "../Qualitzer2.0-Backend");
 const digest = (bytes, algorithm = "sha256", encoding = "hex") => crypto.createHash(algorithm).update(bytes).digest(encoding);
 const json = file => JSON.parse(fs.readFileSync(file, "utf8"));
 async function main() {
   const release = json(path.join(root, "artifacts/release-verification.json"));
-  assert.equal(release.version, "1.0.47");
-  assert.equal(release.versionCode, 48);
+  const expected = expectedRelease(root);
+  assert.equal(release.version, expected.version);
+  assert.equal(release.versionCode, expected.versionCode);
+  assert.equal(release.gatewayUrl, releaseEndpoints(root).gatewayUrl);
   assert.equal(release.actionLocationConfigured, true);
   assert.equal(release.nativeGoogleMapsConfigured, true);
   assert.equal(release.locationConfigured, true);
-  const apk = fs.readFileSync(path.join(root, "artifacts/qualitzer-tecnicos-1.0.47-android.apk"));
+  const apk = fs.readFileSync(path.join(root, "artifacts", expected.name));
   assert.equal(digest(apk), release.sha256);
   const artifact = "infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.22.tgz";
   const archive = fs.readFileSync(path.join(backend, artifact));
@@ -30,8 +34,9 @@ async function main() {
   const ignored = spawnSync("C:/Program Files/Git/cmd/git.exe", ["-C", backend, "check-ignore", "--quiet", artifact], { encoding: "utf8" });
   assert.equal(ignored.status, 1, "GATEWAY_ARTIFACT_MUST_NOT_BE_IGNORED");
   const url = process.argv[2];
-  assert.ok(/^http:\/\/192\.168\.1\.102:8822\/$/.test(url), "EXPECTED_LOCAL_DELIVERY_URL");
-  const response = await fetch(`${url}qualitzer-tecnicos-1.0.47-android.apk`, { signal: AbortSignal.timeout(20000) });
+  const delivery = new URL(url);
+  assert.ok(delivery.protocol === "http:" && privateHost(delivery.hostname) && delivery.pathname === "/" && !delivery.username && !delivery.password && !delivery.search && !delivery.hash, "EXPECTED_LOCAL_DELIVERY_URL");
+  const response = await fetch(`${url}${expected.name}`, { signal: AbortSignal.timeout(20000) });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "application/vnd.android.package-archive");
   const downloaded = Buffer.from(await response.arrayBuffer());
@@ -42,7 +47,7 @@ async function main() {
   const downloadedGateway = Buffer.from(await gatewayResponse.arrayBuffer());
   assert.equal(digest(downloadedGateway), digest(archive));
   const report = { completedAt: new Date().toISOString(), passed: true, url, version: release.version, bytes: downloaded.length, sha256: release.sha256, gatewayVersion: "1.0.22", gatewaySha256: digest(archive), gatewayDownloadVerified: true, consumerLockMatches: true, gatewayNotIgnored: true, backendInstalled: false, remoteDeploymentTested: false, nativeDeviceTested: false };
-  fs.writeFileSync(path.join(root, "artifacts/parent-assignment-delivery-1.0.47.json"), JSON.stringify(report, null, 2));
+  fs.writeFileSync(path.join(root, `artifacts/parent-assignment-delivery-${expected.version}.json`), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

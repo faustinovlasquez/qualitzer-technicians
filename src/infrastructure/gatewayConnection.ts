@@ -5,7 +5,7 @@ export function validGatewayUrl(value: string): string {
   try { return canonicalGatewayUrl(value); }
   catch (error) {
     if (error instanceof Error && error.message === "GATEWAY_PUBLIC_HTTPS_REQUIRED") throw new Error("Una pasarela pública debe usar HTTPS para proteger tus credenciales.");
-    throw new Error("Ingresa la URL base completa de la pasarela, por ejemplo https://api-demos-qz-v2.qualitzer.com/mobile, sin credenciales, parámetros ni segmentos ambiguos.");
+    throw new Error("Ingresa la URL base completa de la pasarela, incluida su ruta /mobile, sin credenciales, parámetros ni segmentos ambiguos.");
   }
 }
 

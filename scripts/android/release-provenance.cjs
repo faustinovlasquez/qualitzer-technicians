@@ -3,9 +3,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
-const { sha256File, gatewayUrl } = require("./release-policy.cjs");
+const { sha256File } = require("./release-policy.cjs");
 
 const requiredSources = [
+  "src/infrastructure/gatewayConfig.ts",
+  "src/infrastructure/gatewayConnection.ts",
+  "config/gatewayPolicy.js",
   "src/infrastructure/tenantChallengeClock.ts",
   "src/infrastructure/HttpTechnicianRepository.ts",
   "src/infrastructure/assignmentReadBatch.ts",
@@ -169,7 +172,7 @@ function verifySources(root, captured, bundleSha256) {
   return { sources, sourceMapSha256: sha256File(mapFile), generatedBundleSha256: sha256File(bundleFile), sourceCount: map.sources.length };
 }
 
-async function checkHealth() {
+async function checkHealth(gatewayUrl) {
   const checkedAt = new Date().toISOString();
   try {
     const response = await fetch(`${gatewayUrl}/health`, { redirect: "error", signal: AbortSignal.timeout(15000) });

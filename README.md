@@ -4,6 +4,10 @@
 
 Empezar por el **[manual completo paso a paso](docs/MANUAL-INSTALACION-PRODUCCION.md)**: backend, migraciones, variables, frontend web, Expo/Firebase, firma, APK, instalación y verificación. Cada fase distingue acciones de una persona, de la IA y operaciones que requieren autorización.
 
+**Configuración de API vigente:** definir únicamente `BACKEND_URL` con la ruta `/api` en el [.env](.env) local o en el entorno CI/EAS. La app, Expo y la compilación derivan `/mobile` en el mismo servidor, sin dominios en el código ni en las pruebas. No configurar `EXPO_PUBLIC_GATEWAY_URL` manualmente. Detalles: [configuración por entorno](docs/CONFIGURACION-BACKEND.md).
+
+`npm start` inicia Expo contra ese gateway ya desplegado. `npm run gateway` conserva el arranque independiente de la pasarela local para soporte; no cambia automáticamente el destino de la app. Cambiar `.env` requiere reiniciar Expo o generar otra APK, no modificar código al hacer merge.
+
 - [Ficha para un nuevo entorno o pase](docs/PLANTILLA-PASE-ENTORNO.md)
 - [Guía específica del backend](../Qualitzer2.0-Backend/docs/INSTALACION-APP-TECNICOS.md)
 - [Guía específica del frontend web y administración](../Qualitzer2.0-Frontend/docs/INSTALACION-APP-TECNICOS.md)

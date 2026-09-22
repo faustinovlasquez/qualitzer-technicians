@@ -171,13 +171,28 @@ test("requires the exact Expo UUID and package before reading any Firebase file"
   assert.throws(() => verifyPushConfig("missing-directory", config), /PUSH_ANDROID_PACKAGE_MISMATCH/);
 });
 
+test("release environment derives both endpoints for any deployment without inheriting unrelated variables", () => {
+  for (const origin of ["https://development.example.com", "https://production.example.com"]) {
+    const environment = releaseEnvironment({ BACKEND_URL: `${origin}/api`, EXPO_PUBLIC_GATEWAY_URL: "https://ignored.example.com/mobile", PRIVATE_TEST_VALUE: "not-public" });
+    assert.equal(environment.BACKEND_URL, `${origin}/api`);
+    assert.equal(environment.EXPO_PUBLIC_GATEWAY_URL, `${origin}/mobile`);
+    assert.equal(Object.hasOwn(environment, "PRIVATE_TEST_VALUE"), false);
+  }
+  assert.throws(() => releaseEnvironment({ BACKEND_URL: "" }), /BACKEND_URL_REQUIRED/);
+  assert.throws(() => releaseEnvironment({ BACKEND_URL: "http://localhost:5001/api" }), /STANDALONE_GATEWAY_PUBLIC_HTTPS_REQUIRED/);
+});
+
 test("real Expo getConfig retains static IDs/file with sanitized environment and no dotenv reads", () => {
   const environment = releaseEnvironment({
+    BACKEND_URL: "https://build-api.example.com/api",
     PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT,
     EXPO_PROJECT_ID: "fake-invalid-override", GOOGLE_SERVICES_FILE: "./.data/private.json",
     EXPO_TOKEN: "fake", GOOGLE_APPLICATION_CREDENTIALS: "fake", NODE_OPTIONS: "fake",
     QUALITZER_BRAND_FILE: "fake", EXPO_PUBLIC_FAKE_SECRET: "fake", EXPO_NO_DOTENV: "0",
   });
+  environment.GOOGLE_MAPS_API_KEY = fakeApiKey;
+  assert.equal(environment.BACKEND_URL, "https://build-api.example.com/api");
+  assert.equal(environment.EXPO_PUBLIC_GATEWAY_URL, "https://build-api.example.com/mobile");
   for (const key of ["EXPO_PROJECT_ID", "GOOGLE_SERVICES_FILE", "EXPO_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "NODE_OPTIONS", "QUALITZER_BRAND_FILE", "EXPO_PUBLIC_FAKE_SECRET"]) assert.equal(Object.hasOwn(environment, key), false);
   assert.equal(environment.EXPO_NO_DOTENV, "1");
   const before = fs.readFileSync(path.join(root, "app.config.ts"));
@@ -218,7 +233,7 @@ test("rejects missing, foreign-package, spec-only, non-string and non-default re
 });
 
 test("resource capture errors discard stdout/stderr rather than exposing values", () => {
-  assert.throws(() => readApkResources("missing-aapt-executable", "missing.apk", releaseEnvironment({})), { message: "PUSH_APK_RESOURCE_DUMP_FAILED" });
+  assert.throws(() => readApkResources("missing-aapt-executable", "missing.apk", releaseEnvironment({ BACKEND_URL: "https://build-api.example.com/api" })), { message: "PUSH_APK_RESOURCE_DUMP_FAILED" });
 });
 
 for (const compressed of [false, true]) test(`compiled APK reads actual ${compressed ? "deflated" : "stored"} app.config and reports CLIENT_ONLY`, t => {

@@ -6,13 +6,14 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 const { zipEntries, entryBytes } = require("./inspect-apk.cjs");
-const { expectedRelease, sha256File, verifyPrevious, certificateSha256 } = require("./release-policy.cjs");
+const { expectedRelease, releaseEndpoints, sha256File, verifyPrevious, certificateSha256 } = require("./release-policy.cjs");
 const sharp = require("sharp");
 
 async function main() {
 const root = path.resolve(__dirname, "../..");
 const release = expectedRelease(root);
 const report = JSON.parse(fs.readFileSync(path.join(root, `artifacts/release-verification-${release.version}.json`), "utf8"));
+assert.equal(report.gatewayUrl, releaseEndpoints(root).gatewayUrl);
 const apk = path.join(root, "artifacts", release.name);
 assert.equal(sha256File(apk), report.sha256);
 assert.equal(fs.statSync(apk).size, report.bytes);

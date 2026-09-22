@@ -1,14 +1,39 @@
 # Configuración móvil: empresas administradas por el backend
 
-Estado vigente **10-09-2026**. Para conectar Qualitzer Field a Qualitzer se configura **sólo `BACKEND_URL` como destino de API**. No se configura una URL del proyecto frontend ni una empresa en el teléfono. Puertos, host, CORS y protección de sesiones siguen siendo ajustes independientes.
+Configuración vigente **22-09-2026**. Para conectar Qualitzer Field a Qualitzer se configura **sólo `BACKEND_URL` como destino de API**. No se configura una URL del proyecto frontend ni una empresa en el teléfono. Puertos, host, CORS y protección de sesiones siguen siendo ajustes independientes.
 
-## Servidor de demos activo
+## Una dirección por entorno
 
-La configuración local de la app apunta a **https://api-demos-qz-v2.qualitzer.com/api**. El endpoint público `/api/auth/mobile/config` respondió 200 con catálogo versión 1. La pasarela sigue en el computador, puerto 8787; Expo sigue en 8081. El backend local en 5001 no es necesario para esta conexión.
+Configurar `BACKEND_URL` en el `.env` del proyecto móvil, excluido de Git:
 
-`GATEWAY_SESSION_FILE=.data/demos/sessions.enc` separa las sesiones cifradas de demos de las sesiones anteriores del backend local. No se borran ni reutilizan sus credenciales contra otro servidor. Al abrir la app, usar las credenciales del entorno remoto. Los datos pendientes anteriores no se trasladan a demos.
+```dotenv
+BACKEND_URL=https://api.example.com/api
+```
 
-Para volver al backend local, restablecer `BACKEND_URL=http://127.0.0.1:5001/api`, retirar `GATEWAY_SESSION_FILE` del entorno y reiniciar la pasarela; no borrar ningún almacén para cambiar de entorno. Esto restaura la configuración de sesiones anterior, no garantiza que una sesión no haya vencido.
+Es un ejemplo ficticio. Cada entorno proporciona su propio valor sin modificar ramas,
+perfiles de Expo, scripts de firma ni pruebas. El proceso o CI puede suministrar esa
+misma variable; tiene prioridad sobre el archivo. Una variable vacía es un error,
+no una instrucción para volver a otro servidor.
+
+La app deriva `https://api.example.com/mobile`. Si hay prefijo, `/prefix/api` deriva
+`/prefix/mobile`. El backend debe exponer el gateway en esa ruta. No configurar
+`EXPO_PUBLIC_GATEWAY_URL` manualmente: una discrepancia se rechaza al compilar.
+
+Expo publica únicamente la URL derivada en su configuración embebida. La APK
+firmada requiere HTTPS público; cambiar `.env` exige recompilar. En EAS remoto,
+suministrar `BACKEND_URL` en el entorno de build porque `.env` está ignorado.
+La búsqueda de empresas y las operaciones usan ese mismo entorno.
+
+`npm start` y `npm run mobile` inician únicamente Expo contra el gateway derivado;
+no inician ni seleccionan automáticamente otra pasarela en el puerto 8787.
+`npm run gateway` conserva la ejecución local independiente para soporte. Exponer
+esa pasarela en la ruta `/mobile` del servidor configurado si se utiliza.
+
+Antes de cambiar de servidor, sincronizar los pendientes y cerrar sesión. No borrar
+sesiones, archivos ni colas y no reutilizar credenciales de otro entorno. La app
+conserva y bloquea una sesión guardada cuya URL no coincida con la nueva APK.
+`GATEWAY_SESSION_FILE` sigue siendo independiente: conservar el almacén de cada
+servidor y no reasignar su contenido para resolver una incompatibilidad.
 
 ## Recorrido de una solicitud
 
@@ -34,12 +59,12 @@ En [../.env](../.env) ya se retiraron `TENANT_ORIGIN` y `GATEWAY_TENANTS_FILE`. 
 
 | Ajuste | Uso |
 | --- | --- |
-| `BACKEND_URL` | API activa: `https://api-demos-qz-v2.qualitzer.com/api` |
-| `GATEWAY_SESSION_FILE` | Sesiones de demos separadas: `.data/demos/sessions.enc` |
+| `BACKEND_URL` | Única base de API del entorno; termina en `/api` y deriva la ruta `/mobile` de la app |
+| `GATEWAY_SESSION_FILE` | Almacén de sesiones separado por servidor para el gateway ejecutado localmente |
 | `GATEWAY_PORT` / `GATEWAY_HOST` | Listener de la pasarela: localmente `8787` / `0.0.0.0` |
 | `GATEWAY_CORS_ORIGINS` | Orígenes exactos del navegador Expo, localhost/127.0.0.1 y LAN en puerto 8081; **no selecciona empresas** |
 
-La app apunta a la **pasarela**; en teléfono se usa la IP LAN del computador, no su loopback. El navegador envía su Origin y cookie; el cliente nativo usa Bearer y no necesita enviar Origin. El arranque de desarrollo añade los orígenes LAN detectados para Expo web, no los orígenes de las empresas.
+La app apunta a la **pasarela derivada de `BACKEND_URL`**, tanto en Expo como en la APK. Para un backend local accesible desde un teléfono, usar su IP LAN, no loopback; el backend debe exponer `/mobile`. El navegador envía su Origin y cookie; el cliente nativo usa Bearer y no necesita enviar Origin. CORS debe autorizar por separado el origen de Expo web, no los orígenes de las empresas.
 
 [../scripts/start.cjs](../scripts/start.cjs) carga el entorno y lo hereda a sus procesos hijos; el gateway también admite la carga habitual del archivo de entorno. **Quitar una variable del archivo no elimina una variable heredada del terminal, servicio o IDE.** Si persiste el modo legacy, retirar ambas variables en su fuente y del proceso que lanza la app, y reiniciar ese proceso. No dejarlas vacías: su presencia selecciona compatibilidad y un valor vacío puede ser inválido. No hacen falta nuevos argumentos de tenant ni cambios de dotenv.
 

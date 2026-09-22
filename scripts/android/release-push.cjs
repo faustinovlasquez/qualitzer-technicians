@@ -5,7 +5,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 const { z } = require("zod");
-const { packageName, gatewayUrl } = require("./release-policy.cjs");
+const { packageName, releaseEndpoints } = require("./release-policy.cjs");
 const { zipEntries, entryBytes } = require("./inspect-apk.cjs");
 
 const pushPolicy = Object.freeze({
@@ -99,13 +99,14 @@ function parseFirebaseConfig(bytes) {
 }
 
 function releaseEnvironment(source) {
+  const { backendUrl, gatewayUrl } = releaseEndpoints(path.resolve(__dirname, "../.."), source);
   const environment = {};
   for (const [name, value] of Object.entries(source)) {
     if (/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH|USERNAME|USERDOMAIN|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES|OS|NUMBER_OF_PROCESSORS|PROCESSOR_.*|JAVA_HOME|ANDROID_HOME|ANDROID_SDK_ROOT|ANDROID_USER_HOME|GRADLE_USER_HOME)$/i.test(name)) environment[name] = value;
   }
   return Object.assign(environment, {
     NODE_ENV: "production", EXPO_NO_DOTENV: "1", EXPO_NO_TELEMETRY: "1", CI: "1",
-    EAS_BUILD_PROFILE: "standalone-apk", EXPO_PUBLIC_STANDALONE: "true", EXPO_PUBLIC_GATEWAY_URL: gatewayUrl,
+    EAS_BUILD_PROFILE: "standalone-apk", EXPO_PUBLIC_STANDALONE: "true", BACKEND_URL: backendUrl, EXPO_PUBLIC_GATEWAY_URL: gatewayUrl,
   });
 }
 

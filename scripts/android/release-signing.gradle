@@ -18,8 +18,11 @@ gradle.beforeProject { project ->
                 }
                 return value
             }
-            if (required("EXPO_PUBLIC_STANDALONE") != "true" ||
-                required("EXPO_PUBLIC_GATEWAY_URL") != "https://api-demos-qz-v2.qualitzer.com/mobile" ||
+            def backend = new URI(required("BACKEND_URL"))
+            def gateway = new URI(required("EXPO_PUBLIC_GATEWAY_URL"))
+            if (backend.scheme != "https" || backend.host == null || backend.userInfo != null ||
+                backend.query != null || backend.fragment != null || !backend.path.endsWith("/api") ||
+                gateway != backend.resolve("mobile") || required("EXPO_PUBLIC_STANDALONE") != "true" ||
                 required("NODE_ENV") != "production" || required("EXPO_NO_DOTENV") != "1") {
                 throw new GradleException("INVALID_STANDALONE_RELEASE_ENVIRONMENT")
             }

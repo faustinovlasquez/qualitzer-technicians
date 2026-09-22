@@ -3,15 +3,22 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
+const { readApiEnvironment } = require("../../config/apiEnvironment");
+const { standaloneGatewayUrl } = require("../../config/gatewayPolicy");
 
 const packageName = "com.qualitzer.field";
 const applicationName = "Qualitzer técnicos";
-const gatewayUrl = "https://api-demos-qz-v2.qualitzer.com/mobile";
 const certificateSha256 = "06da359352b67f02805c065a4f7054fc863cc606221dfe054462f261da32b510";
 const previous = Object.freeze({
-  name: "qualitzer-tecnicos-1.0.46-android.apk", version: "1.0.46", versionCode: 47,
-  sha256: "53c47bf540697b06c081d06bd7886cad7370a9964b1f920d1d77f45e0c9140c0",
+  name: "qualitzer-tecnicos-1.0.48-android.apk", version: "1.0.48", versionCode: 49,
+  sha256: "34abd7bb5fe69c5e7b3f1b821d753e98693e441d12fc2b64571c45e01baaa3bd",
 });
+
+function releaseEndpoints(root, environment = process.env) {
+  const endpoints = readApiEnvironment(root, environment);
+  standaloneGatewayUrl(endpoints.gatewayUrl);
+  return endpoints;
+}
 
 function validateVersion(version, versionCode) {
   if (typeof version !== "string" || version.length > 50 || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) ||
@@ -39,4 +46,4 @@ function verifyPrevious(root) {
   return { ...previous, bytes: fs.statSync(filename).size, unchanged: true };
 }
 
-module.exports = { packageName, applicationName, gatewayUrl, certificateSha256, previous, validateVersion, expectedRelease, sha256File, verifyPrevious };
+module.exports = { packageName, applicationName, releaseEndpoints, certificateSha256, previous, validateVersion, expectedRelease, sha256File, verifyPrevious };

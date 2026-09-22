@@ -4,7 +4,8 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { parseEnv } from "node:util";
 import { isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
-import { standaloneGatewayUrl } from "./config/gatewayPolicy";
+import { canonicalGatewayUrl, standaloneGatewayUrl } from "./config/gatewayPolicy";
+import { readApiEnvironment } from "./config/apiEnvironment";
 
 const brandSchema = z.object({
   tenantId: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,99}$/),
@@ -68,7 +69,11 @@ export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   const releaseProfile = ["standalone-apk", "preview", "production"].includes(process.env.EAS_BUILD_PROFILE ?? "");
   if (releaseProfile && standaloneFlag !== "true") throw new Error("STANDALONE_BUILD_REQUIRES_EXPO_PUBLIC_STANDALONE_TRUE");
   const standalone = standaloneFlag === "true";
-  const gatewayUrl = standalone ? standaloneGatewayUrl(process.env.EXPO_PUBLIC_GATEWAY_URL ?? "") : process.env.EXPO_PUBLIC_GATEWAY_URL;
+  const apiEnvironment = readApiEnvironment(projectRoot);
+  const gatewayUrl = standalone ? standaloneGatewayUrl(apiEnvironment.gatewayUrl) : apiEnvironment.gatewayUrl;
+  if (process.env.EXPO_PUBLIC_GATEWAY_URL !== undefined && canonicalGatewayUrl(process.env.EXPO_PUBLIC_GATEWAY_URL) !== gatewayUrl) {
+    throw new Error("GATEWAY_URL_MUST_MATCH_BACKEND_URL");
+  }
   config = {
     ...config,
     extra: { ...config.extra, gateway: { standalone, url: gatewayUrl } },

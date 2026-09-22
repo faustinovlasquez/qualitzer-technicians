@@ -8,9 +8,9 @@ import * as connection from "../src/infrastructure/gatewayConnection";
 import * as errors from "../src/infrastructure/errors";
 import * as tenantSession from "../src/domain/tenantSession";
 import type { StoredSession } from "../src/infrastructure/sessionStorage";
-import { RELEASE_GATEWAY_URL } from "../config/gatewayPolicy";
 import { user } from "../src/offline/tests/fakes";
 
+const gatewayUrl = "https://api.example.com/mobile";
 type App = ReturnType<typeof import("../src/application/useTechnicianApp").useTechnicianApp>;
 function fixture(configuration: connection.GatewayConfiguration, stored: StoredSession | null) {
   const slots: unknown[] = [];
@@ -75,23 +75,23 @@ function fixture(configuration: connection.GatewayConfiguration, stored: StoredS
     },
   };
 }
-const configuration = connection.resolveGatewayConfiguration({ nativeRelease: true, standaloneFlag: "true", configuredUrl: RELEASE_GATEWAY_URL, developmentUrl: () => { throw new Error("NO_LOCAL_FALLBACK"); } });
+const configuration = connection.resolveGatewayConfiguration({ nativeRelease: true, standaloneFlag: "true", configuredUrl: gatewayUrl, developmentUrl: () => { throw new Error("NO_LOCAL_FALLBACK"); } });
 
 test("actual app hook preserves mismatched stored session and never creates a repo, restores offline or sends credentials", async () => {
   assert.ok(user.tenant);
-  for (const gatewayUrl of ["http://localhost:8787", new URL(RELEASE_GATEWAY_URL).origin, RELEASE_GATEWAY_URL.replace("/mobile", "/other")]) {
-    const stored: StoredSession = { token: `qzm_${"a".repeat(43)}`, gatewayUrl, branchId: 1, tenant: user.tenant };
+  for (const storedGatewayUrl of ["https://other-api.example.com/mobile", "http://localhost:8787", new URL(gatewayUrl).origin, gatewayUrl.replace("/mobile", "/other")]) {
+    const stored: StoredSession = { token: `qzm_${"a".repeat(43)}`, gatewayUrl: storedGatewayUrl, branchId: 1, tenant: user.tenant };
     const before: string = JSON.stringify(stored);
     const f = fixture(configuration, stored);
     let app = await f.restore();
     assert.equal(app.restoring, false);
     assert.equal(app.session, null);
-    assert.equal(app.gatewayUrl, RELEASE_GATEWAY_URL);
+    assert.equal(app.gatewayUrl, gatewayUrl);
     assert.match(app.error ?? "", /Se conservan/);
     assert.equal(app.suggestedGatewayUrl, undefined);
-    app.setGatewayUrl(gatewayUrl);
+    app.setGatewayUrl(storedGatewayUrl);
     app = f.render();
-    assert.equal(app.gatewayUrl, RELEASE_GATEWAY_URL);
+    assert.equal(app.gatewayUrl, gatewayUrl);
     await app.login("test-only", "test-only");
     await f.render().demo();
     await f.render().logout();
@@ -116,7 +116,7 @@ test("actual app hook ignores saved local gateway in a new standalone session an
   const app = await f.restore();
   app.setGatewayUrl("http://localhost:8787");
   await f.render().login("test-only", "test-only");
-  assert.deepEqual(f.calls, ["loadSession", `repository:${RELEASE_GATEWAY_URL}`, `login:${RELEASE_GATEWAY_URL}`]);
-  assert.equal(f.render().gatewayUrl, RELEASE_GATEWAY_URL);
-  assert.ok(f.render().error?.includes(RELEASE_GATEWAY_URL));
+  assert.deepEqual(f.calls, ["loadSession", `repository:${gatewayUrl}`, `login:${gatewayUrl}`]);
+  assert.equal(f.render().gatewayUrl, gatewayUrl);
+  assert.ok(f.render().error?.includes(gatewayUrl));
 });

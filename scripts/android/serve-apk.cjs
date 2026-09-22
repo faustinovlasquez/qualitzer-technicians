@@ -6,9 +6,10 @@ const { createHash } = require("node:crypto");
 const { networkInterfaces } = require("node:os");
 const { resolve } = require("node:path");
 const QRCode = require("qrcode");
-const { validateVersion, expectedRelease, packageName, applicationName, gatewayUrl, certificateSha256 } = require("./release-policy.cjs");
+const { validateVersion, expectedRelease, packageName, applicationName, releaseEndpoints, certificateSha256 } = require("./release-policy.cjs");
 
 const root = resolve(__dirname, "../..");
+const { gatewayUrl } = releaseEndpoints(root);
 function publicPath(base, relative, directory = false) {
   const parts = relative.split("/");
   if (parts.some(part => !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(part))) throw new Error("DOWNLOAD_PATH_NOT_ALLOWED");
@@ -75,10 +76,10 @@ async function main() {
 <style>body{font:16px system-ui;background:#f3f7f8;color:#153c46;margin:0;padding:24px}main{max-width:560px;background:white;border-radius:20px;padding:24px;margin:auto}a{display:block;padding:16px;background:#007f80;color:white;text-decoration:none;text-align:center;border-radius:12px;font-weight:700;margin:12px 0}img{display:block;margin:20px auto}small{word-break:break-all}p,li{line-height:1.55}li{margin:8px 0}details{margin:20px 0}</style>
 <main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
 <p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
-<p><strong>Ubicación por acciones, sin seguimiento continuo.</strong> Al entrar solicita consentimiento y permiso durante el uso. Registra ubicación al iniciar, pausar o entregar trabajos, gestionar actividades, checklists, equipo, archivos y órdenes. No captura por permanecer en la app ni al reintentar una sincronización.</p>
-<p><strong>Configuración Google pendiente.</strong> La clave existente está configurada en la app, pero Google rechazó la consulta de prueba: Places API (New) deshabilitada. Habilitarla, revisar Maps SDK for Android y autorizar el paquete y certificado de la APK. No quitar restricciones de la clave ni afectar la clave web en uso.</p>
-<p>Se conservan cronómetro, reportes y cierre de tareas offline. Actividades, borrados, firmas y entrega de la OT completa aún requieren conexión.</p>
-<p><strong>Publicar workerLocations actualizado e instalar gateway ${gatewayVersion}.</strong> Acepta el contrato de acciones y conserva puntos antiguos. Sin migración nueva ni cambios del frontend. Se retiran permisos y servicios de ubicación de fondo; los puntos pendientes anteriores no se borran.</p>
+<p><strong>Servidor configurado:</strong> ${gatewayUrl}. La dirección procede del entorno de compilación, sin fallback a otro servidor.</p>
+<p><strong>Antes de cambiar de servidor:</strong> sincroniza los pendientes y cierra sesión en la versión anterior. Una sesión de otro servidor bloquea el acceso para proteger sus datos. No se trasladan credenciales, archivos ni pendientes entre entornos.</p>
+<p><strong>Disponibilidad durante la compilación:</strong> ${report.health?.ok && report.health?.backendReachable ? "el gateway respondió con el backend disponible; no se probó un login real." : "no se confirmó conexión con el gateway y backend. Revisar el despliegue de /mobile y /api antes de iniciar sesión."}</p>
+<p>Se conservan la ubicación por acciones, los permisos durante el uso y las funciones offline. Esta actualización no modifica ni acredita la autorización de Google Maps.</p>
 <a href="/${name}">Descargar APK ${version}</a><img src="/qr.svg" width="260" height="260" alt="QR para descargar la actualización en el teléfono">
 <p>Elige <strong>Actualizar</strong> sobre la app instalada. No desinstales ni borres datos o pendientes.</p>
 <p>Guardado local no significa envío confirmado ni ficha actualizada. La sincronización requiere conexión, sesión válida y la app en primer plano y desbloqueada. El cronómetro conserva el tiempo oficial del servidor.</p>
