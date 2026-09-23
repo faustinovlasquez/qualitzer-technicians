@@ -76,13 +76,13 @@ async function main() {
 <style>body{font:16px system-ui;background:#f3f7f8;color:#153c46;margin:0;padding:24px}main{max-width:560px;background:white;border-radius:20px;padding:24px;margin:auto}a{display:block;padding:16px;background:#007f80;color:white;text-decoration:none;text-align:center;border-radius:12px;font-weight:700;margin:12px 0}img{display:block;margin:20px auto}small{word-break:break-all}p,li{line-height:1.55}li{margin:8px 0}details{margin:20px 0}</style>
 <main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
 <p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
-<p><strong>Trabajos dentro del mantenimiento.</strong> Iniciar OT, Entregar OT y Crear trabajo quedan fijos abajo. La cabecera conserva el código completo en una fila y elimina la tarjeta inicial duplicada.</p>
-<p>El nuevo trabajo se vincula a la OT abierta y hereda su equipo. Requiere conexión. Si falla la recarga, se puede reintentar sin volver a crear.</p>
-<p>Antes de usar Crear trabajo, publicar las fuentes backend indicadas en la guía e instalar gateway ${gatewayVersion}. No hay nueva migración. Conservar sesiones y colas.</p>
+<p><strong>Nueva configuración de Google para Android.</strong> Esta APK incorpora la clave Android proporcionada para el mapa nativo y la búsqueda de direcciones.</p>
+<p>Places API (New) respondió HTTP 200 en la comprobación del 23 de septiembre. La carga del mapa debe comprobarse en el teléfono después de actualizar.</p>
+<p>No requiere otro gateway ni cambios de backend respecto de 1.0.53; se conserva gateway ${gatewayVersion}. Mantiene la barra fija del mantenimiento y la creación de trabajos con equipo heredado.</p>
 <p><strong>Servidor configurado:</strong> ${gatewayUrl}. La dirección procede del entorno de compilación, sin fallback a otro servidor.</p>
 <p><strong>Antes de cambiar de servidor:</strong> sincroniza los pendientes y cierra sesión en la versión anterior. Una sesión de otro servidor bloquea el acceso para proteger sus datos. No se trasladan credenciales, archivos ni pendientes entre entornos.</p>
 <p><strong>Disponibilidad durante la compilación:</strong> ${report.health?.ok && report.health?.backendReachable ? "el gateway respondió con el backend disponible; no se probó un login real." : "no se confirmó conexión con el gateway y backend. Revisar el despliegue de /mobile y /api antes de iniciar sesión."}</p>
-<p>Se conservan la ubicación por acciones, los permisos durante el uso y las funciones offline. Esta actualización no modifica ni acredita la autorización de Google Maps.</p>
+<p>Se conservan la ubicación por acciones, los permisos durante el uso y las funciones offline. La autorización del mapa depende de Maps SDK for Android, facturación y restricciones de paquete y certificado en Google Cloud.</p>
 <a href="/${name}">Descargar APK ${version}</a><img src="/qr.svg" width="260" height="260" alt="QR para descargar la actualización en el teléfono">
 <p>Elige <strong>Actualizar</strong> sobre la app instalada. No desinstales ni borres datos o pendientes.</p>
 <p>Guardado local no significa envío confirmado ni ficha actualizada. La sincronización requiere conexión, sesión válida y la app en primer plano y desbloqueada. El cronómetro conserva el tiempo oficial del servidor.</p>
