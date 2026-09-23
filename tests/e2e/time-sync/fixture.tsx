@@ -44,6 +44,7 @@ import { mergeDailyAssignments } from "../../../src/domain/assignmentSchedule";
 import { AssignmentWorkCard } from "../../../src/screens/orders/AssignmentWorkCard";
 import { assignmentsWithTimerRead } from "../../../src/offline/queueIntentions";
 import { executionDuration } from "../../../src/domain/workExecution";
+import { MaintenanceDockFixture } from "./MaintenanceDockFixture";
 
 type Screen = "widget" | "invalid" | "creation" | "creation-empty" | "creation-free" | "creation-overlap" | "creation-queued" | "creation-applied" | "creation-review" | "creation-unknown" | "completion" | "worked-days" | "worked-days-manual" | "offline-clock" | "offline-clock-maintenance" | "offline-clock-completion" | "offline-clock-completion-maintenance" | "offline-clock-completion-manual" | "offline-clock-completion-maintenance-manual" | "blocked" | "notification" | "maintenance" | "sync" | "files" | "detail" | "checklist-summary" | "signatures" | "technical-delivery" | "technical-ready" | "file-delete" | "file-delete-refresh-fails" | "file-delete-rejected" | "order-files" | "order-files-queued" | "order-files-error";
 const date = "2026-09-14";
@@ -184,7 +185,7 @@ function OfflineTimerFixture({ current, engine }: { current: NonNullable<typeof 
   </View>;
 }
 
-function Fixture({ screen, client }: { screen: Screen; client: MobileNotificationClient | null }) {
+function Fixture({ screen, client }: { screen: Screen | "maintenance-dock"; client: MobileNotificationClient | null }) {
   const security = useDeviceSecurity();
   const [value, setValue] = useState(screen === "invalid" ? "invalid-original" : "08:49");
   const [hours, setHours] = useState("24");
@@ -205,6 +206,7 @@ function Fixture({ screen, client }: { screen: Screen; client: MobileNotificatio
     registrations, clockCalls, profileSignatures, signatureDeliveries, orderOperations, creationQueue, snapshot: activeEngine?.getSnapshot() ?? null, sent, manualCalls, original });
   const work: AssignmentWork = { ...assignmentsWithStep().groups[0].works[0], scheduledDate: date, plannedDates: [date], status: "paused", canExecute: true,
     firstInProgressTime: "08:00", elapsedSeconds: 1489 * 60, executedMinutes: 1489, missingRequiredInfo: [], checklists: [] };
+  if (screen === "maintenance-dock") return <MaintenanceDockFixture />;
   if (screen.startsWith("offline-clock") && timerFixture && activeEngine) return <OfflineTimerFixture key={scopeKey} current={timerFixture} engine={activeEngine} />;
   const record = (name: string, next: string, setter: (value: string) => void) => { calls.push({ name, value: next }); setter(next); };
   if (screen === "technical-delivery" || screen === "technical-ready") {

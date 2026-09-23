@@ -19,6 +19,8 @@ export { clearOrderLifecycleDrafts } from "./lifecycle/lifecycleDrafts";
 export type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../../domain/orderLifecycle";
 
 export interface OrderLifecyclePanelProps {
+  dock?: boolean;
+  onCreateWork?: () => void;
   group: AssignmentGroup;
   tenant?: Tenant;
   technicianName: string;
@@ -160,24 +162,28 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     setDraft(null);
   }
 
-  return <Card style={styles.stack}>
+  const Container = props.dock ? View : Card;
+  return <Container style={props.dock ? { gap: 8 } : styles.stack}>
+    {!props.dock ? <>
     <View style={styles.row}>
       <View style={styles.grow}><SectionTitle title="Entrega de OT" /></View>
       <Badge label={readOnly ? "OT cerrada" : effectiveStatus === "pending" && confirmed !== "start" ? "Por iniciar" : "En ejecución"} tone={readOnly ? "success" : "teal"} />
     </View>
     {tenant ? <Text style={styles.caption}>{tenant.name} · {orderLabel}</Text> : null}
+    </> : null}
     {readOnly ? <Notice message="OT entregada o finalizada." tone="success" /> : null}
     {!allow ? <Notice message="El acceso actual no habilita inicio ni entrega de esta OT." tone="warning" /> : null}
     {success ? <Notice message={success} tone="success" /> : null}
     {error ? <Notice message={error} tone="error" /> : null}
     {context?.durationMinutes !== null && context?.durationMinutes !== undefined ? <Text style={styles.label}>Duración informada: {Math.floor(context.durationMinutes / 60)} h {context.durationMinutes % 60} min</Text> : null}
     {readOnly && context?.finalizationNote ? <BodyText>{context.finalizationNote}</BodyText> : null}
-    {!readOnly ? <View style={styles.stack}>
-      {canStart ? <Button title="Iniciar OT" icon="play-outline" variant="secondary" disabled={locked} onPress={() => { setError(null); setSuccess(null); setDialog("start"); }} /> : null}
-      <Button title="Entregar OT" icon="checkmark-circle-outline" disabled={locked || !canDeliver} onPress={() => openDelivery()} style={{ backgroundColor: "#C4510A", borderColor: "#C4510A" }} />
-      {draft ? <Button title="Descartar borrador" variant="ghost" icon="trash-outline" disabled={locked} onPress={discardDraft} /> : null}
+    {!readOnly ? <View style={props.dock ? { flexDirection: "row", gap: 8, alignItems: "stretch" } : styles.stack}>
+      {canStart || props.dock ? <Button title={canStart ? "Iniciar OT" : "OT iniciada"} icon="play-outline" variant="secondary" disabled={locked || !canStart} onPress={() => { setError(null); setSuccess(null); setDialog("start"); }} style={props.dock ? { flex: 1, minWidth: 0, flexDirection: "column", paddingHorizontal: 4 } : undefined} textStyle={props.dock ? { fontSize: 12, textAlign: "center" } : undefined} /> : null}
+      <Button title="Entregar OT" icon="checkmark-circle-outline" disabled={locked || !canDeliver} onPress={() => openDelivery()} style={[{ backgroundColor: "#C4510A", borderColor: "#C4510A" }, props.dock && { flex: 1, minWidth: 0, flexDirection: "column", paddingHorizontal: 4 }]} textStyle={props.dock ? { fontSize: 12, textAlign: "center" } : undefined} />
+      {props.dock && props.onCreateWork ? <Button title="Crear trabajo" icon="add-outline" variant="secondary" disabled={locked || !allow} onPress={props.onCreateWork} style={{ flex: 1, minWidth: 0, flexDirection: "column", paddingHorizontal: 4 }} textStyle={{ fontSize: 12, textAlign: "center" }} /> : null}
+      {draft && !props.dock ? <Button title="Descartar borrador" variant="ghost" icon="trash-outline" disabled={locked} onPress={discardDraft} /> : null}
     </View> : null}
-    <Button title="Actualizar estado de OT" icon="refresh-outline" variant="ghost" loading={action === "load"} disabled={locked} onPress={reload} />
+    {!props.dock || error ? <Button title="Actualizar estado de OT" icon="refresh-outline" variant="ghost" loading={action === "load"} disabled={locked} onPress={reload} /> : null}
     {dialog === "start" ? <StartMaintenanceDialog orderLabel={orderLabel} busy={locked} allowed={canStart} mode={mode} error={error} onClose={() => setDialog(null)} onStart={() => { void start().catch(() => {}); }} /> : null}
     {dialog === "preflight" || dialog === "ready" ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setDialog(null); }}>
       <SafeAreaView style={styles.overlay}><View style={styles.modal}>
@@ -215,7 +221,7 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       onSubmit={deliver}
       onReload={reload}
     /> : null}
-  </Card>;
+  </Container>;
 }
 
 export default OrderLifecyclePanel;

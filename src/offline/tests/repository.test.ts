@@ -223,6 +223,20 @@ test("cached assignments fallback for typed network loss only", async () => {
   f.setReadError(new NetworkError("network")); await f.repository.assignments(scope, 1);
   f.setReadError(new SyntaxError("JSON")); await assert.rejects(f.repository.assignments(scope, 1), SyntaxError);
 });
+test("maintenance child creation requires connection and never adds a local creation", async () => {
+  const current = repositoryFixture(); current.connect(false);
+  const input = { ...creation(), kind: "work" as const, maintenanceId: 7, work: { title: "Child", summary: "", priority: "medium" as const } };
+  await assert.rejects(current.repository.createRecord(input), /OFFLINE_ACTION_REQUIRES_CONNECTION/);
+  assert.equal(current.upstream.creates.length, 0); assert.equal((await current.store.read("a")).operations.length, 0);
+  current.connect(true);
+  current.remote.createRecord = async value => {
+    assert.deepEqual(value, input);
+    return { kind: "work", groupId: "maintenance-7", workId: 90, companyBranchId: 1, schedule: { ...input.schedule, plannedMinutes: 60, timezone: "UTC" } };
+  };
+  assert.equal((await current.repository.createRecord(input)).groupId, "maintenance-7");
+  assert.equal((await current.store.read("a")).operations.length, 0);
+});
+
 test("offline creation throws queued outcome after durable commit and remains in schedule", async () => {
   const f = repositoryFixture(); f.connect(false);
   await assert.rejects(f.repository.createRecord(creation()), (error: unknown) => error instanceof OfflineQueuedError && error.operationId === uuid(1));

@@ -9,6 +9,72 @@ import { agendaFixture, frozenNow } from "./helpers/agenda-load-lifecycle";
 import { checklistDate } from "./helpers/assignment-checklist";
 import { deferred } from "./helpers/durable-ui";
 import type { LocationAction } from "../src/domain/locationTracking";
+import type { CreationResult, WorkEditInput } from "../src/domain/creation";
+
+for (const kind of ["work", "maintenance", "non_productive"] as const) for (const outcome of ["confirmed", "queued", "failed"] as const) test(`creation location ${kind} ${outcome} uses the original action and resulting resource`, async context => {
+  const current = fixture(context); const loaded = await current.loadDay();
+  const input: CreationInput = kind === "maintenance" ? { kind, companyBranchId: 1, clientRequestId: uuid(901), schedule: { date: checklistDate, startTime: "09:00", endTime: "10:00" }, maintenance: { type: "correctivo", title: "Repair", motive: "Inspect", equipmentId: 5 } }
+    : kind === "non_productive" ? { kind, companyBranchId: 1, clientRequestId: uuid(901), schedule: { date: checklistDate, startTime: "09:00", endTime: "10:00" }, nonProductive: { reason: "waiting_parts" } } : { ...creation(901), schedule: { date: checklistDate, startTime: "09:00", endTime: "10:00" } };
+  const result: CreationResult = { kind, groupId: kind === "maintenance" ? "maintenance-77" : kind === "non_productive" ? "direct-np-77" : "direct-77", workId: 77, companyBranchId: 1,
+    schedule: { ...input.schedule, plannedMinutes: 60, timezone: "America/Santiago" } };
+  const calls: Array<{ action: LocationAction; phase: string; groupId?: string; operationId?: string }> = [];
+  loaded.bindLocationActions((action, scope) => { calls.push({ action, phase: "capture", groupId: scope.groupId }); return async (phase, operationId, resource) => { calls.push({ action, phase, groupId: resource?.groupId ?? scope.groupId, operationId }); }; });
+  Object.assign(current.wrappers[0], { createRecord: async () => {
+    if (outcome === "failed") throw new Error("CREATE_FAILED");
+    if (outcome === "queued") throw new OfflineQueuedError({ kind: "create", operationId: input.clientRequestId, operationIds: [input.clientRequestId], date: checklistDate, localGroupId: `local-${input.clientRequestId}`, localWorkId: `local-${input.clientRequestId}`, ownsFiles: false });
+    return result;
+  } });
+  loaded.openCreate(kind); const app = await current.flush();
+  if (outcome === "confirmed") await app.createRecord(input); else await assert.rejects(app.createRecord(input));
+  assert.equal(calls[0].action, kind === "maintenance" ? "ORDER_CREATED" : "WORK_CREATED");
+  assert.equal(calls.length, outcome === "failed" ? 1 : 2);
+  if (outcome !== "failed") { assert.equal(calls[1].groupId, outcome === "queued" ? `local-${input.clientRequestId}` : result.groupId); assert.equal(calls[1].operationId, input.clientRequestId); }
+});
+
+test("maintenance child creation records the canonical child and retries only the parent read", async context => {
+  const current = fixture(context); const loaded = await current.loadDay();
+  const group = loaded.data!.groups[0]; loaded.openGroup(group);
+  let app = await current.flush();
+  const input: CreationInput = { ...creation(902), kind: "work", maintenanceId: 80, schedule: { date: checklistDate, startTime: "09:00", endTime: "10:00" }, work: { title: "Child", summary: "", priority: "medium" } };
+  const child: CreationResult = { kind: "work", groupId: group.id, workId: 902, companyBranchId: 1, schedule: { ...input.schedule, plannedMinutes: 60, timezone: "America/Santiago" } };
+  let posts = 0;
+  const events: Array<{ action: LocationAction; groupId: string; workId?: string }> = [];
+  app.bindLocationActions((action, scope) => async (_state, _operationId, resource) => { events.push({ action, groupId: resource?.groupId ?? scope.groupId, workId: resource?.workId }); });
+  Object.assign(current.wrappers[0], { createRecord: async () => { posts++; return child; } });
+  await assert.rejects(app.orderCreation.onSubmit({ ...input, maintenanceId: 81 }));
+  assert.equal(posts, 0);
+  assert.deepEqual(await app.orderCreation.onSubmit(input), child);
+  assert.deepEqual(events, [{ action: "WORK_CREATED", groupId: group.id, workId: "902" }]);
+  app = await current.flush();
+  const opening = app.orderCreation.onCreated(child); const rejected = assert.rejects(opening, /READ_FAILED/);
+  await current.flush(); current.reads.at(-1)!.reject(new Error("READ_FAILED")); await rejected;
+  app = await current.flush(); assert.equal(app.busy, false); assert.equal(app.selectedOrder?.id, group.id);
+  const retry = app.orderCreation.onCreated(child); await current.flush();
+  const fresh = structuredClone(loaded.data!); fresh.groups[0].works.push({ ...group.works[0], id: "902", title: "Child" });
+  current.reads.at(-1)!.resolve(fresh); await retry;
+  app = await current.flush();
+  assert.equal(app.selectedOrder?.id, group.id); assert.equal(app.selectedOrder?.initialTab, "works");
+  assert.ok(app.data?.groups[0].works.some(work => work.id === "902"));
+  assert.equal(posts, 1); assert.equal(events.length, 1);
+});
+
+test("work mutation waits for location persistence but never repeats a failed business operation", async context => {
+  const current = fixture(context); const loaded = await current.loadDay(); const group = loaded.data!.groups[0];
+  const gate = deferred<void>(); let resolved = false;
+  loaded.bindLocationActions(() => async () => gate.promise);
+  const operation = loaded.onWorkStatus(group, group.works[0], { status: "paused" }).then(() => { resolved = true; });
+  await current.flush(); assert.equal(resolved, false); assert.equal(current.render().busy, true);
+  gate.resolve(); await operation; assert.equal(resolved, true);
+});
+
+test("editing work data and equipment records WORK_UPDATED once after confirmation", async context => {
+  const current = fixture(context); const loaded = await current.loadDay(); const group = loaded.data!.groups[0];
+  const actions: LocationAction[] = []; loaded.bindLocationActions(action => async () => { actions.push(action); });
+  Object.assign(current.wrappers[0], { updateWork: async () => ({}) });
+  loaded.openWork(group, group.works[0]); const app = await current.flush();
+  const input: WorkEditInput = { expectedRevision: "a".repeat(64), fields: { title: "Updated", summary: "", priority: "medium", rentalEquipmentId: 5, specialtyId: null, schedule: { date: checklistDate, startTime: "", endTime: "" } } };
+  await app.workEditor.save(input); assert.deepEqual(actions, ["WORK_UPDATED"]);
+});
 
 test("business mutations publish locations for activities, files, reports, equipment and order lifecycle", async context => {
   const current = fixture(context); const loaded = await current.loadDay(); const group = loaded.data!.groups[0];

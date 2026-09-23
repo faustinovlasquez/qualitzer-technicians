@@ -5,6 +5,7 @@ import { type GoogleMapPoint, type GoogleMapProps, validMapPoint } from "./googl
 import { googlePlaces, type GooglePlaceSuggestion } from "./googlePlaces";
 import { palette } from "../ui/theme";
 import { BodyText, Button, Field, IconButton } from "../ui/components";
+import { GoogleMapConfiguration } from "./GoogleMapConfiguration";
 
 export function GoogleMap(props: GoogleMapProps) {
   const map = useRef<MapView>(null);
@@ -16,6 +17,8 @@ export function GoogleMap(props: GoogleMapProps) {
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [placesError, setPlacesError] = useState<string | null>(null);
   const generation = useRef(0);
   const latest = useRef(props); latest.current = props;
   const alive = useRef(true);
@@ -46,9 +49,12 @@ export function GoogleMap(props: GoogleMapProps) {
   useEffect(() => { if (props.selection) void selectPoint(props.selection); }, [props.selection]);
   const search = async () => {
     if (busy || props.disabled || !props.editable || query.trim().length < 3) return;
-    const version = ++generation.current; setBusy(true); setError(null);
+    const version = ++generation.current; setBusy(true); setError(null); setPlacesError(null);
     try { const found = await googlePlaces.search(query); if (current(version)) { setSuggestions(found); if (!found.length) setError("No se encontraron direcciones para esa búsqueda."); } }
-    catch { if (current(version)) setError("No se pudo buscar en Google. Revisa conexión, Places API y restricciones de la clave Android."); }
+    catch (failure) { if (current(version)) {
+      const code = failure !== null && typeof failure === "object" && "code" in failure && typeof failure.code === "string" && /^GOOGLE_PLACES_\d+$/.test(failure.code) ? failure.code : "NO_CONFIRMADA";
+      setPlacesError(code); setError("No se pudo buscar en Google. Revisa conexión, Places API y restricciones de la clave Android."); setConfigurationOpen(true);
+    } }
     finally { if (alive.current && version === generation.current) setBusy(false); }
   };
   const selectAddress = async (id: string) => {
@@ -62,7 +68,7 @@ export function GoogleMap(props: GoogleMapProps) {
     } catch { if (current(version)) setError("Google no devolvió una dirección válida. Vuelve a seleccionar el resultado."); }
     finally { if (alive.current && version === generation.current) setBusy(false); }
   };
-  if (!googlePlaces.available()) return <Text accessibilityRole="alert" style={styles.error}>Google Maps no está configurado en esta instalación de la app.</Text>;
+  if (!googlePlaces.available()) return <GoogleMapConfiguration configuration={googlePlaces.configuration?.() ?? null} loaded={false} />;
   return <View style={styles.container}>
     {props.editable ? <>
       <View style={styles.search}><View style={{ flex: 1 }}><Field label="Buscar dirección en Google" value={query} maxLength={200} editable={!props.disabled} onChangeText={value => { generation.current++; setBusy(false); setQuery(value); setSuggestions([]); }} onSubmitEditing={() => void search()} returnKeyType="search" /></View>
@@ -85,6 +91,8 @@ export function GoogleMap(props: GoogleMapProps) {
     </View>
     {busy ? <BodyText>Consultando dirección…</BodyText> : null}
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+    <Button title={configurationOpen ? "Ocultar configuración de Google" : "Ver configuración de Google"} icon="settings-outline" variant="secondary" onPress={() => setConfigurationOpen(value => !value)} />
+    {configurationOpen || mapError ? <GoogleMapConfiguration configuration={googlePlaces.configuration?.() ?? null} loaded={loaded} placesError={placesError} /> : null}
   </View>;
 }
 const styles = StyleSheet.create({ container: { gap: 8, width: "100%", minWidth: 0 }, frame: { height: 300, width: "100%" }, map: { flex: 1 }, mapFailure: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: palette.surface, padding: 16, justifyContent: "center", gap: 10 }, search: { flexDirection: "row", alignItems: "flex-end", gap: 8 }, error: { color: palette.danger } });

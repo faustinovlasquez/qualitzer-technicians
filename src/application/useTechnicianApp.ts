@@ -997,12 +997,21 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
     const version = sessionVersion.current;
     const action = beginAction();
+    let locationComplete: ReturnType<LocationActionRecorder> | undefined;
+    try { locationComplete = locationActions.current?.(value.kind === "maintenance" ? "ORDER_CREATED" : "WORK_CREATED", {
+      ...dailyRange(value.schedule.date), companyBranchId: value.companyBranchId, groupId: `local-${value.clientRequestId}`, workId: `local-${value.clientRequestId}`,
+    }); } catch {}
     try {
       const result = creationResultSchema.parse(await repo.createRecord(value));
       if (version !== sessionVersion.current || repository.current !== repo || !currentContext(false)) throw new Error("La sesión cambió. Conserva la misma solicitud y verifica su confirmación antes de crear otra.");
       if (result.kind !== value.kind || result.companyBranchId !== current.branchId || result.schedule.date !== value.schedule.date
         || result.schedule.startTime !== value.schedule.startTime || result.schedule.endTime !== value.schedule.endTime) throw new Error("La respuesta no corresponde a la solicitud enviada. Reintenta con el mismo identificador.");
+      await locationComplete?.("CONFIRMED", value.clientRequestId, { groupId: result.groupId, workId: String(result.workId) }).catch(() => {});
+      if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió. La creación fue confirmada; no la repitas.");
       return result;
+    } catch (error: unknown) {
+      if (version === sessionVersion.current && repository.current === repo && isOfflineQueuedError(error)) await locationComplete?.("QUEUED", error.operationId).catch(() => {});
+      throw error;
     } finally { endAction(action); }
   }
 
@@ -1133,7 +1142,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     try {
       const result = await operation(repo, value);
       if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la operación. Verifica el resultado antes de repetir el envío.");
-      void locationComplete?.("CONFIRMED").catch(() => {});
+      await locationComplete?.("CONFIRMED").catch(() => {});
+      if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió después del guardado. Verifica el resultado antes de repetirlo.");
       if (refreshAfter) {
         void refreshAssignments(true).catch((caught: unknown) => {
           if (version === sessionVersion.current && repository.current === repo) setError(`El cambio fue confirmado, pero no se pudo actualizar la información. No repitas el envío; actualiza las asignaciones. ${errorText(caught)}`);
@@ -1141,7 +1151,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       }
       return result;
     } catch (error: unknown) {
-      if (version === sessionVersion.current && repository.current === repo && isOfflineQueuedError(error)) void locationComplete?.("QUEUED", error.operationId).catch(() => {});
+      if (version === sessionVersion.current && repository.current === repo && isOfflineQueuedError(error)) await locationComplete?.("QUEUED", error.operationId).catch(() => {});
       throw error;
     } finally { endAction(action); }
   }
@@ -1177,6 +1187,47 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       return repo.equipmentLocation(value, target);
     });
   }
+  async function loadWorkEdit() {
+    return readWork((repo, value) => {
+      if (!repo.workEdit) throw new Error("Actualiza el servidor para editar trabajos.");
+      return repo.workEdit(value);
+    });
+  }
+  async function workEditOptions(query: CreationOptionsQuery) {
+    const value = scope();
+    if (query.companyBranchId !== value.companyBranchId) throw new Error("La sucursal cambió.");
+    return readWork(async repo => {
+      const result = creationOptionsSchema.parse(await repo.creationOptions(creationOptionsQuerySchema.parse(query)));
+      if (result.companyBranchId !== value.companyBranchId || result.userId !== session?.user.id || result.workerId !== session.user.workerId) throw new Error("Las opciones no corresponden a esta sesión.");
+      return result;
+    });
+  }
+  async function saveWorkEdit(input: import("../domain/creation").WorkEditInput) {
+    return performMutation(scope(), async (repo, value) => {
+      if (!repo.updateWork) throw new Error("Actualiza el servidor para editar trabajos.");
+      if (repo instanceof OfflineTechnicianRepository && repo.getSnapshot().operations.some(operation => operation.status !== "applied" && (operation.kind === "create" ? operation.localGroupId === value.groupId : operation.scope.groupId === value.groupId))) throw new Error("Sincroniza los pendientes antes de editar este trabajo.");
+      return repo.updateWork(value, input);
+    }, false, "WORK_UPDATED");
+  }
+  async function onWorkEdited(result: import("../domain/creation").WorkEditDocument): Promise<void> {
+    if (!currentContext() || actionLock.current || !session?.branchId || !selected || !repository.current) throw new Error("La sesión o el trabajo cambió.");
+    if (result.groupId !== selected.groupId || String(result.workId) !== selected.workId || result.companyBranchId !== session.branchId) throw new Error("La respuesta no corresponde al trabajo seleccionado.");
+    const owner = session; const repo = repository.current; const version = sessionVersion.current;
+    const date = result.scheduleEditable ? result.fields.schedule.date : selected.queryDate;
+    const nextRange = dailyRange(date);
+    const action = beginAction();
+    try {
+      const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(nextRange, owner.branchId!));
+      if (version !== sessionVersion.current || repo !== repository.current || !isAccessAllowed()) throw new Error("La sesión cambió.");
+      if (!fresh.groups.some(group => group.id === result.groupId && group.works.some(work => work.id === String(result.workId)))) throw new Error("Los cambios están guardados, pero no se pudo actualizar la ficha.");
+      const nextWork = { ...selected, queryDate: date, scheduledDate: date };
+      const nextOrder = selectedOrder ? { ...selectedOrder, queryDate: date } : null;
+      requestVersion.current += 1;
+      manualRefresh.current = { session: owner, range: nextRange };
+      state.current = { ...state.current, data: fresh, range: nextRange, selected: nextWork, selectedOrder: nextOrder };
+      setData(fresh); setRange(nextRange); setSelected(nextWork); setSelectedOrder(nextOrder); setError(null);
+    } finally { endAction(action); }
+  }
   async function saveEquipmentLocation(target: import("../domain/equipmentLocation").EquipmentLocationTarget, input: import("../domain/equipmentLocation").EquipmentLocationUpdate) {
     return performMutation(scope(), (repo, value) => {
       if (!repo.updateEquipmentLocation) throw new Error("La edición de ubicación del equipo no está disponible.");
@@ -1198,6 +1249,46 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const result = await operation(repo, value);
     if (version !== sessionVersion.current || repository.current !== repo || !currentContext()) throw new Error("La sesión o la orden cambió durante la consulta.");
     return result;
+  }
+
+  async function orderCreationOptions(query: CreationOptionsQuery): Promise<CreationOptions> {
+    return readGroup(async (repo, value) => {
+      if (query.companyBranchId !== value.companyBranchId) throw new Error("La sucursal cambió.");
+      const result = creationOptionsSchema.parse(await repo.creationOptions(creationOptionsQuerySchema.parse(query)));
+      if (result.companyBranchId !== value.companyBranchId || result.userId !== session?.user.id || result.workerId !== session.user.workerId) throw new Error("Las opciones no corresponden a tu sesión.");
+      return result;
+    });
+  }
+  async function createOrderWork(input: CreationInput): Promise<CreationResult> {
+    const value = creationInputSchema.parse(input);
+    const parent = groupScope();
+    if (value.kind !== "work" || !value.maintenanceId || parent.groupId !== `maintenance-${value.maintenanceId}` || parent.companyBranchId !== value.companyBranchId) throw new Error("El trabajo no corresponde al mantenimiento abierto.");
+    const owner = session; const repo = repository.current; const version = sessionVersion.current;
+    const result = await performMutation(parent, async repository => {
+      let locationComplete: ReturnType<LocationActionRecorder> | undefined;
+      try { locationComplete = locationActions.current?.("WORK_CREATED", parent); } catch {}
+      const result = creationResultSchema.parse(await repository.createRecord(value));
+      if (result.kind !== "work" || result.groupId !== parent.groupId || result.companyBranchId !== parent.companyBranchId || result.schedule.date !== value.schedule.date || result.schedule.startTime !== value.schedule.startTime || result.schedule.endTime !== value.schedule.endTime) throw new Error("La respuesta no corresponde a esta creación.");
+      await locationComplete?.("CONFIRMED", value.clientRequestId, { groupId: result.groupId, workId: String(result.workId) }).catch(() => {});
+      return result;
+    });
+    if (owner !== state.current.session || repo !== repository.current || version !== sessionVersion.current) throw new Error("La sesión cambió. Verifica la creación antes de repetirla.");
+    return result;
+  }
+  async function onOrderWorkCreated(result: CreationResult): Promise<void> {
+    const parent = groupScope(); const owner = session; const repo = repository.current; const version = sessionVersion.current;
+    if (!owner?.branchId || !repo || result.groupId !== parent.groupId || result.companyBranchId !== parent.companyBranchId || result.kind !== "work" || actionLock.current) throw new Error("El mantenimiento cambió.");
+    const action = beginAction();
+    try {
+      const range = dailyRange(result.schedule.date);
+      const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(range, owner.branchId, { signal: new AbortController().signal }));
+      if (version !== sessionVersion.current || repository.current !== repo || !isAccessAllowed()) throw new Error("La sesión cambió.");
+      if (!fresh.groups.some(group => group.id === result.groupId && group.works.some(work => work.id === String(result.workId)))) throw new Error("El trabajo fue creado. No se pudo cargar la ficha; reintenta sin crearlo otra vez.");
+      const nextOrder = { ...selectedOrder!, queryDate: result.schedule.date, initialTab: "works" as const };
+      manualRefresh.current = { session: owner, range }; requestVersion.current++;
+      state.current = { ...state.current, data: fresh, range, selectedOrder: nextOrder };
+      setData(fresh); setRange(range); setSelectedOrder(nextOrder); setError(null);
+    } finally { endAction(action); }
   }
 
   function requireFileId(fileId: string): string {
@@ -1429,6 +1520,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     signatureAccess,
     bindLocationActions,
     equipmentLocation: { load: loadEquipmentLocation, save: saveEquipmentLocation },
+    workEditor: { load: loadWorkEdit, options: workEditOptions, save: saveWorkEdit, saved: onWorkEdited },
+    orderCreation: { onLoadOptions: orderCreationOptions, onSubmit: createOrderWork, onCreated: onOrderWorkCreated },
     creationNotice: visibleCreationNotice,
     dismissCreationNotice: () => setCreationNotice(null),
     locationPort: remoteRepository(repository.current),

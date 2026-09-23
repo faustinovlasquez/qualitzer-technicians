@@ -37,12 +37,12 @@ const sha256 = createHash("sha256").update(apkContent).digest("hex");
 if (sha256 !== report.sha256 || report.debuggable !== false || report.variant !== "release") throw new Error("APK_RELEASE_VERIFICATION_REQUIRED");
 const size = apkContent.length;
 if (size !== report.bytes) throw new Error("APK_RELEASE_SIZE_MISMATCH");
-const gatewayVersion = "1.0.22";
+const gatewayVersion = "1.0.25";
 const gatewayArchiveName = `qualitzer-mobile-gateway-${gatewayVersion}.tgz`;
 const gatewayArchivePath = `artifacts/mobile-gateway/${gatewayArchiveName}`;
 const gatewayContent = readPublicFile(root, gatewayArchivePath, 32 * 1024 * 1024);
 const gatewaySha256 = createHash("sha256").update(gatewayContent).digest("hex");
-if (gatewaySha256 !== "1ebd9460ab31fa1b1ee1428f2442e146c92239deaaa80dca604f036d3a482ebd") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
+if (gatewaySha256 !== "42529fce980d55104767f9959a2e33d730432facb78cc04fb6b6a7f7648d2739") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
 const validationDirectory = "artifacts/logs/fluidity-package";
 const validationName = readdirSync(publicPath(root, validationDirectory, true), { withFileTypes: true })
   .filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-zA-Z0-9]{6}$/.test(entry.name))
@@ -76,6 +76,9 @@ async function main() {
 <style>body{font:16px system-ui;background:#f3f7f8;color:#153c46;margin:0;padding:24px}main{max-width:560px;background:white;border-radius:20px;padding:24px;margin:auto}a{display:block;padding:16px;background:#007f80;color:white;text-decoration:none;text-align:center;border-radius:12px;font-weight:700;margin:12px 0}img{display:block;margin:20px auto}small{word-break:break-all}p,li{line-height:1.55}li{margin:8px 0}details{margin:20px 0}</style>
 <main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
 <p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
+<p><strong>Trabajos dentro del mantenimiento.</strong> Iniciar OT, Entregar OT y Crear trabajo quedan fijos abajo. La cabecera conserva el código completo en una fila y elimina la tarjeta inicial duplicada.</p>
+<p>El nuevo trabajo se vincula a la OT abierta y hereda su equipo. Requiere conexión. Si falla la recarga, se puede reintentar sin volver a crear.</p>
+<p>Antes de usar Crear trabajo, publicar las fuentes backend indicadas en la guía e instalar gateway ${gatewayVersion}. No hay nueva migración. Conservar sesiones y colas.</p>
 <p><strong>Servidor configurado:</strong> ${gatewayUrl}. La dirección procede del entorno de compilación, sin fallback a otro servidor.</p>
 <p><strong>Antes de cambiar de servidor:</strong> sincroniza los pendientes y cierra sesión en la versión anterior. Una sesión de otro servidor bloquea el acceso para proteger sus datos. No se trasladan credenciales, archivos ni pendientes entre entornos.</p>
 <p><strong>Disponibilidad durante la compilación:</strong> ${report.health?.ok && report.health?.backendReachable ? "el gateway respondió con el backend disponible; no se probó un login real." : "no se confirmó conexión con el gateway y backend. Revisar el despliegue de /mobile y /api antes de iniciar sesión."}</p>

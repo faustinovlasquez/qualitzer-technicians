@@ -28,6 +28,14 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     const { equipmentLocationSchema, equipmentLocationTargetSchema } = await import("../domain/equipmentLocation");
     return equipmentLocationSchema.parse(await this.request<unknown>(this.scopePath(scope, `/equipment-location/${equipmentLocationTargetSchema.parse(target)}`)));
   }
+  async workEdit(scope: import("../domain/models").WorkScope) {
+    const { workEditDocumentSchema } = await import("../domain/creation");
+    return workEditDocumentSchema.parse(await this.request<unknown>(this.scopePath(scope, "/edit")));
+  }
+  async updateWork(scope: import("../domain/models").WorkScope, input: import("../domain/creation").WorkEditInput) {
+    const { workEditDocumentSchema, workEditInputSchema } = await import("../domain/creation");
+    return workEditDocumentSchema.parse(await this.request<unknown>(this.scopePath(scope, "/edit"), "PATCH", workEditInputSchema.parse(input)));
+  }
   async updateEquipmentLocation(scope: import("../domain/models").WorkScope, target: import("../domain/equipmentLocation").EquipmentLocationTarget, input: import("../domain/equipmentLocation").EquipmentLocationUpdate) {
     const { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } = await import("../domain/equipmentLocation");
     return equipmentLocationSchema.parse(await this.request<unknown>(this.scopePath(scope, `/equipment-location/${equipmentLocationTargetSchema.parse(target)}`), "PATCH", equipmentLocationUpdateSchema.parse(input)));

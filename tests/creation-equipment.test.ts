@@ -7,6 +7,10 @@ import { demoCreationOptions } from "../src/infrastructure/creationDemo";
 import { exactEquipmentMatches, lookupEquipment, type EquipmentOption } from "../src/screens/creation/equipmentLookup";
 import { creationPayload, emptyCreationForm, readCreationDraft } from "../src/screens/creation/creationForm";
 import type { CreationCatalogCache } from "../src/screens/creation/CreationCatalogSelector";
+import { creationFormSchema } from "../src/screens/creation/creationForm";
+import type { ComponentProps } from "react";
+import type { CreationEquipmentLookup } from "../src/screens/creation/CreationEquipmentLookup";
+import { action, deferred, durableReactFixture, elements, settle, uiModule } from "./helpers/durable-ui";
 
 const first = { id: 71, label: "N.º interno EQ-001 · PLACA-9 · Excavadora", internalNumber: "EQ-001", identifier: "PLACA-9", equipmentType: "Excavadora" };
 const second = { ...first, id: 99, identifier: "PLACA-10", label: "N.º interno EQ-001 · PLACA-10 · Excavadora" };
@@ -89,4 +93,74 @@ test("selection maps only the chosen ID; old pending empty selection and queued 
   assert.deepEqual(queued.input, input);
   assert.equal(queued.form.equipment?.id, 71);
   assert.equal(readCreationDraft(JSON.stringify({ ...saved, form: { ...selected, equipment: { id: 99, label: second.label } } }), "work", 1), null);
+});
+
+test("equipment summary metadata survives drafts but never changes work or maintenance API payloads", () => {
+  const plain = { ...emptyCreationForm("2026-09-22"), title: "Inspeccion", motive: "Revision", startTime: "09:00", endTime: "10:00", equipment: { id: first.id, label: first.label } };
+  const detailed = creationFormSchema.parse({ ...plain, equipment: first });
+  const uuid = "52b5201d-4ea9-4dad-9f9d-191d11ea8461";
+  for (const kind of ["work", "maintenance"] as const) {
+    assert.deepEqual(creationPayload(kind, detailed, 1, uuid), creationPayload(kind, plain, 1, uuid));
+    const restored = readCreationDraft(JSON.stringify({ version: 1, kind, phase: "editing", form: detailed }), kind, 1);
+    assert.equal(restored?.form.equipment?.internalNumber, "EQ-001");
+    assert.equal(restored?.form.equipment?.identifier, "PLACA-9");
+  }
+});
+
+function equipmentFixture(required: boolean) {
+  const hooks = durableReactFixture();
+  let loads = 0;
+  const security = { blocked: false, isUnlocked: () => !security.blocked };
+  const module = uiModule<{ CreationEquipmentLookup: typeof CreationEquipmentLookup }>("screens/creation/CreationEquipmentLookup.tsx", hooks, {
+    react: { ...hooks.react, useContext: () => security },
+    "./CreationModal": { CreationModal: "CreationModal" },
+    "./CreationCatalogSelector": { CreationCatalogSelector: "CreationCatalogSelector" },
+  });
+  const selections: ComponentProps<typeof CreationEquipmentLookup>["selected"][] = [];
+  const props: ComponentProps<typeof CreationEquipmentLookup> = { ...context, required, disabled: false, selected: null, cache: new Map(),
+    onLoadOptions: async () => { loads++; return options([first, second]); }, onSelect: item => { selections.push(item); props.selected = item; } };
+  const render = () => { const tree = hooks.render(() => module.CreationEquipmentLookup(props)); hooks.flush(); return tree; };
+  return { props, render, hooks, selections, security, loads: () => loads };
+}
+
+for (const required of [false, true]) test(`compact equipment ${required ? "maintenance" : "work"}: select, cancel change, replace and remove`, async context => {
+  const fixture = equipmentFixture(required); context.after(() => fixture.hooks.unmount());
+  assert.equal(elements(fixture.render(), "Field").length, 0);
+  assert.equal(fixture.loads(), 0);
+  action(fixture.render(), "Asociar equipo").onPress();
+  let tree = fixture.render(); assert.equal(elements(tree, "CreationModal").length, 1);
+  elements<{ onChangeText(value: string): void }>(tree, "Field")[0].props.onChangeText("EQ-001");
+  action(fixture.render(), "Buscar equipo").onPress(); await settle(); tree = fixture.render();
+  assert.equal(fixture.selections.length, 0);
+  const result = elements<{ accessibilityLabel: string; onPress(): void }>(tree, "Pressable").find(item => item.props.accessibilityLabel === `Seleccionar ${first.label}`);
+  assert.ok(result); result.props.onPress(); tree = fixture.render();
+  assert.equal(fixture.props.selected?.id, 71); assert.equal(fixture.props.selected?.identifier, "PLACA-9");
+  assert.equal(elements(tree, "Field").length, 0); assert.equal(elements(tree, "CreationModal").length, 0);
+  action(tree, "Cambiar equipo").onPress(); tree = fixture.render();
+  elements<{ onClose(): void }>(tree, "CreationModal")[0].props.onClose(); tree = fixture.render();
+  assert.equal(fixture.props.selected?.id, 71);
+  action(tree, "Cambiar equipo").onPress(); tree = fixture.render();
+  const tab = elements<{ accessibilityLabel: string; onPress(): void }>(tree, "Pressable").find(item => item.props.accessibilityLabel === "Catálogo");
+  assert.ok(tab); tab.props.onPress(); tree = fixture.render();
+  const catalog = elements<{ embedded: boolean; onSelect(item: typeof second): void }>(tree, "CreationCatalogSelector")[0];
+  assert.equal(catalog.props.embedded, true); catalog.props.onSelect(second); tree = fixture.render();
+  assert.equal(fixture.props.selected?.id, 99);
+  action(tree, "Quitar equipo").onPress(); tree = fixture.render();
+  assert.equal(fixture.props.selected, null); assert.ok(action(tree, "Asociar equipo"));
+  result.props.onPress(); assert.equal(fixture.props.selected, null, "closed picker callback cannot reselect");
+});
+
+test("closing, locking or disabling the equipment picker prevents late results and retained selections", async context => {
+  const fixture = equipmentFixture(false); context.after(() => fixture.hooks.unmount());
+  const gate = deferred<CreationOptions>(); fixture.props.onLoadOptions = () => gate.promise;
+  fixture.render(); action(fixture.render(), "Asociar equipo").onPress();
+  elements<{ onChangeText(value: string): void }>(fixture.render(), "Field")[0].props.onChangeText("EQ-001");
+  action(fixture.render(), "Buscar equipo").onPress();
+  elements<{ onClose(): void }>(fixture.render(), "CreationModal")[0].props.onClose();
+  gate.resolve(options([first])); await settle();
+  assert.equal(elements(fixture.render(), "CreationModal").length, 0); assert.equal(fixture.selections.length, 0);
+  const open = action(fixture.render(), "Asociar equipo"); fixture.props.disabled = true; fixture.render(); open.onPress();
+  assert.equal(elements(fixture.render(), "CreationModal").length, 0);
+  fixture.props.disabled = false; fixture.security.blocked = true; fixture.render(); open.onPress();
+  assert.equal(elements(fixture.render(), "CreationModal").length, 0);
 });

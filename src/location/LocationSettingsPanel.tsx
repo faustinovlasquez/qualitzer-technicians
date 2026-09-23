@@ -26,7 +26,8 @@ export function LocationSettingsPanel({ tracking, disabled = false }: { tracking
       <BodyText>Zona horaria: {tracking.timezone}</BodyText>
       <BodyText>{locationTrackingStatus(tracking.state)}</BodyText>
       <BodyText>Solo al realizar acciones. No se registra un recorrido periódico ni en segundo plano.</BodyText>
-      <BodyText>{tracking.state?.points.length ?? 0} puntos pendientes · Última sincronización: {tracking.state?.lastSyncedAt ? new Date(tracking.state.lastSyncedAt).toLocaleString("es-CL") : "Sin registros enviados"}</BodyText>
+      <BodyText>{tracking.state?.points.length ?? 0} puntos pendientes · Última sincronización: {tracking.state?.lastSyncedAt ? new Date(tracking.state.lastSyncedAt).toLocaleString("es-CL", { timeZone: tracking.timezone }) : "Sin registros enviados"}</BodyText>
+      {tracking.synchronize ? <Button title="Sincronizar ubicaciones" icon="sync-outline" variant="secondary" disabled={frozen} onPress={() => { void tracking.synchronize?.(); }} /> : null}
       <BodyText>Por privacidad, la captura se detiene tras 24 horas sin verificar la sesión. Los puntos pendientes no se eliminan.</BodyText>
       <Button title="Permisos del teléfono" icon="settings-outline" variant="secondary" onPress={() => { void Linking.openSettings(); }} />
       {tracking.state?.points.slice(-5).reverse().map(point => <View key={point.id} style={styles.entry}>

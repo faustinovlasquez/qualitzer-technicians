@@ -12,6 +12,7 @@ const activityPickerOnly = process.argv.includes("--activity-picker");
 const signaturesOnly = process.argv.includes("--signatures");
 const fileDeletionOnly = process.argv.includes("--file-deletion");
 const orderFilesOnly = process.argv.includes("--order-files");
+const maintenanceDockOnly = process.argv.includes("--maintenance-dock");
 const androidRefreshBefore = process.argv.includes("--android-refresh-before");
 let runner = fs.readFileSync(shared, "utf8");
 function replace(before, after) {
@@ -20,6 +21,7 @@ function replace(before, after) {
 }
 replace('const root = path.resolve(__dirname, "../..");', `const root = ${JSON.stringify(root)};`);
 replace('"artifacts/logs/picker-messages-ui"', '"artifacts/logs/time-sync-ui"');
+replace('"process.env.NODE_ENV": \'"production"\'', '"process.env.NODE_ENV": \'"production"\', "process.env.EXPO_OS": \'"web"\'');
 runner = runner.replaceAll('path.join(root, "tests/e2e/picker-messages-fixture.tsx")', 'path.join(root, "tests/e2e/time-sync/fixture.tsx")');
 replace('entryPoints: ["tests/e2e/picker-messages-fixture.tsx"]', 'entryPoints: ["tests/e2e/time-sync/fixture.tsx"]');
 replace('const program = ts.createProgram([path.join(root, "tests/e2e/time-sync/fixture.tsx")]', 'const program = ts.createProgram([path.join(root, "tests/e2e/time-sync/fixture.tsx"), path.join(root, "src/ui/time/TimePickerPanel.native.tsx")]');
@@ -92,6 +94,7 @@ if (activityPickerOnly) replace('    async function check(name, run) {', '    as
 if (signaturesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/profile-signatures/.test(name)) return;');
 if (fileDeletionOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/file-deletion/.test(name)) return;');
 if (orderFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/order-files/.test(name)) return;');
+if (maintenanceDockOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/maintenance-dock/.test(name)) return;');
 if (deliveryFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/completion|blocked-stays|confirmed-files/.test(name)) return;');
 if (workedDaysOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/worked-days/.test(name)) return;');
 if (offlineClockOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/offline-clock/.test(name)) return;');

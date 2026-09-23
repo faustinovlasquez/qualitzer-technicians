@@ -8,10 +8,26 @@ import { emptySchema, resourceParamsSchema } from "../validation";
 import { AssignmentAuthorization } from "./authorization";
 import type { UploadConcurrency } from "./routes";
 import { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } from "../../src/domain/equipmentLocation";
+import { workEditDocumentSchema, workEditInputSchema } from "../../src/domain/creation";
 
 export function registerWorkActions(router: Router, upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency): void {
   const authorization = new AssignmentAuthorization(upstream);
   const base = "/:groupId/works/:workId";
+  function editDocument(value: unknown, scope: { group: { id: string }; workId: number; range: { companyBranchId: number } }) {
+    const document = parseUpstream(workEditDocumentSchema, value);
+    if (document.groupId !== scope.group.id || document.workId !== scope.workId || document.companyBranchId !== scope.range.companyBranchId) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    return document;
+  }
+  router.get(`${base}/edit`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const { scope, query, prefix } = await owned(req, true);
+    res.json(editDocument(await upstream.request(`${prefix}/edit`, { token: scope.token, query }), scope));
+  });
+  router.patch(`${base}/edit`, async (req, res) => {
+    const input = workEditInputSchema.parse(req.body);
+    const { scope, query, prefix } = await owned(req, true);
+    res.json(editDocument(await upstream.request(`${prefix}/edit`, { token: scope.token, query, method: "PATCH", json: input }), scope));
+  });
   router.get(`${base}/equipment-location/:target`, async (req, res) => {
     emptySchema.parse(req.body ?? {});
     const target = equipmentLocationTargetSchema.parse(req.params.target);

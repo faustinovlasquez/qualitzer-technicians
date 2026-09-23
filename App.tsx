@@ -104,7 +104,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       {locationSettingsOpen ? <>
         <Button title="Volver al historial" icon="arrow-back-outline" variant="secondary" disabled={locationTracking.busy} onPress={() => setLocationSettingsOpen(false)} />
         <LocationSettingsPanel tracking={locationTracking} disabled={app.busy} />
-      </> : <LocationHistoryPanel key={locationViewKey} tracking={locationTracking} initialDate={app.selected?.queryDate ?? app.selectedOrder?.queryDate ?? app.range.startDate}
+      </> : <LocationHistoryPanel key={locationViewKey} tracking={locationTracking} initialDate={new Intl.DateTimeFormat("en-CA", { timeZone: locationTracking.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())}
         onConfigure={() => setLocationSettingsOpen(true)} resource={app.selected ? { groupId: app.selected.groupId, workId: Number(app.selected.workId) } : app.selectedOrder ? { groupId: app.selectedOrder.id } : undefined} />}
     </CreationModal> : null}
   </>;
@@ -134,6 +134,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     return <WorkDetailScreen
       timezone={app.session.user.system.timezone}
       equipmentLocation={app.equipmentLocation}
+      workEditor={app.session.mode === "live" ? { ...app.workEditor, user: app.session.user } : undefined}
       tenant={app.session.tenant}
       branchName={branchName}
       connectionStatus={connectionStatus}
@@ -176,6 +177,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     if (!app.orderGroup) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Orden no disponible" message="Puede haber cambiado de responsable o período. Vuelve a tu jornada y actualiza las asignaciones." /><Button title="Volver a mi jornada" disabled={app.busy} onPress={app.closeOrder} /></SafeAreaView>;
     return <View style={styles.app}>
       <OrderDetailScreen
+        creation={app.session.mode === "live" ? { ...app.orderCreation, user: app.session.user } : undefined}
         group={app.orderGroup}
         tenant={app.session.tenant}
         branchName={branchName}

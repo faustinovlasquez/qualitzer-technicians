@@ -11,6 +11,19 @@ const input: CreationInput = { kind: "work", companyBranchId: 1, clientRequestId
 const result = { kind: "work", companyBranchId: 1, groupId: "direct-71", workId: 71, schedule: { ...input.schedule, plannedMinutes: 90, timezone: "America/Santiago" } };
 const options = () => ({ ...demoCreationOptions({ companyBranchId: 1 }), userId: 9, workerId: 42 });
 
+test("maintenance child creation validates the parent result and rejects equipment injection", async context => {
+  const { state, baseUrl } = await harness(context);
+  const child = { ...input, maintenanceId: 7 };
+  state.failures.set(upstreamPath, { status: 201, body: { ...result, groupId: "maintenance-7" } });
+  assert.equal((await jsonRequest(baseUrl, "/api/creation", "POST", child)).response.status, 201);
+  assert.deepEqual(writeCalls(state).at(-1)?.json, child);
+  assert.equal((await jsonRequest(baseUrl, "/api/creation", "POST", { ...child, work: { ...child.work, rentalEquipmentId: 9 } })).response.status, 400);
+  for (const groupId of ["maintenance-8", "direct-71"]) {
+    state.failures.set(upstreamPath, { status: 201, body: { ...result, groupId } });
+    assert.equal((await jsonRequest(baseUrl, "/api/creation", "POST", child)).response.status, 502);
+  }
+});
+
 test("creation routes forward exact allowlisted request, UUID unchanged, replay status and safe result", async (t) => {
   const { state, baseUrl } = await harness(t);
   state.failures.set(upstreamPath, { status: 201, body: { ...result, cost: 123, token: "private", schedule: { ...result.schedule, price: 50 } } });

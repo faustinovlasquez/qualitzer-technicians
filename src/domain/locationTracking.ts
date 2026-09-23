@@ -2,10 +2,10 @@ import { z } from "zod";
 import { clockTimeSchema, mobileUuidSchema, positiveCreationIdSchema } from "./creation";
 import type { GroupScope } from "./models";
 
-export const locationActionSchema = z.enum(["WORK_STARTED", "WORK_RESUMED", "WORK_PAUSED", "WORK_COMPLETED", "WORK_DELIVERED", "WORK_REOPENED", "ACTIVITY_CREATED", "ACTIVITY_UPDATED", "ACTIVITY_COMPLETED", "ACTIVITY_REOPENED", "ACTIVITY_DELETED", "CHECKLIST_SAVED", "CHECKLIST_ATTACHED", "EQUIPMENT_LOCATION_CHANGED", "ORDER_STARTED", "ORDER_DELIVERED", "FILE_UPLOADED", "FILE_DELETED", "COMMENT_ADDED", "REPORT_SAVED"]);
+export const locationActionSchema = z.enum(["WORK_CREATED", "ORDER_CREATED", "WORK_UPDATED", "WORK_STARTED", "WORK_RESUMED", "WORK_PAUSED", "WORK_COMPLETED", "WORK_DELIVERED", "WORK_REOPENED", "ACTIVITY_CREATED", "ACTIVITY_UPDATED", "ACTIVITY_COMPLETED", "ACTIVITY_REOPENED", "ACTIVITY_DELETED", "CHECKLIST_SAVED", "CHECKLIST_ATTACHED", "EQUIPMENT_LOCATION_CHANGED", "ORDER_STARTED", "ORDER_DELIVERED", "FILE_UPLOADED", "FILE_DELETED", "COMMENT_ADDED", "REPORT_SAVED"]);
 export type LocationAction = z.infer<typeof locationActionSchema>;
 export interface LocationActionEvent { action: LocationAction; groupId: string; workId?: number; localWorkId?: string; targetId?: string; capturedAt: number; actionState: "CONFIRMED" | "QUEUED"; operationId?: string; }
-export type LocationActionRecorder = (action: LocationAction, scope: GroupScope & { workId?: string }, targetId?: string) => (state: "CONFIRMED" | "QUEUED", operationId?: string) => Promise<void>;
+export type LocationActionRecorder = (action: LocationAction, scope: GroupScope & { workId?: string }, targetId?: string) => (state: "CONFIRMED" | "QUEUED", operationId?: string, resource?: { groupId: string; workId?: string }) => Promise<void>;
 export function locationDate(schedule: LocationSchedule, timestamp: number): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: schedule.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(timestamp);
 }
@@ -51,6 +51,7 @@ export const locationPointSchema = z.object({
 });
 export type LocationPoint = z.infer<typeof locationPointSchema>;
 const actionLabels: { [Action in LocationAction]: string } = {
+  WORK_CREATED: "Trabajo creado", ORDER_CREATED: "Mantenimiento creado", WORK_UPDATED: "Datos del trabajo actualizados",
   WORK_STARTED: "Trabajo iniciado", WORK_RESUMED: "Trabajo reanudado", WORK_PAUSED: "Trabajo pausado", WORK_COMPLETED: "Trabajo completado", WORK_DELIVERED: "Trabajo entregado", WORK_REOPENED: "Trabajo reabierto",
   ACTIVITY_CREATED: "Actividad añadida", ACTIVITY_UPDATED: "Actividad modificada", ACTIVITY_COMPLETED: "Actividad completada", ACTIVITY_REOPENED: "Actividad reabierta", ACTIVITY_DELETED: "Actividad eliminada",
   CHECKLIST_SAVED: "Checklist guardado", CHECKLIST_ATTACHED: "Checklist añadido", EQUIPMENT_LOCATION_CHANGED: "Ubicación del equipo cambiada", ORDER_STARTED: "Orden iniciada", ORDER_DELIVERED: "Orden entregada",

@@ -16,9 +16,10 @@ export interface LocationTrackingUi {
   state: LocationJournalState | null; available: boolean; busy: boolean; error: string | null; timezone: string;
   save(schedule: LocationSchedule, enabled: boolean): Promise<void>;
   capture: LocationActionRecorder;
+  synchronize?(): Promise<void>;
   history(date: string, page: number, resource?: import("../domain/locationTracking").LocationHistoryResource): Promise<import("zod").infer<typeof locationHistorySchema>>;
 }
-export function useLocationTracking(session: Session | null, gatewayUrl: string, offline: OfflineSnapshot | null, verifiedAt: number | null, port: TechnicianRepository | null, allowPrompt = true): LocationTrackingUi {
+export function useLocationTracking(session: Session | null, gatewayUrl: string, offline: OfflineSnapshot | null, verifiedAt: number | null, port: Pick<TechnicianRepository, "uploadLocations" | "locationHistory"> | null, allowPrompt = true): LocationTrackingUi {
   const nativePicker = useTrustedNativePicker();
   const security = useDeviceSecurity();
   const [state, setState] = useState<LocationJournalState | null>(null);
@@ -27,6 +28,7 @@ export function useLocationTracking(session: Session | null, gatewayUrl: string,
   const current = useRef<{ journal: LocationJournal; generation: string } | null>(null);
   const latest = useRef({ offline, port, verifiedAt, state, security }); latest.current = { offline, port, verifiedAt, state, security };
   const sending = useRef(false);
+  const synchronize = useRef<(() => Promise<void>) | null>(null);
   const retry = useRef({ after: 0, failures: 0 });
   const prompted = useRef<string | null>(null);
   const lifecycle = useRef<Promise<void>>(Promise.resolve());
@@ -64,7 +66,7 @@ export function useLocationTracking(session: Session | null, gatewayUrl: string,
       if (cancelled || current.current !== active) return;
       setState(value);
       const uploadPort = latest.current.port;
-      if (AppState.currentState !== "active" || !latest.current.offline?.online || latest.current.offline.authBlocked || !uploadPort?.uploadLocations || sending.current || value.points.length === 0 || Date.now() < retry.current.after) return;
+      if (AppState.currentState !== "active" || !latest.current.security.isUnlocked() || !latest.current.offline?.online || latest.current.offline.authBlocked || !uploadPort?.uploadLocations || sending.current || value.points.length === 0 || Date.now() < retry.current.after) return;
       sending.current = true;
       try {
         const points = value.points.slice(0, 50);
@@ -75,10 +77,13 @@ export function useLocationTracking(session: Session | null, gatewayUrl: string,
       finally { sending.current = false; }
     };
     const run = () => { if (AppState.currentState === "active") void tick().catch(() => { if (!cancelled) setError("Revisa permisos y almacenamiento de ubicación."); }); };
+    synchronize.current = tick;
+    void lifecycle.current.then(run);
     const timer = setInterval(run, 30000);
     const subscription = AppState.addEventListener("change", run);
     return () => {
       cancelled = true; clearInterval(timer); subscription.remove();
+      if (synchronize.current === tick) synchronize.current = null;
       if (current.current === bound) current.current = null;
       lifecycle.current = lifecycle.current.then(async () => {
         if (bound) await bound.journal.change(value => { if (value.generation === bound?.generation) { value.active = false; value.generation = ""; } });
@@ -113,17 +118,22 @@ export function useLocationTracking(session: Session | null, gatewayUrl: string,
     if (!active || !snapshot?.active || snapshot.generation !== active.generation || !snapshot.settings.enabled || snapshot.settings.consentVersion !== 2 || !snapshot.settings.consentedAt
       || capturedAt >= snapshot.validUntil || latest.current.offline?.authBlocked || !latest.current.security.isUnlocked() || AppState.currentState !== "active" || scope.companyBranchId !== active.journal.owner.companyBranchId) return async () => {};
     const id = Crypto.randomUUID();
-    const fix = currentLocationFix(Date.parse(snapshot.settings.consentedAt)).catch(() => null);
+    const fix = currentLocationFix(capturedAt).catch(() => null);
     let completed = false;
-    return async (actionState, operationId) => {
+    return async (actionState, operationId, resource) => {
       if (completed) return; completed = true;
       try {
         const position = await fix;
         if (current.current !== active || latest.current.offline?.authBlocked) return;
         const permission = await locationPermissionReady();
-        await active.journal.recordAction(active.generation, id, permission ? position : null, { action, actionState, capturedAt, operationId, groupId: scope.groupId,
-          ...(scope.workId?.startsWith("local-") ? { localWorkId: scope.workId.slice(6) } : scope.workId ? { workId: Number(scope.workId) } : {}), ...(targetId ? { targetId } : {}) });
-        if (current.current === active) setState(await active.journal.read());
+        const target = resource ?? scope;
+        const recorded = await active.journal.recordAction(active.generation, id, permission ? position : null, { action, actionState, capturedAt, operationId, groupId: target.groupId,
+          ...(target.workId?.startsWith("local-") ? { localWorkId: target.workId.slice(6) } : target.workId ? { workId: Number(target.workId) } : {}), ...(targetId ? { targetId } : {}) });
+        if (current.current === active) {
+          setState(await active.journal.read());
+          if (!recorded) setError("No se conservó la ubicación de esta acción. Revisa el estado del registro y verifica tu sesión.");
+          else void synchronize.current?.().catch(() => { if (current.current === active) setError("Ubicación guardada en el teléfono. Pendiente de sincronizar."); });
+        }
       } catch { if (current.current === active) setError("La acción se guardó, pero no se pudo conservar su registro de ubicación."); }
     };
   }, [key]);
@@ -156,5 +166,9 @@ export function useLocationTracking(session: Session | null, gatewayUrl: string,
       || (point.kind === "action" ? locationDate(point.schedule, Date.parse(point.capturedAt)) : locationWorkingDay(point.schedule, Date.parse(point.capturedAt))) !== date || resource && (point.groupId !== resource.groupId || resource.workId !== undefined && point.workId !== resource.workId))) throw new Error("El historial recibido no corresponde a la consulta.");
     return result;
   };
-  return { state: current.current?.journal.owner.namespace === `location:${key}` ? state : null, available: locationTrackingAvailable, busy, error, timezone: session?.user.system.timezone ?? "UTC", save, capture, history };
+  const syncNow = async () => {
+    retry.current.after = 0;
+    try { await synchronize.current?.(); } catch { setError("No se pudo sincronizar el historial. Los puntos pendientes se conservan."); }
+  };
+  return { state: current.current?.journal.owner.namespace === `location:${key}` ? state : null, available: locationTrackingAvailable, busy, error, timezone: session?.user.system.timezone ?? "UTC", save, capture, history, synchronize: syncNow };
 }

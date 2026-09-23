@@ -11,7 +11,7 @@ const report = { passed: false, cases: [], errors: [], scope: "Actual RN Web loc
 async function main() {
   const native = JSON.stringify(path.join(root, "node_modules/react-native-web/dist/index.js").replaceAll("\\", "/"));
   const stubs = {
-    "google-places": `const address=point=>({address:'Camino del Equipo 10',country:'Chile',region:'Metropolitana',county:'Paine',city:'',postalCode:'',lat:String(point.lat),lon:String(point.lng)});export const googlePlaces={available:()=>true,endSession:()=>{},search:async query=>{if(window.locationFixture.googleDenied)throw new Error('GOOGLE_DENIED');return [{id:'place-1',label:'Camino del Equipo 10, Paine'}];},details:async()=>address({lat:-33.83,lng:-70.76}),reverse:async point=>address(point)};`,
+    "google-places": `const address=point=>({address:'Camino del Equipo 10',country:'Chile',region:'Metropolitana',county:'Paine',city:'',postalCode:'',lat:String(point.lat),lon:String(point.lng)});export const googlePlaces={configuration:()=>({packageName:'com.example.field',keyConfigured:true,certificateSha1:[Array(20).fill('AB').join(':')],playServicesStatus:0}),diagnose:async()=>({status:403,accepted:false,reasons:['SERVICE_DISABLED']}),available:()=>true,endSession:()=>{},search:async query=>{if(window.locationFixture.googleDenied)throw new Error('GOOGLE_DENIED');return [{id:'place-1',label:'Camino del Equipo 10, Paine'}];},details:async()=>address({lat:-33.83,lng:-70.76}),reverse:async point=>address(point)};`,
     "react-native-maps": `import React,{forwardRef,useEffect,useRef,useImperativeHandle} from 'react';export const PROVIDER_GOOGLE='google';export function Marker(){return null;}export function Circle(){return null;}export default forwardRef(function Map(props,ref){const canvas=useRef(null);useImperativeHandle(ref,()=>({animateToRegion:()=>{}}));useEffect(()=>{props.onMapLoaded?.();},[]);useEffect(()=>{const brush=canvas.current.getContext('2d');brush.fillStyle='#d0e6d5';brush.fillRect(0,0,500,300);brush.strokeStyle='#ffffff';brush.lineWidth=18;brush.beginPath();brush.moveTo(0,190);brush.lineTo(500,120);brush.stroke();if(React.Children.toArray(props.children).some(child=>child.type===Marker)){brush.fillStyle='#d63230';brush.beginPath();brush.arc(250,150,10,0,Math.PI*2);brush.fill();}},[props.children]);return <canvas data-testid="google-native-map" aria-label="Mapa Google simulado" ref={canvas} width="500" height="300" style={{width:'100%',height:300}} onClick={()=>props.onPress?.({nativeEvent:{coordinate:{latitude:-33.82,longitude:-70.75}}})}/>;});`,
     "equipment-position": 'export async function requestEquipmentPosition(){window.locationFixture.prompts++;if(!window.locationFixture.allow)throw new Error("Permiso de ubicación denegado.");return {lat:-33.9,lng:-70.8,accuracy:20};}',
     "react-native": `export * from ${native};export const Linking={openURL:async url=>{window.locationFixture.maps.push(url);},openSettings:async()=>{}};export const Alert={alert(_title,_body,buttons){window.locationFixture.prompts++;window.locationFixture.confirm=buttons.find(button=>button.text==='Aceptar y permitir').onPress;}};`,
@@ -36,6 +36,14 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch({ channel: "msedge", headless: true });
+    if (process.argv.includes("--equipment-picker")) {
+      await equipmentPickerFlows(browser, `http://127.0.0.1:${server.address().port}`);
+      assert.deepEqual(report.errors, []); report.passed = true; return;
+    }
+    if (process.argv.includes("--work-edit")) {
+      await workEditFlows(browser, `http://127.0.0.1:${server.address().port}`);
+      assert.deepEqual(report.errors, []); report.passed = true; return;
+    }
     if (process.argv.includes("--equipment-map")) {
       await equipmentFlows(browser, `http://127.0.0.1:${server.address().port}`);
       assert.deepEqual(report.errors, []); report.passed = true; return;
@@ -140,6 +148,99 @@ async function main() {
     assert.deepEqual(report.errors, []); report.passed = true;
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 }
+async function workEditFlows(browser, base) {
+  for (const width of [360, 390, 1280]) for (const scale of [1, 2]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, locale: "es-CL" });
+    const page = await context.newPage(); page.on("pageerror", error => report.errors.push(error.message));
+    await page.goto(`${base}/?view=work-edit`);
+    await page.getByRole("button", { name: "Asociar equipo", exact: true }).click();
+    await page.getByRole("textbox", { name: "Título *", exact: true }).waitFor();
+    await page.getByRole("textbox", { name: "Título *", exact: true }).fill("Trabajo editado");
+    await page.getByRole("textbox", { name: "Resumen del trabajo (opcional)", exact: true }).fill("Nueva descripcion");
+    await page.getByRole("button", { name: "Asociar equipo", exact: true }).click();
+    await page.getByRole("tab", { name: "Catálogo", exact: true }).click();
+    await page.getByRole("button", { name: /Equipo elegido 9/ }).click();
+    if (scale === 2) await page.evaluate(() => { const resize = () => { for (const element of document.querySelectorAll("div,span,button,input,textarea")) {
+      if (element.dataset.resized || ![...element.childNodes].some(node => node.nodeType === 3 && node.textContent.trim())) continue;
+      element.dataset.resized = "true"; const style = getComputedStyle(element); element.style.fontSize = `${parseFloat(style.fontSize) * 2}px`;
+      if (style.lineHeight !== "normal") element.style.lineHeight = `${parseFloat(style.lineHeight) * 2}px`;
+    } }; resize(); new MutationObserver(resize).observe(document.body, { childList: true, subtree: true }); });
+    const screenshot = `work-edit-${width}-${scale}x.png`; await page.screenshot({ path: path.join(output, screenshot), fullPage: true });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+    await page.getByRole("textbox", { name: "Fecha *", exact: true }).fill("2026-09-23");
+    await page.getByRole("button", { name: "Revisar cambios", exact: true }).click();
+    await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+    await page.getByRole("button", { name: "Editar trabajo", exact: true }).waitFor();
+    const saved = await page.evaluate(() => window.workEditFixture.saves);
+    assert.equal(saved.length, 1); assert.equal(saved[0].fields.title, "Trabajo editado"); assert.equal(saved[0].fields.schedule.date, "2026-09-23"); assert.equal(saved[0].fields.rentalEquipmentId, 9);
+    await page.goto(`${base}/?view=work-edit&inherited=true`);
+    await page.getByText("Equipo del mantenimiento", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Equipo hijo incorrecto", { exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Asociar equipo", exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Editar trabajo", exact: true }).click();
+    await page.getByText("Equipo heredado", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /catálogo/i }).count(), 0);
+    await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+    await page.getByRole("button", { name: "Revisar cambios", exact: true }).click();
+    await page.evaluate(() => { window.workEditFixture.conflict = true; });
+    await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+    await page.getByText(/El trabajo cambió/).waitFor();
+    assert.equal(await page.evaluate(() => window.workEditFixture.confirmed), 0);
+    report.cases.push({ view: "work-edit", width, scale, passed: true, screenshot, apiSimulated: true });
+    await context.close();
+  }
+}
+async function equipmentPickerFlows(browser, base) {
+  for (const width of [360, 390, 1280]) for (const scale of [1, 2]) for (const kind of ["work", "maintenance"]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, locale: "es-CL" });
+    const page = await context.newPage(); page.on("pageerror", error => report.errors.push(error.message));
+    await page.goto(`${base}/?view=equipment-picker&kind=${kind}`);
+    const associate = page.getByRole("button", { name: "Asociar equipo", exact: true }); await associate.waitFor();
+    if (scale === 2) await page.evaluate(() => { const resize = () => { for (const element of document.querySelectorAll("div,span,button,input,textarea")) {
+      if (element.dataset.resized || ![...element.childNodes].some(node => node.nodeType === 3 && node.textContent.trim())) continue;
+      element.dataset.resized = "true"; const style = getComputedStyle(element); element.style.fontSize = `${parseFloat(style.fontSize) * 2}px`;
+      if (style.lineHeight !== "normal") element.style.lineHeight = `${parseFloat(style.lineHeight) * 2}px`;
+    } }; resize(); new MutationObserver(resize).observe(document.body, { childList: true, subtree: true }); });
+    assert.equal(await page.getByRole("textbox", { name: "Código / número interno", exact: true }).count(), 0);
+    await associate.click();
+    const code = page.getByRole("textbox", { name: "Código / número interno", exact: true }); await code.fill("8");
+    await page.getByRole("button", { name: "Buscar equipo", exact: true }).click();
+    await page.getByRole("button", { name: "Seleccionar BULLDOZER D10T · Agrícola", exact: true }).waitFor();
+    const dialogFile = `equipment-dialog-${kind}-${width}-${scale}x.png`; await page.screenshot({ path: path.join(output, dialogFile), animations: "disabled" });
+    await page.getByRole("button", { name: "Seleccionar BULLDOZER D10T · Agrícola", exact: true }).click();
+    const summary = page.getByTestId("selected-equipment-summary"); await summary.waitFor();
+    assert.match(await summary.innerText(), /CRHD-31/); assert.match(await summary.innerText(), /Equipo seleccionado/);
+    assert.equal(await code.count(), 0);
+    await summary.scrollIntoViewIfNeeded();
+    const screenshot = `equipment-summary-${kind}-${width}-${scale}x.png`; await page.screenshot({ path: path.join(output, screenshot), animations: "disabled" });
+    if (scale === 1) assert((await summary.boundingBox()).height < 150, "COMPACT_EQUIPMENT_SUMMARY");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    await page.getByRole("button", { name: "Cambiar equipo", exact: true }).click();
+    await page.getByRole("tab", { name: "Catálogo", exact: true }).click();
+    await page.getByRole("button", { name: "Excavadora de mantenimiento de brazo extendido", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Cerrar Cambiar equipo", exact: true }).last().click();
+    assert.match(await summary.innerText(), /CRHD-31/);
+    await page.getByRole("button", { name: "Cambiar equipo", exact: true }).click();
+    await page.getByRole("tab", { name: "Catálogo", exact: true }).click();
+    await page.getByRole("button", { name: "Excavadora de mantenimiento de brazo extendido", exact: true }).click();
+    assert.match(await summary.innerText(), /EQ-009/);
+    await page.getByRole("button", { name: "Quitar equipo", exact: true }).click();
+    await associate.waitFor(); assert.equal(await summary.count(), 0);
+    await page.getByRole("textbox", { name: "Título *", exact: true }).fill("Trabajo de prueba");
+    if (kind === "maintenance") {
+      await page.getByRole("textbox", { name: "Motivo del mantenimiento *", exact: true }).fill("Inspeccionar equipo");
+      await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+      await page.getByText("Selecciona un equipo.", { exact: true }).waitFor();
+    }
+    await associate.click(); await page.getByRole("tab", { name: "Catálogo", exact: true }).click();
+    await page.getByRole("button", { name: "BULLDOZER D10T · Agrícola", exact: true }).click();
+    await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+    await page.getByRole("textbox", { name: "Fecha *", exact: true }).waitFor();
+    report.cases.push({ view: "equipment-picker", kind, width, scale, passed: true, screenshot, dialogFile, apiSimulated: true });
+    await context.close();
+  }
+}
 async function equipmentFlows(browser, base) {
   for (const width of [360, 390, 1280]) for (const scale of [1, 2]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, locale: "es-CL" });
@@ -193,10 +294,20 @@ async function equipmentFlows(browser, base) {
     await page.getByText("Registro de ubicación desactivado en este teléfono.", { exact: true }).waitFor();
     await page.goto(`${base}/?view=equipment`);
     await page.getByRole("button", { name: "Editar ubicación actual", exact: true }).click();
+    if (scale === 2) await page.evaluate(() => { const resize = () => { for (const element of document.querySelectorAll("div,span,button,input,h1,h2,h3")) {
+      if (element.dataset.resized || ![...element.childNodes].some(node => node.nodeType === 3 && node.textContent.trim())) continue;
+      element.dataset.resized = "true"; const style = getComputedStyle(element); element.style.fontSize = `${parseFloat(style.fontSize) * 2}px`;
+      if (style.lineHeight !== "normal") element.style.lineHeight = `${parseFloat(style.lineHeight) * 2}px`;
+    } }; resize(); new MutationObserver(resize).observe(document.body, { childList: true, subtree: true }); });
     await page.evaluate(() => { window.locationFixture.googleDenied = true; });
     await page.getByRole("textbox", { name: "Buscar dirección en Google", exact: true }).fill("Paine");
     await page.getByRole("button", { name: "Buscar dirección", exact: true }).click();
     await page.getByText("No se pudo buscar en Google. Revisa conexión, Places API y restricciones de la clave Android.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Comprobar acceso a Google", exact: true }).click();
+    await page.getByText("Falta habilitar Places API (New) en el proyecto de esta clave.", { exact: true }).waitFor();
+    await page.getByText("Paquete Android: com.example.field", { exact: true }).scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    await page.screenshot({ path: path.join(output, `google-configuration-${width}-${scale}x.png`), fullPage: true, animations: "disabled" });
     await page.getByRole("button", { name: "Usar mi ubicación", exact: true }).click();
     await page.getByText("-33.9, -70.8", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Guardar ubicación", exact: true }).click();

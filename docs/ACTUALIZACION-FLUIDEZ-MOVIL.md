@@ -1,4 +1,12 @@
-# Ubicacion por acciones: gateway 1.0.22 / APK 1.0.47
+# Trabajos en mantenimiento: gateway 1.0.25 / APK 1.0.53
+
+La entrega actual agrega el footer fijo de mantenimiento y creacion de hijos con equipo heredado. Ver [actualizacion 1.0.53](ACTUALIZACION-1.0.53.md). Desplegar las fuentes backend y gateway 1.0.25 antes de usar Crear trabajo. Conservar sesiones y colas; no hay migracion nueva. El contenido posterior conserva las entregas anteriores.
+
+Se registra tambien creacion y edicion, con guardado local antes de finalizar la accion e intento inmediato de sincronizacion. Conserva timer, checklist, completion y recibos. Publicar workerLocations actualizado. Mapa nativo con diagnostico de Google, sin clave visible. Detalles en ACTUALIZACION-1.0.51.md.
+
+## Edicion de trabajos: gateway 1.0.23 / APK 1.0.50
+
+Formulario de creacion reutilizado en modo editar y asociacion de equipo faltante. Publicar PanelWorkEdit del backend antes de gateway 1.0.23. Se mantienen timer, checklist, completion, recibos y ubicacion por acciones. No se modifica ni borra la cola offline. Detalles en ACTUALIZACION-1.0.50.md.
 
 Contrato nuevo de ubicacion consentimiento2 por acciones confirmadas o guardadas en cola. No modifica timer, checklist, completion ni sus recibos. Publicar workerLocations actualizado antes de gateway1.0.22; sin migracion nueva. La captura periodica y servicios de fondo se detienen, sin borrar puntos anteriores pendientes. Google nativo no depende del frontend; su autorizacion en Cloud sigue siendo necesaria.
 

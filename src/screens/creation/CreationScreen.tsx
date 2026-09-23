@@ -10,10 +10,10 @@ import { queuedCreationOutcomeSchema, queuedOutcomeData } from "../offline/offli
 import { scheduleClock } from "../../domain/weeklySchedule";
 import { useDeviceSecurity } from "../../security/DeviceSecurityContext";
 import { Badge, Button, Card, Field, IconButton } from "../../ui/components";
-import { TimeField } from "../../ui/time/TimeField";
 import { palette, radius, typography } from "../../ui/theme";
 import { CreationCatalogSelector, type CreationCatalogCache } from "./CreationCatalogSelector";
-import { CreationDatePicker } from "./CreationDatePicker";
+import { CreationScheduleFields } from "./CreationScheduleFields";
+import { WorkEditScreen, type WorkEditScreenProps } from "./WorkEditScreen";
 import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
 import { CreationFields, creationLabels, priorityLabels } from "./CreationFields";
 import { CreationModal } from "./CreationModal";
@@ -24,6 +24,7 @@ export { clearCreationDrafts } from "./creationDrafts";
 export type { CreationInput, CreationKind, CreationOptions, CreationOptionsQuery, CreationResult } from "../../domain/creation";
 
 export interface CreationScreenProps {
+  parentMaintenance?: { id: number; code: string; equipment: import("../../domain/models").Equipment | null };
   kind: CreationKind;
   user: User;
   tenant: Tenant;
@@ -42,8 +43,9 @@ export interface CreationScreenProps {
   onQueued?: (outcome: OfflineQueuedOutcome) => void | Promise<void>;
 }
 
-export function CreationScreen(props: CreationScreenProps) {
-  const scope = creationDraftKey(props.storageKey, props.tenant.id, props.user.id, props.companyBranchId, props.kind, props.mode);
+export function CreationScreen(props: CreationScreenProps | WorkEditScreenProps) {
+  if ("editing" in props) return <WorkEditScreen key={`${props.storageKey}:${props.editing.groupId}:${props.editing.workId}`} {...props} />;
+  const scope = creationDraftKey(props.storageKey, props.tenant.id, props.user.id, props.companyBranchId, props.kind, props.mode) + (props.parentMaintenance ? `:maintenance:${props.parentMaintenance.id}` : "");
   return <CreationScreenContent key={scope} {...props} draftKey={scope} />;
 }
 
@@ -52,7 +54,7 @@ const serverMessages = new Map<string, string>([
   ["MOBILE_CREATION_INVALID_LOCAL_TIME", "Esa hora local no existe por el cambio de horario. Elige otra franja."],
   ["MOBILE_CREATION_AMBIGUOUS_LOCAL_TIME", "La franja contiene una hora ambigua por cambio de horario."],
   ["MOBILE_CREATION_DST_TRANSITION_UNSUPPORTED", "No se admite una franja que atraviese un cambio de horario."],
-  ["MOBILE_CREATION_REQUEST_CONFLICT", "Este identificador ya se usó con otra solicitud. Revisa tu agenda antes de crear otra."],
+  ["MOBILE_CREATION_REQUEST_CONFLICT", "Este identificador ya se usó para otra creación. Revisa tu agenda antes de crear otro registro."],
   ["MOBILE_CREATION_EQUIPMENT_NOT_FOUND", "El equipo ya no está disponible."],
   ["MOBILE_CREATION_SPECIALTY_NOT_FOUND", "La especialidad ya no está disponible."],
   ["MOBILE_CREATION_TIMEZONE_NOT_CONFIGURED", "La sucursal no tiene una zona horaria válida configurada."],
@@ -64,11 +66,12 @@ function submissionError(error: unknown): string {
   return error instanceof Error ? serverMessages.get(error.message) ?? "No se confirmó la creación. Puede haberse recibido en el servidor." : "No se confirmó la creación. Puede haberse recibido en el servidor.";
 }
 
-function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey }: CreationScreenProps & { draftKey: string }) {
+function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey, parentMaintenance }: CreationScreenProps & { draftKey: string }) {
   const security = useDeviceSecurity();
   const store = useMemo(() => openCreationDraftStore(draftKey, kind, companyBranchId), [draftKey, kind, companyBranchId]);
   const catalogCache = useMemo<CreationCatalogCache>(() => new Map(), [draftKey]);
-  const [draft, setDraft] = useState<CreationDraft>(() => ({ version: 1, kind, phase: "editing", form: emptyCreationForm(initialDate) }));
+  const initialForm = () => ({ ...emptyCreationForm(initialDate), ...(parentMaintenance ? { maintenanceId: parentMaintenance.id } : {}) });
+  const [draft, setDraft] = useState<CreationDraft>(() => ({ version: 1, kind, phase: "editing", form: initialForm() }));
   const current = useRef(draft);
   const [ready, setReady] = useState(false);
   const [draftError, setDraftError] = useState("");
@@ -82,7 +85,6 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [dialog, setDialog] = useState<"back" | "new" | "invalid" | null>(null);
-  const [calendar, setCalendar] = useState(false);
   const [catalog, setCatalog] = useState<"equipment" | "specialties" | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
@@ -117,10 +119,11 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     mounted.current = true;
     void store.read().then((saved) => {
       if (!active) return;
+      if (saved && saved.form.maintenanceId !== parentMaintenance?.id) throw new Error("CREATION_PARENT_MISMATCH");
       if (saved) { replaceDraft(saved); changed.current = true; if (saved.phase !== "editing") setStep(2); }
       setReady(true);
     }).catch(() => {
-      if (active) setDraftError("No se pudo recuperar un borrador válido. No se enviará nada. Si antes enviaste una solicitud, revisa tu agenda antes de descartarlo.");
+      if (active) setDraftError("No se pudo recuperar el borrador. Si ya intentaste crear este registro, revisa tu agenda antes de descartarlo.");
     });
     return () => { active = false; mounted.current = false; };
   }, [store]);
@@ -189,6 +192,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   async function submit(): Promise<void> {
     if (!mounted.current || !latest.current.isUnlocked() || lock.current || latest.current.busy || !ready || !options || current.current.phase === "confirmed" || current.current.phase === "queued") return;
     if (current.current.phase === "editing" && !checkForm(true)) return;
+    if (parentMaintenance && latest.current.offline !== undefined && !latest.current.offline?.online) { setError("Conecta para crear un trabajo en este mantenimiento."); return; }
     lock.current = true;
     setSending(true);
     setError("");
@@ -207,6 +211,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
       await store.write(pending);
       if (!mounted.current || !latest.current.isUnlocked()) return;
       const result = creationResultSchema.parse(await latest.current.onSubmit(pending.input));
+      if (parentMaintenance && result.groupId !== `maintenance-${parentMaintenance.id}`) throw new Error("CREATION_PARENT_MISMATCH");
       if (result.kind !== kind || result.companyBranchId !== companyBranchId || result.schedule.date !== pending.input.schedule.date ||
         result.schedule.startTime !== pending.input.schedule.startTime || result.schedule.endTime !== pending.input.schedule.endTime) throw new Error("CREATION_RESULT_MISMATCH");
       const completed: CreationDraft = { ...pending, phase: "confirmed", result };
@@ -221,8 +226,8 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
           current.current = queued;
           if (mounted.current) { setDraft(queued); setError(""); }
           await persistAndOpen(queued, true);
-        } else if (mounted.current) setError("Se recibió un resultado local que no corresponde a esta solicitud. Revisa el centro offline antes de continuar.");
-      } else if (mounted.current) setError(current.current.phase === "pending" ? `${submissionError(failure)} Reintenta la misma solicitud o elige explícitamente editar como nueva.` : "No se pudo preparar la solicitud. Comprueba los campos y las opciones; no se envió ninguna creación.");
+        } else if (mounted.current) setError("El resultado local no corresponde a esta creación. Revisa el centro offline antes de continuar.");
+      } else if (mounted.current) setError(current.current.phase === "pending" ? `${submissionError(failure)} Reintenta confirmar la creación sin duplicarla.` : "No se pudo preparar la creación. Comprueba los campos; no se creó ningún registro.");
     } finally {
       lock.current = false;
       if (mounted.current) setSending(false);
@@ -235,7 +240,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     lock.current = true;
     setSending(true);
     try { await store.write(current.current); setDialog(null); onBack(); }
-    catch { setSaveError("No se pudo guardar el borrador. Permanece aquí y reintenta para no perder la solicitud."); setDialog(null); }
+    catch { setSaveError("No se pudo guardar el borrador. Permanece aquí y reintenta para no perder los datos."); setDialog(null); }
     finally { lock.current = false; if (mounted.current) setSending(false); }
   }
 
@@ -244,14 +249,14 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     lock.current = true;
     setSending(true);
     try {
-      const next: CreationDraft = { version: 1, kind, phase: "editing", form: resetForm ? emptyCreationForm(initialDate) : current.current.form };
+      const next: CreationDraft = { version: 1, kind, phase: "editing", form: resetForm ? initialForm() : current.current.form };
       await store.write(next);
       if (!mounted.current || !latest.current.isUnlocked()) return;
       replaceDraft(next);
       setReady(true);
       setDraftError(""); setSaveError(""); setError(""); setErrors({}); setStep(0); setDialog(null);
       changed.current = !resetForm;
-    } catch { setSaveError("No se pudo preparar un nuevo borrador. La solicitud anterior no se ha vuelto a enviar."); setDialog(null); }
+    } catch { setSaveError("No se pudo preparar un nuevo borrador. No se ha repetido la creación anterior."); setDialog(null); }
     finally { lock.current = false; if (mounted.current) setSending(false); }
   }
 
@@ -260,7 +265,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
       await store.write(saved);
     } catch {
       if (mounted.current) setSaveError(saved.phase === "queued"
-        ? "La solicitud está en la cola duradera. No vuelvas a crearla; falta guardar el estado de esta pantalla. Usa Ver trabajo local para reintentar."
+        ? "La creación está guardada en el teléfono. No la repitas; falta guardar el estado de esta pantalla. Usa Ver trabajo local para reintentar."
         : "La creación está confirmada, pero no se pudo guardar la confirmación local. No vuelvas a crearla; reintenta guardar la confirmación.");
       return;
     }
@@ -303,14 +308,15 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
       {connectionStatus}
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <Text style={styles.context}>{tenant.name} · {branch?.name ?? `Sucursal ${companyBranchId}`} · {user.name} {user.lastnames}</Text>
+        {parentMaintenance ? <Text style={styles.heading}>{parentMaintenance.code}</Text> : null}
         {mode === "demo" ? <Badge label="Demostración · no crea registros reales" tone="warning" /> : null}
         {draft.phase === "queued" ? <Card style={styles.card}>
-          <Badge label="Solicitud anterior" tone="neutral" />
-          <Text accessibilityRole="header" style={styles.title}>{queuedState?.status === "syncing" ? "Sincronizando solicitud" : queuedState?.status === "review" ? "Solicitud por revisar" : queuedState?.status === "auth_required" ? "Verifica tu sesión para sincronizar" : queuedState?.status === "pending" ? "Guardado · pendiente de sincronizar" : "Solicitud guardada anteriormente"}</Text>
+          <Badge label="Creación anterior" tone="neutral" />
+          <Text accessibilityRole="header" style={styles.title}>{queuedState?.status === "syncing" ? "Sincronizando creación" : queuedState?.status === "review" ? "Creación por revisar" : queuedState?.status === "auth_required" ? "Verifica tu sesión para sincronizar" : queuedState?.status === "pending" ? "Guardado · pendiente de sincronizar" : "Creación guardada anteriormente"}</Text>
           <Text style={styles.body}>{draft.form.title || creationLabels[kind]}</Text>
           <Text style={styles.body}>{draft.input.schedule.date} · {draft.input.schedule.startTime || "Sin inicio"}–{draft.input.schedule.endTime || "Sin fin"}</Text>
-          <Text style={styles.hint}>{queuedState?.status === "unavailable" ? "No se pudo comprobar su estado actual. Revisa tus asignaciones antes de repetir este trabajo." : queuedState?.status === "review" ? "La solicitud se conserva en el centro de sincronización y necesita revisión." : "La cola conserva esta solicitud. No necesitas volver a enviarla."}</Text>
-          <Text style={styles.hint}>Puedes crear otro trabajo distinto sin borrar esta solicitud.</Text>
+          <Text style={styles.hint}>{queuedState?.status === "unavailable" ? "No se pudo comprobar su estado actual. Revisa tus asignaciones antes de repetir este trabajo." : queuedState?.status === "review" ? "La creación se conserva en el centro de sincronización y necesita revisión." : "La creación está guardada. No necesitas repetirla."}</Text>
+          <Text style={styles.hint}>Puedes crear otro trabajo distinto sin borrar esta creación.</Text>
           <Button title="Ver trabajo local" loading={sending} disabled={busy} onPress={() => void openSaved()} />
           <Button title="Crear otro" icon="add-outline" variant="secondary" disabled={sending || busy} onPress={() => void editAsNew(true)} />
         </Card> : confirmedResult ? <Card style={styles.card}>
@@ -333,22 +339,15 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
           {optionsError ? <Card style={styles.card}><Text accessibilityRole="alert" style={styles.warning}>{optionsError}</Text><Button title="Reintentar opciones" variant="secondary" onPress={() => setReload((value) => value + 1)} /></Card> : null}
           {ready && options ? <>
             {draft.phase === "pending" ? <Card style={styles.card}>
-              <Text accessibilityRole="alert" style={styles.warning}>Solicitud pendiente de confirmación. Los campos están bloqueados para conservar exactamente el mismo cuerpo y UUID, aunque cierres y vuelvas.</Text>
-              <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar misma solicitud. Crear otra puede duplicar una operación ya recibida.</Text>
+              <Text accessibilityRole="alert" style={styles.warning}>No se ha confirmado si el registro se creó. Se conservan los datos para reintentar sin duplicarlo.</Text>
+              <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar creación. Crear otro registro puede duplicar uno ya guardado.</Text>
             </Card> : null}
-            {step === 0 ? <Card><CreationFields kind={kind} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
-              equipmentLookup={<CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
+            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
+              equipmentLookup={parentMaintenance ? <View style={styles.card}><Text style={styles.heading}>Equipo del mantenimiento</Text><Text style={styles.body}>{parentMaintenance.equipment?.label ?? "No informado"}</Text><Text style={styles.hint}>{parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier}</Text></View> : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
                 required={kind === "maintenance"} disabled={frozen} selected={form.equipment} error={errors.equipment} cache={catalogCache}
-                onLoadOptions={onLoadOptions} onSelect={(item) => change("equipment", item)} onBrowse={() => setCatalog("equipment")} />} /></Card> : null}
+                onLoadOptions={onLoadOptions} onSelect={(item) => change("equipment", item)} />} /></Card> : null}
             {step === 1 ? <Card style={styles.card}>
-              <Text accessibilityRole="header" style={styles.heading}>¿Cuándo lo realizarás?</Text>
-              <Field label="Fecha *" value={form.date} maxLength={10} autoCapitalize="none" placeholder="YYYY-MM-DD" editable={!frozen} error={errors.date}
-                onChangeText={(value) => change("date", value)} hint="Formato año-mes-día; por ejemplo 2026-09-10." />
-              <Button title="Elegir fecha en calendario" icon="calendar-outline" variant="secondary" disabled={frozen} onPress={() => setCalendar(true)} />
-              <TimeField label={kind === "work" ? "Hora de inicio (opcional)" : "Hora de inicio *"} value={form.startTime} disabled={frozen} error={errors.startTime} onChange={(value) => change("startTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Formato de 24 horas (HH:mm)." />
-              {kind === "work" && form.startTime ? <Button title="Quitar hora de inicio" icon="close-outline" variant="ghost" disabled={frozen} onPress={() => change("startTime", "")} /> : null}
-              <TimeField label={kind === "work" ? "Hora de fin (opcional)" : "Hora de fin *"} value={form.endTime} disabled={frozen} error={errors.endTime} onChange={(value) => change("endTime", value)} scopeKey={JSON.stringify([draftKey, form.date])} hint="Debe ser posterior al inicio cuando se indiquen ambas horas." />
-              {kind === "work" && form.endTime ? <Button title="Quitar hora de fin" icon="close-outline" variant="ghost" disabled={frozen} onPress={() => change("endTime", "")} /> : null}
+              <CreationScheduleFields form={form} errors={errors} disabled={frozen} optionalTimes={kind === "work"} scopeKey={JSON.stringify([draftKey, form.date])} onChange={change} />
               <Text accessibilityLiveRegion="polite" style={styles.body}>Duración prevista: {minutes === null ? kind === "work" ? "sin definir" : "completa un horario válido" : `${minutes} min (${Math.floor(minutes / 60)} h ${minutes % 60} min)`}</Text>
               <Text style={styles.body}>Zona horaria de la sucursal: {options.timezone}</Text>
               <Text style={styles.hint}>Un solo día, sin pausas automáticas. Para cruzar medianoche o repetir, divide la planificación desde la web. El servidor verifica los cambios de horario.</Text>
@@ -360,7 +359,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
                 <Text style={styles.body}>{kind === "work" ? form.summary.trim() : form.motive.trim()}</Text>
                 {kind === "maintenance" ? <Text style={styles.body}>Tipo: {form.maintenanceType === "correctivo" ? "Correctivo" : "Detención"}</Text> : null}
                 <Text style={styles.body}>Prioridad: {priorityLabels[form.priority]}</Text>
-                <Text style={styles.body}>{form.equipment ? `Equipo: ${form.equipment.label} · ID ${form.equipment.id}` : "Sin equipo asociado"}</Text>
+                <Text style={styles.body}>{parentMaintenance ? `Equipo del mantenimiento: ${parentMaintenance.equipment?.label ?? "No informado"}` : form.equipment ? `Equipo: ${form.equipment.label} · ID ${form.equipment.id}` : "Sin equipo asociado"}</Text>
                 {form.specialty ? <Text style={styles.body}>Especialidad: {form.specialty.label}</Text> : null}
                 {kind === "maintenance" && form.damageType ? <Text style={styles.body}>Daño: {form.damageType === "desgaste" ? "Desgaste" : "Operacional"}</Text> : null}
               </> : <>
@@ -377,9 +376,9 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               {preview.overlaps.map((title) => <Text key={title} style={styles.body}>• {title}</Text>)}
             </Card> : null}
             {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-            {step < 2 ? <Button title={step === 0 ? "Continuar a horario" : "Revisar solicitud"} disabled={frozen} onPress={() => { if (checkForm(step === 1)) setStep(step + 1); }} /> : <>
-              <Button title={draft.phase === "pending" ? "Reintentar misma solicitud" : mode === "demo" ? "Simular creación" : "Confirmar y crear"} icon="checkmark-outline" loading={sending} disabled={busy || loadingOptions} onPress={() => void submit()} />
-              {draft.phase === "pending" ? <Button title="Editar como nueva solicitud" variant="secondary" disabled={busy || sending} onPress={() => setDialog("new")} /> : null}
+            {step < 2 ? <Button title={step === 0 ? "Continuar a horario" : "Revisar creación"} disabled={frozen} onPress={() => { if (checkForm(step === 1)) setStep(step + 1); }} /> : <>
+              <Button title={draft.phase === "pending" ? "Reintentar creación" : mode === "demo" ? "Simular creación" : "Confirmar y crear"} icon="checkmark-outline" loading={sending} disabled={busy || loadingOptions} onPress={() => void submit()} />
+              {draft.phase === "pending" ? <Button title="Editar como nueva creación" variant="secondary" disabled={busy || sending} onPress={() => setDialog("new")} /> : null}
             </>}
             {step > 0 && draft.phase === "editing" ? <Button title="Paso anterior" variant="ghost" disabled={sending || busy} onPress={() => { setStep(step - 1); setError(""); }} /> : null}
             <Text style={styles.hint}>El borrador se conserva en este dispositivo para esta sesión, empresa, sucursal y tipo de creación.</Text>
@@ -388,13 +387,12 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
         {saveError ? <Text accessibilityRole="alert" style={styles.error}>{saveError}</Text> : null}
       </ScrollView>
     </KeyboardAvoidingView>
-    {calendar && !frozen ? <CreationDatePicker value={form.date} onChange={(value) => change("date", value)} onClose={() => setCalendar(false)} /> : null}
     {catalog && !frozen ? <CreationCatalogSelector resource={catalog} companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId} cache={catalogCache}
       selected={catalog === "equipment" ? form.equipment : form.specialty} onLoadOptions={onLoadOptions} onClose={() => setCatalog(null)}
       onSelect={(item) => change(catalog === "equipment" ? "equipment" : "specialty", item)} /> : null}
-    {dialog ? <CreationModal title={dialog === "back" ? "Volver sin perder tu solicitud" : "Crear una nueva solicitud"} onClose={() => { if (!lock.current) setDialog(null); }}>
-      <Text style={styles.body}>{dialog === "back" ? "Se conservará el borrador. Si ya intentaste enviarlo, al volver podrás reintentar con el mismo identificador sin duplicarlo." : "La solicitud anterior podría haberse creado aunque no recibieras respuesta. Revisa tu agenda primero. Continuar descarta su identificador y el próximo envío será una solicitud nueva: podría generar un duplicado."}</Text>
-      <Button title={dialog === "back" ? "Guardar borrador y volver" : "Entiendo: editar como nueva solicitud"} loading={sending} onPress={() => { if (dialog === "back") void leaveWithDraft(); else void editAsNew(dialog === "invalid"); }} />
+    {dialog ? <CreationModal title={dialog === "back" ? "Volver sin perder tus datos" : "Crear otro registro"} onClose={() => { if (!lock.current) setDialog(null); }}>
+      <Text style={styles.body}>{dialog === "back" ? "Se conservará el borrador. Si ya intentaste crear el registro, podrás reintentar sin duplicarlo." : "El registro anterior podría haberse creado aunque no recibieras respuesta. Revisa tu agenda primero. Continuar prepara una creación distinta y podría generar un duplicado."}</Text>
+      <Button title={dialog === "back" ? "Guardar borrador y volver" : "Entiendo: editar como nueva creación"} loading={sending} onPress={() => { if (dialog === "back") void leaveWithDraft(); else void editAsNew(dialog === "invalid"); }} />
       <Button title="Seguir aquí" variant="secondary" disabled={sending} onPress={() => setDialog(null)} />
     </CreationModal> : null}
   </SafeAreaView>;

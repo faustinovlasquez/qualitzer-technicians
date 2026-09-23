@@ -108,15 +108,18 @@ function EquipmentCard({ equipment, title, children }: { equipment: Equipment; t
   </Card>;
 }
 
-export function EquipmentTab({ group, work, locationPort, identity = "", disabled = false, online = true }: { group: AssignmentGroup; work: AssignmentWork; locationPort?: EquipmentLocationPort; identity?: string; disabled?: boolean; online?: boolean }) {
+export function EquipmentTab({ group, work, locationPort, identity = "", disabled = false, online = true, onAssociate }: { group: AssignmentGroup; work: AssignmentWork; locationPort?: EquipmentLocationPort; identity?: string; disabled?: boolean; online?: boolean; onAssociate?: () => void }) {
   const [linkError, setLinkError] = useState<string | null>(null);
-  const equipment = work.workEquipment ?? group.equipment;
-  const showGroupEquipment = work.workEquipment && group.equipment && JSON.stringify(work.workEquipment) !== JSON.stringify(group.equipment);
+  const inherited = group.type === "internal_maintenance";
+  const equipment = inherited ? group.equipment : work.workEquipment ?? group.equipment;
+  const showGroupEquipment = !inherited && work.workEquipment && group.equipment && JSON.stringify(work.workEquipment) !== JSON.stringify(group.equipment);
   return <View style={styles.stack}>
     <SectionTitle title="Ficha de la asignación" subtitle="Datos de equipo recibidos con este trabajo. No corresponde a una ficha completa del catálogo." />
-    {equipment ? <EquipmentCard equipment={equipment} title={work.workEquipment ? "Equipo del trabajo" : "Equipo de la asignación"}>
+    {equipment ? <EquipmentCard equipment={equipment} title={inherited ? "Equipo del mantenimiento" : work.workEquipment ? "Equipo del trabajo" : "Equipo de la asignación"}>
       {locationPort ? <EquipmentLocationPanel key={`${identity}:work`} port={locationPort} target="work" identity={identity} disabled={disabled} online={online} /> : null}
-    </EquipmentCard> : <Card><EmptyState title="Sin equipo informado" message="La asignación no incluye datos de un equipo. No se consultan ni infieren equipos por identificador." icon="hardware-chip-outline" /></Card>}
+    </EquipmentCard> : <View style={styles.stack}><EmptyState title="Sin equipo asociado" message={inherited ? "El mantenimiento no tiene un equipo informado." : ""} icon="hardware-chip-outline" />
+      {!inherited && onAssociate ? <Button title="Asociar equipo" icon="hardware-chip-outline" variant="secondary" disabled={disabled || !online} onPress={onAssociate} /> : null}
+    </View>}
     {showGroupEquipment && group.equipment ? <EquipmentCard equipment={group.equipment} title="Equipo de la asignación general">
       {locationPort ? <EquipmentLocationPanel key={`${identity}:group`} port={locationPort} target="group" identity={identity} disabled={disabled} online={online} /> : null}
     </EquipmentCard> : null}

@@ -3,8 +3,35 @@ import { test } from "node:test";
 import { creationConflictPreview, creationDuration, creationPayload, emptyCreationForm, readCreationDraft, validateCreationForm, type CreationForm } from "../src/screens/creation/creationForm";
 import { mergeDailyAssignments } from "../src/domain/assignmentSchedule";
 import { assignments, group, work } from "../server/tests/fixtures";
+import { workEditDocumentSchema, workEditInputSchema } from "../src/domain/creation";
+import { workEditForm, workEditPayload } from "../src/screens/creation/creationForm";
 
 const requestId = "52b5201d-4ea9-4dad-9f9d-191d11ea8461";
+test("maintenance child creation keeps parent scope across draft reload and omits equipment overrides", () => {
+  const values = { ...form(), maintenanceId: 7, equipment: { id: 99, label: "Ignored" } };
+  const input = creationPayload("work", values, 1, requestId);
+  assert.equal(input.kind, "work");
+  assert.equal(input.kind === "work" && input.maintenanceId, 7);
+  assert.equal(input.kind === "work" && input.work.rentalEquipmentId, undefined);
+  const restored = readCreationDraft(JSON.stringify({ version: 1, kind: "work", phase: "pending", form: values, input }), "work", 1);
+  assert.equal(restored?.form.maintenanceId, 7);
+});
+test("work edit preloads the creation form and updates only allowed fields without creating another work", () => {
+  const document = workEditDocumentSchema.parse({ groupId: "direct-11", workId: 11, companyBranchId: 1, revision: "a".repeat(64),
+    fields: { title: "Original", summary: "Description", priority: "medium", specialtyId: null, rentalEquipmentId: null, schedule: { date: "2026-09-22", startTime: "", endTime: "" } },
+    equipment: null, specialty: null, equipmentInherited: false, scheduleEditable: true });
+  const form = workEditForm(document);
+  assert.equal(form.title, "Original"); assert.equal(form.date, "2026-09-22");
+  const input = workEditPayload(document, { ...form, title: "Changed", date: "2026-09-23", equipment: { id: 9, label: "EQ-9" } });
+  assert.equal(input.fields.title, "Changed"); assert.equal(input.fields.schedule.date, "2026-09-23"); assert.equal(input.fields.rentalEquipmentId, 9);
+  assert.equal("clientRequestId" in input, false);
+  const inherited = { ...document, equipmentInherited: true, scheduleEditable: false, fields: { ...document.fields, rentalEquipmentId: 7 } };
+  const guarded = workEditPayload(inherited, { ...form, date: "2026-09-25", equipment: { id: 99, label: "Wrong" } });
+  assert.equal(guarded.fields.rentalEquipmentId, 7); assert.equal(guarded.fields.schedule.date, "2026-09-22");
+  assert.equal(workEditInputSchema.safeParse({ ...input, userId: 9 }).success, false);
+  assert.equal(workEditInputSchema.safeParse({ ...input, expectedRevision: "" }).success, false);
+  assert.equal(workEditInputSchema.safeParse({ ...input, fields: { ...input.fields, schedule: { date: "2026-02-30", startTime: "", endTime: "" } } }).success, false);
+});
 function form(overrides: Partial<CreationForm> = {}): CreationForm {
   return { ...emptyCreationForm("2026-09-10"), title: " Reparar ", summary: " Revisar conexiones ", motive: " Fuga detectada ", startTime: "09:00", endTime: "10:30", ...overrides };
 }

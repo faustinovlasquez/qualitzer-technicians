@@ -10,12 +10,16 @@ const recoveryTests = process.argv.includes("--sync-recovery") ? ["src/offline/t
 if (recoveryTests.length) recoveryTests.push("src/offline/tests/storage-capacity.test.ts");
 if (process.argv.includes("--offline-delivery")) recoveryTests.push("tests/delivery-review-ui.test.ts", "src/offline/tests/durable-intentions.test.ts", "src/offline/tests/repository.test.ts");
 if (process.argv.includes("--creation-history")) recoveryTests.push("tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts");
+if (process.argv.includes("--action-history")) recoveryTests.push("tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts", "tests/creation-form.test.ts");
+if (process.argv.includes("--work-edit")) recoveryTests.push("tests/creation-form.test.ts", "tests/creation-equipment.test.ts", "tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts", "server/tests/work-edit.test.ts", "server/tests/equipment-location.test.ts");
+if (process.argv.includes("--maintenance-create")) recoveryTests.push("tests/creation-form.test.ts", "tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts", "src/offline/tests/repository.test.ts", "server/tests/creation-routes.test.ts");
 
 function clientTypes() {
   const config = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile);
   const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
   const targets = ["App.tsx", "tests/user-signatures.test.ts", "src/screens/signatures/UserSignaturesPanel.tsx", "src/infrastructure/signatureImage.web.ts"];
   if (process.argv.includes("--locations")) targets.push("tests/location-tracking.test.ts", "tests/e2e/location/fixture.tsx", "src/location/GoogleMap.web.tsx");
+  if (process.argv.includes("--work-edit")) targets.push("tests/e2e/location/WorkEditFixture.tsx");
   targets.push(...recoveryTests.filter(file => !file.startsWith("server/")), ...(recoveryTests.length ? ["src/offline/FileStore.web.ts"] : []));
   const program = ts.createProgram(targets.map(file => path.join(root, file)), {
     ...parsed.options, noEmit: true, types: [...new Set([...(parsed.options.types ?? []), "node"])],

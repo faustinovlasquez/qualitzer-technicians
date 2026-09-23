@@ -40,10 +40,19 @@ import { CameraPermissionGuide } from "./workDetail/files/CameraPermissionGuide"
 import { useCameraPermissionGuide } from "./workDetail/files/useCameraPermissionGuide";
 import { WorkActivities, type WorkActivityActions } from "./workDetail/WorkActivities";
 import { PrivateModal } from "../security/DeviceSecurityContext";
+import { CreationScreen } from "./creation/CreationScreen";
+import { workEditDocumentSchema, type WorkEditDocument, type WorkEditInput, type CreationOptionsQuery, type CreationOptions } from "../domain/creation";
 
 export { clearWorkDetailDrafts, workDetailDraftKey } from "./workDetail/useWorkDraft";
 
 export interface WorkDetailScreenProps {
+  workEditor?: {
+    user: import("../domain/models").User;
+    load(): Promise<WorkEditDocument>;
+    options(query: CreationOptionsQuery): Promise<CreationOptions>;
+    save(input: WorkEditInput): Promise<WorkEditDocument>;
+    saved(document: WorkEditDocument): Promise<void>;
+  };
   activityActions?: WorkActivityActions;
   onReopen?: () => Promise<void>;
   tenant: Tenant;
@@ -123,6 +132,8 @@ export function WorkDetailScreen(props: WorkDetailScreenProps) {
 function WorkDetailContent(props: WorkDetailScreenProps) {
   const { group, work, generatedAt, mode, range, busy, onBack, onRefresh, onStatus, onSaveStep, onUpload, onReport, storageKey } = props;
   const [deliverySucceeded, setDeliverySucceeded] = useState(false);
+  const [editing, setEditing] = useState<WorkEditDocument | null>(null);
+  const editorBack = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
   const [reopened, setReopened] = useState(false);
   useEffect(() => { if (work.status !== "delivered") setReopened(false); }, [work.status]);
@@ -224,6 +235,15 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   parentBusy.current = busy;
   const maintenance = group.type === "internal_maintenance";
   const readOnly = readOnlyWork(group, work) || localWork || staleReadOnly || Boolean(queuedCompletion);
+  async function openEditor(): Promise<void> {
+    await runAction("edit", async () => {
+      const current = callbacks.current;
+      if (!current.workEditor || readOnly || !online || hasPendingOperations || !(securityRef.current?.isUnlocked() ?? true)) return;
+      await draft.store.flush();
+      const result = workEditDocumentSchema.parse(await current.workEditor.load());
+      if (mounted.current && callbacks.current.work.id === current.work.id && callbacks.current.group.id === current.group.id && (securityRef.current?.isUnlocked() ?? true)) setEditing(result);
+    });
+  }
   const awaitingConfirmation = awaitingStatus !== null && awaitingStatus !== work.status;
   const locked = busy || action !== null;
   const disabled = locked || !draft.hydrated || !offlineReady || awaitingConfirmation;
@@ -666,6 +686,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       } /></View> : null}
       {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : <ScrollView key={tab} ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
           {mode === "demo" ? <Notice message="Modo demostración · los cambios y confirmaciones son locales, no se envían a Qualitzer." /> : null}
+          {props.workEditor && !readOnly ? <Button title="Editar trabajo" icon="create-outline" variant="secondary" disabled={locked || !online || hasPendingOperations} onPress={() => void openEditor()} /> : null}
           {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
           {exitWarning ? <Card style={styles.stack}>
             <Notice message="No se pudo proteger el borrador en el almacenamiento. Si vuelves ahora, los cambios quedarán solo en esta sesión y podrían perderse al cerrar la aplicación." tone="warning" />
@@ -704,7 +725,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             onPanelChange={setActivityPanelOpen}
             onCreated={() => { scrollPositions.current.work = workTabOffset.current; detailScroll.current?.scrollTo({ y: workTabOffset.current, animated: true }); }} backHandler={childBack} key={resourceKey} scopeKey={`${storageKey}:${resourceKey}`} mode={mode} activities={work.activities ?? []} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} readOnly={readOnlyWork(group, work)} />} /></View> : null}
             {tab === "comments" ? <CommentsTab scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:comments`} resourceKey={resourceKey} mode={mode} busy={locked || staleReadOnly} pending={props.offline !== undefined ? pendingComments : undefined} offlineReady={offlineReady} onLoad={props.onLoadComments} onSubmit={props.onAddComment} /> : null}
-          {tab === "equipment" ? <EquipmentTab group={group} work={work} locationPort={props.equipmentLocation} identity={identity} disabled={locked} online={props.offline?.online ?? true} /> : null}
+          {tab === "equipment" ? <EquipmentTab group={group} work={work} locationPort={props.equipmentLocation} identity={identity} disabled={locked || readOnly || hasPendingOperations} online={online} onAssociate={props.workEditor && !readOnly ? () => void openEditor() : undefined} /> : null}
         </ScrollView>}
         {tab !== "checklist" && tab !== "evidence" && !activityPanelOpen ? <View style={styles.executionFooter} testID="work-execution-footer">
           <View style={styles.executionButtons}>
@@ -726,6 +747,10 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         </View></View>
       </PrivateModal> : null}
       <CameraPermissionGuide guide={cameraGuide} />
+      {editing && props.workEditor ? <PrivateModal visible animationType="slide" onRequestClose={() => editorBack.current?.()}>
+        <CreationScreen editing={editing} backHandler={editorBack} user={props.workEditor.user} tenant={props.tenant} storageKey={storageKey} busy={busy} online={online && !hasPendingOperations}
+          onBack={() => setEditing(null)} onLoadOptions={props.workEditor.options} onSave={props.workEditor.save} onSaved={async result => { await callbacks.current.workEditor?.saved(result); if (mounted.current) { setEditing(null); setMessage("Trabajo actualizado."); } }} />
+      </PrivateModal> : null}
       {reopening ? <PrivateModal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setReopening(false); }}><View style={styles.modalOverlay}><View style={[styles.modalCard, styles.modalContent]}>
         <SectionTitle title="¿Reabrir trabajo?" />
         <BodyText>Se conservarán las actividades, respuestas, archivos y horas ya registradas. Podrás continuar el trabajo y entregarlo nuevamente.</BodyText>

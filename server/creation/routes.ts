@@ -42,7 +42,8 @@ export function createCreationRouter(upstream: Upstream): Router {
       status = metadata.status;
       replayed = metadata.idempotencyReplayed ?? (status === 200 ? "true" : "false");
     } }));
-    if (![200, 201].includes(status) || result.kind !== input.kind || result.companyBranchId !== input.companyBranchId || result.schedule.date !== input.schedule.date || result.schedule.startTime !== input.schedule.startTime || result.schedule.endTime !== input.schedule.endTime || result.schedule.plannedMinutes !== creationPlannedMinutes(input.schedule) || (input.kind !== "maintenance" && result.groupId !== `${input.kind === "work" ? "direct" : "direct-np"}-${result.workId}`)) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    const expectedGroup = input.kind === "work" && input.maintenanceId !== undefined ? `maintenance-${input.maintenanceId}` : input.kind !== "maintenance" ? `${input.kind === "work" ? "direct" : "direct-np"}-${result.workId}` : undefined;
+    if (![200, 201].includes(status) || result.kind !== input.kind || result.companyBranchId !== input.companyBranchId || result.schedule.date !== input.schedule.date || result.schedule.startTime !== input.schedule.startTime || result.schedule.endTime !== input.schedule.endTime || result.schedule.plannedMinutes !== creationPlannedMinutes(input.schedule) || expectedGroup !== undefined && result.groupId !== expectedGroup) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.set("Idempotency-Replayed", replayed === "true" ? "true" : "false").status(status).json(result);
   });
   return router;

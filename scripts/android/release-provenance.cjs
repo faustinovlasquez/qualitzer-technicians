@@ -6,6 +6,18 @@ const { createHash } = require("node:crypto");
 const { sha256File } = require("./release-policy.cjs");
 
 const requiredSources = [
+  "src/screens/creation/CreationEquipmentLookup.tsx",
+  "src/screens/creation/CreationCatalogSelector.tsx",
+  "src/location/useLocationTracking.ts",
+  "src/location/GoogleMap.tsx",
+  "src/location/GoogleMapConfiguration.tsx",
+  "src/location/googlePlaces.ts",
+  "src/location/LocationHistoryPanel.tsx",
+  "src/location/LocationSettingsPanel.tsx",
+  "src/screens/creation/CreationScreen.tsx",
+  "src/screens/creation/CreationScheduleFields.tsx",
+  "src/screens/creation/WorkEditScreen.tsx",
+  "src/screens/creation/creationForm.ts",
   "src/infrastructure/gatewayConfig.ts",
   "src/infrastructure/gatewayConnection.ts",
   "config/gatewayPolicy.js",

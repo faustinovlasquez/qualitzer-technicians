@@ -15,10 +15,14 @@ import { user } from "../server/tests/fixtures";
 import { tenant } from "./helpers/tenant-challenge";
 import { uiSnapshot } from "./helpers/durable-ui";
 import * as tenantSession from "../src/domain/tenantSession";
+import type { TechnicianRepository } from "../src/domain/TechnicianRepository";
 
 for (const permissionGranted of [true, false]) test(`location hook prompts on entry and respects permission ${permissionGranted}`, async context => {
   const hooks = durableReactFixture(); context.after(() => hooks.unmount());
-  const store = new MemoryStore(); let fixes = 0; let permits = 0; let sequence = 500;
+  const store = new MemoryStore(); let fixes = 0; let permits = 0; let sequence = 500; let uploads = 0; let failUpload = false;
+  const port: Pick<TechnicianRepository, "uploadLocations" | "locationHistory"> = { uploadLocations: async (_branch: number, points: locationDomain.LocationPoint[]) => {
+    uploads++; if (failUpload) throw new Error("UNAVAILABLE"); return { acceptedIds: points.map(point => point.id) };
+  } };
   let buttons: { text: string; onPress?(): void }[] = []; let alerts = 0;
   const security = { blocked: false, isUnlocked: () => !security.blocked };
   const appState = { currentState: "active", addEventListener: () => ({ remove() {} }) };
@@ -35,11 +39,11 @@ for (const permissionGranted of [true, false]) test(`location hook prompts on en
     if (id === "./LocationJournal") return { LocationJournal };
     if (id === "./locationRuntime") return { locationTrackingAvailable: true, reconcileLocationTracking: async () => {}, scheduleLocationChecks: async () => {},
       locationPermissionReady: async () => permissionGranted, requestLocationPermissions: async () => { permits++; return permissionGranted; },
-      currentLocationFix: async () => { fixes++; return { timestamp: Date.now(), coords: { latitude: -33, longitude: -70, accuracy: 10 } }; } };
+      currentLocationFix: async (minimum: number) => { fixes++; assert.ok(Math.abs(Date.now() - minimum) < 1000); return { timestamp: Date.now(), coords: { latitude: -33, longitude: -70, accuracy: 10 } }; } };
     throw new Error(`UNEXPECTED_IMPORT:${id}`);
   }, { setInterval: () => 1, clearInterval: () => {} });
   const offline = uiSnapshot();
-  const render = () => { const result = hooks.render(() => module.useLocationTracking(session, "https://gateway.invalid", offline, Date.now(), null)); hooks.flush(); return result; };
+  const render = () => { const result = hooks.render(() => module.useLocationTracking(session, "https://gateway.invalid", offline, Date.now(), port)); hooks.flush(); return result; };
   async function flush() { let result = render(); for (let index = 0; index < 12; index++) { await settle(); result = render(); } return result; }
   await flush(); assert.equal(alerts, 1); assert.equal(fixes, 0);
   buttons.find(button => button.text === "Continuar")?.onPress?.(); const active = await flush();
@@ -58,6 +62,24 @@ for (const permissionGranted of [true, false]) test(`location hook prompts on en
   appState.currentState = "background"; await result.capture("WORK_PAUSED", scope)("CONFIRMED"); assert.equal(fixes, 1);
   appState.currentState = "active"; security.blocked = true;
   await result.capture("WORK_PAUSED", scope)("CONFIRMED"); assert.equal(fixes, 1);
+  security.blocked = false; offline.online = true; let current = await flush();
+  await current.capture("ACTIVITY_CREATED", scope)("CONFIRMED");
+  current = await flush(); assert.equal(uploads, 1); assert.equal(current.state?.points.length, 0);
+  failUpload = true;
+  await current.capture("COMMENT_ADDED", scope)("CONFIRMED");
+  current = await flush(); assert.equal(uploads, 2); assert.equal(current.state?.points.length, 1);
+  assert.match(current.error ?? "", /No se pudo confirmar/);
+  failUpload = false; await current.synchronize?.(); current = await flush();
+  assert.equal(current.state?.points.length, 0); assert.equal(current.error, null);
+});
+
+test("map configuration shows public signing data and distinguishes unverified Cloud settings", () => {
+  const hooks = durableReactFixture();
+  const module = uiModule<typeof import("../src/location/GoogleMapConfiguration")>("location/GoogleMapConfiguration.tsx", hooks, { "./googlePlaces": { googlePlaces: { diagnose: async () => ({ status: 403, accepted: false, reasons: ["SERVICE_DISABLED"] }) } } });
+  const tree = hooks.render(() => module.GoogleMapConfiguration({ loaded: false, configuration: { packageName: "com.example.field", certificateSha1: [Array(20).fill("AB").join(":")], keyConfigured: true, playServicesStatus: 0 } }));
+  const text = elements<{ children?: unknown }>(tree, "Text").map(element => JSON.stringify(element.props.children)).join(" ");
+  assert.match(text, /Maps SDK for Android/); assert.match(text, /Places API/); assert.match(text, /SHA-1/); assert.match(text, /Pendiente de verificar/);
+  assert.equal(text.includes("AIza"), false);
 });
 
 test("action locations accept off-hours events, require new consent and deduplicate queued actions", async () => {
@@ -80,6 +102,7 @@ test("native Places search never emits an address before selecting and resolving
   const address: EquipmentAddress = { address: "Calle 4", country: "Chile", region: "", county: "Paine", city: "", postalCode: "", lat: "-33.8", lon: "-70.7" };
   const searches: string[] = []; const ids: string[] = []; const received: EquipmentAddress[] = [];
   const module = uiModule<typeof import("../src/location/GoogleMap")>("location/GoogleMap.tsx", hooks, {
+    "./GoogleMapConfiguration": { GoogleMapConfiguration: "GoogleMapConfiguration" },
     "react-native-maps": { __esModule: true, default: "MapView", Marker: "Marker", Circle: "Circle", PROVIDER_GOOGLE: "google" },
     "./googlePlaces": { googlePlaces: { available: () => true, endSession: () => {}, search: async (query: string) => { searches.push(query); return [{ id: "place-1", label: "Calle 4, Paine" }]; }, details: async (id: string) => { ids.push(id); return address; } } },
   });
@@ -98,6 +121,7 @@ test("native Google map keeps selected coordinates and ignores a late address af
   const hooks = durableReactFixture(); context.after(() => hooks.unmount());
   const gate = deferred<EquipmentAddress>(); const points: number[] = []; const addresses: EquipmentAddress[] = [];
   const module = uiModule<typeof import("../src/location/GoogleMap")>("location/GoogleMap.tsx", hooks, {
+    "./GoogleMapConfiguration": { GoogleMapConfiguration: "GoogleMapConfiguration" },
     "react-native-maps": { __esModule: true, default: "MapView", Marker: "Marker", Circle: "Circle", PROVIDER_GOOGLE: "google" },
     "./googlePlaces": { googlePlaces: { available: () => true, endSession: () => {}, reverse: () => gate.promise } },
   });

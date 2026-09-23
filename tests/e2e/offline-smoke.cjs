@@ -185,7 +185,7 @@ async function main() {
     await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
     await page.getByRole("textbox", { name: "Hora de inicio *", exact: true }).fill("17:00");
     await page.getByRole("textbox", { name: "Hora de fin *", exact: true }).fill("18:00");
-    await page.getByRole("button", { name: "Revisar solicitud", exact: true }).click();
+    await page.getByRole("button", { name: "Revisar creación", exact: true }).click();
     await page.getByRole("button", { name: "Confirmar y crear", exact: true }).click();
     await page.getByRole("button", { name: "Ver trabajo local", exact: true }).waitFor();
     assert.equal((await metrics()).effects.creations, 0);

@@ -4,6 +4,7 @@ import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, syncReceip
 
 export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
 type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_password" |
+  `/technician-dashboard/panel/${string}/works/${number}/edit` |
   "/user_signatures/me" | `/user_signatures/me/${number}` |
   "/worker-locations/batch" | "/worker-locations/me" |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
@@ -116,6 +117,15 @@ export class Upstream {
         throw new GatewayError(response.status >= 500 ? 503 : 502, "UPSTREAM_INVALID_RESPONSE");
       }
       if (!response.ok) {
+        if (/\/works\/[1-9]\d*\/edit$/.test(path)) {
+          let data: unknown;
+          try { data = JSON.parse(await readBody(response)); } catch { data = null; }
+          const failure = z.object({ error: z.enum(["WORK_EDIT_CONFLICT", "WORK_EDIT_INVALID_INPUT", "WORK_EDIT_NOT_AVAILABLE", "WORK_EDIT_MAINTENANCE_REQUIRED", "WORK_EQUIPMENT_INHERITED", "WORK_SCHEDULE_READ_ONLY", "WORK_SPECIALTY_READ_ONLY", "WORK_READ_ONLY", "PANEL_WORK_NOT_FOUND", "MOBILE_CREATION_EQUIPMENT_NOT_FOUND", "MOBILE_CREATION_SPECIALTY_NOT_FOUND", "MOBILE_CREATION_TIMEZONE_NOT_CONFIGURED"]) }).safeParse(data);
+          if (failure.success && [400, 404, 409].includes(response.status)) throw new GatewayError(response.status, failure.data.error);
+          if (response.status === 401) throw new GatewayError(401, "UNAUTHORIZED");
+          if (response.status === 404) throw new GatewayError(503, "WORK_EDIT_NOT_AVAILABLE");
+          throw new GatewayError(response.status >= 500 ? 503 : response.status, "UPSTREAM_REJECTED");
+        }
         if (/\/equipment-location\/(?:work|group)$/.test(path) && [400, 401, 404, 409].includes(response.status)) {
           const text = await readBody(response);
           let value: unknown;

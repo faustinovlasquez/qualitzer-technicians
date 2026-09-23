@@ -2,6 +2,87 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de mantenimiento",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8828" } },
+			"isBackground": true, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar creacion en mantenimiento",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/testing/user-signatures-validation.cjs", "--maintenance-create"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar footer mantenimiento",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/time-sync/smoke.cjs", "--maintenance-dock"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de selector compacto",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8827" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar selector compacto de equipos",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/location/smoke.cjs", "--equipment-picker"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de historial y diagnostico",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8826" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar historial por acciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/testing/user-signatures-validation.cjs", "--locations", "--action-history"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de edicion trabajos",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8825" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar UI edicion trabajos",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/location/smoke.cjs", "--work-edit"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar edicion de trabajos",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/testing/user-signatures-validation.cjs", "--work-edit"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: descargar APK de configuracion unificada",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
@@ -567,7 +648,7 @@
 			"label": "Qualitzer: comprobar entrega de asignaciones",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
-			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.102:8824/"],
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.105:8828/"],
 			"isBackground": false,
 			"problemMatcher": []
 		},

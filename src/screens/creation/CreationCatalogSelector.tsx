@@ -9,6 +9,7 @@ import { CreationModal } from "./CreationModal";
 export type CreationCatalogPage = NonNullable<CreationOptions["equipment"]>;
 export type CreationCatalogCache = Map<string, CreationCatalogPage>;
 interface Props {
+  embedded?: boolean;
   resource: "equipment" | "specialties";
   companyBranchId: number;
   userId: number;
@@ -20,7 +21,7 @@ interface Props {
   onClose: () => void;
 }
 
-export function CreationCatalogSelector({ resource, companyBranchId, userId, workerId, selected, cache, onLoadOptions, onSelect, onClose }: Props) {
+export function CreationCatalogSelector({ resource, companyBranchId, userId, workerId, selected, cache, onLoadOptions, onSelect, onClose, embedded = false }: Props) {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [items, setItems] = useState<CatalogItem[]>([]);
@@ -65,9 +66,9 @@ export function CreationCatalogSelector({ resource, companyBranchId, userId, wor
     active.current = true;
     void load("", 0);
     return () => { active.current = false; request.current += 1; };
-  }, [resource, companyBranchId]);
+  }, [resource, companyBranchId, userId, workerId]);
 
-  return <CreationModal title={resource === "equipment" ? "Seleccionar equipo" : "Seleccionar especialidad"} onClose={onClose}>
+  const content = <>
     <Field label={resource === "equipment" ? "Buscar por número interno, identificación, tipo o modelo" : "Buscar en el catálogo"} value={search} maxLength={100} onChangeText={(value) => setSearch(value.replace(/[\x00-\x1f\x7f]/g, ""))}
       returnKeyType="search" onSubmitEditing={() => { if (!loading) void load(search.trim(), 0); }} />
     <Button title="Buscar" icon="search-outline" disabled={loading} onPress={() => void load(search.trim(), 0)} />
@@ -77,16 +78,17 @@ export function CreationCatalogSelector({ resource, companyBranchId, userId, wor
     {!loading && !error && items.length === 0 ? <Text style={styles.hint}>No se encontraron resultados.</Text> : null}
     <View style={styles.list}>
       {items.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={item.label}
-        accessibilityState={{ selected: item.id === selected?.id }} onPress={() => { onSelect({ id: item.id, label: item.label }); onClose(); }} style={[styles.item, item.id === selected?.id && styles.selected]}>
-        <Text style={styles.label}>{item.label}{resource === "equipment" ? ` · ID ${item.id}` : ""}</Text>
+        accessibilityState={{ selected: item.id === selected?.id }} onPress={() => { if (!active.current || loading) return; onSelect(resource === "equipment" ? item : { id: item.id, label: item.label }); onClose(); }} style={[styles.item, item.id === selected?.id && styles.selected]}>
+        <Text style={styles.label}>{item.label}</Text>
       </Pressable>)}
     </View>
     {hasMore ? <Button title="Cargar más" variant="secondary" disabled={loading} onPress={() => void load(appliedSearch, page + 1)} /> : null}
-    <Text style={styles.hint}>Sin conexión solo se pueden consultar páginas guardadas; un resultado vacío no descarta equipos no almacenados. No se consultan precios ni costos.</Text>
-  </CreationModal>;
+  </>;
+  return embedded ? <View style={styles.content}>{content}</View> : <CreationModal title={resource === "equipment" ? "Seleccionar equipo" : "Seleccionar especialidad"} onClose={onClose}>{content}</CreationModal>;
 }
 
 const styles = StyleSheet.create({
+  content: { gap: 12 },
   list: { gap: 8 }, item: { minHeight: 54, justifyContent: "center", padding: 14, borderWidth: 1, borderColor: palette.border, borderRadius: radius.md },
   selected: { backgroundColor: palette.primarySoft, borderColor: palette.primary }, label: { ...typography.body, color: palette.text },
   error: { ...typography.body, color: palette.danger }, hint: { ...typography.caption, color: palette.textSecondary },

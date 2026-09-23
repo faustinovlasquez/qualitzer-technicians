@@ -4,11 +4,14 @@ import type { ReactNode } from "react";
 import type { CreationInput, CreationOptions, CreationResult } from "../src/domain/creation";
 import { OfflineQueuedError, type OfflineQueuedOutcome, type OfflineSnapshot, type OfflineOperationStatus } from "../src/domain/offline";
 import type { CreationScreenProps } from "../src/screens/creation/CreationScreen";
-import type { TimeFieldProps } from "../src/ui/time/TimeField";
+import type { ComponentProps } from "react";
+import type { CreationScheduleFields } from "../src/screens/creation/CreationScheduleFields";
 import { creationDraftSchema, creationPayload, emptyCreationForm, queuedCreationState, type CreationDraft, type CreationForm } from "../src/screens/creation/creationForm";
 import { user } from "../server/tests/fixtures";
 import { reactFixture, tenant } from "./helpers/tenant-challenge";
 import { action, deferred, elements, memoryDraftStorage, settle, uiModule, type Wrapped } from "./helpers/durable-ui";
+import type { WorkEditDocument, WorkEditInput } from "../src/domain/creation";
+import type { WorkEditScreenProps } from "../src/screens/creation/WorkEditScreen";
 
 const requestId = "52b5201d-4ea9-4dad-9f9d-191d11ea8461";
 const date = "2026-09-14";
@@ -20,6 +23,36 @@ const outcome: Extract<CreationDraft, { phase: "queued" }>["outcome"] = { kind: 
   localGroupId: `local-${requestId}`, localWorkId: `local-${requestId}`, ownsFiles: false };
 const options: CreationOptions = { companyBranchId: 1, userId: 9, workerId: 42, timezone: "America/Santiago",
   priorities: ["low", "medium", "high"], nonProductiveReasons: [{ value: "waiting_parts", label: "Espera de repuestos" }], maintenanceTypes: [{ value: "correctivo", enabled: true, instruction: null }], schedule: { sameDayOnly: true, conflictPolicy: "warning" } };
+
+test("edit form preloads the same fields, guards double save and retries navigation without a second write", async context => {
+  const { hooks, react } = stableHooks(); context.after(() => hooks.unmount());
+  const gate = deferred<WorkEditDocument>(); const writes: WorkEditInput[] = [];
+  let failNavigation = true; let navigations = 0; let unlocked = true;
+  const editing: WorkEditDocument = { groupId: "direct-11", workId: 11, companyBranchId: 1, revision: "a".repeat(64), equipment: null, specialty: null, equipmentInherited: false, scheduleEditable: true,
+    fields: { title: "Original", summary: "Description", priority: "medium", rentalEquipmentId: null, specialtyId: null, schedule: { date, startTime: "09:00", endTime: "10:00" } } };
+  const props: WorkEditScreenProps = { editing, user: user(), tenant, storageKey: "edit-fixture", busy: false, online: true, onBack: () => {}, onLoadOptions: async () => options,
+    onSave: async input => { writes.push(input); return gate.promise; }, onSaved: async () => { navigations++; if (failNavigation) throw new Error("READ_FAILED"); } };
+  const module = uiModule<{ WorkEditScreen: (props: WorkEditScreenProps) => ReactNode }>("screens/creation/WorkEditScreen.tsx", hooks, {
+    react, "react-native": { Platform: { OS: "web" }, StyleSheet: { create: (styles: object) => styles }, BackHandler: { addEventListener: () => ({ remove: () => {} }) }, View: "View", Text: "Text", ScrollView: "ScrollView", ActivityIndicator: "ActivityIndicator" },
+    "../../security/DeviceSecurityContext": { useDeviceSecurity: () => ({ isUnlocked: () => unlocked }) },
+    "./CreationFields": { CreationFields: "CreationFields", priorityLabels: { medium: "Media" } },
+    "./CreationEquipmentLookup": { CreationEquipmentLookup: "CreationEquipmentLookup" }, "./CreationCatalogSelector": { CreationCatalogSelector: "CreationCatalogSelector" },
+    "./CreationScheduleFields": { CreationScheduleFields: "CreationScheduleFields" }, "./CreationModal": { CreationModal: "CreationModal" },
+  });
+  const render = () => { const tree = hooks.render(() => module.WorkEditScreen(props)); hooks.flush(); return tree; };
+  render(); await settle();
+  const fields = elements<{ form: CreationForm; onChange: (field: keyof CreationForm, value: CreationForm[keyof CreationForm]) => void }>(render(), "CreationFields")[0].props;
+  assert.equal(fields.form.title, "Original"); fields.onChange("title", "Edited");
+  action(render(), "Continuar a horario").onPress(); action(render(), "Revisar cambios").onPress();
+  const save = action(render(), "Guardar cambios");
+  unlocked = false; save.onPress(); await settle(); assert.equal(writes.length, 0);
+  unlocked = true; save.onPress(); save.onPress(); await settle(); assert.equal(writes.length, 1);
+  assert.equal(writes[0].fields.title, "Edited");
+  gate.resolve({ ...editing, fields: writes[0].fields }); await settle();
+  assert.equal(navigations, 1); failNavigation = false;
+  action(render(), "Volver al trabajo actualizado").onPress(); await settle();
+  assert.equal(navigations, 2); assert.equal(writes.length, 1);
+});
 
 const savedQueued: Extract<CreationDraft, { phase: "queued" }> = { version: 1, kind: "work", phase: "queued", form, input, outcome };
 function snapshot(status: OfflineOperationStatus = "pending"): OfflineSnapshot {
@@ -41,7 +74,7 @@ function stableHooks() {
   return { hooks, react: { ...hooks.react, useMemo } };
 }
 
-async function creationFixture(initial?: CreationDraft) {
+async function creationFixture(initial?: CreationDraft, parentMaintenance?: CreationScreenProps["parentMaintenance"]) {
   const { hooks, react } = stableHooks();
   const memory = memoryDraftStorage();
   const submit = deferred<CreationResult>();
@@ -73,18 +106,21 @@ async function creationFixture(initial?: CreationDraft) {
     "./creationDrafts": drafts,
     "./CreationCatalogSelector": { CreationCatalogSelector: "CreationCatalogSelector" },
     "./CreationDatePicker": { CreationDatePicker: "CreationDatePicker" },
+    "./CreationScheduleFields": { CreationScheduleFields: "CreationScheduleFields" },
+    "./WorkEditScreen": { WorkEditScreen: "WorkEditScreen" },
     "./CreationEquipmentLookup": { CreationEquipmentLookup: "CreationEquipmentLookup" },
     "./CreationFields": { CreationFields: "CreationFields", creationLabels: { work: "Trabajo", maintenance: "Mantenimiento", non_productive: "Tiempo no productivo" }, priorityLabels: { medium: "Media" } },
     "./CreationModal": { CreationModal: "CreationModal" },
   });
   let backs = 0;
   const props: CreationScreenProps = { kind: initial?.kind ?? "work", user: user(), tenant, companyBranchId: 1, initialDate: date, data: null,
+    parentMaintenance,
     mode: "live", storageKey: "creation-isolated", onBack: () => { backs++; }, onLoadOptions: async () => options,
     onSubmit: async (value) => { submitted.push(value); return submit.promise; },
     onQueued: async (value) => { events.push("open:queued"); queued.push(value); },
     onCreated: async (value) => { events.push("open:confirmed"); created.push(value); } };
-  const key = () => drafts.creationDraftKey(props.storageKey, props.tenant.id, props.user.id, props.companyBranchId, props.kind, props.mode);
-  memory.values.set(key(), JSON.stringify(initial ?? { version: 1, kind: "work", phase: "editing", form }));
+  const key = () => drafts.creationDraftKey(props.storageKey, props.tenant.id, props.user.id, props.companyBranchId, props.kind, props.mode) + (props.parentMaintenance ? `:maintenance:${props.parentMaintenance.id}` : "");
+  memory.values.set(key(), JSON.stringify(initial ?? { version: 1, kind: "work", phase: "editing", form: { ...form, ...(parentMaintenance ? { maintenanceId: parentMaintenance.id } : {}) } }));
   let renderedKey: string | null = null;
   const render = (): ReactNode => {
     const root = module.CreationScreen(props);
@@ -98,10 +134,19 @@ async function creationFixture(initial?: CreationDraft) {
   render(); await settle(); render();
   function review(): void {
     action(render(), "Continuar a horario").onPress();
-    action(render(), "Revisar solicitud").onPress();
+    action(render(), "Revisar creación").onPress();
   }
   return { hooks, props, memory, drafts, key, security, controls, submit, writes, submitted, queued, created, events, render, review, backs: () => backs };
 }
+
+test("parent maintenance form persists an isolated draft and only opens its own confirmed child", async context => {
+  const current = await creationFixture(undefined, { id: 7, code: "OT-COR-7", equipment: null }); context.after(() => current.hooks.unmount());
+  assert.match(current.key(), /:maintenance:7$/);
+  current.review(); action(current.render(), "Confirmar y crear").onPress(); await settle();
+  assert.equal(current.submitted[0].kind === "work" && current.submitted[0].maintenanceId, 7);
+  current.submit.resolve({ ...result, groupId: "maintenance-7" }); await settle();
+  assert.equal(current.created.length, 1); assert.equal(current.created[0].groupId, "maintenance-7");
+});
 
 for (const kind of ["work", "maintenance", "non_productive"] as const) test(`${kind}: can create multiple distinct requests after queue handoff without deleting the original`, async t => {
   const previousForm = { ...form, motive: "Revisar motor", equipment: { id: 4, label: "Camion" } };
@@ -122,9 +167,9 @@ for (const kind of ["work", "maintenance", "non_productive"] as const) test(`${k
     const fields = elements<{ form: CreationForm; onChange: (field: keyof CreationForm, value: CreationForm[keyof CreationForm]) => void }>(fixture.render(), "CreationFields")[0].props;
     fields.onChange("title", `Trabajo distinto ${index}`); fields.onChange("summary", "Alcance nuevo"); fields.onChange("motive", "Motivo nuevo"); fields.onChange("equipment", { id: 4, label: "Camion" });
     action(fixture.render(), "Continuar a horario").onPress();
-    const times = elements<TimeFieldProps>(fixture.render(), "TimeField");
-    times[0].props.onChange("11:00"); times[1].props.onChange("12:00");
-    action(fixture.render(), "Revisar solicitud").onPress();
+    const times = elements<ComponentProps<typeof CreationScheduleFields>>(fixture.render(), "CreationScheduleFields")[0].props;
+    times.onChange("startTime", "11:00"); times.onChange("endTime", "12:00");
+    action(fixture.render(), "Revisar creación").onPress();
     assert.equal(fixture.submitted.length, index - 1);
     const confirm = action(fixture.render(), "Confirmar y crear"); confirm.onPress(); confirm.onPress(); await settle();
     assert.equal((await store.read())?.phase, "queued");
@@ -209,7 +254,7 @@ test("header back traverses creation steps while list exit retains the draft gua
   const fixture = await creationFixture(); t.after(() => fixture.hooks.unmount());
   fixture.review();
   action(fixture.render(), "Volver conservando borrador").onPress();
-  assert.ok(action(fixture.render(), "Revisar solicitud"));
+  assert.ok(action(fixture.render(), "Revisar creación"));
   assert.equal(fixture.backs(), 0);
   action(fixture.render(), "Volver conservando borrador").onPress();
   assert.ok(action(fixture.render(), "Continuar a horario"));
@@ -256,7 +301,7 @@ for (const phase of ["queued", "confirmed"] as const) {
     complete(f); await settle();
     f.controls.gate.reject(new Error("DISK_FULL")); await settle();
     assert.equal(f.queued.length + f.created.length, 0);
-    assert.match(alerts(f.render()), /No vuelvas a crearla/);
+    assert.match(alerts(f.render()), /No vuelvas a crearla|No la repitas/);
     save.onPress(); assert.equal(f.submitted.length, 1);
     f.controls.hold = undefined;
     const fallback = action(f.render(), label); fallback.onPress(); fallback.onPress(); await settle();
@@ -319,7 +364,7 @@ test("pending persistence failure never submits and retry preserves the original
   f.controls.gate.reject(new Error("DISK_FULL")); await settle();
   assert.equal(f.submitted.length, 0); assert.equal(f.queued.length, 0);
   f.controls.hold = undefined;
-  action(f.render(), "Reintentar misma solicitud").onPress(); await settle();
+  action(f.render(), "Reintentar creación").onPress(); await settle();
   assert.equal(f.submitted.length, 1); assert.deepEqual(f.submitted[0], input);
   f.submit.reject(new OfflineQueuedError(outcome)); await settle();
   assert.equal(f.queued.length, 1);
@@ -399,17 +444,17 @@ test("wizard Next still validates synchronously and never calls submission", asy
 test("clock onChange edits the creation draft only; invalid end time still blocks review and valid times require explicit create", async t => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount());
   action(f.render(), "Continuar a horario").onPress();
-  let fields = elements<TimeFieldProps>(f.render(), "TimeField");
-  assert.equal(fields.length, 2);
-  assert.equal(fields[0].props.value, "09:00");
-  fields[0].props.onChange("23:00"); fields[1].props.onChange("00:07");
+  let fields = elements<ComponentProps<typeof CreationScheduleFields>>(f.render(), "CreationScheduleFields");
+  assert.equal(fields.length, 1);
+  assert.equal(fields[0].props.form.startTime, "09:00");
+  fields[0].props.onChange("startTime", "23:00"); fields[0].props.onChange("endTime", "00:07");
   assert.equal(f.submitted.length, 0); assert.equal(f.queued.length + f.created.length, 0);
-  action(f.render(), "Revisar solicitud").onPress();
+  action(f.render(), "Revisar creación").onPress();
   assert.match(alerts(f.render()), /Revisa los campos/);
-  fields = elements<TimeFieldProps>(f.render(), "TimeField");
-  assert.equal(fields.length, 2); assert.equal(fields[1].props.value, "00:07");
-  fields[1].props.onChange("23:59");
-  action(f.render(), "Revisar solicitud").onPress();
+  fields = elements<ComponentProps<typeof CreationScheduleFields>>(f.render(), "CreationScheduleFields");
+  assert.equal(fields.length, 1); assert.equal(fields[0].props.form.endTime, "00:07");
+  fields[0].props.onChange("endTime", "23:59");
+  action(f.render(), "Revisar creación").onPress();
   assert.equal(f.submitted.length, 0);
   const confirm = action(f.render(), "Confirmar y crear"); confirm.onPress(); confirm.onPress(); await settle();
   assert.equal(f.submitted.length, 1);

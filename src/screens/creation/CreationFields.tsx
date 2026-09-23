@@ -20,12 +20,14 @@ interface Props {
   errors: CreationFormErrors;
   options: CreationOptions;
   disabled: boolean;
+  editing?: boolean;
+  specialtyLocked?: boolean;
   equipmentLookup: ReactNode;
   onChange: <Key extends keyof CreationForm>(field: Key, value: CreationForm[Key]) => void;
   onSelectCatalog: (resource: "equipment" | "specialties") => void;
 }
 
-export function CreationFields({ kind, form, errors, options, disabled, equipmentLookup, onChange, onSelectCatalog }: Props) {
+export function CreationFields({ kind, form, errors, options, disabled, editing = false, specialtyLocked = false, equipmentLookup, onChange, onSelectCatalog }: Props) {
   return <View style={styles.fields}>
     {kind === "maintenance" ? <>
       <Text style={styles.label}>Tipo de mantenimiento *</Text>
@@ -48,8 +50,8 @@ export function CreationFields({ kind, form, errors, options, disabled, equipmen
         {options.priorities.map((priority) => <CreationChoice key={priority} label={priorityLabels[priority]} selected={form.priority === priority} disabled={disabled} onPress={() => onChange("priority", priority)} />)}
       </View>
       <Text style={styles.label}>Especialidad (opcional)</Text>
-      <Button title={form.specialty?.label ?? "Seleccionar especialidad"} variant="secondary" icon="construct-outline" disabled={disabled} onPress={() => onSelectCatalog("specialties")} />
-      {form.specialty ? <Button title="Quitar especialidad" variant="ghost" disabled={disabled} onPress={() => onChange("specialty", null)} /> : null}
+      <Button title={form.specialty?.label ?? "Seleccionar especialidad"} variant="secondary" icon="construct-outline" disabled={disabled || specialtyLocked} onPress={() => onSelectCatalog("specialties")} />
+      {form.specialty && !specialtyLocked ? <Button title="Quitar especialidad" variant="ghost" disabled={disabled} onPress={() => onChange("specialty", null)} /> : null}
       {kind === "maintenance" ? <>
         <Text style={styles.label}>Tipo de daño (opcional)</Text>
         <View style={styles.choices} accessibilityRole="radiogroup">
@@ -57,7 +59,7 @@ export function CreationFields({ kind, form, errors, options, disabled, equipmen
           <CreationChoice label="Operacional" selected={form.damageType === "operacional"} disabled={disabled} onPress={() => onChange("damageType", "operacional")} />
           <CreationChoice label="Desgaste" selected={form.damageType === "desgaste"} disabled={disabled} onPress={() => onChange("damageType", "desgaste")} />
         </View>
-      </> : <Text style={styles.hint}>Se crea un trabajo propio independiente; no una OT comercial.</Text>}
+      </> : !editing ? <Text style={styles.hint}>Se crea un trabajo propio independiente; no una OT comercial.</Text> : null}
     </> : <>
       <Text style={styles.label}>Motivo *</Text>
       <View style={styles.reasons} accessibilityRole="radiogroup">

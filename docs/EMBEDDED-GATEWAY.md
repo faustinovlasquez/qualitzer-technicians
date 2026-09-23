@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.22
+# @qualitzer/mobile-gateway 1.0.25
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,13 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.22. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.25. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.25 permite crear un trabajo dentro de un mantenimiento existente: `kind: "work"` con `maintenanceId` positivo, sin equipo enviado por el cliente. Comprueba que la respuesta conserve exactamente ese padre. El backend autoriza al tecnico, hereda el equipo y crea el hijo y su planificacion en una transaccion. Requiere desplegar MobileCreation y su proyeccion de asignaciones del backend; no hay migracion nueva. La APK1.0.53 usa este flujo solo online, con UUID y borrador aislado por OT; las creaciones independientes y sus colas siguen iguales.
+
+1.0.24 acepta WORK_CREATED, ORDER_CREATED y WORK_UPDATED en ubicaciones por acciones. Requiere actualizar IWorkerLocation y WorkerLocationValidation del backend antes de instalar la APK1.0.51. Mantiene consentimiento, validacion por usuario/sucursal, puntos legacy, timer, checklist, completion y recibos. Sin migracion nueva.
+
+1.0.23 incorpora GET/PATCH de edicion de trabajo en assignments/:groupId/works/:workId/edit, con autorizacion de asignacion, revision esperada, validacion de recurso y respuesta. Requiere los endpoints PanelWorkEdit del backend. Edicion online, sin alterar timer, checklist, completion ni colas. El equipo de mantenimiento es heredado y no se cambia desde el hijo.
 
 1.0.22 acepta ubicacion de acciones (`kind: action`, consentimiento 2, accion, recurso, instante y estado CONFIRMED/QUEUED; QUEUED requiere UUID de operacion). Conserva puntos antiguos consentimiento1, recibos, timer, checklist y completion. Backend workerLocations debe publicarse con este contrato antes del gateway; la tabla existente admite los campos extendidos en payload JSON, sin migracion nueva. Usuario/trabajador/sucursal siguen derivados y revalidados. Eventos reportados por dispositivo no prueban por si solos presencia ni ejecucion del comando.
 

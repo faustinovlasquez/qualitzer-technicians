@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
+import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, workEditInputSchema, type WorkEditDocument, type WorkEditInput, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
 import type { Assignments } from "../../domain/models";
 import type { OfflineSnapshot } from "../../domain/offline";
 import { buildWeeklySchedule, scheduleTimeMinutes } from "../../domain/weeklySchedule";
@@ -7,9 +7,10 @@ import { queuedCreationOutcomeSchema } from "../offline/offlineUi";
 
 const draftText = (max: number) => z.string().max(max).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/);
 export const creationFormSchema = z.object({
+  maintenanceId: positiveCreationIdSchema.optional(),
   title: draftText(255), summary: draftText(5000), motive: draftText(5000),
   priority: creationPrioritySchema, maintenanceType: z.enum(["correctivo", "detencion"]),
-  equipment: z.object({ id: positiveCreationIdSchema, label: draftText(500) }).strict().nullable(),
+  equipment: z.object({ id: positiveCreationIdSchema, label: draftText(500), internalNumber: draftText(500).nullish(), identifier: draftText(500).nullish(), equipmentType: draftText(500).nullish() }).strict().nullable(),
   specialty: z.object({ id: positiveCreationIdSchema, label: draftText(500) }).strict().nullable(),
   damageType: z.enum(["", "operacional", "desgaste"]), reason: nonProductiveReasonSchema,
   reasonText: draftText(500), initialComment: draftText(5000),
@@ -27,9 +28,9 @@ export function emptyCreationForm(initialDate: string): CreationForm {
 export function creationPayload(kind: CreationKind, form: CreationForm, companyBranchId: number, clientRequestId: string): CreationInput {
   const base = { companyBranchId, clientRequestId, schedule: { date: form.date, startTime: form.startTime, endTime: form.endTime } };
   const specialty = form.specialty ? { specialtyId: form.specialty.id } : {};
-  if (kind === "work") return creationInputSchema.parse({ ...base, kind, work: {
+  if (kind === "work") return creationInputSchema.parse({ ...base, kind, ...(form.maintenanceId ? { maintenanceId: form.maintenanceId } : {}), work: {
     title: form.title, summary: form.summary.trim(), priority: form.priority, ...specialty,
-    ...(form.equipment ? { rentalEquipmentId: form.equipment.id } : {}),
+    ...(form.equipment && !form.maintenanceId ? { rentalEquipmentId: form.equipment.id } : {}),
   } });
   if (kind === "maintenance") return creationInputSchema.parse({ ...base, kind, maintenance: {
     type: form.maintenanceType, title: form.title, motive: form.motive, equipmentId: form.equipment?.id, priority: form.priority,
@@ -130,4 +131,19 @@ export function creationConflictPreview(data: Assignments | null, schedule: Crea
   const overlaps = [...new Set(weekly.days.flatMap((day) => day.blocks.filter((block) => block.startMinute < end && block.endMinute > start).map((block) => block.work.title)))];
   return { overlaps, generatedAt: data.generatedAt,
     message: `${overlaps.length ? "Hay horarios superpuestos en las asignaciones cargadas. Puedes continuar." : "Sin superposiciones en los horarios cargados."} ${weekly.unscheduled.length ? "Hay trabajos sin horario comparable; revisión incompleta. " : ""}Es una advertencia local, no una confirmación de disponibilidad del servidor.` };
+}
+
+export function workEditForm(document: WorkEditDocument): CreationForm {
+  return { ...emptyCreationForm(document.fields.schedule.date), title: document.fields.title, summary: document.fields.summary,
+    priority: document.fields.priority, equipment: document.equipment, specialty: document.specialty,
+    startTime: document.fields.schedule.startTime, endTime: document.fields.schedule.endTime };
+}
+
+export function workEditPayload(document: WorkEditDocument, form: CreationForm): WorkEditInput {
+  return workEditInputSchema.parse({ expectedRevision: document.revision, fields: {
+    title: form.title, summary: form.summary, priority: form.priority,
+    specialtyId: document.equipmentInherited ? document.fields.specialtyId : form.specialty?.id ?? null,
+    rentalEquipmentId: document.equipmentInherited ? document.fields.rentalEquipmentId : form.equipment?.id ?? null,
+    schedule: document.scheduleEditable ? { date: form.date, startTime: form.startTime, endTime: form.endTime, endDateOffset: 0 } : document.fields.schedule,
+  } });
 }

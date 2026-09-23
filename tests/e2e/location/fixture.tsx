@@ -14,6 +14,7 @@ import type { LocationHistoryResource } from "../../../src/domain/locationTracki
 import { EquipmentLocationPanel } from "../../../src/location/EquipmentLocationPanel";
 import { DeviceSecurityContext, type DeviceSecurityUi } from "../../../src/security/DeviceSecurityContext";
 import type { EquipmentLocation, EquipmentLocationUpdate } from "../../../src/domain/equipmentLocation";
+import { WorkEditFixture, EquipmentPickerFixture } from "./WorkEditFixture";
 
 declare global { interface Window { locationFixture: { allow: boolean; prompts: number; confirm?: () => void; saves: unknown[]; offline: boolean; defer: boolean; reads: Array<{ date: string; page: number; resource?: LocationHistoryResource }>; resolves: Array<() => void>; maps: string[]; equipmentSaves: EquipmentLocationUpdate[]; conflict: boolean; failSave: boolean }; } }
 window.locationFixture = { allow: true, prompts: 0, saves: [], offline: false, defer: false, reads: [], resolves: [], maps: [], equipmentSaves: [], conflict: false, failSave: false };
@@ -34,6 +35,8 @@ const point = locationPointSchema.parse({ id: "00000000-0000-4000-8000-000000000
 function Fixture() {
   const params = new URLSearchParams(location.search);
   const mode = params.get("view") ?? "profile";
+  if (mode === "work-edit") return <WorkEditFixture />;
+  if (mode === "equipment-picker") return <EquipmentPickerFixture />;
   const maintenance = params.get("kind") === "maintenance" || mode === "maintenance";
   const [success, setSuccess] = useState(true);
   const started = { ...point, kind: "action" as const, action: "WORK_PAUSED" as const, actionState: "CONFIRMED" as const, consentVersion: 2 as const, groupId: "maintenance-5", workId: 7 };

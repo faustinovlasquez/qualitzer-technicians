@@ -11,6 +11,8 @@ import type { LocationPoint } from "./locationTracking";
 
 export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort> {
   equipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget): Promise<import("./equipmentLocation").EquipmentLocation>;
+  workEdit?(scope: WorkScope): Promise<import("./creation").WorkEditDocument>;
+  updateWork?(scope: WorkScope, input: import("./creation").WorkEditInput): Promise<import("./creation").WorkEditDocument>;
   updateEquipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget, input: import("./equipmentLocation").EquipmentLocationUpdate): Promise<import("./equipmentLocation").EquipmentLocation>;
   uploadLocations?(companyBranchId: number, points: LocationPoint[], expectedActor: { userId: number; workerId: number }): Promise<{ acceptedIds: string[] }>;
   locationHistory?(companyBranchId: number, date: string, page: number, resource?: import("./locationTracking").LocationHistoryResource): Promise<import("zod").infer<typeof import("./locationTracking").locationHistorySchema>>;

@@ -24,8 +24,8 @@ Archivos nuevos solamente. No se modifica App, hooks, dominio, autenticación, g
 
 - Solo formularios validados, IDs de catálogo y el cuerpo/resultado canónico; no se almacenan objetos User, Tenant, sesión, token, costos ni credenciales. Los textos del formulario se guardan localmente: la UI pide no incluir información sensible. AsyncStorage no es una bóveda cifrada.
 - UUID nuevo al confirmar un nuevo payload lógico. Antes de POST se persiste el cuerpo exacto. Si persistir falla, no se envía.
-- Cualquier resultado incierto bloquea campos y conserva cuerpo/UUID, también después de reabrir. **Reintentar misma solicitud** envía ese cuerpo sin reconstruirlo.
-- **Editar como nueva solicitud** requiere advertencia explícita de posible duplicado y elimina la solicitud anterior solo por esa acción.
+- Cualquier resultado incierto bloquea campos y conserva cuerpo/UUID, también después de reabrir. **Reintentar creación** envía ese cuerpo sin reconstruirlo.
+- **Editar como nueva creación** requiere advertencia explícita de posible duplicado. La interfaz no presenta la creación como una solicitud de aprobación.
 - Confirmación en memoria antes de persistencia: un error local de disco o del callback no permite reenviar. Si se recupera un pending tras fallo de disco, el replay conserva el UUID original.
 - Borradores corruptos bloquean creación hasta descarte explícito; nunca se pierde silenciosamente un UUID incierto.
 - El calendario es un selector accesible React Native compartido por web/iOS/Android, sin paquete adicional de fechas. También admite texto YYYY-MM-DD; horas HH:mm de 24 horas.

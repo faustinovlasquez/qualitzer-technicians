@@ -1,5 +1,5 @@
     const wiring = [
-      ["src/screens/creation/CreationScreen.tsx", [["Hora de inicio (opcional)", 'form.startTime', '(value) => change("startTime", value)'], ["Hora de fin (opcional)", 'form.endTime', '(value) => change("endTime", value)']]],
+      ["src/screens/creation/CreationScheduleFields.tsx", [["Hora de inicio (opcional)", 'form.startTime', 'value => onChange("startTime", value)'], ["Hora de fin (opcional)", 'form.endTime', 'value => onChange("endTime", value)']]],
       ["src/screens/workDetail/CompletionDialog.tsx", [["Inicio real (HH:mm)", "start", "(value) => { edited.current = true; setStart(value); }"], ["Término real (HH:mm)", "end", "(value) => { edited.current = true; setEnd(value); }"]]],
       ["src/screens/notifications/NotificationSettingsScreen.tsx", [["Desde", "preferences.quietHoursStart", "(quietHoursStart) => update({ quietHoursStart })"], ["Hasta", "preferences.quietHoursEnd", "(quietHoursEnd) => update({ quietHoursEnd })"]]],
     ];
@@ -56,6 +56,57 @@
       assert.deepEqual((await metrics()).clockCalls,[...previous,{label,value:hour+":"+minute}],"exactly one original consumer onChange after confirmation");
     }
     for (const width of [360,390,1280]) for(const scale of [1,2]) {
+      await check(`maintenance-dock-${width}-${scale}`, async () => {
+        await page.setViewportSize({ width, height: 900 });
+        await fresh("maintenance-dock", scale);
+        const dock = page.getByTestId("maintenance-action-dock");
+        await dock.getByRole("button", { name: "Crear trabajo", exact: true }).waitFor();
+        const before = await dock.boundingBox();
+        assert(before && before.y + before.height <= 901);
+        assert.equal(await page.getByText("Entrega de OT", { exact: true }).count(), 0);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+        await button("Iniciar OT").click();
+        await page.getByText("Iniciar OT de mantenimiento", { exact: true }).waitFor();
+        await button("Cancelar").last().click();
+        await button("Entregar OT").click();
+        await page.getByText("Antes de entregar la OT", { exact: true }).waitFor();
+        await button("Cancelar").last().click();
+        await page.getByRole("tab", { name: "Archivos", exact: true }).click();
+        await button("Crear trabajo").waitFor();
+        const after = await dock.boundingBox(); assert(after && after.y + after.height <= 901);
+        await screenshot(`maintenance-dock-files-${width}-${scale}`);
+        await button("Crear trabajo").click();
+        await page.getByRole("textbox", { name: "Título *", exact: true }).fill("Trabajo hijo nuevo");
+        assert.equal(await button("Asociar equipo").count(), 0);
+        await button("Continuar a horario").click(); await button("Revisar creación").click();
+        await page.evaluate(() => { window.maintenanceDock.failRead = true; });
+        await button("Confirmar y crear").click();
+        await page.getByText(/La creación está confirmada. No se pudo abrir/).waitFor();
+        assert.equal(await page.evaluate(() => window.maintenanceDock.inputs.length), 1);
+        await page.evaluate(() => { window.maintenanceDock.failRead = false; });
+        await button("Gestionar trabajo").click();
+        await button("Crear trabajo").waitFor();
+        await page.getByText("Trabajo hijo nuevo", { exact: true }).waitFor();
+        for (const name of ["Iniciar OT", "Entregar OT", "Crear trabajo"]) {
+          const fits = await dock.getByRole("button", { name, exact: true }).evaluate(element => {
+            const outer = element.getBoundingClientRect();
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+              for (let offset = 0; offset < node.length; offset++) {
+                if (!node.textContent[offset].trim()) continue;
+                const range = document.createRange(); range.setStart(node, offset); range.setEnd(node, offset + 1);
+                for (const rect of range.getClientRects()) if (rect.left < outer.left || rect.right > outer.right || rect.bottom > outer.bottom) return false;
+              }
+            }
+            return true;
+          });
+          assert.equal(fits, true, name + " text bounds");
+        }
+        const inputs = await page.evaluate(() => window.maintenanceDock.inputs);
+        assert.equal(inputs.length, 1); assert.equal(inputs[0].maintenanceId, 369); assert.equal(inputs[0].work.rentalEquipmentId, undefined);
+        await screenshot(`maintenance-dock-created-${width}-${scale}`);
+      });
       const label=`${width}x844-font${scale*100}`;await page.setViewportSize({width,height:844});
       await check(label+"-checklist-summary", async () => {
         await fresh("checklist-summary", scale);
@@ -157,7 +208,7 @@
             assert.equal(await page.getByText(/cobertura cargada|Datos cargados:|Sin superposiciones|no confirma disponibilidad/).count(),0);
             assert.equal(await warning.count(),screen==="creation-overlap"?1:0);
             if(screen==="creation-overlap")assert.equal(await page.getByText(/Trabajo coincidente/).count(),1);
-            const action=button(stage==="schedule"?"Revisar solicitud":"Confirmar y crear");
+            const action=button(stage==="schedule"?"Revisar creación":"Confirmar y crear");
             assert.equal(await action.isEnabled(),true);
             await action.scrollIntoViewIfNeeded();
             if(screen==="creation"||screen==="creation-overlap")await screenshot(label+"-"+screen+"-"+stage);
@@ -185,7 +236,7 @@
             await page.getByRole("textbox",{name:"Resumen del trabajo (opcional)",exact:true}).fill("Revision adicional");
             await button("Continuar a horario").click();
             await clockChange("Hora de inicio (opcional)","11","00");await clockChange("Hora de fin (opcional)","12","00");
-            await button("Revisar solicitud").click();
+            await button("Revisar creación").click();
             assert.equal((await metrics()).calls.filter(call=>call.name==="create").length,index-1);
             await button("Confirmar y crear").click();await page.getByRole("heading",{name:"Guardado · pendiente de sincronizar",exact:true}).waitFor();
             const state=await metrics();assert.equal(state.creationQueue.length,index+1);assert.deepEqual(state.creationQueue[0],originalQueue[0]);
@@ -203,13 +254,13 @@
         await fresh("creation",scale);
         await button("Continuar a horario").click();
         await button("Quitar hora de inicio").click();await button("Quitar hora de fin").click();
-        await button("Revisar solicitud").click();await page.getByText(/Sin duración prevista/).waitFor();
+        await button("Revisar creación").click();await page.getByText(/Sin duración prevista/).waitFor();
         assert.deepEqual((await metrics()).calls,[]);
         await fresh("creation-queued",scale);await button("Crear otro").click();
         await page.getByRole("textbox",{name:"Título *",exact:true}).fill("Trabajo sin horario");
         assert.equal(await page.getByRole("textbox",{name:"Resumen del trabajo (opcional)",exact:true}).inputValue(),"");
         await button("Continuar a horario").click();await screenshot(label+"-creation-optional-schedule");
-        await button("Revisar solicitud").click();await screenshot(label+"-creation-optional-review");
+        await button("Revisar creación").click();await screenshot(label+"-creation-optional-review");
         await button("Confirmar y crear").click();await page.getByRole("heading",{name:"Guardado · pendiente de sincronizar",exact:true}).waitFor();
         const state=await metrics();const operation=state.creationQueue.at(-1);
         assert.equal(operation.input.work.summary,"");

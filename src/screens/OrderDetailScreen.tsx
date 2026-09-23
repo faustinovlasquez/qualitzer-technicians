@@ -23,6 +23,7 @@ import { OfflineOrderLifecyclePanel } from "./offline/OfflineOrderLifecyclePanel
 import { offlineAttachment, operationsForWork, type PendingDocument } from "./offline/offlineUi";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import type { UserSignatureAccess } from "../domain/userSignatures";
+import { CreationScreen, type CreationScreenProps } from "./creation/CreationScreen";
 
 export interface OrderDetailScreenProps {
   group: AssignmentGroup;
@@ -37,6 +38,8 @@ export interface OrderDetailScreenProps {
   onBack: () => void;
   onHome?: () => void;
   onLocationHistory?: () => void;
+  onCreateWork?: () => void;
+  creation?: Pick<CreationScreenProps, "user" | "onLoadOptions" | "onSubmit" | "onCreated">;
   onOpenWork: (group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions) => void;
   onWorkStatus: (group: AssignmentGroup, work: AssignmentWork, input: StatusInput) => Promise<void>;
   onRefresh: () => Promise<void>;
@@ -74,6 +77,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const { group, tenant, branchName, mode, busy, initialTab = "works", onBack, onOpenWork, onWorkStatus, onRefresh } = props;
   const [tab, setTab] = useState<OrderTab>(initialTab);
   const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const history = useRef<OrderTab[]>(initialTab === "works" ? [] : ["works"]);
   const childBack = useRef<((home?: boolean) => boolean) | null>(null);
   const [deliverySucceeded, setDeliverySucceeded] = useState(false);
@@ -177,6 +181,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
 
   const lifecycleProps = {
     group, tenant, technicianName: props.technicianName, storageKey: props.storageKey, mode, busy: locked,
+    dock: true,
+    onCreateWork: props.creation || props.onCreateWork ? () => { if (!locked && executionAvailable && !childBack.current?.(true)) { if (props.creation) setCreating(true); else props.onCreateWork?.(); } } : undefined,
     signatureAccess: props.signatureAccess,
     deliveryIntent: props.deliveryIntent,
     onDeliveryIntentConsumed: props.onDeliveryIntentConsumed,
@@ -185,23 +191,25 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     onDeliver: (input: MaintenanceDeliveryInput) => runOperation("deliver", () => props.onDeliver(input)),
   };
 
+  if (creating && props.creation && props.companyBranchId) return <CreationScreen kind="work" {...props.creation}
+    tenant={tenant} connectionStatus={props.connectionStatus} companyBranchId={props.companyBranchId} initialDate={props.range?.startDate ?? group.scheduledDate}
+    data={null} offline={props.offline} mode={mode} busy={busy} storageKey={props.storageKey}
+    parentMaintenance={{ id: Number(group.id.slice("maintenance-".length)), code: workOrderCode ?? group.code, equipment: group.equipment }}
+    onBack={() => setCreating(false)} onCreated={async result => { await props.creation?.onCreated?.(result); if (mounted.current) { setTab("works"); history.current = []; setCreating(false); } }} />;
   return <SafeAreaView style={styles.safe}>
     {deliverySucceeded ? <DeliverySuccess title="Mantenimiento entregado" name={plainText(group.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
     <SessionContextBar tenant={tenant} branchName={branchName}>{props.connectionStatus}</SessionContextBar>
     <View style={styles.header}>
-      <Text style={styles.headerTitle}>{direct ? "Detalle de asignación" : group.type === "internal_maintenance" ? "Mantenimiento" : "Detalle de OT"}</Text>
       <View style={styles.headerControls}>
       <IconButton name="arrow-back-outline" label="Volver al paso anterior" disabled={locked} onPress={goBack} />
       <View style={styles.headerCopy}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={styles.codes}>
           {localGroup ? <Badge label="Pendiente de sincronizar" tone="warning" /> : null}
           {localGroup && group.code.trim() ? <Badge label={plainText(group.code)} /> : null}
-          {workOrderCode ? <Badge label={workOrderCode} tone="teal" /> : null}
+          {workOrderCode ? <Text numberOfLines={1} style={styles.orderCode}>{workOrderCode}</Text> : null}
         </ScrollView>
       </View>
       <IconButton name="home-outline" label="Ir a mi jornada" disabled={locked} onPress={() => leaveDetails(true)} />
-      <IconButton name="ellipsis-horizontal" label="Opciones de la orden" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) setSectionsOpen(true); }} />
-      {props.onLocationHistory ? <IconButton name="location-outline" label="Mi historial de ubicación" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) props.onLocationHistory?.(); }} /> : null}
       <IconButton name="refresh-outline" label="Actualizar orden y trabajos" disabled={locked} onPress={refresh} />
       </View>
       <Text numberOfLines={1} style={styles.headerSubtitle}>{plainText(group.title)}</Text>
@@ -221,6 +229,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           <Text style={[styles.tabText, tab === item.id && styles.tabTextSelected]}>{item.label}{item.id === "works" ? ` (${group.works.length})` : item.id === "materials" ? ` (${group.products.length})` : ""}</Text>
         </Pressable>)}
       </ScrollView>
+      <IconButton name="ellipsis-horizontal" label="Opciones de la orden" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) setSectionsOpen(true); }} />
+      {props.onLocationHistory ? <IconButton name="location-outline" label="Mi historial de ubicación" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) props.onLocationHistory?.(); }} /> : null}
     </View>
     <View style={[styles.screen, tab === "files" && styles.hidden]} testID="order-details-scroll-container">
     <ScrollView
@@ -236,9 +246,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       {!online ? <Notice message={props.offline === null ? "Recuperando la cola local. Espera antes de guardar cambios." : props.offline?.authBlocked ? "La sesión requiere verificación. Los cambios locales se conservan; no se pueden guardar nuevas operaciones." : "Sin conexión verificada. Puedes guardar archivos, comentarios y cambios del cronómetro en la cola local. Eliminar y entregar requieren conexión; el cronómetro no avanza en esta vista."} tone="warning" /> : null}
       {props.staleReadOnly ? <Notice message="La ficha actual aún no está verificada. Actualiza los datos y permisos antes de ejecutar. Los borradores se conservan; esto no indica que la OT esté cerrada." tone="warning" /> : null}
       {tab === "works" ? <View style={styles.stack}>
-        <Card><AssignmentOrderSummary group={group} /></Card>
-        {props.offline === undefined && !localGroup && !props.staleReadOnly ? <OrderLifecyclePanel {...lifecycleProps} /> : <OfflineOrderLifecyclePanel {...lifecycleProps} offline={props.offline ?? null} staleReadOnly={props.staleReadOnly} />}
-        <SectionTitle title={`Trabajos asignados (${group.works.length})`} subtitle="Todos los trabajos recibidos para esta orden, incluidas las asignaciones heredadas del equipo. Los filtros de la jornada no recortan esta lista." />
+        {group.type !== "internal_maintenance" ? <Card><AssignmentOrderSummary group={group} /></Card> : null}
+        <SectionTitle title={`Trabajos asignados (${group.works.length})`} />
         {group.works.length === 0 ? <Card><EmptyState title="Sin trabajos asignados" message="No se recibieron trabajos para esta orden. Actualiza la información para consultar cambios." icon="construct-outline" /></Card> : group.works.map((work) => <AssignmentWorkCard
           key={JSON.stringify([group.type, group.id, work.workType, work.id])}
           group={group}
@@ -285,6 +294,9 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           onDelete={(fileId: string) => runOperation("delete", () => props.onDeleteFile(fileId))}
         />
       </View> : null}
+    {group.type === "internal_maintenance" ? <View style={styles.actionDock} testID="maintenance-action-dock">
+      {props.offline === undefined && !localGroup && !props.staleReadOnly ? <OrderLifecyclePanel {...lifecycleProps} /> : <OfflineOrderLifecyclePanel {...lifecycleProps} offline={props.offline ?? null} staleReadOnly={props.staleReadOnly} />}
+    </View> : null}
     {sectionsOpen ? <Modal visible transparent animationType="fade" onRequestClose={() => setSectionsOpen(false)}>
       <View style={styles.menuOverlay}><ScrollView style={styles.menu} contentContainerStyle={styles.menuContent} accessibilityViewIsModal>
         <SectionTitle title="Secciones de la orden" />
@@ -308,10 +320,12 @@ const styles = StyleSheet.create({
   header: { gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: palette.surface },
   headerControls: { flexDirection: "row", alignItems: "center", gap: 4 },
   headerCopy: { flex: 1, minWidth: 0 },
+  orderCode: { ...typography.label, color: palette.primary, backgroundColor: palette.primarySoft, padding: 8 },
+  actionDock: { flexShrink: 0, padding: 12, borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
   headerTitle: { ...typography.label, color: palette.navy, fontWeight: "700" },
   headerSubtitle: { ...typography.caption, color: palette.textSecondary, flexShrink: 1 },
   codes: { flexDirection: "row", alignItems: "center", gap: 6 },
-  tabsContainer: { backgroundColor: palette.surface, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: palette.border },
+  tabsContainer: { flexDirection: "row", alignItems: "center", backgroundColor: palette.surface, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: palette.border },
   tabs: { flexGrow: 1, gap: 6, paddingHorizontal: 16 },
   tab: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 12, paddingVertical: 12, borderRadius: radius.sm, backgroundColor: palette.track },
   tabSelected: { backgroundColor: palette.navy },

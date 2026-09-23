@@ -58,13 +58,14 @@ export function LocationHistoryPanel({ tracking, initialDate, resource, onConfig
   return <View style={styles.section} testID="location-history">
     <View style={styles.row}>
       <Button title={new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`))} icon="calendar-outline" variant="secondary" onPress={() => setCalendar(true)} />
-      <IconButton name="refresh-outline" label="Actualizar historial" disabled={!current} onPress={() => setRevision(value => value + 1)} />
+      <IconButton name="refresh-outline" label="Actualizar historial" disabled={!current} onPress={() => { void Promise.resolve(tracking.synchronize?.()).catch(() => {}).finally(() => setRevision(value => value + 1)); }} />
     </View>
     {resource ? <View style={styles.choices}>
       <ChoiceButton label={resource.workId === undefined ? "Acciones de esta orden" : "Acciones de este trabajo"} selected={related} onPress={() => { setRelated(true); setPage(0); setLocalPage(0); }} />
       <ChoiceButton label="Mis acciones del día" selected={!related} onPress={() => { setRelated(false); setPage(0); setLocalPage(0); }} />
     </View> : null}
     <BodyText>Mi ubicación · {tracking.timezone}</BodyText>
+    <BodyText>Fecha de la acción: {date}</BodyText>
     <BodyText>{locationTrackingStatus(tracking.state)}</BodyText>
     {tracking.error ? <Text accessibilityRole="alert" style={styles.error}>{tracking.error}</Text> : null}
     {onConfigure ? <Button title="Configurar ubicación" icon="settings-outline" variant="secondary" disabled={tracking.busy} onPress={onConfigure} /> : null}

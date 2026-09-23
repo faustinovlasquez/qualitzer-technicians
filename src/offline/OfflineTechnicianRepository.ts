@@ -71,6 +71,14 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     if (!this.remote.equipmentLocation) throw new Error("La ubicación del equipo no está disponible.");
     return this.remote.equipmentLocation(scope, target);
   }, scope);
+  workEdit: NonNullable<TechnicianRepository["workEdit"]> = scope => this.onlineOnly(() => {
+    if (!this.remote.workEdit) throw new Error("Actualiza el servidor para editar trabajos.");
+    return this.remote.workEdit(scope);
+  }, scope);
+  updateWork: NonNullable<TechnicianRepository["updateWork"]> = (scope, input) => this.onlineOnly(() => {
+    if (!this.remote.updateWork) throw new Error("Actualiza el servidor para editar trabajos.");
+    return this.remote.updateWork(scope, input);
+  }, scope);
   updateEquipmentLocation: NonNullable<TechnicianRepository["updateEquipmentLocation"]> = (scope, target, input) => this.onlineOnly(() => {
     if (!this.remote.updateEquipmentLocation) throw new Error("La edición de ubicación no está disponible.");
     return this.remote.updateEquipmentLocation(scope, target, input);
@@ -302,6 +310,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   async createRecord(input: CreationInput): Promise<CreationResult> {
     const parsed = creationInputSchema.parse(input);
     this.branch(parsed.companyBranchId);
+    if (parsed.kind === "work" && parsed.maintenanceId !== undefined) return this.onlineOnly(() => this.remote.createRecord(parsed));
     const operation: OfflineOperation = { ...this.base(parsed.clientRequestId), kind: "create", input: parsed, localGroupId: `local-${parsed.clientRequestId}`, localWorkId: `local-${parsed.clientRequestId}` };
     let registered = await this.engine.enqueue([operation]);
     if (this.getSnapshot().online && registered.some(item => item.status === "pending" || item.status === "syncing")) {
