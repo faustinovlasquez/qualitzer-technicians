@@ -1,5 +1,10 @@
 # Actualizacion 1.0.56: acciones de OT compactas
 
+Nota posterior: gateway 1.0.27 agrega un diagnostico preciso al abrir Editar
+trabajo con una respuesta incompatible. La APK1.0.56 no cambia. El fallo real
+reportado aun requiere el mensaje de ese diagnostico; no se da por corregido.
+Ver la guia de despliegue del gateway. El resto describe la entrega original.
+
 Android versionCode 57, misma firma y paquete.
 
 - Iniciar OT y Entregar OT muestran icono y texto en una fila horizontal.

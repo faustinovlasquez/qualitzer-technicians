@@ -56,19 +56,18 @@ function WorkExecution({ work, generatedAt, online = true, pending = false, loca
   const elapsed = (localTimer ? localTimerElapsedSeconds(localTimer, now) : null) ?? work.elapsedSeconds + (running ? Math.max(0, (now - baseline) / 1000) : 0);
   const timing = assignmentProgress(work, elapsed);
 
-  return <View style={styles.execution}>
+  return <View style={styles.execution} testID="assignment-work-execution">
     <View style={styles.between}>
-      <Text style={styles.executionTitle}>Tiempo total ejecutado</Text>
+      <Text style={styles.executionTitle}>Ejecutado</Text>
       <Text style={styles.elapsed}>{clock(timing.totalExecutedMinutes * 60)}</Text>
     </View>
-    <Text style={styles.note}>{duration(timing.totalExecutedMinutes)} ejecutados / {duration(timing.totalPlannedMinutes)} planificados</Text>
     <View style={styles.between}>
-      <Text style={styles.note}>Avance total</Text>
-      <Text style={[styles.count, timing.overtimeMinutes > 0 && styles.overtime]}>{timing.percentage === null ? "Sin tiempo planificado" : `${timing.percentage}%`}</Text>
+      <Text style={styles.note}>{timing.percentage === null ? "Sin tiempo planificado" : `${duration(timing.totalPlannedMinutes)} asignados`}</Text>
+      {timing.percentage !== null ? <Text style={[styles.count, timing.overtimeMinutes > 0 && styles.overtime]}>{timing.percentage}%</Text> : null}
     </View>
-    <View accessibilityRole="progressbar" accessibilityLabel="Tiempo ejecutado frente al planificado" accessibilityValue={{ min: 0, max: 100, now: timing.barPercentage, text: timing.percentage === null ? "Sin tiempo planificado" : `${timing.percentage}% ejecutado` }} style={styles.progressTrack}>
+    {timing.percentage !== null ? <View accessibilityRole="progressbar" accessibilityLabel="Tiempo ejecutado frente al planificado" accessibilityValue={{ min: 0, max: 100, now: timing.barPercentage, text: `${timing.percentage}% ejecutado` }} style={styles.progressTrack}>
       <View style={[styles.progressFill, timing.overtimeMinutes > 0 && styles.overtimeFill, { width: `${timing.barPercentage}%` }]} />
-    </View>
+    </View> : null}
     {timing.overtimeMinutes > 0 ? <Text style={styles.overtime}>{duration(timing.overtimeMinutes)} sobre lo planificado</Text> : null}
     {running ? <Text style={styles.note}>En ejecución · el servidor confirma el tiempo final.</Text> : null}
     {pending || !online ? <Text style={styles.note}>{localTimer?.localClock || !pending ? "Tiempo local · pendiente de confirmar" : "Último tiempo recibido"}</Text> : null}
@@ -114,7 +113,9 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const priority = priorities[work.priority];
   const total = safeCount(work.checklistTotal);
   const done = Math.min(total, safeCount(work.checklistDone));
-  const title = plainText(work.title);
+  const title = plainText(work.title) || "Trabajo sin título";
+  const scheduledDay = assignmentDay(work.scheduledDate);
+  const scheduledLabel = scheduledDay ? `${shortDate(scheduledDay)} ${scheduledDay.slice(0, 4)}` : "Sin fecha programada";
   const finished = isFinished(work);
   const locked = busy || acting;
   const pausing = desiredStatus === "in_progress";
@@ -162,7 +163,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   }
 
   return <Card style={[styles.card, finished && styles.closedCard]}>
-    <View style={styles.between}>
+    <View style={styles.between} testID={`assignment-work-heading-${work.id}`}>
       <View style={styles.codes}>
         {localWork ? <Badge label="Guardado local · pendiente" tone="warning" /> : null}
         {codeLabels.map((code) => <Text key={code} style={styles.code}>{code}</Text>)}
@@ -178,7 +179,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       accessibilityHint="Abre el detalle del trabajo."
       style={({ pressed }) => [styles.titleButton, pressed && styles.pressed]}
     >
-      <View style={styles.titleCopy}><Text style={styles.title}>{title}</Text><Text style={styles.detailLabel}>Ver detalle del trabajo</Text></View>
+      <View style={styles.titleCopy}><Text numberOfLines={2} ellipsizeMode="tail" style={styles.title}>{title}</Text></View>
       <Ionicons name="chevron-forward-outline" size={21} color={palette.primary} accessible={false} />
     </Pressable>
     <View style={styles.codes}>
@@ -190,9 +191,11 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       <AssignmentMetadataRow icon="location-outline" text={location?.trim() ? location : "Ubicación no informada"} />
       {customer?.trim() ? <AssignmentMetadataRow icon="business-outline" text={customer} /> : null}
     </View>
-    <View style={styles.schedule}>
-      <AssignmentMetadataRow icon="calendar-outline" text={fullDate(work.scheduledDate)} strong />
-      <AssignmentMetadataRow icon="time-outline" text={scheduleTime(work)} />
+    <View style={styles.schedule} testID="assignment-work-schedule">
+      <View style={styles.scheduleRow} accessibilityLabel={`${fullDate(work.scheduledDate)}. ${scheduleTime(work)}`}>
+        <Ionicons name="calendar-outline" size={16} color={palette.textMuted} accessible={false} />
+        <Text style={styles.scheduleText}>{scheduledLabel} · {scheduleTime(work)}</Text>
+      </View>
       {plannedDates.length > 1 ? <AssignmentMetadataRow icon="calendar-outline" text={`Fechas planificadas: ${plannedDates.map(shortDate).join(" · ")}`} /> : null}
     </View>
     {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
@@ -206,14 +209,14 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     </View> : null}
     <View style={styles.footer}>
       {!finished ? <View style={styles.actions}>
-        <Button title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={styles.action} />
-        <Button title="Entregar" accessibilityLabel="Entregar: abrir revisión de requisitos, sin confirmar todavía" icon="checkmark-done-outline" variant="secondary" disabled={locked || !canReviewDelivery} onPress={() => openWork({ action: "deliver" })} style={styles.action} />
+        <Button title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={styles.action} textStyle={styles.actionText} />
+        <Button title="Entregar" accessibilityLabel="Entregar: abrir revisión de requisitos, sin confirmar todavía" icon="checkmark-done-outline" variant="secondary" disabled={locked || !canReviewDelivery} onPress={() => openWork({ action: "deliver" })} style={styles.action} textStyle={styles.actionText} />
       </View> : <Text style={styles.note}>Trabajo {work.status === "delivered" ? "entregado" : "completado"} · archivos, checklist y comentarios disponibles para consulta.</Text>}
       {!finished && !work.canExecute ? <Text style={styles.note}>La ejecución aún no está habilitada. Pulsa Entregar para revisar los requisitos pendientes.</Text> : null}
       <View style={styles.actions}>
-        <Button title={`Archivos (${safeCount(work.filesCount)})`} icon="attach-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.shortcut} />
-        <Button title={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.shortcut} />
-        <Button title={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbubble-ellipses-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "comments" })} style={styles.shortcut} />
+        <Button title={String(safeCount(work.filesCount))} accessibilityLabel={`Archivos (${safeCount(work.filesCount)})`} icon="attach-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.shortcut} textStyle={styles.shortcutText} />
+        <Button title={`${done}/${total}`} accessibilityLabel={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.shortcut} textStyle={styles.shortcutText} />
+        <Button title={String(safeCount(work.commentsCount))} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbubble-ellipses-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "comments" })} style={styles.shortcut} textStyle={styles.shortcutText} />
       </View>
       {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
     </View>
@@ -221,18 +224,19 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
 }
 
 const styles = StyleSheet.create({
-  card: { gap: 13 },
+  card: { gap: 8, padding: 12, borderRadius: 8 },
   closedCard: { backgroundColor: palette.successSoft, borderLeftWidth: 4, borderLeftColor: palette.primary },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
   codes: { flexDirection: "row", flexWrap: "wrap", gap: 6, flexShrink: 1 },
   code: { ...typography.caption, fontWeight: "800", color: palette.primary, letterSpacing: 0.5, flexShrink: 1, backgroundColor: palette.primarySoft, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.sm, overflow: "hidden" },
   titleButton: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radius.sm },
-  titleCopy: { flex: 1, gap: 3 },
-  title: { fontSize: 18, lineHeight: 25, fontWeight: "700", letterSpacing: -0.3, color: palette.navy },
-  detailLabel: { ...typography.caption, color: palette.primary },
-  metadata: { gap: 8, paddingTop: 2 },
-  schedule: { backgroundColor: palette.background, borderRadius: radius.sm, padding: 12, gap: 7 },
-  execution: { gap: 7 },
+  titleCopy: { flex: 1, minWidth: 0 },
+  title: { fontSize: 16, lineHeight: 22, fontWeight: "700", letterSpacing: 0, color: palette.navy },
+  metadata: { gap: 4 },
+  schedule: { gap: 4 },
+  scheduleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  scheduleText: { ...typography.caption, color: palette.textSecondary, flex: 1, minWidth: 0 },
+  execution: { gap: 4 },
   executionTitle: { ...typography.caption, color: palette.text, fontWeight: "700", flexShrink: 1 },
   note: { ...typography.caption, color: palette.textSecondary },
   elapsed: { ...typography.label, color: palette.primary, fontWeight: "700", fontVariant: ["tabular-nums"] },
@@ -241,9 +245,11 @@ const styles = StyleSheet.create({
   overtimeFill: { backgroundColor: palette.amber },
   progressTrack: { height: 5, borderRadius: radius.pill, backgroundColor: palette.track, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: palette.teal, borderRadius: radius.pill },
-  footer: { gap: 10, borderTopWidth: 1, borderTopColor: palette.track, paddingTop: 12 },
+  footer: { gap: 6, borderTopWidth: 1, borderTopColor: palette.track, paddingTop: 8 },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  action: { flex: 1, minWidth: 112, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },
-  shortcut: { flexGrow: 1, flexBasis: 145, minHeight: 44, paddingHorizontal: 10, paddingVertical: 10 },
+  action: { flex: 1, minWidth: 112, minHeight: 44, paddingHorizontal: 8, paddingVertical: 8, gap: 6, flexWrap: "wrap" },
+  actionText: { fontSize: 13, lineHeight: 18, maxWidth: "100%", minWidth: 0 },
+  shortcut: { flex: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 4, paddingVertical: 8, gap: 4 },
+  shortcutText: { fontSize: 13, lineHeight: 18 },
   pressed: { opacity: 0.72 },
 });

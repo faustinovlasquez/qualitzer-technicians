@@ -23,7 +23,7 @@ import { EvidenceTab } from "./workDetail/EvidenceTab";
 import { deleteLocalPhoto, MAX_PHOTOS, openLocalPhotoScope, pickPhotos, preparePhotos, validateLocalPhotos } from "./workDetail/localPhotos";
 import { useAttachmentFiles } from "./workDetail/useAttachmentFiles";
 import { useWorkDraft, workDetailDraftKey } from "./workDetail/useWorkDraft";
-import { EquipmentTab, WorkTab } from "./workDetail/WorkInformation";
+import { EquipmentTab, WorkDescription, WorkTab } from "./workDetail/WorkInformation";
 import { FileWorkspace } from "./workDetail/FileWorkspace";
 import { CommentsTab } from "./workDetail/CommentsTab";
 import { automaticExecutionTiming, canTransitionExecution, executionElapsedSeconds, isExecutionFinalization, executionDateAllowed, executionDatesAllowed } from "../domain/workExecution";
@@ -700,11 +700,12 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
             <Text style={styles.heroOverline}>{maintenance ? "MANTENIMIENTO INTERNO" : group.type === "external_ot" ? "ORDEN DE TRABAJO" : "ASIGNACIÓN DIRECTA"}</Text>
             <Text accessibilityRole="header" style={styles.heroTitle}>{plainText(work.title)}</Text>
+            {tab === "work" ? <WorkDescription key={resourceKey} work={work} disabled={locked} /> : null}
             <View style={styles.row}><Ionicons name="construct-outline" size={18} color={palette.onDark} accessible={false} /><Text style={styles.heroText}>{plainText(work.specialty) || "Especialidad no informada"}</Text></View>
             <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending || Boolean(queuedCompletion)} localTimer={pendingTimer} completion={queuedCompletion} />
             <View style={styles.heroMetrics}>
               <View style={styles.metric}><Text style={styles.heroText}>Programado</Text><Text style={styles.metricValue}>{shortDate(work.scheduledDate)}</Text></View>
-              <View style={styles.metric}><Text style={styles.heroText}>Tiempo previsto</Text><Text style={styles.metricValue}>{duration(work.plannedMinutes)}</Text></View>
+              <View style={styles.metric}><Text style={styles.heroText}>Tiempo asignado</Text><Text style={styles.metricValue}>{duration(work.plannedMinutes)}</Text></View>
               <View style={styles.metric}><Text style={styles.heroText}>Prioridad</Text><Text style={styles.metricValue}>{work.priority === "high" ? "Alta" : work.priority === "medium" ? "Media" : "Baja"}</Text></View>
             </View>
           </LinearGradient>

@@ -175,7 +175,8 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
     };
   }, [scopedEntries, selectedDay]);
 
-  const filteredEntries = useMemo(() => scopedEntries.filter(({ group, work }) => filter.some(status => matchesStatus(work, status)) && matchesAssignmentSearch(group, work, query)), [scopedEntries, query, filter]);
+  const searchedEntries = useMemo(() => scopedEntries.filter(({ group, work }) => matchesAssignmentSearch(group, work, query)), [scopedEntries, query]);
+  const filteredEntries = useMemo(() => searchedEntries.filter(({ work }) => filter.some(status => matchesStatus(work, status))), [searchedEntries, filter]);
   const scopedOrders = (data?.groups ?? []).filter((group) => {
     if (group.type === "direct_assignment") return false;
     if (scopedEntries.some((entry) => groupKey(entry.group) === groupKey(group))) return true;
@@ -186,18 +187,38 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
     return !day || (day >= start && day <= end) || (day < start && open);
   });
   const emptyOrders = scopedOrders.filter((group) => group.works.length === 0);
-  const filteredOrders = scopedOrders.filter((group) => filter.some(status => matchesStatus(group, status)) && matchesOrderSearch(group, query));
+  const searchedOrders = scopedOrders.filter((group) => matchesOrderSearch(group, query));
+  const filteredOrders = searchedOrders.filter((group) => filter.some(status => matchesStatus(group, status)));
   const filteredMaintenances = filteredOrders.filter((group) => group.type === "internal_maintenance");
   const filteredWorkOrders = filteredOrders.filter((group) => group.type === "external_ot");
   const visibleOrders = listView === "maintenances" ? filteredMaintenances : filteredWorkOrders;
   const viewCounts = { works: filteredEntries.length, maintenances: filteredMaintenances.length, orders: filteredWorkOrders.length };
+  const statusItems = listView === "works" ? searchedEntries.map(entry => entry.work)
+    : searchedOrders.filter(group => group.type === (listView === "maintenances" ? "internal_maintenance" : "external_ot"));
+  const statusCounts = {
+    all: statusItems.length,
+    pending: statusItems.filter(item => matchesStatus(item, "pending")).length,
+    in_progress: statusItems.filter(item => matchesStatus(item, "in_progress")).length,
+    completed: statusItems.filter(item => matchesStatus(item, "completed")).length,
+  };
+  function countLabel(count: number): string {
+    if (data === null || coveragePending || (partial && count === 0)) return "—";
+    return `${count}${partial ? "+" : ""}`;
+  }
+  function countHint(count: number): string {
+    if (data === null || coveragePending) return "Cantidad no disponible";
+    if (partial) return count > 0 ? `Al menos ${count} coincidencias; cobertura parcial` : "Cantidad no confirmada; cobertura parcial";
+    return `${count} coincidencias`;
+  }
   const visibleCount = viewCounts[listView];
   const entityTabs = <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist" accessibilityLabel="Tipo de asignación" style={{ flexGrow: 0 }} contentContainerStyle={styles.entityTabs}>
     {listViews.map((item) => <Pressable key={item.value} accessibilityRole="tab"
       accessibilityLabel={`${item.label}${hasDataCount() ? `, ${viewCounts[item.value]} coincidencias` : ""}`}
+      accessibilityHint={countHint(viewCounts[item.value])}
       accessibilityState={{ selected: listView === item.value, disabled: busy }} disabled={busy}
       onPress={() => selectListView(item.value)} style={[styles.entityTab, listView === item.value && styles.segmentSelected]}>
       <Text style={[styles.entityTabText, listView === item.value && styles.segmentTextSelected]}>{item.label}</Text>
+      <Text testID={`assignment-type-count-${item.value}`} style={[styles.countBadge, listView === item.value && styles.countBadgeSelected]}>{countLabel(viewCounts[item.value])}</Text>
     </Pressable>)}
   </ScrollView>;
   function hasDataCount(): boolean { return data !== null && !coveragePending && !partial; }
@@ -419,8 +440,9 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.filters}>
         {filters.map((item) => (
-          <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityState={{ selected: filter.includes(item.value), disabled: busy }} aria-pressed={filter.includes(item.value)} disabled={busy} onPress={() => toggleFilter(item.value)} style={({ pressed }) => [styles.filter, filter.includes(item.value) && styles.filterSelected, pressed && styles.pressed]}>
+          <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityHint={countHint(statusCounts[item.value])} accessibilityState={{ selected: filter.includes(item.value), disabled: busy }} aria-pressed={filter.includes(item.value)} disabled={busy} onPress={() => toggleFilter(item.value)} style={({ pressed }) => [styles.filter, filter.includes(item.value) && styles.filterSelected, pressed && styles.pressed]}>
             <Text style={[styles.filterText, filter.includes(item.value) && styles.filterTextSelected]}>{item.label}</Text>
+            <Text testID={`assignment-status-count-${item.value}`} style={[styles.countBadge, filter.includes(item.value) && styles.countBadgeSelected]}>{countLabel(statusCounts[item.value])}</Text>
           </Pressable>
         ))}
       </ScrollView>
@@ -474,8 +496,10 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
 
 const styles = StyleSheet.create({
   entityTabs: { flexGrow: 1, padding: 3, gap: 3, borderRadius: 6, backgroundColor: palette.surface },
-  entityTab: { flexGrow: 1, minHeight: 44, justifyContent: "center", alignItems: "center", paddingHorizontal: 7, paddingVertical: 8, borderRadius: 6 },
+  entityTab: { flexGrow: 1, minHeight: 44, flexDirection: "row", gap: 6, justifyContent: "center", alignItems: "center", paddingHorizontal: 7, paddingVertical: 8, borderRadius: 6 },
   entityTabText: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: palette.textSecondary, textAlign: "center" },
+  countBadge: { minWidth: 24, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, fontSize: 12, lineHeight: 18, fontWeight: "700", fontVariant: ["tabular-nums"], color: palette.primary, backgroundColor: palette.primarySoft, textAlign: "center", flexShrink: 0 },
+  countBadgeSelected: { color: palette.navy, backgroundColor: palette.white },
   mobileSchedule: { padding: 12, gap: 8 },
   desktopSchedule: { flex: 1, minHeight: 0, padding: 14, gap: 8 },
   compactSegments: { padding: 2, gap: 2, alignSelf: "stretch", width: "100%", flexGrow: 0, flexShrink: 0 },
@@ -533,7 +557,7 @@ const styles = StyleSheet.create({
   searchFocused: { borderColor: palette.primary },
   searchInput: { flex: 1, minWidth: 0, minHeight: 54, paddingVertical: 14, fontSize: 15, color: palette.text },
   filters: { gap: 8, paddingVertical: 2 },
-  filter: { minHeight: 44, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingHorizontal: 17, paddingVertical: 12, alignItems: "center", justifyContent: "center" },
+  filter: { minHeight: 44, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingHorizontal: 12, paddingVertical: 10, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },
   filterSelected: { borderColor: palette.navy, backgroundColor: palette.navy },
   filterText: { ...typography.label, fontSize: 13, color: palette.textSecondary },
   filterTextSelected: { color: palette.white },

@@ -15,6 +15,8 @@ targets.push("src/screens/workDetail/WorkInformation.tsx", "src/screens/workDeta
 const jornadaOnly = process.argv.includes("--jornada-defaults");
 const jornadaTests = ["tests/agenda-load-lifecycle.test.ts", "tests/parent-assignment-ui.test.ts", "tests/offline-cold-start.test.ts"];
 if (jornadaOnly) targets.splice(0, targets.length, "App.tsx", "src/application/useTechnicianApp.ts", "src/screens/DashboardScreen.tsx", "tests/e2e/compact-overview-fixture.tsx", ...jornadaTests);
+const badgesOnly = process.argv.includes("--assignment-badges");
+if (badgesOnly) targets.splice(0, targets.length, "src/screens/DashboardScreen.tsx", "tests/e2e/compact-overview-fixture.tsx", "tests/parent-assignment-ui.test.ts");
 try {
   console.log("Checking assignment types");
   const configPath = path.join(root, "tsconfig.json");
@@ -35,6 +37,7 @@ try {
   files.push("tests/work-activities.test.ts", "tests/delivery-review-ui.test.ts", "tests/timer-reconciliation-ui.test.ts");
   files.push("tests/checklist-resume-ui.test.ts", "tests/creation-auto-advance.test.ts");
   if (jornadaOnly) files.splice(0, files.length, ...jornadaTests);
+  if (badgesOnly) files.splice(0, files.length, "tests/parent-assignment-ui.test.ts");
   const result = spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", ...files], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 120000 });
   const log = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   fs.writeFileSync(path.join(output, "tests.log"), log);

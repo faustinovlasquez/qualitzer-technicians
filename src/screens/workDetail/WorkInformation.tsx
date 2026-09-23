@@ -1,16 +1,45 @@
 import { useState, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { plainText } from "../../domain/format";
+import { duration, plainText } from "../../domain/format";
 import { isWorkActivity } from "../../domain/workActivities";
 import { workChecklistProgress } from "../../domain/assignmentChecklistProgress";
 import type { Activity, AssignmentGroup, AssignmentWork, Equipment, Material } from "../../domain/models";
-import { Badge, BodyText, Button, Card, EmptyState, Field, SectionTitle } from "../../ui/components";
+import { Badge, BodyText, Button, Card, EmptyState, Field, IconButton, SectionTitle } from "../../ui/components";
+import { PrivateModal } from "../../security/DeviceSecurityContext";
 import { AttachmentList, Fact, HttpLink, Notice } from "./DetailUi";
 import { styles } from "./detailStyles";
 import { palette } from "../../ui/theme";
 import type { EquipmentLocationPort } from "../../domain/equipmentLocation";
 import { EquipmentLocationPanel } from "../../location/EquipmentLocationPanel";
+
+export function WorkDescription({ work, disabled = false }: { work: AssignmentWork; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const description = plainText(work.summary);
+  const schedule = [work.scheduledStartTime ? `Desde ${work.scheduledStartTime.slice(0, 5)}` : "", work.scheduledEndTime ? `Hasta ${work.scheduledEndTime.slice(0, 5)}${work.endDateOffset === 1 ? " (+1 día)" : ""}` : ""].filter(Boolean).join(" · ");
+  return <>
+    {description ? <Pressable accessibilityRole="button" accessibilityLabel="Ver descripción completa del trabajo" accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={() => setOpen(true)} style={({ pressed }) => [styles.descriptionPreview, pressed && styles.descriptionPressed]} testID="work-description-preview">
+      <View style={styles.descriptionHeading}><Text style={styles.heroText}>Descripción</Text><Ionicons name="expand-outline" size={20} color={palette.onDark} accessible={false} /></View>
+      <Text numberOfLines={3} ellipsizeMode="tail" style={styles.heroText} testID="work-description-excerpt">{description}</Text>
+    </Pressable> : <Text style={styles.heroText}>Sin descripción informada</Text>}
+    {schedule ? <Text style={styles.heroText}>{schedule}</Text> : null}
+    {open ? <PrivateModal visible animationType="slide" onRequestClose={() => setOpen(false)}>
+      <SafeAreaView style={styles.safe} testID="work-description-dialog" accessibilityViewIsModal onAccessibilityEscape={() => setOpen(false)}>
+        <View style={styles.descriptionHeader}><Text accessibilityRole="header" style={[styles.heading, styles.grow]}>Detalle del trabajo</Text><IconButton name="close-outline" label="Cerrar detalle del trabajo" onPress={() => setOpen(false)} /></View>
+        <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+          <Text selectable accessibilityRole="header" style={styles.heading}>{plainText(work.title)}</Text>
+          <View style={styles.columns}>
+            <View style={styles.column}><Fact label="Fecha programada" value={work.scheduledDate.slice(0, 10) || "Sin fecha"} /><Fact label="Horario" value={schedule || "No informado"} /></View>
+            <View style={styles.column}><Fact label="Tiempo asignado" value={duration(work.plannedMinutes)} /><Fact label="Prioridad" value={work.priority === "high" ? "Alta" : work.priority === "medium" ? "Media" : "Baja"} /></View>
+          </View>
+          <Text style={styles.label}>Descripción</Text>
+          <Text selectable style={styles.descriptionFull} testID="work-description-full">{description}</Text>
+        </ScrollView>
+      </SafeAreaView>
+    </PrivateModal> : null}
+  </>;
+}
 
 function Materials({ materials }: { materials: Material[] }) {
   const states: { [key in Material["stockStatus"]]: string } = { in_stock: "En stock", requested: "Solicitado", reserved: "Reservado" };

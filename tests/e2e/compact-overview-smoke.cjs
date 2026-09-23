@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const root = path.resolve(__dirname, "../..");
 const agendaOnly = process.argv.includes("--agenda-layout");
 const jornadaOnly = process.argv.includes("--jornada-defaults");
+const badgesOnly = process.argv.includes("--assignment-badges");
 const outputRoot = path.join(root, "artifacts/logs/compact-overview-ui");
 const runtimeFiles = ["src/screens/LoginScreen.tsx", "src/screens/DashboardScreen.tsx"];
 const hash = text => crypto.createHash("sha256").update(text).digest("hex");
@@ -65,7 +66,7 @@ async function main() {
     report.sourceHashes = Object.fromEntries(Object.entries(current).map(([file, text]) => [file, hash(text)]));
     report.testSourceHashes = Object.fromEntries(["tests/e2e/compact-overview-fixture.tsx", "tests/e2e/compact-overview-smoke.cjs"].map(file => [file, hash(fs.readFileSync(path.join(root, file)))]));
     const bundles = { after: await bundle(current) };
-    if (report.baseline.comparable && !process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly) bundles.before = await bundle(baseline.sources);
+    if (report.baseline.comparable && !process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly && !badgesOnly) bundles.before = await bundle(baseline.sources);
     report.bundleInputs = Object.keys(bundles.after.metafile.inputs);
     for (const file of runtimeFiles) assert.ok(report.bundleInputs.includes(file), `Missing real screen: ${file}`);
     assert.ok(!report.bundleInputs.some(file => /(^|\/)App\.tsx$|HttpTechnicianRepository|sessionStorage|expo-secure-store|(?:^|\/)\.env$/.test(file)), "Forbidden runtime imported");
@@ -193,6 +194,73 @@ async function main() {
         };
         new MutationObserver(apply).observe(document.body, { childList: true, subtree: true }); apply();
       }, factor);
+    }
+    if (badgesOnly) for (const width of [360, 390, 1024]) for (const scale of [1, 2]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`${origin}/after`);
+      await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
+      await scaleText(scale);
+      await check(`assignment-badges-${width}-text${scale * 100}`, async () => {
+        const filter = name => page.getByRole("button", { name, exact: true });
+        const tab = name => page.getByRole("tab", { name: new RegExp("^" + name) });
+        const count = (kind, value) => page.getByTestId(`assignment-${kind}-count-${value}`);
+        async function counts(kind, expected) {
+          for (const [key, value] of Object.entries(expected)) assert.equal(await count(kind, key).textContent(), value);
+        }
+        async function fits(control) {
+          await reachable(control);
+          const issues = await control.evaluate(element => {
+            const outer = element.getBoundingClientRect();
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            let node; const issues = [];
+            while ((node = walker.nextNode())) for (let index = 0; index < node.length; index++) {
+              if (!node.textContent[index].trim()) continue;
+              const range = document.createRange(); range.setStart(node, index); range.setEnd(node, index + 1);
+              for (const rect of range.getClientRects()) if (rect.left < outer.left - 1 || rect.right > outer.right + 1 || rect.top < outer.top - 1 || rect.bottom > outer.bottom + 1) issues.push(node.textContent);
+            }
+            return issues;
+          });
+          assert.deepEqual(issues, []);
+        }
+        await fresh("dashboard", "badges");
+        await tab("Trabajos").click();
+        await counts("type", { works: "3", maintenances: "1", orders: "1" });
+        await counts("status", { all: "4", pending: "2", in_progress: "1", completed: "1" });
+        for (const name of ["Trabajos", "Mantenimientos", "OTs"]) await fits(tab(name));
+        for (const name of ["Todos", "Pendientes", "En curso", "Completados"]) await fits(filter(name));
+        await filter("Todos").click();
+        await counts("type", { works: "4", maintenances: "2", orders: "2" });
+        await tab("Mantenimientos").click();
+        await counts("status", { all: "2", pending: "1", in_progress: "0", completed: "1" });
+        await filter("Completados").click();
+        await counts("type", { works: "1", maintenances: "1", orders: "1" });
+        await counts("status", { all: "2", pending: "1", in_progress: "0", completed: "1" });
+        await filter("Todos").click();
+        await tab("OTs").click();
+        await counts("status", { all: "2", pending: "0", in_progress: "1", completed: "1" });
+        await tab("Mantenimientos").click();
+        const search = page.getByRole("textbox", { name: "Buscar tareas", exact: true });
+        await search.fill("bateria");
+        await counts("type", { works: "0", maintenances: "1", orders: "0" });
+        await counts("status", { all: "1", pending: "1", in_progress: "0", completed: "0" });
+        await search.fill("");
+        await filter("Todos").scrollIntoViewIfNeeded();
+        await shot(`assignment-badges-${width}-text${scale * 100}`);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).statusCalls, 0);
+        await fresh("dashboard", "badges-many"); await tab("Trabajos").click();
+        await counts("status", { all: "120", pending: "120", in_progress: "0", completed: "0" });
+        await fits(tab("Trabajos")); await fits(filter("Pendientes"));
+        await shot(`assignment-badges-many-${width}-text${scale * 100}`);
+        await fresh("dashboard", "partial"); await tab("Trabajos").click();
+        await counts("type", { works: "3+", maintenances: "—", orders: "—" });
+        await counts("status", { all: "4+", pending: "2+", in_progress: "1+", completed: "1+" });
+        for (const scenario of ["partial-empty", "null-coverage", "no-data"]) {
+          await fresh("dashboard", scenario);
+          await counts("type", { works: "—", maintenances: "—", orders: "—" });
+          await counts("status", { all: "—", pending: "—", in_progress: "—", completed: "—" });
+        }
+      });
     }
     if (jornadaOnly) for (const width of [360, 390, 1024]) for (const scale of [1, 2]) {
       await page.setViewportSize({ width, height: 844 });
@@ -326,7 +394,7 @@ async function main() {
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       });
     }
-    if (!process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly) for (const phase of Object.keys(bundles).sort().reverse()) {
+    if (!process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly && !badgesOnly) for (const phase of Object.keys(bundles).sort().reverse()) {
       for (const [width, height] of [[320, 740], [360, 740], [390, 740], [1024, 800]]) for (const scale of phase === "before" ? [1] : [1, 2]) {
         const label = `${phase}-${width}x${height}-text${scale * 100}`;
         await page.setViewportSize({ width, height });
@@ -394,7 +462,7 @@ async function main() {
     }
     await page.setViewportSize({ width: 390, height: 740 }); await page.goto(`${origin}/after`);
     await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
-    if (!process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
+    if (!process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly && !badgesOnly) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
       await fresh("login");
       const username = page.getByRole("textbox", { name: "Correo o usuario", exact: true });
       const password = page.getByLabel("Contraseña", { exact: true });
@@ -419,7 +487,7 @@ async function main() {
       assert.equal(await username.isEditable(), false); assert.equal(await password.isEditable(), false);
       assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).gatewayChanges, 0);
     });
-    if (!agendaOnly && !jornadaOnly) for (const width of [360, 1024]) for (const scale of [1, 2]) for (const scenario of ["empty-maintenance", "empty-ot"]) {
+    if (!agendaOnly && !jornadaOnly && !badgesOnly) for (const width of [360, 1024]) for (const scale of [1, 2]) for (const scenario of ["empty-maintenance", "empty-ot"]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`${origin}/after`);
       await page.waitForFunction(() => Boolean(window.compactOverviewFixture));

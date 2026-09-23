@@ -20,15 +20,15 @@ async function main() {
   assert.equal(release.locationConfigured, true);
   const apk = fs.readFileSync(path.join(root, "artifacts", expected.name));
   assert.equal(digest(apk), release.sha256);
-  const artifact = "infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.26.tgz";
+  const artifact = "infrastructure/mobile-gateway/qualitzer-mobile-gateway-1.0.27.tgz";
   const archive = fs.readFileSync(path.join(backend, artifact));
-  assert.equal(digest(archive), "f39f59d2fccf6672f54583da4514d305e770655fec114210853ad5cc7efa86dc");
+  assert.equal(digest(archive), "8370a69c7752cc5c52fe9169bed09d31302c5a2373a667fa9167f90e8a4a0aa8");
   assert.equal(digest(fs.readFileSync(path.join(root, "artifacts/mobile-gateway", path.basename(artifact)))), digest(archive));
   const manifest = json(path.join(backend, "package.json"));
   const lock = json(path.join(backend, "package-lock.json"));
   assert.equal(manifest.dependencies["@qualitzer/mobile-gateway"], `file:${artifact}`);
   assert.equal(lock.packages[""].dependencies["@qualitzer/mobile-gateway"], `file:${artifact}`);
-  assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].version, "1.0.26");
+  assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].version, "1.0.27");
   assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].resolved, `file:${artifact}`);
   assert.equal(lock.packages["node_modules/@qualitzer/mobile-gateway"].integrity, `sha512-${digest(archive, "sha512", "base64")}`);
   const ignored = spawnSync("C:/Program Files/Git/cmd/git.exe", ["-C", backend, "check-ignore", "--quiet", artifact], { encoding: "utf8" });
@@ -46,8 +46,8 @@ async function main() {
   assert.equal(gatewayResponse.headers.get("content-type"), "application/gzip");
   const downloadedGateway = Buffer.from(await gatewayResponse.arrayBuffer());
   assert.equal(digest(downloadedGateway), digest(archive));
-  const report = { completedAt: new Date().toISOString(), passed: true, url, version: release.version, bytes: downloaded.length, sha256: release.sha256, gatewayVersion: "1.0.26", gatewaySha256: digest(archive), gatewayDownloadVerified: true, consumerLockMatches: true, gatewayNotIgnored: true, backendInstalled: false, remoteDeploymentTested: false, nativeDeviceTested: false };
-  fs.writeFileSync(path.join(root, `artifacts/parent-assignment-delivery-${expected.version}.json`), JSON.stringify(report, null, 2));
+  const report = { completedAt: new Date().toISOString(), passed: true, url, version: release.version, bytes: downloaded.length, sha256: release.sha256, gatewayVersion: "1.0.27", gatewaySha256: digest(archive), gatewayDownloadVerified: true, consumerLockMatches: true, gatewayNotIgnored: true, backendInstalled: false, remoteDeploymentTested: false, nativeDeviceTested: false };
+  fs.writeFileSync(path.join(root, `artifacts/parent-assignment-delivery-${expected.version}-gateway-${report.gatewayVersion}.json`), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

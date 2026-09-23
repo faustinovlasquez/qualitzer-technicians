@@ -1,4 +1,8 @@
-# Asignacion de mantenimiento y boton flotante: gateway 1.0.26 / APK 1.0.55
+# Diagnostico de edicion: gateway 1.0.27 / APK 1.0.56 sin cambios
+
+El error generico al abrir Editar trabajo no identifica si falla usuario/asignacion, JSON, identidad o un campo del documento. Gateway 1.0.27 distingue esas etapas y muestra solo rutas de campos incompatibles. El caso sin horario pasa las pruebas locales. No se ha obtenido la respuesta del trabajo remoto ni confirmado su causa: instalar el gateway, recuperar la conexion y reintentar abrir Editar trabajo para obtener el mensaje preciso. No repetir guardados ni crear otro trabajo. Se conserva la APK1.0.56 y todos los datos, sesiones y validaciones. 194 pruebas Mobile/gateway y tipos sin errores; sin acceso remoto ni SQL/backend tests/build/lint.
+
+## Historial: gateway 1.0.26 / APK 1.0.55
 
 La entrega actual corrige el falso aviso de trabajo no asignado al crear un hijo con otro horario y separa Crear trabajo como un + flotante. Ver [actualizacion 1.0.55](ACTUALIZACION-1.0.55.md). Instalar gateway 1.0.26 para corregir la autorizacion de la OT; no hay cambios nuevos de tablas. Conservar claves, sesiones y colas.
 

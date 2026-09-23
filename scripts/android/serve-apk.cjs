@@ -37,12 +37,12 @@ const sha256 = createHash("sha256").update(apkContent).digest("hex");
 if (sha256 !== report.sha256 || report.debuggable !== false || report.variant !== "release") throw new Error("APK_RELEASE_VERIFICATION_REQUIRED");
 const size = apkContent.length;
 if (size !== report.bytes) throw new Error("APK_RELEASE_SIZE_MISMATCH");
-const gatewayVersion = "1.0.26";
+const gatewayVersion = "1.0.27";
 const gatewayArchiveName = `qualitzer-mobile-gateway-${gatewayVersion}.tgz`;
 const gatewayArchivePath = `artifacts/mobile-gateway/${gatewayArchiveName}`;
 const gatewayContent = readPublicFile(root, gatewayArchivePath, 32 * 1024 * 1024);
 const gatewaySha256 = createHash("sha256").update(gatewayContent).digest("hex");
-if (gatewaySha256 !== "f39f59d2fccf6672f54583da4514d305e770655fec114210853ad5cc7efa86dc") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
+if (gatewaySha256 !== "8370a69c7752cc5c52fe9169bed09d31302c5a2373a667fa9167f90e8a4a0aa8") throw new Error("GATEWAY_IMMUTABLE_HASH_REQUIRED");
 const validationDirectory = "artifacts/logs/fluidity-package";
 const validationName = readdirSync(publicPath(root, validationDirectory, true), { withFileTypes: true })
   .filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-zA-Z0-9]{6}$/.test(entry.name))
@@ -76,9 +76,10 @@ async function main() {
 <style>body{font:16px system-ui;background:#f3f7f8;color:#153c46;margin:0;padding:24px}main{max-width:560px;background:white;border-radius:20px;padding:24px;margin:auto}a{display:block;padding:16px;background:#007f80;color:white;text-decoration:none;text-align:center;border-radius:12px;font-weight:700;margin:12px 0}img{display:block;margin:20px auto}small{word-break:break-all}p,li{line-height:1.55}li{margin:8px 0}details{margin:20px 0}</style>
 <main><img src="/logo.png" width="72" height="72" alt="Logo de Qualitzer"><h1>${applicationName} · ${version}</h1>
 <p>Android · código ${versionCode} · APK release firmado · ${(size / 1024 / 1024).toFixed(2)} MiB · Android 7 o superior.</p>
-<p><strong>Acciones de OT compactas.</strong> Iniciar OT y Entregar OT muestran icono y texto en una fila, con menos altura. Se elimina Actualizar estado de OT de la barra inferior, también cuando hay un error.</p>
-<p>Se conservan el + flotante para crear trabajos, la actualización de la cabecera y los diálogos de inicio y entrega.</p>
-<p>No requiere otro gateway respecto de 1.0.55; se conserva ${gatewayVersion}. El arreglo anterior del aviso de asignación sigue requiriendo ese gateway instalado. No cambian la clave Google, las sesiones ni las colas.</p>
+<p><strong>Contadores de asignaciones.</strong> Trabajos, Mantenimientos y OTs muestran badges con sus coincidencias del período, búsqueda y estados seleccionados.</p>
+<p>Todos, Pendientes, En curso y Completados muestran la cantidad del tipo seleccionado. En curso incluye pausados; Completados incluye entregados. Los datos incompletos se distinguen con — o un número seguido de +.</p>
+<p>Esta mejora no requiere un gateway nuevo; se conserva ${gatewayVersion}. Se mantienen las tarjetas compactas, el resumen con descripción ampliable y el + flotante de mantenimiento.</p>
+<p>El diagnóstico previo del error de edición sigue siendo independiente de este cambio de presentación. No cambian la clave Google, las sesiones ni las colas.</p>
 <p><strong>Servidor configurado:</strong> ${gatewayUrl}. La dirección procede del entorno de compilación, sin fallback a otro servidor.</p>
 <p><strong>Antes de cambiar de servidor:</strong> sincroniza los pendientes y cierra sesión en la versión anterior. Una sesión de otro servidor bloquea el acceso para proteger sus datos. No se trasladan credenciales, archivos ni pendientes entre entornos.</p>
 <p><strong>Disponibilidad durante la compilación:</strong> ${report.health?.ok && report.health?.backendReachable ? "el gateway respondió con el backend disponible; no se probó un login real." : "no se confirmó conexión con el gateway y backend. Revisar el despliegue de /mobile y /api antes de iniciar sesión."}</p>

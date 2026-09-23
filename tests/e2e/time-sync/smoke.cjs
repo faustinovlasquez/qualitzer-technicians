@@ -13,6 +13,8 @@ const signaturesOnly = process.argv.includes("--signatures");
 const fileDeletionOnly = process.argv.includes("--file-deletion");
 const orderFilesOnly = process.argv.includes("--order-files");
 const maintenanceDockOnly = process.argv.includes("--maintenance-dock");
+const workDescriptionOnly = process.argv.includes("--work-description");
+const compactCardOnly = process.argv.includes("--compact-card");
 const androidRefreshBefore = process.argv.includes("--android-refresh-before");
 let runner = fs.readFileSync(shared, "utf8");
 function replace(before, after) {
@@ -95,6 +97,8 @@ if (signaturesOnly) replace('    async function check(name, run) {', '    async 
 if (fileDeletionOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/file-deletion/.test(name)) return;');
 if (orderFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/order-files/.test(name)) return;');
 if (maintenanceDockOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/maintenance-dock/.test(name)) return;');
+if (workDescriptionOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/work-description/.test(name)) return;');
+if (compactCardOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/compact-card/.test(name)) return;');
 if (deliveryFilesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/completion|blocked-stays|confirmed-files/.test(name)) return;');
 if (workedDaysOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/worked-days/.test(name)) return;');
 if (offlineClockOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/offline-clock/.test(name)) return;');

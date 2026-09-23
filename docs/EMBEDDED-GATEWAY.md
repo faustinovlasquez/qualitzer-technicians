@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.26
+# @qualitzer/mobile-gateway 1.0.27
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.26. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.27. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.27 agrega diagnostico acotado a GET/PATCH de edicion de trabajos. Distingue respuesta incompatible durante la autorizacion (WORK_EDIT_ASSIGNMENT_INVALID_RESPONSE) de documento, identidad o JSON invalido en PanelWorkEdit (WORK_EDIT_INVALID_RESPONSE). Solo muestra hasta cinco rutas de campos del esquema, sin valores, nombres de claves desconocidas, tokens ni datos de trabajo. No flexibiliza el esquema, no reintenta escrituras y no elimina la revision esperada. La APK1.0.56 puede mostrar los mensajes sin recompilar. Este paquete identifica la etapa/campo del fallo reportado; no acredita la correccion del dato remoto, que aun requiere reproducirlo con la respuesta real.
 
 1.0.26 corrige ASSIGNMENT_NOT_FOUND cuando los trabajos de una misma OT de mantenimiento llegan en bloques horarios distintos, como sucede al crear un hijo. Reune bloques compatibles del padre para estado, inicio, entrega y archivos; localiza cada hijo en todos los bloques sin autorizar coincidencias ambiguas. Conserva la identidad de usuario/trabajador/sucursal, rechazo de bloques duplicados o contradictorios y la comprobacion de pertenencia de hijos al detalle canonico. No altera la creacion ni sus UUID, no asigna otra OT y no cambia tablas o colas. Requiere instalar este gateway; la APK1.0.55 agrega el boton + flotante.
 

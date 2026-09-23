@@ -73,6 +73,9 @@ let confirmCreation = () => {};
 const recoveryScreens = new Set<Screen>(["creation-queued", "creation-applied", "creation-review", "creation-unknown"]);
 let metrics = (): unknown => ({});
 let changeScope = () => {};
+let changeWorkDescription = (_description: string) => {};
+type CompactCardVariant = "untimed" | "timed" | "overtime" | "closed" | "busy" | "offline";
+let changeCompactCard = (_variant: CompactCardVariant) => {};
 let activityRows: Activity[] = [];
 let activityFiles: Attachment[] = [];
 let activityDeletionMode: "success" | "rejected" | "refresh-fails" = "success";
@@ -185,7 +188,7 @@ function OfflineTimerFixture({ current, engine }: { current: NonNullable<typeof 
   </View>;
 }
 
-function Fixture({ screen, client }: { screen: Screen | "maintenance-dock"; client: MobileNotificationClient | null }) {
+function Fixture({ screen, client }: { screen: Screen | "maintenance-dock" | "compact-card"; client: MobileNotificationClient | null }) {
   const security = useDeviceSecurity();
   const [value, setValue] = useState(screen === "invalid" ? "invalid-original" : "08:49");
   const [hours, setHours] = useState("24");
@@ -193,6 +196,9 @@ function Fixture({ screen, client }: { screen: Screen | "maintenance-dock"; clie
   const [offset, setOffset] = useState("1");
   const [scopeKey, setScope] = useState("initial");
   const [workStatus, setWorkStatus] = useState<AssignmentWork["status"]>("paused");
+  const [workDescription, setWorkDescription] = useState<string | undefined>(undefined);
+  const [cardVariant, setCardVariant] = useState<CompactCardVariant>("untimed");
+  const [cardStatus, setCardStatus] = useState<AssignmentWork["status"]>("pending");
   const [draft, setDraft] = useState<DeliveryDraft>({ note: "Conservar observaciones", hours: "24", minutes: "49", faultType: null, receivedByName: "", technicianStrokes: [], clientStrokes: [] });
   const [signatureDelivery, setSignatureDelivery] = useState(false);
   const [orderBusy, setOrderBusy] = useState(false);
@@ -202,11 +208,27 @@ function Fixture({ screen, client }: { screen: Screen | "maintenance-dock"; clie
   const [creationQueue, setCreationQueue] = useState<OfflineOperation[]>(creationOperations);
   confirmCreation = () => setCreationQueue(current => current.map(operation => operation.kind === "create" ? { ...operation, status: "applied", result: { kind: operation.input.kind, companyBranchId: 1, groupId: "direct-901", workId: 901, schedule: { ...operation.input.schedule, plannedMinutes: creationPlannedMinutes(operation.input.schedule), timezone: "UTC" } } } : operation));
   changeScope = () => setScope(current => current + "-changed");
+  changeWorkDescription = setWorkDescription;
+  changeCompactCard = setCardVariant;
   metrics = () => ({ unlocked: security.isUnlocked(), security: security.controller.getSnapshot(), value, hours, minutes, offset, scopeKey, draft, calls, submitted,
     registrations, clockCalls, profileSignatures, signatureDeliveries, orderOperations, creationQueue, snapshot: activeEngine?.getSnapshot() ?? null, sent, manualCalls, original });
-  const work: AssignmentWork = { ...assignmentsWithStep().groups[0].works[0], scheduledDate: date, plannedDates: [date], status: "paused", canExecute: true,
+  const work: AssignmentWork = { ...assignmentsWithStep().groups[0].works[0], ...(workDescription === undefined ? {} : { summary: workDescription, scheduledStartTime: "08:00", scheduledEndTime: "09:30", plannedMinutes: 90 }), scheduledDate: date, plannedDates: [date], status: "paused", canExecute: true,
     firstInProgressTime: "08:00", elapsedSeconds: 1489 * 60, executedMinutes: 1489, missingRequiredInfo: [], checklists: [] };
   if (screen === "maintenance-dock") return <MaintenanceDockFixture />;
+  if (screen === "compact-card") {
+    const timed = cardVariant !== "untimed";
+    const assignedWork: AssignmentWork = { ...work, id: "80", title: timed ? "Inspeccionar y reparar todos los componentes del sistema de entrada y verificar su funcionamiento completo" : "", status: cardVariant === "closed" ? "completed" : cardStatus,
+      scheduledStartTime: timed ? "08:00" : "", scheduledEndTime: timed ? "09:30" : "", plannedMinutes: timed ? 90 : 0, totalPlannedMinutes: timed ? 90 : 0,
+      executedMinutes: cardVariant === "overtime" ? 120 : 0, totalExecutedMinutes: cardVariant === "overtime" ? 120 : 0, elapsedSeconds: cardVariant === "overtime" ? 7200 : 0,
+      checklistTotal: 0, checklistDone: 0, filesCount: 3, commentsCount: 2 };
+    const group = { ...assignmentsWithStep().groups[0], id: "maintenance-80", type: "internal_maintenance" as const, customerName: null, locationName: "", locationAddress: null,
+      equipment: { identifier: "98536565", internalNumber: "EQ-80", label: "DIESEL SIEMENS JU6H-UF34", ownerLabel: null }, works: [assignedWork] };
+    return <ScrollView contentContainerStyle={{ padding: 16, width: "100%", maxWidth: 500, alignSelf: "center" }}>
+      <AssignmentWorkCard group={group} work={assignedWork} busy={cardVariant === "busy"} online={cardVariant !== "offline"} generatedAt={new Date().toISOString()}
+        onOpenWork={(selectedGroup, selectedWork, options) => calls.push({ name: "compact-open", value: { groupId: selectedGroup.id, workId: selectedWork.id, options } })}
+        onWorkStatus={async (_group, _work, input) => { submitted.push(input); setCardStatus(input.status); }} />
+    </ScrollView>;
+  }
   if (screen.startsWith("offline-clock") && timerFixture && activeEngine) return <OfflineTimerFixture key={scopeKey} current={timerFixture} engine={activeEngine} />;
   const record = (name: string, next: string, setter: (value: string) => void) => { calls.push({ name, value: next }); setter(next); };
   if (screen === "technical-delivery" || screen === "technical-ready") {
@@ -435,6 +457,8 @@ async function render(screen: Screen) {
   root.render(<SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: innerWidth, height: innerHeight }, insets: { top: 0, right: 0, bottom: 0, left: 0 } }}><DeviceSecurityProvider><Fixture key={revision} screen={screen} client={client} /></DeviceSecurityProvider></SafeAreaProvider>);
 }
 const api = { render, metrics: () => metrics(), scope: () => changeScope(), creation: () => readCreation?.(), state: () => readState?.(),
+  description: (value: string) => changeWorkDescription(value),
+  compactCard: (variant: CompactCardVariant) => changeCompactCard(variant),
   restartTimer: () => restartTimer(),
   confirmCreation: () => confirmCreation(),
   activityDeletionCase: (mode: typeof activityDeletionMode) => {

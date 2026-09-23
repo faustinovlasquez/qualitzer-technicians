@@ -8,25 +8,46 @@ import { emptySchema, resourceParamsSchema } from "../validation";
 import { AssignmentAuthorization } from "./authorization";
 import type { UploadConcurrency } from "./routes";
 import { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } from "../../src/domain/equipmentLocation";
-import { workEditDocumentSchema, workEditInputSchema } from "../../src/domain/creation";
+import { workEditDocumentSchema, workEditInputSchema, type WorkEditInput } from "../../src/domain/creation";
 
 export function registerWorkActions(router: Router, upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency): void {
   const authorization = new AssignmentAuthorization(upstream);
   const base = "/:groupId/works/:workId";
   function editDocument(value: unknown, scope: { group: { id: string }; workId: number; range: { companyBranchId: number } }) {
-    const document = parseUpstream(workEditDocumentSchema, value);
-    if (document.groupId !== scope.group.id || document.workId !== scope.workId || document.companyBranchId !== scope.range.companyBranchId) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    const parsed = workEditDocumentSchema.safeParse(value);
+    if (!parsed.success) {
+      const paths = [...new Set(parsed.error.issues.map(issue => issue.path.join(".") || "document"))].slice(0, 5);
+      throw new GatewayError(502, "WORK_EDIT_INVALID_RESPONSE", `No se pudo cargar la edicion. El backend devolvio campos incompatibles: ${paths.join(", ")}.`);
+    }
+    const document = parsed.data;
+    if (document.groupId !== scope.group.id || document.workId !== scope.workId || document.companyBranchId !== scope.range.companyBranchId) {
+      throw new GatewayError(502, "WORK_EDIT_INVALID_RESPONSE", "La respuesta de edicion no corresponde al trabajo o sucursal consultados.");
+    }
     return document;
+  }
+  async function editRequest(req: Request, input?: WorkEditInput) {
+    let assigned: Awaited<ReturnType<typeof owned>>;
+    try { assigned = await owned(req, true); }
+    catch (error) {
+      if (error instanceof GatewayError && error.code === "UPSTREAM_INVALID_RESPONSE") throw new GatewayError(502, "WORK_EDIT_ASSIGNMENT_INVALID_RESPONSE", "No se pudo verificar la asignacion para editar. El backend devolvio un formato incompatible en el usuario o la lista de trabajos.");
+      throw error;
+    }
+    const { scope, query, prefix } = assigned;
+    let value: unknown;
+    try { value = await upstream.request(`${prefix}/edit`, { token: scope.token, query, ...(input ? { method: "PATCH" as const, json: input } : {}) }); }
+    catch (error) {
+      if (error instanceof GatewayError && error.code === "UPSTREAM_INVALID_RESPONSE") throw new GatewayError(502, "WORK_EDIT_INVALID_RESPONSE", "El endpoint de edicion no devolvio JSON valido. Revisa el despliegue de PanelWorkEdit en el backend.");
+      throw error;
+    }
+    return editDocument(value, scope);
   }
   router.get(`${base}/edit`, async (req, res) => {
     emptySchema.parse(req.body ?? {});
-    const { scope, query, prefix } = await owned(req, true);
-    res.json(editDocument(await upstream.request(`${prefix}/edit`, { token: scope.token, query }), scope));
+    res.json(await editRequest(req));
   });
   router.patch(`${base}/edit`, async (req, res) => {
     const input = workEditInputSchema.parse(req.body);
-    const { scope, query, prefix } = await owned(req, true);
-    res.json(editDocument(await upstream.request(`${prefix}/edit`, { token: scope.token, query, method: "PATCH", json: input }), scope));
+    res.json(await editRequest(req, input));
   });
   router.get(`${base}/equipment-location/:target`, async (req, res) => {
     emptySchema.parse(req.body ?? {});

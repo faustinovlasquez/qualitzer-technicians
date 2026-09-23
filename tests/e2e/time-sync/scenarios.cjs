@@ -56,6 +56,118 @@
       assert.deepEqual((await metrics()).clockCalls,[...previous,{label,value:hour+":"+minute}],"exactly one original consumer onChange after confirmation");
     }
     for (const width of [360,390,1280]) for(const scale of [1,2]) {
+      await check(`compact-card-${width}-${scale}`, async () => {
+        await page.setViewportSize({ width, height: 900 });
+        await fresh("compact-card", scale);
+        const card = page.getByTestId("assignment-work-heading-80").locator("..");
+        await page.getByText("Trabajo sin título", { exact: true }).waitFor();
+        const cardBox = await card.boundingBox();
+        assert(cardBox && (scale !== 1 || cardBox.height < 440), "compact untimed card height");
+        const schedule = await page.getByTestId("assignment-work-schedule").boundingBox();
+        const execution = await page.getByTestId("assignment-work-execution").boundingBox();
+        assert(schedule && (scale !== 1 || schedule.height <= 40));
+        assert(execution && (scale !== 1 || execution.height <= 52));
+        assert.equal(await page.getByRole("progressbar", { name: "Tiempo ejecutado frente al planificado", exact: true }).count(), 0);
+        assert.equal(await page.getByText("00:00:00", { exact: true }).count(), 1);
+        await page.getByText("Sin tiempo planificado", { exact: true }).waitFor();
+        const shortcutBoxes = [];
+        for (const name of ["Archivos (3)", "Checklist (0/0)", "Comentarios (2)"]) {
+          const control = button(name); const box = await control.boundingBox();
+          assert(box && box.height >= 44 && box.width >= 44 && box.x >= cardBox.x && box.x + box.width <= cardBox.x + cardBox.width + 1);
+          shortcutBoxes.push(box); await control.click();
+        }
+        assert(shortcutBoxes.every(box => Math.abs(box.y - shortcutBoxes[0].y) < 1), "all shortcuts stay in one row");
+        const links = (await metrics()).calls.filter(call => call.name === "compact-open");
+        assert.deepEqual(links.map(call => call.value.options.tab), ["evidence", "checklist", "comments"]);
+        assert(links.every(call => call.value.groupId === "maintenance-80" && call.value.workId === "80"));
+        report.measurements.push({ name: `compact-card-${width}-${scale}`, card: cardBox, schedule, execution });
+        await screenshot(`compact-card-untimed-${width}-${scale}`);
+        await page.getByRole("button", { name: /Trabajo sin título/ }).click();
+        await page.getByRole("button", { name: /^Entregar: abrir/ }).click();
+        assert.equal((await metrics()).calls.at(-1).value.options.action, "deliver");
+        assert.equal((await metrics()).submitted.length, 0);
+        await button("Iniciar").click(); await button("Pausar").waitFor();
+        await button("Pausar").click(); await button("Reanudar").waitFor();
+        assert.deepEqual((await metrics()).submitted.map(input => input.status), ["in_progress", "paused"]);
+        await page.evaluate(() => window.timeSync.compactCard("timed"));
+        await page.getByText("1 h 30 min asignados", { exact: true }).waitFor();
+        await page.getByRole("progressbar", { name: "Tiempo ejecutado frente al planificado", exact: true }).waitFor();
+        for (const control of [button("Reanudar"), page.getByRole("button", { name: /^Entregar: abrir/ })]) {
+          const fits = await control.evaluate(element => {
+            const outer = element.getBoundingClientRect();
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) for (let offset = 0; offset < node.length; offset++) {
+              if (!node.textContent[offset].trim()) continue;
+              const range = document.createRange(); range.setStart(node, offset); range.setEnd(node, offset + 1);
+              for (const rect of range.getClientRects()) if (rect.left < outer.left - 0.5 || rect.right > outer.right + 0.5 || rect.bottom > outer.bottom + 0.5) return false;
+            }
+            return true;
+          });
+          assert.equal(fits, true, "action icon and text fit at enlarged text size");
+        }
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+        await screenshot(`compact-card-timed-${width}-${scale}`);
+        await page.evaluate(() => window.timeSync.compactCard("overtime"));
+        await page.getByText("02:00:00", { exact: true }).waitFor();
+        await page.getByText("133%", { exact: true }).waitFor();
+        await page.getByText("30 min sobre lo planificado", { exact: true }).waitFor();
+        await page.evaluate(() => window.timeSync.compactCard("busy"));
+        assert.equal(await button("Archivos (3)").isDisabled(), true);
+        assert.equal(await button("Reanudar").isDisabled(), true);
+        await page.evaluate(() => window.timeSync.compactCard("offline"));
+        assert.equal(await button("Reanudar").isDisabled(), true);
+        assert.equal(await button("Archivos (3)").isDisabled(), false);
+        await page.evaluate(() => window.timeSync.compactCard("closed"));
+        assert.equal(await button("Reanudar").count(), 0);
+        assert.equal(await button("Archivos (3)").isDisabled(), false);
+      });
+      await check(`work-description-${width}-${scale}`, async () => {
+        await page.setViewportSize({ width, height: 900 });
+        await fresh("detail", scale);
+        const description = "Inspeccionar la entrada y comprobar el funcionamiento de la puerta. " + "Registrar los hallazgos y revisar los elementos indicados antes de finalizar. ".repeat(65) + "ULTIMA INDICACION: informar al responsable.";
+        await page.evaluate(value => window.timeSync.description(value), description);
+        const preview = page.getByTestId("work-description-excerpt");
+        await preview.waitFor();
+        const layout = await preview.evaluate(element => ({ height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight), scrollHeight: element.scrollHeight }));
+        assert(layout.height <= layout.lineHeight * 3 + 1 && layout.scrollHeight > layout.height, "long description is clamped to three lines");
+        await screenshot(`work-description-preview-${width}-${scale}`);
+        const before = await metrics();
+        await button("Ver descripción completa del trabajo").click();
+        const dialog = page.getByTestId("work-description-dialog");
+        await dialog.waitFor();
+        assert.equal(await page.getByTestId("work-description-full").textContent(), description);
+        await dialog.getByText("Reparación de puerta", { exact: true }).waitFor();
+        await dialog.getByText("2026-09-14", { exact: true }).waitFor();
+        await dialog.getByText("Desde 08:00 · Hasta 09:30", { exact: true }).waitFor();
+        await dialog.getByText("1 h 30 min", { exact: true }).waitFor();
+        await screenshot(`work-description-dialog-${width}-${scale}`);
+        const closeBefore = await button("Cerrar detalle del trabajo").boundingBox();
+        assert(closeBefore && closeBefore.width >= 44 && closeBefore.height >= 44 && closeBefore.x + closeBefore.width <= width + 1);
+        const tailVisible = await page.getByTestId("work-description-full").evaluate(element => {
+          let scrollable = element.parentElement;
+          while (scrollable && !(scrollable.scrollHeight > scrollable.clientHeight && /auto|scroll/.test(getComputedStyle(scrollable).overflowY))) scrollable = scrollable.parentElement;
+          if (!scrollable) return false;
+          scrollable.scrollTop = scrollable.scrollHeight;
+          const view = scrollable.getBoundingClientRect(); const text = element.getBoundingClientRect();
+          return text.bottom <= view.bottom + 1 && text.bottom > view.top;
+        });
+        assert.equal(tailVisible, true, "full description can be read to its end");
+        const closeAfter = await button("Cerrar detalle del trabajo").boundingBox();
+        assert(closeAfter && closeBefore.y === closeAfter.y, "close remains fixed while description scrolls");
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+        await button("Cerrar detalle del trabajo").click();
+        assert.equal(await dialog.count(), 0);
+        assert.deepEqual((await metrics()).submitted, before.submitted);
+        assert.deepEqual((await metrics()).calls, before.calls);
+        await page.evaluate(() => window.timeSync.description("<p>Revisar &amp; confirmar</p>"));
+        await button("Ver descripción completa del trabajo").click();
+        assert.equal(await page.getByTestId("work-description-full").textContent(), "Revisar & confirmar");
+        await button("Cerrar detalle del trabajo").click();
+        await page.evaluate(() => window.timeSync.description("   "));
+        await page.getByText("Sin descripción informada", { exact: true }).waitFor();
+        assert.equal(await button("Ver descripción completa del trabajo").count(), 0);
+      });
       await check(`maintenance-dock-${width}-${scale}`, async () => {
         await page.setViewportSize({ width, height: 900 });
         await fresh("maintenance-dock", scale);

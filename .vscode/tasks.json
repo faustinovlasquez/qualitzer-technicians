@@ -2,6 +2,68 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de badges de asignaciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8835" } },
+			"isBackground": true, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar badges de asignaciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/testing/parent-assignment-validation.cjs", "--assignment-badges"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar badges de asignaciones",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/compact-overview-smoke.cjs", "--assignment-badges"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de tarjetas compactas",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8834" } },
+			"isBackground": true, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar tarjeta de trabajo compacta",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/time-sync/smoke.cjs", "--compact-card"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de resumen del trabajo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8833" } },
+			"isBackground": true, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar descripcion de trabajo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/time-sync/smoke.cjs", "--work-description"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" },
+			"problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar gateway diagnostico edicion",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\android\\serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8832" } },
+			"isBackground": true, "problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: descargar APK de acciones OT compactas",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
@@ -672,7 +734,7 @@
 			"label": "Qualitzer: comprobar entrega de asignaciones",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
-			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.105:8831/"],
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\scripts\\testing\\parent-assignment-delivery.cjs", "http://192.168.1.105:8835/"],
 			"isBackground": false,
 			"problemMatcher": []
 		},

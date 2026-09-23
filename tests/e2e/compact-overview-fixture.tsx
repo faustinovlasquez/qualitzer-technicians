@@ -7,7 +7,7 @@ import { DashboardScreen, type DashboardScreenProps } from "../../src/screens/Da
 import { LoginScreen } from "../../src/screens/LoginScreen";
 import { monthRange, weekRange } from "../../src/domain/format";
 
-type Scenario = "full" | "supplemental" | "partial" | "partial-empty" | "null-coverage" | "no-data" | "empty-maintenance" | "empty-ot" | "agenda-date16";
+type Scenario = "full" | "supplemental" | "partial" | "partial-empty" | "null-coverage" | "no-data" | "empty-maintenance" | "empty-ot" | "agenda-date16" | "badges" | "badges-many";
 type Screen = "login" | "dashboard" | "agenda";
 const range: DateRange = { startDate: "2026-09-12", endDate: "2026-09-12" };
 const user: User = { id: 1, workerId: 1, name: "Alex", lastnames: "Fixture", email: "alex@example.invalid", role: { name: "Técnico" },
@@ -62,6 +62,16 @@ function DashboardFixture({ screen, scenario, busy, onOpenWork }: { screen: Scre
   const [currentRange, setRange] = useState(scenario === "agenda-date16" ? monthRange(range.startDate) : screen === "agenda" ? weekRange(range.startDate) : range);
   const [focusDate, setFocusDate] = useState<string | null>(null);
   const data = assignments(scenario);
+  if (scenario === "badges" || scenario === "badges-many") {
+    const base = data.groups[0];
+    if (scenario === "badges-many") base.works = Array.from({ length: 120 }, (_, index) => ({ ...base.works[0], id: String(index + 1), status: "pending" as const }));
+    data.groups.push(
+      { ...base, id: "maintenance-102", type: "internal_maintenance", title: "Revision de bateria", status: "pending", works: [] },
+      { ...base, id: "maintenance-103", type: "internal_maintenance", title: "Cambio de aceite", status: "delivered", works: [] },
+      { ...base, id: "external-104", type: "external_ot", title: "Orden activa", status: "in_progress", works: [] },
+      { ...base, id: "external-105", type: "external_ot", title: "Orden cerrada", status: "completed", works: [] },
+    );
+  }
   if (scenario === "agenda-date16") {
     const base = data.groups[0];
     data.groups = [
