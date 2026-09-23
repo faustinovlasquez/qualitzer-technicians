@@ -1,4 +1,8 @@
-# Trabajos en mantenimiento: gateway 1.0.25 / APK 1.0.53
+# Asignacion de mantenimiento y boton flotante: gateway 1.0.26 / APK 1.0.55
+
+La entrega actual corrige el falso aviso de trabajo no asignado al crear un hijo con otro horario y separa Crear trabajo como un + flotante. Ver [actualizacion 1.0.55](ACTUALIZACION-1.0.55.md). Instalar gateway 1.0.26 para corregir la autorizacion de la OT; no hay cambios nuevos de tablas. Conservar claves, sesiones y colas.
+
+## Historial: gateway 1.0.25 / APK 1.0.53
 
 La entrega actual agrega el footer fijo de mantenimiento y creacion de hijos con equipo heredado. Ver [actualizacion 1.0.53](ACTUALIZACION-1.0.53.md). Desplegar las fuentes backend y gateway 1.0.25 antes de usar Crear trabajo. Conservar sesiones y colas; no hay migracion nueva. El contenido posterior conserva las entregas anteriores.
 

@@ -134,6 +134,21 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("maintenance schedules authorize parent files and the newly linked child without accepting foreign work", async context => {
+  const { request, state } = await harness(context);
+  const parent = group({ id: "maintenance-50", type: "internal_maintenance" });
+  const child = { ...parent, scheduledStartTime: "14:00", scheduledEndTime: "15:00", works: [work({ id: "12", scheduledStartTime: "14:00", scheduledEndTime: "15:00" })] };
+  state.assignments = assignments([parent, child]);
+  assert.equal((await request(groupPath(parent.id))).response.status, 200);
+  assert.equal((await request(workPath(parent.id, "12"))).response.status, 200);
+  assert.equal((await request(workPath(parent.id, "99"))).response.status, 404);
+  assert.equal((await request(workPath("maintenance-99", "12"))).response.status, 404);
+  assert.equal(writes(state.calls).length, 0);
+  state.assignments = assignments([parent, { ...child, status: "delivered" }]);
+  assert.equal((await request(groupPath(parent.id))).response.status, 409);
+  assert.equal((await request(workPath(parent.id, "12"))).response.status, 409);
+});
+
 test("maintenance file lists accept backend display sizes without treating rounded KB or MB as exact bytes", async (t) => {
   const { request, state } = await harness(t);
   state.assignments = assignments([group({ id: "maintenance-50", type: "internal_maintenance" })]);

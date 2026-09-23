@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.25
+# @qualitzer/mobile-gateway 1.0.26
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.25. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.26. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.26 corrige ASSIGNMENT_NOT_FOUND cuando los trabajos de una misma OT de mantenimiento llegan en bloques horarios distintos, como sucede al crear un hijo. Reune bloques compatibles del padre para estado, inicio, entrega y archivos; localiza cada hijo en todos los bloques sin autorizar coincidencias ambiguas. Conserva la identidad de usuario/trabajador/sucursal, rechazo de bloques duplicados o contradictorios y la comprobacion de pertenencia de hijos al detalle canonico. No altera la creacion ni sus UUID, no asigna otra OT y no cambia tablas o colas. Requiere instalar este gateway; la APK1.0.55 agrega el boton + flotante.
 
 1.0.25 permite crear un trabajo dentro de un mantenimiento existente: `kind: "work"` con `maintenanceId` positivo, sin equipo enviado por el cliente. Comprueba que la respuesta conserve exactamente ese padre. El backend autoriza al tecnico, hereda el equipo y crea el hijo y su planificacion en una transaccion. Requiere desplegar MobileCreation y su proyeccion de asignaciones del backend; no hay migracion nueva. La APK1.0.53 usa este flujo solo online, con UUID y borrador aislado por OT; las creaciones independientes y sus colas siguen iguales.
 

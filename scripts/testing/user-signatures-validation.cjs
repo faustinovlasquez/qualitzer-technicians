@@ -12,7 +12,7 @@ if (process.argv.includes("--offline-delivery")) recoveryTests.push("tests/deliv
 if (process.argv.includes("--creation-history")) recoveryTests.push("tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts");
 if (process.argv.includes("--action-history")) recoveryTests.push("tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts", "tests/creation-form.test.ts");
 if (process.argv.includes("--work-edit")) recoveryTests.push("tests/creation-form.test.ts", "tests/creation-equipment.test.ts", "tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts", "server/tests/work-edit.test.ts", "server/tests/equipment-location.test.ts");
-if (process.argv.includes("--maintenance-create")) recoveryTests.push("tests/creation-form.test.ts", "tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts", "src/offline/tests/repository.test.ts", "server/tests/creation-routes.test.ts");
+if (process.argv.includes("--maintenance-create")) recoveryTests.push("tests/creation-form.test.ts", "tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts", "src/offline/tests/repository.test.ts", "server/tests/creation-routes.test.ts", "server/tests/panel-resources.test.ts", "server/tests/assignments-authorization.test.ts", "server/tests/work-edit.test.ts");
 
 function clientTypes() {
   const config = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile);

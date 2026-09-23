@@ -24,6 +24,7 @@ import { offlineAttachment, operationsForWork, type PendingDocument } from "./of
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import type { UserSignatureAccess } from "../domain/userSignatures";
 import { CreationScreen, type CreationScreenProps } from "./creation/CreationScreen";
+import { CreationFloatingButton } from "./creation/CreationQuickMenu";
 
 export interface OrderDetailScreenProps {
   group: AssignmentGroup;
@@ -95,6 +96,9 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const localGroup = group.id.startsWith("local-");
   const assignmentsRange = props.assignmentsRange ?? props.range;
   const executionAvailable = online && !localGroup && !props.staleReadOnly;
+  const showCreateWork = group.type === "internal_maintenance" && (props.creation !== undefined || props.onCreateWork !== undefined) && group.status !== "completed" && group.status !== "delivered";
+  const awaitingSnapshot = group.works.length > 0 && group.works.every(work => work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT"));
+  const createDisabled = locked || !executionAvailable || awaitingSnapshot || props.offline?.connection?.foreground === false;
   const timerAvailable = (online || (props.offline !== undefined && props.offline !== null && !props.offline.authBlocked)) && !localGroup && !props.staleReadOnly;
   const scopedOperations = props.range && props.companyBranchId !== undefined ? operationsForWork(props.offline, { groupId: group.id, ...props.range, companyBranchId: props.companyBranchId }) : [];
   const documents = scopedOperations.filter((operation): operation is PendingDocument => operation.kind === "document" && operation.stepId === undefined);
@@ -179,10 +183,14 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     onOpenWork(selectedGroup, work, options);
   }
 
+  function createWork(): void {
+    if (!showCreateWork || createDisabled || leaving.current || childBack.current?.(true)) return;
+    if (props.creation) setCreating(true); else props.onCreateWork?.();
+  }
+
   const lifecycleProps = {
     group, tenant, technicianName: props.technicianName, storageKey: props.storageKey, mode, busy: locked,
     dock: true,
-    onCreateWork: props.creation || props.onCreateWork ? () => { if (!locked && executionAvailable && !childBack.current?.(true)) { if (props.creation) setCreating(true); else props.onCreateWork?.(); } } : undefined,
     signatureAccess: props.signatureAccess,
     deliveryIntent: props.deliveryIntent,
     onDeliveryIntentConsumed: props.onDeliveryIntentConsumed,
@@ -236,7 +244,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     <ScrollView
       ref={scroll}
       style={styles.screen}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, showCreateWork && styles.createSpace]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} />}
@@ -266,7 +274,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       <Text style={styles.footerNote}>Los estados, cantidades y asignaciones corresponden a la información recibida de Qualitzer.</Text>
     </ScrollView>
     </View>
-      {filesVisited ? <View style={[styles.filePanel, tab !== "files" && styles.hidden]}>
+      {filesVisited ? <View style={[styles.filePanel, showCreateWork && styles.createSpace, tab !== "files" && styles.hidden]}>
         <FileWorkspace
           compact
           autoSave
@@ -295,6 +303,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
         />
       </View> : null}
     {group.type === "internal_maintenance" ? <View style={styles.actionDock} testID="maintenance-action-dock">
+      {showCreateWork ? <View style={styles.createDock} testID="maintenance-create-fab"><CreationFloatingButton label="Crear trabajo" disabled={createDisabled} onPress={createWork} /></View> : null}
       {props.offline === undefined && !localGroup && !props.staleReadOnly ? <OrderLifecyclePanel {...lifecycleProps} /> : <OfflineOrderLifecyclePanel {...lifecycleProps} offline={props.offline ?? null} staleReadOnly={props.staleReadOnly} />}
     </View> : null}
     {sectionsOpen ? <Modal visible transparent animationType="fade" onRequestClose={() => setSectionsOpen(false)}>
@@ -322,6 +331,8 @@ const styles = StyleSheet.create({
   headerCopy: { flex: 1, minWidth: 0 },
   orderCode: { ...typography.label, color: palette.primary, backgroundColor: palette.primarySoft, padding: 8 },
   actionDock: { flexShrink: 0, padding: 12, borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  createDock: { position: "absolute", top: -72, right: 16, zIndex: 900 },
+  createSpace: { paddingBottom: 88 },
   headerTitle: { ...typography.label, color: palette.navy, fontWeight: "700" },
   headerSubtitle: { ...typography.caption, color: palette.textSecondary, flexShrink: 1 },
   codes: { flexDirection: "row", alignItems: "center", gap: 6 },

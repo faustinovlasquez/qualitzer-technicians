@@ -72,11 +72,10 @@ export class AssignmentAuthorization {
     bearer(req);
     const params = resourceParamsSchema.parse(req.params);
     const { token, user, range, data } = await this.snapshot(req, executionDate);
-    const groups = data.groups.filter((group) => group.id === params.groupId);
-    const group = groups[0];
-    const works = group?.works.filter((work) => work.id === params.workId) ?? [];
+    const group = assignedGroup(data.groups, params.groupId);
+    const works = data.groups.filter(candidate => candidate.id === params.groupId).flatMap(candidate => candidate.works).filter(work => work.id === params.workId);
     const work = works[0];
-    if (groups.length !== 1 || works.length !== 1 || !group || !work) {
+    if (works.length !== 1 || !work) {
       throw new GatewayError(404, "ASSIGNMENT_NOT_FOUND");
     }
     if (mutation && isExecutionFinalization(work.status)) {
@@ -105,6 +104,24 @@ export class AssignmentAuthorization {
     }
     return scopes;
   }
+}
+
+export function assignedGroup(groups: AssignmentGroup[], groupId: string): AssignmentGroup {
+  const candidates = groups.filter(candidate => candidate.id === groupId);
+  const first = candidates[0];
+  if (!first || (first.type !== "internal_maintenance" && candidates.length !== 1)) throw new GatewayError(404, "ASSIGNMENT_NOT_FOUND");
+  if (candidates.length === 1) return first;
+  const schedules = new Set<string>();
+  for (const candidate of candidates) {
+    const schedule = JSON.stringify([candidate.scheduledDate, candidate.scheduledStartTime, candidate.scheduledEndTime, candidate.works.map(work => work.id).sort()]);
+    if (schedules.has(schedule)) throw new GatewayError(404, "ASSIGNMENT_NOT_FOUND");
+    schedules.add(schedule);
+    if (candidate.type !== first.type || candidate.status !== first.status || candidate.maintenanceType !== first.maintenanceType
+      || candidate.isResponsible !== first.isResponsible || candidate.canManage !== first.canManage
+      || candidate.equipment?.identifier !== first.equipment?.identifier || candidate.equipment?.internalNumber !== first.equipment?.internalNumber
+      || new Set(candidate.works.map(work => work.id)).size !== candidate.works.length) throw new GatewayError(409, "ASSIGNMENT_CHANGED");
+  }
+  return { ...first, works: [...new Map(candidates.flatMap(candidate => candidate.works).map(work => [work.id, work])).values()] };
 }
 
 export function ownedStep(scope: OwnedWork, stepId: string): ChecklistStep {

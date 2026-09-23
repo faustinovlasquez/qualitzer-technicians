@@ -12,7 +12,7 @@ export function OfflineOrderLifecyclePanel({ offline, staleReadOnly, ...props }:
   const awaitingSnapshot = props.group.works.length > 0 && props.group.works.every((work) => work.missingRequiredInfo.includes("OFFLINE_AWAITING_SERVER_SNAPSHOT"));
   if (offline?.online && !offline.authBlocked && !props.group.id.startsWith("local-") && !staleReadOnly && !awaitingSnapshot) return <OrderLifecyclePanel {...props} />;
   if (props.dock) return <View style={{ flexDirection: "row", gap: 8 }}>
-    {[{ title: "Iniciar OT", icon: "play-outline" as const }, { title: "Entregar OT", icon: "checkmark-circle-outline" as const }, ...(props.onCreateWork ? [{ title: "Crear trabajo", icon: "add-outline" as const }] : [])].map(item => <Button key={item.title} {...item} variant="secondary" disabled onPress={() => {}} style={{ flex: 1, minWidth: 0, flexDirection: "column", paddingHorizontal: 4 }} textStyle={{ fontSize: 12, textAlign: "center" }} />)}
+    {[{ title: "Iniciar OT", icon: "play-outline" as const }, { title: "Entregar OT", icon: "checkmark-circle-outline" as const }].map(item => <Button key={item.title} {...item} variant="secondary" disabled onPress={() => {}} style={{ flex: 1, minWidth: 0, minHeight: 44, flexDirection: "row", gap: 6, paddingHorizontal: 8, paddingVertical: 8 }} textStyle={{ fontSize: 13, lineHeight: 18, textAlign: "center" }} />)}
   </View>;
   return <Card style={styles.stack}>
     <SectionTitle title="Inicio y entrega de OT" />

@@ -1,5 +1,5 @@
 import type { AssignmentGroup, AssignmentWork, ChecklistStep } from "../../src/domain/models";
-import { AssignmentAuthorization, ownedStep } from "../assignments/authorization";
+import { assignedGroup, AssignmentAuthorization, ownedStep } from "../assignments/authorization";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
 import { positiveId, type RangeQuery } from "../validation";
@@ -24,9 +24,7 @@ export class PanelAuthorization {
       return { ...scope, step: input.stepId ? ownedStep(scope, input.stepId) : null };
     }
     const { token, range, data } = await this.assignments.snapshot(input.canonical);
-    const groups = data.groups.filter((group) => group.id === input.groupId);
-    const group = groups[0];
-    if (groups.length !== 1 || !group) throw new GatewayError(404, "ASSIGNMENT_NOT_FOUND");
+    const group = assignedGroup(data.groups, input.groupId);
     let work: AssignmentWork | null = null;
     if (group.type === "direct_assignment") {
       work = group.works.find((candidate) => positiveId.safeParse(candidate.id).success && group.works.filter((item) => item.id === candidate.id).length === 1) ?? null;

@@ -156,6 +156,32 @@ test("order metadata is source-aware, canonical and sanitized without trusting m
   assert.equal(writes(state.calls).length, 0);
 });
 
+test("maintenance state accepts existing and newly created children in separate schedule rows", async context => {
+  const { request, state } = await harness(context);
+  const parent = assigned().groups[0];
+  assert.ok(parent);
+  state.assignments = assignments([
+    parent,
+    { ...parent, scheduledStartTime: "14:00", scheduledEndTime: "15:00", works: [work({ id: "12", title: "New child", status: "pending", scheduledStartTime: "14:00", scheduledEndTime: "15:00" })] },
+  ]);
+  const original = detail();
+  state.detail = { ...original, works: [...original.works, { id: 12, maintenanceId: 50, title: "New child", checklists: [] }] };
+  const response = await request();
+  assert.equal(response.response.status, 200);
+  assert.equal((response.data as { groupId: string }).groupId, "maintenance-50");
+  assert.equal(writes(state.calls).length, 0);
+  assert.equal((await request(orderPath("/start"), { method: "POST", body: {} })).response.status, 200);
+  assert.equal(writes(state.calls).length, 1);
+  state.calls.length = 0;
+  state.assignments.groups[1]!.status = "delivered";
+  assert.equal((await request(orderPath("/start"), { method: "POST", body: {} })).response.status, 409);
+  assert.equal(writes(state.calls).length, 0);
+  state.assignments.groups[1]!.status = "pending";
+  state.detail = original;
+  assert.equal((await request()).response.status, 409);
+  assert.equal(writes(state.calls).length, 0);
+});
+
 test("start maps only pending maintenance parents to POST start-repair with empty JSON and session-derived headers", async (t) => {
   const { request, state } = await harness(t);
   const result = await request(orderPath("/start"), { method: "POST", body: {} });

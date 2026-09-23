@@ -63,7 +63,11 @@
         await dock.getByRole("button", { name: "Crear trabajo", exact: true }).waitFor();
         const before = await dock.boundingBox();
         assert(before && before.y + before.height <= 901);
+        const floating = await page.getByTestId("maintenance-create-fab").boundingBox();
+        assert(floating && floating.width === 56 && floating.height === 56 && floating.y + floating.height < before.y && floating.x + floating.width <= width - 15);
+        assert.equal(await button("Crear trabajo").getByText("Crear trabajo", { exact: true }).count(), 0);
         assert.equal(await page.getByText("Entrega de OT", { exact: true }).count(), 0);
+        assert.equal(await button("Actualizar estado de OT").count(), 0);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
         await button("Iniciar OT").click();
         await page.getByText("Iniciar OT de mantenimiento", { exact: true }).waitFor();
@@ -87,7 +91,10 @@
         await button("Gestionar trabajo").click();
         await button("Crear trabajo").waitFor();
         await page.getByText("Trabajo hijo nuevo", { exact: true }).waitFor();
-        for (const name of ["Iniciar OT", "Entregar OT", "Crear trabajo"]) {
+        for (const name of ["Iniciar OT", "Entregar OT"]) {
+          const bounds = await button(name).boundingBox();
+          assert(bounds && bounds.height >= 44 && bounds.height <= (scale === 1 ? 46 : 92), name + " compact height");
+          assert.equal(await button(name).evaluate(element => getComputedStyle(element).flexDirection), "row");
           const fits = await dock.getByRole("button", { name, exact: true }).evaluate(element => {
             const outer = element.getBoundingClientRect();
             const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -106,6 +113,11 @@
         const inputs = await page.evaluate(() => window.maintenanceDock.inputs);
         assert.equal(inputs.length, 1); assert.equal(inputs[0].maintenanceId, 369); assert.equal(inputs[0].work.rentalEquipmentId, undefined);
         await screenshot(`maintenance-dock-created-${width}-${scale}`);
+        await page.evaluate(() => { window.maintenanceDock.failStatus = true; });
+        await button("Entregar OT").click();
+        await page.getByText("No se pudo consultar el estado de la OT.", { exact: true }).waitFor();
+        assert.equal(await button("Actualizar estado de OT").count(), 0);
+        await screenshot(`maintenance-dock-error-${width}-${scale}`);
       });
       const label=`${width}x844-font${scale*100}`;await page.setViewportSize({width,height:844});
       await check(label+"-checklist-summary", async () => {

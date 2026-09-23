@@ -14,16 +14,22 @@ const actions: { kind: CreationKind; label: string; detail: string; icon: IconNa
   { kind: "non_productive", label: "Tiempo no productivo", detail: "Registra una espera, traslado u otro motivo", icon: "time-outline" },
 ];
 
+export function CreationFloatingButton({ onPress, label, disabled = false, expanded }: {
+  onPress: () => void; label: string; disabled?: boolean; expanded?: boolean;
+}) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded, disabled }}
+    disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.fab, disabled && styles.disabled, pressed && styles.pressed]}>
+    <Ionicons name="add" size={30} color={palette.white} accessible={false} />
+  </Pressable>;
+}
+
 export function CreationQuickMenu({ onCreate, disabled = false }: CreationQuickMenuProps) {
   const [open, setOpen] = useState(false);
   const insets = useSafeAreaInsets();
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
   return <>
     <View pointerEvents="box-none" style={[styles.dock, __DEV__ ? { left: Math.max(16, insets.left), bottom: 16 } : { right: Math.max(16, insets.right), bottom: 16 }]}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Crear trabajo, mantenimiento o tiempo no productivo" accessibilityState={{ expanded: open, disabled }}
-        disabled={disabled} onPress={() => setOpen(true)} style={({ pressed }) => [styles.fab, disabled && styles.disabled, pressed && styles.pressed]}>
-        <Ionicons name="add" size={30} color={palette.white} accessible={false} />
-      </Pressable>
+      <CreationFloatingButton label="Crear trabajo, mantenimiento o tiempo no productivo" expanded={open} disabled={disabled} onPress={() => setOpen(true)} />
     </View>
     <Modal visible={open && !disabled} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
       <SafeAreaView style={styles.overlay}>

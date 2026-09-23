@@ -1,6 +1,6 @@
 import type { Request } from "express";
 import type { AssignmentGroup, User } from "../../src/domain/models";
-import { AssignmentAuthorization } from "../assignments/authorization";
+import { assignedGroup, AssignmentAuthorization } from "../assignments/authorization";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
@@ -27,9 +27,7 @@ export class OrderAuthorization {
   async resolve(req: Request): Promise<OrderScope> {
     const groupId = orderRequest(req);
     const { token, user, range, data } = await this.assignments.snapshot(req);
-    const groups = data.groups.filter((candidate) => candidate.id === groupId);
-    const group = groups[0];
-    if (groups.length !== 1 || !group) throw new GatewayError(404, "ASSIGNMENT_NOT_FOUND");
+    const group = assignedGroup(data.groups, groupId);
     if (group.type !== "internal_maintenance") throw new GatewayError(400, "ORDER_SOURCE_UNSUPPORTED");
     const maintenanceId = Number(group.id.slice("maintenance-".length));
     const detail = parseUpstream(maintenanceDetailSchema, await this.upstream.request(`/maintenances/${maintenanceId}`, { token }));
