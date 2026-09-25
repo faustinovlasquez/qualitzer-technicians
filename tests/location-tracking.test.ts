@@ -168,6 +168,36 @@ for (const source of ["map", "gps-without-map"] as const) test(`equipment editor
   assert.equal(elements(render(), "CreationModal").length, 0);
 });
 
+for (const source of ["DISPATCH_ADDRESS", "SAFEGUARD"] as const) test(`equipment panel displays and edits its own address instead of ${source}`, async context => {
+  const hooks = durableReactFixture(); context.after(() => hooks.unmount());
+  const address: EquipmentAddress = { address: "Calle propia 1, Ciudad, Chile", country: "Chile", region: "", county: "Ciudad", city: "Ciudad", postalCode: "", lat: "-33", lon: "-70" };
+  const stored: EquipmentLocation = { equipmentId: 5, equipmentContext: "rental", label: "Equipo", address, canEdit: true,
+    currentAddress: { ...address, address: "Direccion ajena", lat: "-34", lon: "-71" }, currentSource: source, currentLabel: "Direccion ajena" };
+  const writes: EquipmentLocationUpdate[] = [];
+  const module = uiModule<typeof import("../src/location/EquipmentLocationPanel")>("location/EquipmentLocationPanel.tsx", hooks, {
+    "../security/DeviceSecurityContext": { useDeviceSecurity: () => ({ blocked: false, isUnlocked: () => true }) },
+    "../screens/creation/CreationModal": { CreationModal: "CreationModal" }, "./GoogleMap": { GoogleMap: "GoogleMap" }, "./equipmentPosition": {},
+  });
+  const props = { port: { load: async () => stored, save: async (_target: string, input: EquipmentLocationUpdate) => { writes.push(input); return { ...stored, address: input.address }; } }, target: "work" as const, identity: "equipment-own-location", disabled: false, online: true };
+  const render = () => { const tree = hooks.render(() => module.EquipmentLocationPanel(props)); hooks.flush(); return tree; };
+  render(); await settle();
+  assert.ok(JSON.stringify(render()).includes("Calle propia 1, Ciudad, Chile"));
+  assert.equal(JSON.stringify(render()).includes("Direccion ajena"), false);
+  action(render(), "Ver ubicación en el mapa").onPress();
+  const shownPoint = elements<{ point: { lat: number; lng: number } }>(render(), "GoogleMap")[0].props.point;
+  assert.equal(shownPoint.lat, -33); assert.equal(shownPoint.lng, -70);
+  elements<{ onClose(): void }>(render(), "CreationModal")[0].props.onClose();
+  action(render(), "Editar ubicación actual").onPress();
+  const field = elements<{ label: string; onChangeText(value: string): void }>(render(), "Field").find(item => item.props.label === "Dirección")!;
+  field.props.onChangeText("Nueva direccion");
+  assert.equal(elements<{ point: unknown }>(render(), "GoogleMap")[0].props.point, null);
+  action(render(), "Guardar ubicación").onPress(); await settle();
+  assert.equal(writes.length, 1); assert.deepEqual(writes[0].expected, address);
+  assert.equal(writes[0].address.lat, null); assert.equal(writes[0].address.lon, null);
+  assert.ok(JSON.stringify(render()).includes("Nueva direccion"));
+  assert.equal(JSON.stringify(render()).includes("Direccion ajena"), false);
+});
+
 test("equipment read from an obsolete identity never appears in the next equipment panel", async context => {
   const hooks = durableReactFixture(); context.after(() => hooks.unmount());
   const gate = deferred<EquipmentLocation>();
@@ -336,4 +366,23 @@ test("history status distinguishes consent upgrade, disabled capture, expired se
   state.issue = "GPS no disponible"; assert.equal(locationTrackingStatus(state, now), state.issue);
   assert.equal(locationTrackingStatus(state, Date.parse("2026-09-21T20:00:00Z")), state.issue);
   assert.match(locationTrackingStatus(state, state.validUntil), /verifica/);
+});
+
+test("native equipment map follows an external point change and removes a cleared point", async context => {
+  const hooks = durableReactFixture(); context.after(() => hooks.unmount());
+  let requests = 0;
+  const module = uiModule<typeof import("../src/location/GoogleMap")>("location/GoogleMap.tsx", hooks, {
+    "./GoogleMapConfiguration": { GoogleMapConfiguration: "GoogleMapConfiguration" },
+    "react-native-maps": { __esModule: true, default: "MapView", Marker: "Marker", Circle: "Circle", PROVIDER_GOOGLE: "google" },
+    "./googlePlaces": { googlePlaces: { available: () => true, endSession: () => {}, reverse: async () => { requests++; throw new Error("UNEXPECTED_REVERSE"); } } },
+  });
+  const props: GoogleMapProps = { point: { lat: -33, lng: -70 }, editable: true };
+  const render = () => { const tree = hooks.render(() => module.GoogleMap(props)); hooks.flush(); return tree; };
+  render(); await settle();
+  props.point = { lat: -34, lng: -71 }; render(); await settle();
+  const marker = elements<{ coordinate: { latitude: number; longitude: number } }>(render(), "Marker")[0];
+  assert.equal(marker.props.coordinate.latitude, -34);
+  props.point = null; render(); await settle();
+  assert.equal(elements(render(), "Marker").length, 0);
+  assert.equal(requests, 0);
 });

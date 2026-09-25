@@ -246,8 +246,9 @@ async function equipmentFlows(browser, base) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, locale: "es-CL" });
     const page = await context.newPage(); page.on("pageerror", error => report.errors.push(error.message));
     const portalRequests = []; page.on("request", request => { if (/mobile-map/.test(request.url())) portalRequests.push(request.url()); });
-    await page.goto(`${base}/?view=equipment`);
-    await page.getByText("Calle 4 Poniente", { exact: true }).waitFor();
+    await page.goto(`${base}/?view=equipment&source=dispatch`);
+    await page.getByText("Calle 4 Poniente, Paine, Metropolitana, Chile", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Direccion de despacho anterior", { exact: true }).count(), 0);
     if (scale === 2) await page.evaluate(() => { const resize = () => { for (const element of document.querySelectorAll("div,span,button,input,h1,h2,h3")) {
       if (element.dataset.resized || ![...element.childNodes].some(node => node.nodeType === 3 && node.textContent.trim())) continue;
       element.dataset.resized = "true"; const computed = getComputedStyle(element); element.style.fontSize = `${parseFloat(computed.fontSize) * 2}px`; if (computed.lineHeight !== "normal") element.style.lineHeight = `${parseFloat(computed.lineHeight) * 2}px`;
@@ -259,6 +260,7 @@ async function equipmentFlows(browser, base) {
     await page.getByRole("button", { name: "Cerrar Ubicación actual del equipo", exact: true }).last().click();
     await page.getByRole("button", { name: "Editar ubicación actual", exact: true }).click();
     await page.getByRole("textbox", { name: "Buscar dirección en Google", exact: true }).waitFor();
+    assert.equal(await page.getByRole("textbox", { name: "Dirección", exact: true }).inputValue(), "Calle 4 Poniente");
     await map.click();
     await page.waitForFunction(() => [...document.querySelectorAll("input")].some(input => input.value === "Camino del Equipo 10"));
     assert.equal(await page.evaluate(() => window.locationFixture.equipmentSaves.length), 0);
@@ -271,6 +273,8 @@ async function equipmentFlows(browser, base) {
     const file = `equipment-map-${width}-${scale}x.png`; await page.screenshot({ path: path.join(output, file), fullPage: true, animations: "disabled" });
     await page.getByRole("button", { name: "Guardar ubicación", exact: true }).click();
     await page.getByText("Ubicación actualizada en Qualitzer.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Direccion de despacho anterior", { exact: true }).count(), 0);
+    await page.getByText("Camino del Equipo 10, Paine, Metropolitana, Chile", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.locationFixture.equipmentSaves.length), 1);
     assert.equal(await page.evaluate(() => window.locationFixture.equipmentSaves[0].expected.address), "Calle 4 Poniente");
     assert.equal(await page.evaluate(() => window.locationFixture.equipmentSaves[0].address.lat), "-33.9");
@@ -284,6 +288,11 @@ async function equipmentFlows(browser, base) {
     await page.getByText(/La ubicación cambió\. Actualiza antes de guardar\./).waitFor();
     await page.getByRole("button", { name: "Cancelar", exact: true }).click();
     assert.equal(await page.getByRole("button", { name: "Guardar ubicación", exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Editar ubicación actual", exact: true }).click();
+    await page.getByRole("textbox", { name: "Dirección", exact: true }).fill("Direccion escrita manualmente");
+    await page.getByText("Sin punto seleccionado", { exact: true }).waitFor();
+    assert.notEqual(await map.evaluate(canvas => canvas.getContext("2d").getImageData(250,150,1,1).data[0]), 214);
+    await page.getByRole("button", { name: "Cancelar", exact: true }).click();
     await page.goto(`${base}/?view=equipment&readonly=true`); await page.getByText("Sin permiso para editar la ubicación del equipo.", { exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: "Editar ubicación actual", exact: true }).count(), 0);
     await page.goto(`${base}/?view=work&embedded=true`); await page.getByRole("button", { name: /^Ver en mapa/ }).click();

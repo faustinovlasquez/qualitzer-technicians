@@ -2,6 +2,21 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de ubicacion propia del equipo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/android/serve-apk.cjs"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile", "env": { "QUALITZER_APK_PORT": "8837" } },
+			"isBackground": true, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar ubicacion propia del equipo",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/location/smoke.cjs", "--equipment-map"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: verificar descarga actividades offline",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",

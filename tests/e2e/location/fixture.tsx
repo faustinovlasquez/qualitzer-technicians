@@ -21,13 +21,16 @@ window.locationFixture = { allow: true, prompts: 0, saves: [], offline: false, d
 const unlocked = { blocked: false, isUnlocked: () => true, runTrustedNativePicker: async <Result,>(operation: () => Promise<Result>) => operation() } as DeviceSecurityUi;
 const equipmentAddress = { address: "Calle 4 Poniente", country: "Chile", region: "Metropolitana", county: "Paine", city: "", postalCode: "", lat: "-33.81", lon: "-70.74" };
 let equipmentValue: EquipmentLocation = { equipmentId: 5, equipmentContext: "rental", label: "Camión de prueba", canEdit: true, address: equipmentAddress, currentAddress: equipmentAddress, currentSource: "REGISTERED", currentLabel: null };
+if (new URLSearchParams(location.search).get("source") === "dispatch") {
+  equipmentValue = { ...equipmentValue, currentAddress: { ...equipmentAddress, address: "Direccion de despacho anterior", lat: "-35", lon: "-72" }, currentSource: "DISPATCH_ADDRESS", currentLabel: "Direccion de despacho anterior" };
+}
 const equipmentPort = {
   load: async () => ({ ...equipmentValue, canEdit: new URLSearchParams(location.search).get("readonly") !== "true" }),
   save: async (_target: string, input: EquipmentLocationUpdate) => {
     window.locationFixture.equipmentSaves.push(input);
     if (window.locationFixture.failSave) throw new Error("Respuesta de guardado no disponible.");
     if (window.locationFixture.conflict) throw new Error("La ubicación cambió. Actualiza antes de guardar.");
-    equipmentValue = { ...equipmentValue, address: input.address, currentAddress: input.address }; return equipmentValue;
+    equipmentValue = { ...equipmentValue, address: input.address }; return equipmentValue;
   },
 };
 const point = locationPointSchema.parse({ id: "00000000-0000-4000-8000-000000000001", companyBranchId: 1, capturedAt: "2026-09-21T09:00:00.000Z", locationAt: "2026-09-21T09:00:00.000Z",

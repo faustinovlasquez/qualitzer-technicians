@@ -10,6 +10,7 @@ import { GoogleMapConfiguration } from "./GoogleMapConfiguration";
 export function GoogleMap(props: GoogleMapProps) {
   const map = useRef<MapView>(null);
   const [point, setPoint] = useState(props.point);
+  const selectedPoint = useRef(props.point);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<GooglePlaceSuggestion[]>([]);
   const [busy, setBusy] = useState(false);
@@ -35,9 +36,17 @@ export function GoogleMap(props: GoogleMapProps) {
   }, [loaded, attempt]);
   const current = (version: number) => alive.current && version === generation.current && latest.current.editable && !latest.current.disabled;
   const center = (next: GoogleMapPoint) => {
+    selectedPoint.current = next;
     setPoint(next);
     map.current?.animateToRegion({ latitude: next.lat, longitude: next.lng, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 250);
   };
+  useEffect(() => {
+    const next = props.point;
+    if (next?.lat === selectedPoint.current?.lat && next?.lng === selectedPoint.current?.lng && next?.accuracy === selectedPoint.current?.accuracy) return;
+    generation.current++; setBusy(false);
+    if (validMapPoint(next)) center(next);
+    else { selectedPoint.current = null; setPoint(null); }
+  }, [props.point?.lat, props.point?.lng, props.point?.accuracy]);
   const selectPoint = async (next: GoogleMapPoint) => {
     if (!latest.current.editable || latest.current.disabled || !validMapPoint(next)) return;
     const version = ++generation.current;
