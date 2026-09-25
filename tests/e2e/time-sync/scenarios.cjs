@@ -56,6 +56,39 @@
       assert.deepEqual((await metrics()).clockCalls,[...previous,{label,value:hour+":"+minute}],"exactly one original consumer onChange after confirmation");
     }
     for (const width of [360,390,1280]) for(const scale of [1,2]) {
+      await check(`offline-activities-${width}-${scale}`, async () => {
+        await page.setViewportSize({ width, height: 900 });
+        await fresh("offline-activities", scale);
+        await button("Agregar actividad").scrollIntoViewIfNeeded();
+        assert.equal(await button("Agregar actividad").isDisabled(), false);
+        assert.equal(await page.getByText("OFFLINE_ACTION_REQUIRES_SERVER_RESOURCE", { exact: true }).count(), 0);
+        for (const [name, minutes] of [["Revisar motor y sistema de alimentacion", "15"], ["Comprobar cierre", "0"]]) {
+          await button("Agregar actividad").click();
+          await page.getByRole("textbox", { name: "Nombre de la actividad", exact: true }).fill(name);
+          await page.getByRole("textbox", { name: "Minutos de actividad", exact: true }).fill(minutes);
+          await screenshot(`offline-activities-form-${minutes}-${width}-${scale}`);
+          await button("Guardar actividad").click();
+          await button("Guardar actividad").waitFor({ state: "hidden" });
+          await page.getByText(name, { exact: true }).waitFor();
+        }
+        const before = await page.evaluate(() => window.timeSync.state());
+        assert.equal(before.operations.length, 3);
+        assert.equal(before.operations.filter(operation => operation.kind === "activity" && operation.status === "pending").length, 2);
+        assert.equal((await metrics()).sent.length, 0);
+        await screenshot(`offline-activities-pending-${width}-${scale}`);
+        await page.evaluate(() => window.timeSync.restartActivities());
+        await button("Agregar actividad").scrollIntoViewIfNeeded();
+        await page.getByText("Comprobar cierre", { exact: true }).waitFor();
+        assert.deepEqual((await page.evaluate(() => window.timeSync.state())).operations.map(operation => operation.id), before.operations.map(operation => operation.id));
+        await page.evaluate(() => window.timeSync.restoreActivities());
+        await page.getByTestId("activity-card-900").waitFor();
+        await page.getByTestId("activity-card-901").waitFor();
+        assert.equal(await page.getByText("Comprobar cierre", { exact: true }).count(), 1);
+        assert.equal((await metrics()).sent.length, 2);
+        assert((await page.evaluate(() => window.timeSync.state())).operations.every(operation => operation.status === "applied"));
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+        await screenshot(`offline-activities-confirmed-${width}-${scale}`);
+      });
       await check(`compact-card-${width}-${scale}`, async () => {
         await page.setViewportSize({ width, height: 900 });
         await fresh("compact-card", scale);

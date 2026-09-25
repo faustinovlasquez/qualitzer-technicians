@@ -6,8 +6,9 @@ const link = z.string().nullish().transform(value => {
   if (!value) return "";
   try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? value : ""; } catch { return ""; }
 });
-export const workActivityInputSchema = z.object({ activity: z.string().trim().min(1).max(240).refine(value => !value.includes("__WORK_CHECKLIST__")), executionTime: z.number().int().min(0).max(44639) }).strict();
+export const workActivityInputSchema = z.object({ activity: z.string().trim().min(1).max(240).refine(value => !value.includes("\u0000") && !value.includes("__WORK_CHECKLIST__")), executionTime: z.number().int().min(0).max(44639) }).strict();
 export type WorkActivityInput = z.infer<typeof workActivityInputSchema>;
+export type WorkActivityList = Activity[] & { appliedOperationIds?: string[] };
 export const workActivitySchema: z.ZodType<Activity> = z.object({
   id, activity: z.string(), executionTime: z.number().nonnegative(), isStarted: z.boolean(), isCompleted: z.boolean(),
   isChecklist: z.boolean().optional(), checklistId: id.nullish(),
@@ -19,8 +20,8 @@ export function isWorkActivity(activity: Activity): boolean {
   return activity.isChecklist !== true && activity.checklistId == null && !activity.activity.startsWith("__WORK_CHECKLIST__");
 }
 export interface WorkActivitiesPort {
-  activities(scope: WorkScope): Promise<Activity[]>;
-  createActivity(scope: WorkScope, input: WorkActivityInput): Promise<{ id: number }>;
+  activities(scope: WorkScope): Promise<WorkActivityList>;
+  createActivity(scope: WorkScope, input: WorkActivityInput, operationId?: string): Promise<{ id: number }>;
   updateActivity(scope: WorkScope, id: number, input: WorkActivityInput): Promise<void>;
   completeActivity(scope: WorkScope, id: number, isCompleted?: boolean): Promise<void>;
   deleteActivity(scope: WorkScope, id: number): Promise<void>;

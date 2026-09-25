@@ -137,6 +137,10 @@ export class DemoTechnicianRepository implements TechnicianRepository {
   private async applyOfflineCommand(input: SyncCommand): Promise<OfflineReceipt | void> {
     if (input.scope.workId === undefined) return { operationId: input.operationId, state: "rejected", error: "MOBILE_SYNC_COMMENT_WORK_REQUIRED" };
     const scope = { ...input.scope, workId: String(input.scope.workId) };
+    if (input.kind === "activity") {
+      const result = await this.createActivity(scope, input.payload);
+      return { operationId: input.operationId, state: "applied", activityId: result.id };
+    }
     if (input.kind === "comment") { await this.addComment(scope, input.payload.text); return; }
     if (input.kind === "completion") {
       const { work } = this.find(scope);

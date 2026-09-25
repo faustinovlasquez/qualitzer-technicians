@@ -2,6 +2,7 @@ import type { OfflineDeploymentCounts, OfflineOperation, OfflineOperationKind } 
 import { requiresDeployment } from "./connection";
 
 export function deploymentKinds(operation: OfflineOperation): readonly OfflineOperationKind[] | undefined {
+  if (operation.lastError === "MOBILE_SYNC_ACTIONS_UNAVAILABLE" && operation.kind === "activity") return ["activity"];
   if (operation.lastError === "MOBILE_SYNC_ACTIONS_UNAVAILABLE" && operation.kind === "completion") return ["completion"];
   // Shared schema/missing-route errors do not prove which endpoint is unavailable.
   if (operation.lastError === "MOBILE_SYNC_ACTIONS_UNAVAILABLE" && (operation.kind === "timer" || operation.kind === "checklist")) return ["timer", "checklist"];
@@ -43,7 +44,7 @@ export function runnableOperations(operations: readonly OfflineOperation[]): Off
 }
 
 export function awaitingDeploymentCounts(operations: readonly OfflineOperation[]): OfflineDeploymentCounts {
-  const counts: OfflineDeploymentCounts = { create: 0, comment: 0, answer: 0, document: 0, timer: 0, checklist: 0, completion: 0 };
+  const counts: OfflineDeploymentCounts = { create: 0, comment: 0, answer: 0, document: 0, timer: 0, checklist: 0, completion: 0, activity: 0 };
   const waiting = new Set<string>();
   const kinds = new Set<OfflineOperationKind>();
   for (const operation of operations) {

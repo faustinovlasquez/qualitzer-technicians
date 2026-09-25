@@ -149,7 +149,7 @@ for (const platform of ["memory", "native"] as const) test(`${platform}: unsuppo
   assert.deepEqual(engine.getSnapshot().operations.map((operation) => operation.status), ["pending", "pending", "pending", "pending", "applied", "applied", "applied"]);
   assert.equal(engine.getSnapshot().operations[0]!.nextAttemptAt, 61_000);
   assert.equal(engine.getSnapshot().operations[1]!.attempts, 0);
-  assert.deepEqual(engine.getSnapshot().awaitingDeploymentByKind, { timer: 2, checklist: 1, comment: 1, answer: 0, document: 0, create: 0, completion: 0 });
+  assert.deepEqual(engine.getSnapshot().awaitingDeploymentByKind, { timer: 2, checklist: 1, comment: 1, answer: 0, document: 0, create: 0, completion: 0, activity: 0 });
   assert.equal(engine.getSnapshot().connection?.status, "service_error");
   assert.equal(engine.getSnapshot().connection?.errorCode, "MOBILE_SYNC_ACTIONS_UNAVAILABLE");
   assert.ok(engine.getSnapshot().operations[6]!.receipt?.fileId);
@@ -211,7 +211,7 @@ test("creation schema gates only create and dependents, never independent legacy
   const engine = new OfflineEngine(f.dependencies); await engine.syncNow();
   assert.equal(f.upstream.creates.length, 1);
   assert.deepEqual(f.upstream.commands.map((command) => command.operationId), [uuid(4)]);
-  assert.deepEqual(engine.getSnapshot().awaitingDeploymentByKind, { create: 2, comment: 1, answer: 0, document: 0, timer: 0, checklist: 0, completion: 0 });
+  assert.deepEqual(engine.getSnapshot().awaitingDeploymentByKind, { create: 2, comment: 1, answer: 0, document: 0, timer: 0, checklist: 0, completion: 0, activity: 0 });
 });
 
 for (const error of [new NetworkError("network"), new ApiError(500, "UPSTREAM_UNAVAILABLE", "Failure"),

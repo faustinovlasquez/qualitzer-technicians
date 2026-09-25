@@ -8,7 +8,7 @@ import { OfflineQueuedError } from "../../domain/offline";
 import { ApiError, NetworkError } from "../../infrastructure/errors";
 import { OfflineTechnicianRepository } from "../OfflineTechnicianRepository";
 import { decodeState, emptyState, updateState } from "../state";
-import { assignmentsWithStep, creation, fixture, user, uuid } from "./fakes";
+import { assignmentsWithStep, creation, fixture, result as creationResult, user, uuid } from "./fakes";
 import { syncAnswerFromStep, syncCommandSchema, toSyncAnswer } from "../../domain/offlineProtocol";
 import { answerFromStep } from "../../domain/format";
 import { resourceCacheKey } from "../cacheSchemas";
@@ -142,6 +142,7 @@ test("local child reads do not override worker service failure with fictitious c
   const connection = f.repository.getSnapshot().connection;
   assert.equal(connection?.status, "service_error");
   await f.repository.comments(local, 0); await f.repository.files(local);
+  assert.deepEqual(await f.repository.activities(local), []);
   assert.deepEqual(f.repository.getSnapshot().connection, connection);
   await f.repository.assignments(scope, 1);
   assert.equal(f.repository.getSnapshot().connection?.status, "service_error");
@@ -913,4 +914,100 @@ test("pending comment on a remapped dependency returns its existing ID without r
   const retry = await queued(f.repository.addComment(scope, "Nota"));
   assert.equal(retry.operationId, comment.operationId);
   assert.deepEqual((await f.store.read("a")).operations.find((op) => op.id === comment.operationId), prior);
+});
+
+test("offline activity creation persists once, waits for its local work and reuses its receipt after restart", async () => {
+  const current = repositoryFixture();
+  current.connect(false);
+  await queued(current.repository.createRecord(creation()));
+  const local = { ...scope, groupId: `local-${uuid(1)}`, workId: `local-${uuid(1)}` };
+  const activity = { activity: "Revisar presion", executionTime: 15 };
+  await queued(current.repository.createActivity(local, activity, uuid(50)));
+  current.advance();
+  await queued(current.repository.createActivity(local, activity, uuid(50)));
+  const restored = new OfflineTechnicianRepository(current.remote, current.session, { ...current.dependencies, upstream: current.remote });
+  assert.equal((await current.store.read("a")).operations.length, 2);
+  assert.equal((await current.store.read("a")).operations[1].dependencyId, uuid(1));
+  assert.equal(current.upstream.commands.length, 0);
+  await assert.rejects(restored.createActivity(local, { ...activity, executionTime: 16 }, uuid(50)), /OPERATION_ID_REUSED/);
+  current.remote.offlineCommand = async command => {
+    assert.equal(current.upstream.created.size, 1);
+    assert.equal(command.kind, "activity");
+    assert.deepEqual(command.scope, scope);
+    const receipt = { operationId: command.operationId, state: "applied" as const, activityId: 901 };
+    current.upstream.receipts.set(command.operationId, receipt);
+    return receipt;
+  };
+  current.connect(true);
+  await restored.engine.syncNow();
+  const after = await current.store.read("a");
+  assert.equal(after.operations[1].status, "applied");
+  assert.equal(after.operations[1].receipt?.activityId, 901);
+  assert.deepEqual(await restored.createActivity(local, activity, uuid(50)), { id: 901 });
+  assert.equal((await current.store.read("a")).operations.length, 2);
+});
+
+test("offline activity creation rejects foreign resources and never acknowledges a failed durable write", async () => {
+  const current = repositoryFixture(); current.connect(false);
+  await queued(current.repository.createRecord(creation()));
+  const local = { ...scope, groupId: `local-${uuid(1)}`, workId: `local-${uuid(1)}` };
+  const input = { activity: "Nueva", executionTime: 0 };
+  for (const invalid of [{ ...local, companyBranchId: 2 }, { ...local, workId: `local-${uuid(2)}` }, { ...local, startDate: "2026-09-09" }]) {
+    await assert.rejects(current.repository.createActivity(invalid, input, uuid(80)), /NAMESPACE_MISMATCH|UNKNOWN_LOCAL_RESOURCE/);
+  }
+  current.store.failWrites = true;
+  await assert.rejects(current.repository.createActivity(local, input, uuid(80)), /DISK_FULL/);
+  assert.equal((await current.store.read("a")).operations.length, 1);
+  current.store.failWrites = false;
+  await queued(current.repository.createActivity(local, input, uuid(80)));
+  assert.equal((await current.store.read("a")).operations.length, 2);
+});
+
+test("offline activity creation confirms an identical POST after a lost response without a second effect", async () => {
+  const current = repositoryFixture(); current.connect(false);
+  await queued(current.repository.createRecord(creation()));
+  const local = { ...scope, groupId: `local-${uuid(1)}`, workId: `local-${uuid(1)}` };
+  await queued(current.repository.createActivity(local, { activity: "Medir", executionTime: 10 }, uuid(81)));
+  let effects = 0;
+  let lost = true;
+  const submissions: unknown[] = [];
+  current.remote.offlineCommand = async command => {
+    submissions.push(command);
+    if (!current.upstream.receipts.has(command.operationId)) {
+      effects++;
+      current.upstream.receipts.set(command.operationId, { operationId: command.operationId, state: "applied", activityId: 902 });
+    }
+    if (lost) throw new NetworkError("network");
+    return current.upstream.receipts.get(command.operationId)!;
+  };
+  current.connect(true);
+  await current.repository.engine.syncNow();
+  assert.equal((await current.store.read("a")).operations[1].status, "pending");
+  lost = false; current.advance();
+  const restarted = new OfflineTechnicianRepository(current.remote, current.session, { ...current.dependencies, upstream: current.remote });
+  await restarted.engine.syncNow();
+  assert.equal(effects, 1);
+  assert.equal(submissions.length, 2);
+  assert.deepEqual(submissions[0], submissions[1]);
+  assert.equal((await current.store.read("a")).operations[1].receipt?.activityId, 902);
+});
+
+test("completion waits for activities retaining the original local work identity", async () => {
+  const current = repositoryFixture(); current.connect(false);
+  await queued(current.repository.createRecord(creation()));
+  const local = { ...scope, groupId: `local-${uuid(1)}`, workId: `local-${uuid(1)}` };
+  await queued(current.repository.createActivity(local, { activity: "Actividad previa", executionTime: 0 }, uuid(82)));
+  await updateState(current.store, "a", state => {
+    const parent = state.operations[0];
+    assert.equal(parent.kind, "create");
+    if (parent.kind !== "create") throw new Error("MISSING_PARENT");
+    parent.status = "applied"; parent.result = creationResult(parent.input);
+    const data = assignmentsWithStep();
+    data.groups[0].works[0].canExecute = true;
+    state.cache.push({ key: `assignments:${scope.startDate}`, json: JSON.stringify(data), fetchedAt: current.dependencies.now(), coverage: { date: scope.startDate, branchId: 1, fetchedAt: current.dependencies.now() } });
+  });
+  await queued(current.repository.status(scope, { status: "completed", executionDates: [scope.startDate] }));
+  const completion = (await current.store.read("a")).operations.find(operation => operation.kind === "completion");
+  assert.ok(completion?.kind === "completion");
+  assert.ok(completion.prerequisiteIds.includes(uuid(82)));
 });

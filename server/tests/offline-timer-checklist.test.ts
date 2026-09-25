@@ -10,6 +10,25 @@ const timer = { operationId, kind: "timer", scope, payload: { status: "in_progre
 const checklist = { operationId, kind: "checklist", scope, payload: { checklistId: 41 } };
 const commandsPath = "/api/mobile-sync/commands";
 
+test("activity creation waits for backend support, preserves its exact ID and rejects invalid payloads", async context => {
+  const { state, baseUrl } = await harness(context);
+  const command = { operationId, kind: "activity", scope: { ...scope, endDate: scope.startDate }, payload: { activity: " Revisar presion ", executionTime: 15 } };
+  assert.equal((await jsonRequest(baseUrl, "/api/offline/commands", "POST", command)).response.status, 503);
+  assert.equal(writeCalls(state).length, 0);
+  state.assignments.technician.supportsOfflineActivities = true;
+  state.failures.set(commandsPath, { status: 200, body: { operationId, state: "applied", activityId: 91, secret: "NOT_EXPOSED" } });
+  const response = await jsonRequest(baseUrl, "/api/offline/commands", "POST", command);
+  assert.equal(response.response.status, 200);
+  assert.deepEqual(response.data, { operationId, state: "applied", activityId: 91 });
+  assert.deepEqual(writeCalls(state)[0]?.json, syncCommandSchema.parse(command));
+  for (const payload of [{ activity: "", executionTime: 0 }, { activity: "__WORK_CHECKLIST__:7", executionTime: 0 }, { activity: "Trabajo", executionTime: -1 }, { activity: "Trabajo", executionTime: 44640 }, { ...command.payload, workerId: 9 }]) {
+    assert.equal((await jsonRequest(baseUrl, "/api/offline/commands", "POST", { ...command, payload })).response.status, 400);
+  }
+  assert.equal(writeCalls(state).length, 1);
+  state.failures.set(commandsPath, { status: 200, body: { operationId, state: "applied" } });
+  assert.equal((await jsonRequest(baseUrl, "/api/offline/commands", "POST", command)).response.status, 409);
+});
+
 test("completion requires backend capability and preserves dates and identity in its receipt request", async context => {
   const { state, baseUrl } = await harness(context);
   const command = { operationId, kind: "completion", scope: { ...scope, endDate: scope.startDate }, payload: {

@@ -6,7 +6,9 @@ const root = path.resolve(__dirname, "../..");
 const output = path.join(root, "artifacts/logs/user-signatures", new Date().toISOString().replace(/[:.]/g, "-"));
 fs.mkdirSync(output, { recursive: true });
 const report = { startedAt: new Date().toISOString(), passed: false, phases: [] };
+const offlineActivities = process.argv.includes("--offline-activities");
 const recoveryTests = process.argv.includes("--sync-recovery") ? ["src/offline/tests/deployment-scheduling.test.ts", "src/offline/tests/actions-deployment.test.ts", "src/offline/tests/file-fingerprint.test.ts", "src/offline/tests/durable-intentions.test.ts", "src/offline/tests/timer-reconciliation.test.ts", "src/offline/tests/repository.test.ts", "server/tests/offline-actions-deployment.test.ts", "server/tests/offline-timer-checklist.test.ts"] : [];
+if (offlineActivities) recoveryTests.push("src/offline/tests/repository.test.ts", "src/offline/tests/deployment-scheduling.test.ts", "src/offline/tests/durable-intentions.test.ts", "src/offline/tests/timer-reconciliation.test.ts", "server/tests/offline-sync.test.ts", "server/tests/offline-actions-deployment.test.ts", "server/tests/offline-timer-checklist.test.ts", "tests/work-activities.test.ts");
 if (recoveryTests.length) recoveryTests.push("src/offline/tests/storage-capacity.test.ts");
 if (process.argv.includes("--offline-delivery")) recoveryTests.push("tests/delivery-review-ui.test.ts", "src/offline/tests/durable-intentions.test.ts", "src/offline/tests/repository.test.ts");
 if (process.argv.includes("--creation-history")) recoveryTests.push("tests/creation-auto-advance.test.ts", "tests/durable-fluidity-hook.test.ts");
@@ -44,7 +46,7 @@ function execute(name, args) {
 try {
   clientTypes();
   execute("server-types", ["node_modules/typescript/bin/tsc", "--noEmit", "-p", "server/tsconfig.json"]);
-  execute("tests", ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", "--test-reporter=tap", "tests/user-signatures.test.ts", "tests/order-lifecycle.test.ts", "tests/agenda-load-lifecycle.test.ts", "tests/notification-app-navigation.test.ts", "server/tests/user-signatures.test.ts", "server/tests/order-lifecycle.test.ts", ...(process.argv.includes("--locations") ? ["tests/location-tracking.test.ts", "server/tests/location-routes.test.ts", "server/tests/equipment-location.test.ts"] : []), ...recoveryTests]);
+  execute("tests", ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "server/tsconfig.json", "--test", "--test-reporter=tap", ...(offlineActivities ? [] : ["tests/user-signatures.test.ts", "tests/order-lifecycle.test.ts", "tests/agenda-load-lifecycle.test.ts", "tests/notification-app-navigation.test.ts", "server/tests/user-signatures.test.ts", "server/tests/order-lifecycle.test.ts"]), ...(process.argv.includes("--locations") ? ["tests/location-tracking.test.ts", "server/tests/location-routes.test.ts", "server/tests/equipment-location.test.ts"] : []), ...recoveryTests]);
   report.passed = true;
 } catch (error) { report.error = error.message; }
 report.completedAt = new Date().toISOString();

@@ -12,7 +12,7 @@ export const OFFLINE_LIMITS = {
   prepareWorks: 30,
   maxBackoffMs: 300_000,
 } as const;
-export interface CacheEntry { key: string; json: string; fetchedAt: number; coverage?: OfflineCoverage; timerReadOperationIds?: string[]; fileReadOperationIds?: string[]; }
+export interface CacheEntry { key: string; json: string; fetchedAt: number; coverage?: OfflineCoverage; timerReadOperationIds?: string[]; fileReadOperationIds?: string[]; activityReadOperationIds?: string[]; }
 export interface Passport { key: string; user: User; verifiedAt: number; disabled: boolean; }
 export interface OfflineState {
   version: 1;

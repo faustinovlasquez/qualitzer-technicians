@@ -7,6 +7,7 @@ const deliveryFilesOnly = process.argv.includes("--delivery-files");
 const workedDaysOnly = process.argv.includes("--worked-days");
 const offlineClockOnly = process.argv.includes("--offline-clock");
 const workActionsOnly = process.argv.includes("--work-actions");
+const offlineActivitiesOnly = process.argv.includes("--offline-activities");
 const checklistSummaryOnly = process.argv.includes("--checklist-summary");
 const activityPickerOnly = process.argv.includes("--activity-picker");
 const signaturesOnly = process.argv.includes("--signatures");
@@ -91,6 +92,7 @@ components.push("src/screens/WorkDetailScreen.tsx", "src/screens/workDetail/Work
 if (orderFilesOnly) components.push("src/screens/OrderDetailScreen.tsx", "src/screens/workDetail/files/workspaceStyles.ts");
 if (signaturesOnly) components.push("src/screens/ProfileScreen.tsx", "src/screens/signatures/UserSignaturesPanel.tsx", "src/screens/signatures/SignatureEditor.tsx", "src/screens/orders/lifecycle/SignaturePad.web.tsx", "src/infrastructure/signatureImage.web.ts");
 if (workActionsOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/work-actions/.test(name)) return;');
+if (offlineActivitiesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/offline-activities/.test(name)) return;');
 if (checklistSummaryOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/checklist-summary/.test(name)) return;');
 if (activityPickerOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/activity-picker/.test(name)) return;');
 if (signaturesOnly) replace('    async function check(name, run) {', '    async function check(name, run) {\n      if (!/profile-signatures/.test(name)) return;');

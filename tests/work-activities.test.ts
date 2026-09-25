@@ -6,6 +6,7 @@ import { harness, jsonRequest, writeCalls, errorCode, form, uploadRequest } from
 import type { WorkActivityActions } from "../src/screens/workDetail/WorkActivities";
 import type { WorkspaceFileDraft } from "../src/screens/workDetail/files/WorkspaceDraftStore";
 import { action, durableReactFixture, settle, uiModule } from "./helpers/durable-ui";
+import { OfflineQueuedError, type OfflineOperation } from "../src/domain/offline";
 
 const path = (suffix: string) => `/api/assignments/direct-11/works/11${suffix}?companyBranchId=1&startDate=2026-09-01&endDate=2026-09-01`;
 test("delete activity image validates membership and forwards exact context only after fresh authorization", async context => {
@@ -132,6 +133,7 @@ test("activity creation continues its own upload despite parent busy and retries
   };
   const props = { scopeKey: "activity-upload", mode: "demo" as const, activities: [], actions, disabled: false, readOnly: false, canContinueWrite: () => true };
   const module = uiModule<typeof import("../src/screens/workDetail/WorkActivities")>("screens/workDetail/WorkActivities.tsx", hooks, {
+    "expo-crypto": { randomUUID: () => "00000000-0000-4000-8000-000000000001" },
     "./files/WorkspaceDraftStore": { useWorkspaceDraft: () => ({ ...snapshot, store }) },
     "./FileWorkspace": { FileWorkspace: "FileWorkspace" },
     "./files/filePicker": { pickWorkspaceFiles: async () => [] },
@@ -150,5 +152,53 @@ test("activity creation continues its own upload despite parent busy and retries
     assert.equal(creates, 1);
     assert.deepEqual(sent, ["file-1", "file-2", "file-2"]);
     assert.equal(snapshot.files.length, 0);
+  } finally { hooks.unmount(); }
+});
+
+test("offline activity form saves a durable UUID once and opens a separate next activity", async () => {
+  const hooks = durableReactFixture();
+  const snapshot = { text: JSON.stringify({ activity: "Revision local", minutes: "15" }), files: [], hydrated: true, saving: false, fileBusy: false, closed: false, error: null };
+  let sequence = 0;
+  let creates = 0;
+  const operations: Extract<OfflineOperation, { kind: "activity" }>[] = [];
+  const store = { getSnapshot: () => snapshot, setText: async (text: string) => { snapshot.text = text; }, flush: async () => {}, beginFiles: () => Symbol(), endFiles: () => {} };
+  const actions: WorkActivityActions = {
+    load: async () => [],
+    create: async (payload, operationId) => {
+      assert.ok(operationId);
+      assert.equal(JSON.parse(snapshot.text).operationId, operationId);
+      creates++;
+      operations.push({ id: operationId, kind: "activity", scope: { groupId: "local-work", workId: "local-work", companyBranchId: 1, startDate: "2026-09-25", endDate: "2026-09-25" }, payload, status: "pending", attempts: 0, createdAt: 1, nextAttemptAt: 0 });
+      throw new OfflineQueuedError({ operationId, operationIds: [operationId], kind: "activity", date: "2026-09-25", ownsFiles: false });
+    },
+    complete: async () => { throw new Error("UNEXPECTED_REMOTE_WRITE"); }, files: async () => [], upload: async () => { throw new Error("UNEXPECTED_UPLOAD"); }
+  };
+  const props = { scopeKey: "local-activity", mode: "live" as const, activities: [], actions, operations, disabled: true, createDisabled: false, readOnly: false };
+  const module = uiModule<typeof import("../src/screens/workDetail/WorkActivities")>("screens/workDetail/WorkActivities.tsx", hooks, {
+    "expo-crypto": { randomUUID: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}` },
+    "./files/WorkspaceDraftStore": { useWorkspaceDraft: () => ({ ...snapshot, store }) },
+    "./FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./files/filePicker": { pickWorkspaceFiles: async () => [] },
+    "./files/WorkspaceFileList": { PendingFileList: "PendingFileList" }
+  });
+  function render() { return hooks.render(() => module.WorkActivities(props)); }
+  try {
+    assert.equal(action(render(), "Agregar actividad").disabled, false);
+    action(render(), "Agregar actividad").onPress(); await settle();
+    const save = action(render(), "Guardar actividad");
+    assert.equal(save.disabled, false);
+    save.onPress(); save.onPress(); await settle();
+    assert.equal(creates, 1);
+    assert.equal(JSON.parse(snapshot.text).queued, true);
+    assert.ok(JSON.stringify(render()).includes("Guardada local"));
+    action(render(), "Agregar actividad").onPress(); await settle();
+    assert.equal(JSON.parse(snapshot.text).operationId, undefined);
+    snapshot.text = JSON.stringify({ activity: "Segunda actividad", minutes: "0" });
+    action(render(), "Guardar actividad").onPress(); await settle();
+    assert.equal(creates, 2);
+    assert.notEqual(operations[0].id, operations[1].id);
+    assert.equal(operations[0].payload.activity, "Revision local");
+    props.createDisabled = true;
+    assert.equal(action(render(), "Agregar actividad").disabled, true);
   } finally { hooks.unmount(); }
 });

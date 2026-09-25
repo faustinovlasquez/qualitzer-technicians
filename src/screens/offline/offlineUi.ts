@@ -160,6 +160,7 @@ export function trustedLocalFile(fileId: string, file: LocalPhoto, platform: str
 }
 
 export function operationTitle(operation: OfflineOperation): string {
+  if (operation.kind === "activity") return `Actividad · ${operation.payload.activity}`;
   if (operation.kind === "document") return `Archivo · ${operation.file.name}`;
   if (operation.kind === "comment") return "Comentario";
   if (operation.kind === "answer") return "Respuesta de checklist";

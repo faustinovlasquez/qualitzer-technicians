@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { Assignments, AssignmentWork, User, WorkScope } from "../domain/models";
 import { OfflineUnavailableError, type OfflineOperation, type TimerReadAssignmentWork } from "../domain/offline";
 import { checklistAssignmentInputSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
-import { syncScopeSchema, syncTimerPayloadSchema, syncCompletionInputSchema } from "../domain/offlineProtocol";
+import { syncScopeSchema, syncTimerPayloadSchema, syncCompletionInputSchema, syncOperationIdSchema } from "../domain/offlineProtocol";
+import { workActivityInputSchema } from "../domain/workActivities";
 import { executionElapsedSeconds, executionDuration } from "../domain/workExecution";
 import type { OfflineState } from "./contracts";
 import { cachedAssignmentsSchema, sameResource } from "./cacheSchemas";
@@ -86,8 +87,15 @@ export function prepareQueuedIntention(state: OfflineState, input: Extract<Offli
     const data = cachedAssignmentsSchema.parse(JSON.parse(cached.json));
     if (value.isManual && (!data.technician.allowEditExecutionTime || executionDuration(value) === null)) throw new OfflineUnavailableError("OFFLINE_COMPLETION_MANUAL_FORBIDDEN");
     if (!value.isManual && (value.executionStartTime !== undefined || value.executionEndTime !== undefined)) throw new OfflineUnavailableError("OFFLINE_COMPLETION_INVALID_INPUT");
-    const prerequisites = state.operations.filter(entry => entry.kind !== "create" && entry.scope.companyBranchId === branchId && entry.scope.groupId === scope.groupId
-      && (entry.scope.workId === scope.workId || entry.scope.workId === undefined));
+    const prerequisites = state.operations.filter(entry => {
+      if (entry.kind === "create" || entry.scope.companyBranchId !== branchId) return false;
+      if (entry.scope.groupId === scope.groupId && (entry.scope.workId === scope.workId || entry.scope.workId === undefined)) return true;
+      if (entry.kind !== "activity") return false;
+      const parent = state.operations.find(operation => operation.kind === "create" && operation.id === entry.dependencyId
+        && operation.localGroupId === entry.scope.groupId && operation.localWorkId === entry.scope.workId);
+      return parent?.kind === "create" && parent.status === "applied" && parent.input.companyBranchId === branchId
+        && parent.result?.companyBranchId === branchId && parent.result.groupId === scope.groupId && String(parent.result.workId) === scope.workId;
+    });
     for (const operation of prerequisites) assertSafeDependency(operation, state.operations);
     const timer = prerequisites.filter((entry): entry is Extract<OfflineOperation, { kind: "timer" }> => entry.kind === "timer" && sameIntentionScope(entry.scope, scope)).at(-1);
     const reconciled = timer?.status === "applied" && cached.timerReadOperationIds?.includes(timer.id) === true;
@@ -132,4 +140,33 @@ export function prepareQueuedIntention(state: OfflineState, input: Extract<Offli
     return { ...input, scope, payload, dependencyId: undefined };
   }
   throw new OfflineUnavailableError("OFFLINE_CHECKLIST_OPTION_REQUIRED");
+}
+
+export function prepareQueuedActivity(state: OfflineState, input: Extract<OfflineOperation, { kind: "activity" }>, user: User, branchId: number): Extract<OfflineOperation, { kind: "activity" }> {
+  syncOperationIdSchema.parse(input.id);
+  const payload = workActivityInputSchema.parse(input.payload);
+  const scope = input.scope;
+  if (scope.companyBranchId !== branchId) throw new OfflineUnavailableError("OFFLINE_BRANCH_NAMESPACE_MISMATCH");
+  if (state.authBlocked || user.workerId === null || !user.accessBranchs.some(branch => branch.id === branchId && branch.isEnabled !== false && branch.isDeleted !== true)) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
+  const previous = state.operations.find(operation => operation.id === input.id);
+  if (previous) {
+    if (previous.kind !== "activity" || !sameIntentionScope(previous.scope, scope) || JSON.stringify(previous.payload) !== JSON.stringify(payload)) throw new OfflineUnavailableError("OFFLINE_OPERATION_ID_REUSED");
+    return previous;
+  }
+  let canonical = scope;
+  let dependencyId: string | undefined;
+  if (scope.groupId.startsWith("local-") || scope.workId.startsWith("local-")) {
+    const parent = state.operations.find(operation => operation.kind === "create" && operation.localGroupId === scope.groupId && operation.localWorkId === scope.workId);
+    if (parent?.kind !== "create" || parent.input.kind === "maintenance" || parent.input.companyBranchId !== branchId || parent.input.schedule.date !== scope.startDate || scope.startDate !== scope.endDate) throw new OfflineUnavailableError("OFFLINE_UNKNOWN_LOCAL_RESOURCE");
+    assertSafeDependency(parent, state.operations);
+    dependencyId = parent.id;
+    if (parent.status !== "applied") return { ...input, payload, dependencyId };
+    if (!parent.result || parent.result.kind !== parent.input.kind || parent.result.companyBranchId !== branchId || parent.result.schedule.date !== scope.startDate) throw new OfflineUnavailableError("OFFLINE_DEPENDENCY_UNRESOLVED");
+    canonical = { ...scope, groupId: parent.result.groupId, workId: String(parent.result.workId) };
+  }
+  executableWork(state, canonical, user, branchId);
+  const readIds = state.cache.find(entry => entry.key === `assignments:${canonical.startDate}`)?.timerReadOperationIds ?? [];
+  if (state.operations.some(operation => operation.kind === "completion" && sameIntentionScope(operation.scope, canonical)
+    && !(operation.status === "applied" && readIds.includes(operation.id)))) throw new OfflineUnavailableError("OFFLINE_COMPLETION_ALREADY_QUEUED");
+  return { ...input, payload, dependencyId };
 }

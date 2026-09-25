@@ -2,6 +2,42 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: verificar descarga actividades offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/testing/parent-assignment-delivery.cjs", "http://192.168.1.102:8836/"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: diagnosticar backend de actividades offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["C:\\Users\\faust\\Desktop\\www\\Qualitzer2.0-Backend\\scripts\\check-mobile-sync-deployment.cjs"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer2.0-Backend" }, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: descargar APK de actividades offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/android/serve-apk.cjs"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile", "env": { "QUALITZER_APK_PORT": "8836" } },
+			"isBackground": true, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: revisar actividades offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["tests/e2e/time-sync/smoke.cjs", "--offline-activities"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
+			"label": "Qualitzer: validar actividades offline",
+			"type": "process",
+			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",
+			"args": ["scripts/testing/user-signatures-validation.cjs", "--offline-activities"],
+			"options": { "cwd": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile" }, "problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: descargar APK de badges de asignaciones",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",

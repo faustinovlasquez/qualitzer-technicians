@@ -1,4 +1,10 @@
-# Diagnostico de edicion: gateway 1.0.27 / APK 1.0.56 sin cambios
+# Actividades offline: gateway 1.0.28 / APK 1.0.61
+
+Entrega final 1.0.61: la entrega espera tambien actividades pendientes cuyo destino conserva el ID local del trabajo. APK1.0.60 queda como intermedia, no recomendada. Ver [actualizacion 1.0.61](ACTUALIZACION-1.0.61.md).
+
+Creacion de actividades con nombre y minutos en trabajos locales o descargados autorizados. Cola durable con UUID, dependencia de creacion y recibo `activityId`. Actualizar MobileSync y PanelWorkActions/TechnicianDashboard del backend antes del gateway. Sin migracion nueva, sin borrar pendientes ni cambiar claves. Edicion, completado, borrado y adjuntos de actividades siguen online. Ver [actualizacion 1.0.60](ACTUALIZACION-1.0.60.md).
+
+## Historial: diagnostico de edicion gateway 1.0.27 / APK 1.0.56
 
 El error generico al abrir Editar trabajo no identifica si falla usuario/asignacion, JSON, identidad o un campo del documento. Gateway 1.0.27 distingue esas etapas y muestra solo rutas de campos incompatibles. El caso sin horario pasa las pruebas locales. No se ha obtenido la respuesta del trabajo remoto ni confirmado su causa: instalar el gateway, recuperar la conexion y reintentar abrir Editar trabajo para obtener el mensaje preciso. No repetir guardados ni crear otro trabajo. Se conserva la APK1.0.56 y todos los datos, sesiones y validaciones. 194 pruebas Mobile/gateway y tipos sin errores; sin acceso remoto ni SQL/backend tests/build/lint.
 

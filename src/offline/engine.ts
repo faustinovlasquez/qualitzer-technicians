@@ -8,7 +8,7 @@ import { OFFLINE_LIMITS, type EngineDependencies, type OfflineState } from "./co
 import { cloneState, emptyState, hasPendingChanges, pendingOperation, receiptSchema, updateState } from "./state";
 import { resourceCacheKey, sameResource } from "./cacheSchemas";
 import { connectionErrorCode as errorCode, failedConnection, isServiceFailure, requiresDeployment } from "./connection";
-import { prepareQueuedIntention } from "./queueIntentions";
+import { prepareQueuedActivity, prepareQueuedIntention } from "./queueIntentions";
 import { awaitingDeploymentCounts, canAdvanceManualRetry, deploymentKinds, deploymentWaits, protectDeploymentCooldown, runnableOperations } from "./syncScheduling";
 
 export function canUseCache(error: unknown): boolean { return error instanceof NetworkError; }
@@ -216,7 +216,8 @@ export class OfflineEngine {
       if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
       for (const input of operations) {
         const operation = input.kind === "timer" || input.kind === "checklist" || input.kind === "completion"
-          ? prepareQueuedIntention(state, input, this.dependencies.user, this.dependencies.branchId) : input;
+          ? prepareQueuedIntention(state, input, this.dependencies.user, this.dependencies.branchId)
+          : input.kind === "activity" ? prepareQueuedActivity(state, input, this.dependencies.user, this.dependencies.branchId) : input;
         if (operation.kind === "create") creationInputSchema.parse(operation.input);
         const draft = operation.kind === "document" && operation.sourceDraftId
           ? findDraftDocument(state.operations, namespace, operation.scope, operation.sourceDraftId, operation.stepId) : undefined;
@@ -460,7 +461,7 @@ export class OfflineEngine {
               ? "OFFLINE_DOCUMENT_SUBMISSION_FAILED" : errorCode(error);
             const inProgress = error instanceof ApiError && error.code === "MOBILE_SYNC_IN_PROGRESS";
             const deployment = error instanceof ApiError && requiresDeployment(error.code);
-            const invalidDocumentReceipt = current.kind === "document" && error instanceof ApiError && error.code === "OFFLINE_INVALID_RECEIPT";
+            const invalidDocumentReceipt = (current.kind === "document" || current.kind === "activity") && error instanceof ApiError && error.code === "OFFLINE_INVALID_RECEIPT";
             current.status = invalidDocumentReceipt || error instanceof ApiError && error.code === "MOBILE_SYNC_OPERATION_REUSED" ? "needs_review"
               : deployment || inProgress || error instanceof NetworkError || (error instanceof OfflineUnavailableError && error.code === "OFFLINE_CYCLE_INTERRUPTED") || (error instanceof ApiError && (error.status >= 500 || error.status === 429)) ? "pending"
               : error instanceof ApiError && error.status === 409 ? "conflict"
@@ -533,6 +534,7 @@ export class OfflineEngine {
       else if (operation.kind === "timer") command = { ...common, kind: "timer", payload: operation.payload };
       else if (operation.kind === "checklist") command = { ...common, kind: "checklist", payload: operation.payload };
       else if (operation.kind === "completion") command = { ...common, kind: "completion", payload: operation.payload };
+      else if (operation.kind === "activity") command = { ...common, kind: "activity", payload: operation.payload };
       else {
         if (!operation.wire) throw new OfflineUnavailableError("OFFLINE_ANSWER_TYPE_UNKNOWN");
         command = { ...common, kind: "answer", payload: { stepId: operation.stepId, answer: operation.wire.answer, base: operation.wire.base } };
@@ -540,6 +542,9 @@ export class OfflineEngine {
       receipt = await upstream.offlineCommand(command);
     }
     const checked = this.checkedReceipt(operation.id, receipt);
+    if (operation.kind === "activity" && checked.state === "applied" && checked.activityId === undefined) {
+      throw new ApiError(409, "OFFLINE_INVALID_RECEIPT", "La actividad requiere verificar su confirmacion.");
+    }
     if (operation.kind === "document" && checked.state === "applied"
       && !(typeof checked.fileId === "number" && Number.isSafeInteger(checked.fileId) && checked.fileId > 0
         || typeof checked.fileId === "string" && /^[1-9]\d*$/.test(checked.fileId) && Number.isSafeInteger(Number(checked.fileId)))) {

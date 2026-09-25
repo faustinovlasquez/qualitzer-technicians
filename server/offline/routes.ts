@@ -34,16 +34,19 @@ export function createOfflineRouter(upstream: Upstream, uploadLimiter: RequestHa
     if (!req.is("application/json")) throw new GatewayError(415, "JSON_REQUIRED");
     const input = syncCommandSchema.parse(req.body);
     const { token, user } = await mobileActor(upstream, req, input.scope.companyBranchId);
-    if (input.kind === "completion" || input.kind === "timer" && input.payload.recordedAt !== undefined) {
+    if (input.kind === "activity" || input.kind === "completion" || input.kind === "timer" && input.payload.recordedAt !== undefined) {
       const query = new URLSearchParams({ companyBranchId: String(input.scope.companyBranchId), startDate: input.scope.startDate, endDate: input.scope.startDate });
       const data = parseUpstream(assignmentsSchema, await upstream.request("/technician-dashboard/assignments", { token, query }));
       if (data.technician.id !== user.workerId) throw new GatewayError(403, "WORKER_MISMATCH");
-      if ((input.kind === "completion" ? data.technician.supportsOfflineCompletion : data.technician.supportsRecordedTimer) !== true) { res.set("Retry-After", "60"); throw new GatewayError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE"); }
+      const supported = input.kind === "activity" ? data.technician.supportsOfflineActivities : input.kind === "completion" ? data.technician.supportsOfflineCompletion : data.technician.supportsRecordedTimer;
+      if (supported !== true) { res.set("Retry-After", "60"); throw new GatewayError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE"); }
     }
     try {
-      respond(res, await upstream.requestReceipt("/mobile-sync/commands", input.operationId, { method: "POST", token, json: input }));
+      const result = await upstream.requestReceipt("/mobile-sync/commands", input.operationId, { method: "POST", token, json: input });
+      if (input.kind === "activity" && result.receipt.state === "applied" && result.receipt.activityId === undefined) throw new GatewayError(409, "OFFLINE_INVALID_RECEIPT");
+      respond(res, result);
     } catch (error) {
-      if ((input.kind === "timer" || input.kind === "checklist") && error instanceof GatewayError
+      if ((input.kind === "activity" || input.kind === "timer" || input.kind === "checklist") && error instanceof GatewayError
         && error.status === 400 && error.code === "MOBILE_SYNC_INVALID_KIND") {
         res.set("Retry-After", "60");
         throw new GatewayError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE");

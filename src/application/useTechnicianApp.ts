@@ -1539,7 +1539,11 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     changeStatus,
     reopenWork: () => performMutation(scope(), (repo, value) => workActions(repo).reopenWork(value), true, "WORK_REOPENED"),
     loadActivities: () => readWork((repo, value) => workActions(repo).activities(value)),
-    createActivity: (input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).createActivity(value, input), true, "ACTIVITY_CREATED"),
+    createActivity: (input: WorkActivityInput, operationId?: string) => {
+      const value = scope();
+      if (selected?.draftGroupId && selected.draftWorkId) { value.groupId = selected.draftGroupId; value.workId = selected.draftWorkId; }
+      return performMutation(value, (repo, scope) => workActions(repo).createActivity(scope, input, operationId), true, "ACTIVITY_CREATED");
+    },
     updateActivity: (id: number, input: WorkActivityInput) => performMutation(scope(), (repo, value) => workActions(repo).updateActivity(value, id, input), true, "ACTIVITY_UPDATED", String(id)),
     completeActivity: (id: number, isCompleted = true) => performMutation(scope(), (repo, value) => workActions(repo).completeActivity(value, id, isCompleted), true, isCompleted ? "ACTIVITY_COMPLETED" : "ACTIVITY_REOPENED", String(id)),
     deleteActivity: (id: number) => performMutation(scope(), (repo, value) => workActions(repo).deleteActivity(value, id), true, "ACTIVITY_DELETED", String(id)),

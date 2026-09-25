@@ -1,6 +1,6 @@
 # Trabajo sin conexión
 
-Estado **21-09-2026, APK 1.0.40 / gateway 1.0.19**: núcleo offline integrado en [../App.tsx](../App.tsx) y [../src/application/useTechnicianApp.ts](../src/application/useTechnicianApp.ts), incluida jornada/agenda, sucursal, detalles y centro **Sin conexión**. La revisión confirma cobertura parcial, no toda la app offline ni validación en teléfono físico.
+Estado **25-09-2026, APK 1.0.61 / gateway 1.0.28**: núcleo offline integrado en [../App.tsx](../App.tsx) y [../src/application/useTechnicianApp.ts](../src/application/useTechnicianApp.ts), incluida jornada/agenda, sucursal, detalles y centro **Sin conexión**. La revisión confirma cobertura parcial, no toda la app offline ni validación en teléfono físico.
 
 ## Antes de salir a terreno
 
@@ -27,7 +27,8 @@ La preparación explícita guarda hasta siete snapshots diarios (con los checkli
 | Iniciar, pausar y reanudar | Cola durable con instantes capturados; contador local separado del confirmado |
 | Terminar o entregar tarea/trabajo, incluido hijo de mantenimiento | Cola durable; detiene tiempo local y espera todas las operaciones previas del destino. Permisos/evidencia se revalidan al sincronizar |
 | Reporte técnico | Cola durable: comentario técnico para trabajo, archivo TXT propio para mantenimiento; borrador conservado antes de guardar |
-| Crear/editar/completar/eliminar actividades y sus archivos | **Pendiente de implementación offline**. Formularios existentes conservan su borrador, pero mutaciones y envío requieren conexión |
+| Crear actividades con nombre y minutos | Cola durable; espera la creacion de su trabajo local o usa una asignacion descargada autorizada. UUID persistido en formulario y recibo con ID exacto. Requiere backend actualizado y gateway 1.0.28 |
+| Editar/completar/eliminar actividades y sus archivos | **Online**. Los adjuntos seleccionados conservan su borrador y requieren envio explicito despues de confirmar la actividad |
 | Iniciar o entregar la OT completa con firmas | **Pendiente de implementación offline**. No equivale a entregar una tarea hija; firmas de entrega aún temporales |
 | Borrar archivos o reabrir trabajo | **Pendiente de implementación offline**; no se encola ni se simula confirmación |
 | Consultar/gestionar firmas de perfil y mutar avisos | **Online**; bandeja previamente cacheada disponible para lectura |

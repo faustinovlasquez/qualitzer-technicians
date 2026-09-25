@@ -98,7 +98,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     try {
       return receiptSchema.parse(await this.request<unknown>("/api/offline/commands", "POST", input, input.operationId));
     } catch (error) {
-      if ((input.kind === "timer" || input.kind === "checklist" || input.kind === "completion") && error instanceof ApiError && error.status === 400
+      if ((input.kind === "activity" || input.kind === "timer" || input.kind === "checklist" || input.kind === "completion") && error instanceof ApiError && error.status === 400
         && (error.code === "INVALID_INPUT" || error.code === "MOBILE_SYNC_INVALID_KIND")) {
         throw new ApiError(503, "MOBILE_SYNC_ACTIONS_UNAVAILABLE", "El servicio aún no admite esta operación offline. Se conserva para reintentar tras actualizar el servidor.");
       }

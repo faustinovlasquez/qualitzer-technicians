@@ -1,9 +1,13 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { z } from "zod";
+import * as Crypto from "expo-crypto";
+import { isOfflineQueuedError, type OfflineOperation } from "../../domain/offline";
+import { syncOperationIdSchema } from "../../domain/offlineProtocol";
+import { operationStatusLabels } from "../offline/offlineUi";
 import type { Activity, Attachment, LocalPhoto } from "../../domain/models";
 import { plainText } from "../../domain/format";
-import { isWorkActivity, workActivityInputSchema, type WorkActivityInput } from "../../domain/workActivities";
+import { isWorkActivity, workActivityInputSchema, type WorkActivityInput, type WorkActivityList } from "../../domain/workActivities";
 import { Badge, BodyText, Button, Field, IconButton, SectionTitle } from "../../ui/components";
 import { AttachmentList, Notice } from "./DetailUi";
 import { styles } from "./detailStyles";
@@ -23,8 +27,8 @@ import { palette } from "../../ui/theme";
 import { useCameraPermissionGuide } from "./files/useCameraPermissionGuide";
 
 export interface WorkActivityActions {
-  load(): Promise<Activity[]>;
-  create(input: WorkActivityInput): Promise<{ id: number }>;
+  load(): Promise<WorkActivityList>;
+  create(input: WorkActivityInput, operationId?: string): Promise<{ id: number }>;
   update?(id: number, input: WorkActivityInput): Promise<void>;
   complete(id: number, isCompleted?: boolean): Promise<void>;
   remove?(id: number): Promise<void>;
@@ -32,10 +36,10 @@ export interface WorkActivityActions {
   deleteFile?(id: number, fileId: string): Promise<void>;
   upload(id: number, files: LocalPhoto[]): Promise<void>;
 }
-interface Props { canContinueWrite?: () => boolean; onPanelChange?: (open: boolean) => void; onCreated?: () => void; backHandler?: { current: ((home?: boolean) => boolean) | null }; scopeKey: string; mode: "live" | "demo"; activities: Activity[]; actions?: WorkActivityActions; disabled: boolean; readOnly: boolean; }
-const formSchema = z.object({ activity: z.string().max(240), hours: z.string().optional(), minutes: z.string(), createdId: z.number().int().positive().optional() })
-  .transform(value => ({ activity: value.activity, minutes: value.hours === undefined ? value.minutes : String(Number(value.hours) * 60 + Number(value.minutes)), createdId: value.createdId }));
-const emptyForm: z.infer<typeof formSchema> = { activity: "", minutes: "0", createdId: undefined };
+interface Props { canContinueWrite?: () => boolean; onPanelChange?: (open: boolean) => void; onCreated?: () => void; backHandler?: { current: ((home?: boolean) => boolean) | null }; scopeKey: string; readKey?: string; mode: "live" | "demo"; activities: Activity[]; operations?: readonly Extract<OfflineOperation, { kind: "activity" }>[]; actions?: WorkActivityActions; disabled: boolean; createDisabled?: boolean; readOnly: boolean; }
+const formSchema = z.object({ activity: z.string().max(240), hours: z.string().optional(), minutes: z.string(), createdId: z.number().int().positive().optional(), operationId: syncOperationIdSchema.optional(), queued: z.boolean().optional() })
+  .transform(value => ({ activity: value.activity, minutes: value.hours === undefined ? value.minutes : String(Number(value.hours) * 60 + Number(value.minutes)), createdId: value.createdId, operationId: value.operationId, queued: value.queued }));
+const emptyForm: z.infer<typeof formSchema> = { activity: "", minutes: "0", createdId: undefined, operationId: undefined, queued: undefined };
 
 export function WorkActivities(props: Props) {
   const draft = useWorkspaceDraft(`${props.scopeKey}:activity-form`, props.mode);
@@ -47,6 +51,8 @@ export function WorkActivities(props: Props) {
   const [editing, setEditing] = useState<Activity | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [readOperationIds, setReadOperationIds] = useState<string[]>([]);
+  const readRevision = useRef(0);
   const mounted = useRef(true);
   const lock = useRef(false);
   const created = useRef<number | null>(null);
@@ -55,11 +61,17 @@ export function WorkActivities(props: Props) {
   const securityRef = useRef(security); securityRef.current = security;
   const runNativePicker = useTrustedNativePicker();
   const canWrite = () => mounted.current && !latest.current.disabled && !latest.current.readOnly && (securityRef.current?.isUnlocked() ?? true);
+  const canCreate = () => mounted.current && !(latest.current.createDisabled ?? latest.current.disabled) && !latest.current.readOnly && (securityRef.current?.isUnlocked() ?? true);
   const canContinueWrite = () => mounted.current && !latest.current.readOnly && (securityRef.current?.isUnlocked() ?? true) && (latest.current.canContinueWrite?.() ?? !latest.current.disabled);
   const cameraGuide = useCameraPermissionGuide(props.scopeKey, canWrite);
   const parsed = (() => { try { return formSchema.safeParse(draft.text ? JSON.parse(draft.text) : emptyForm); } catch { return formSchema.safeParse(null); } })();
   const form = parsed.success ? parsed.data : emptyForm;
   const disabled = props.disabled || props.readOnly || busy || !props.actions;
+  const createDisabled = (props.createDisabled ?? props.disabled) || props.readOnly || busy || !props.actions;
+  const registered = props.operations?.find(operation => operation.id === form.operationId);
+  const submitted = form.queued === true || registered !== undefined;
+  const pending = (props.operations ?? []).filter(operation => operation.status !== "applied" || !readOperationIds.includes(operation.id) && !activities.some(activity => activity.id === operation.receipt?.activityId));
+  const operationRevision = (props.operations ?? []).map(operation => `${operation.id}:${operation.status}`).join(",");
   const filesBack = useRef<((home?: boolean) => boolean) | null>(null);
   const panelOpen = creating || editing !== null || selected !== null;
   useEffect(() => { latest.current.onPanelChange?.(panelOpen); }, [panelOpen]);
@@ -82,20 +94,24 @@ export function WorkActivities(props: Props) {
   async function load(): Promise<void> {
     const current = latest.current;
     if (!current.actions) return;
+    const revision = ++readRevision.current;
     const result = await current.actions.load();
-    if (mounted.current && current.scopeKey === latest.current.scopeKey) setActivities(result.filter(isWorkActivity));
+    if (mounted.current && revision === readRevision.current && current.scopeKey === latest.current.scopeKey && current.readKey === latest.current.readKey) {
+      setActivities(result.filter(isWorkActivity)); setReadOperationIds(result.appliedOperationIds ?? []); setError(null);
+    }
   }
   useEffect(() => {
     mounted.current = true;
     void load().catch(failure => { if (mounted.current) setError(errorMessage(failure)); });
-    return () => { mounted.current = false; };
-  }, [props.scopeKey]);
+    return () => { mounted.current = false; readRevision.current++; };
+  }, [props.scopeKey, props.readKey, operationRevision]);
   async function change(value: Partial<z.infer<typeof formSchema>>): Promise<void> {
+    if (!canCreate() || lock.current || submitted || form.createdId !== undefined) return;
     try { await draft.store.setText(JSON.stringify({ ...form, ...value })); }
     catch (failure) { if (mounted.current) setError(errorMessage(failure)); }
   }
-  async function run(operation: () => Promise<void>, write = true): Promise<void> {
-    if (lock.current || (write && !canWrite()) || !mounted.current) return;
+  async function run(operation: () => Promise<void>, write: boolean | "create" = true): Promise<void> {
+    if (lock.current || (write === "create" ? !canCreate() : write && !canWrite()) || !mounted.current) return;
     lock.current = true; setBusy(true); setError(null);
     try { await operation(); }
     catch (failure) { if (mounted.current) setError(errorMessage(failure)); }
@@ -106,11 +122,22 @@ export function WorkActivities(props: Props) {
     const input = workActivityInputSchema.safeParse({ activity: form.activity, executionTime: /^\d+$/.test(form.minutes) ? Number(form.minutes) : NaN });
     if (!input.success) { setError("Indica el nombre y una cantidad válida de minutos enteros."); return; }
     await run(async () => {
+      const operationId = form.operationId ?? (props.operations === undefined ? undefined : Crypto.randomUUID());
+      if (operationId && form.operationId !== operationId) await draft.store.setText(JSON.stringify({ ...form, operationId }));
       await draft.store.flush();
-      if (!canWrite()) return;
-      const activityId = created.current ?? form.createdId ?? (await props.actions!.create(input.data)).id;
+      if (!canCreate()) return;
+      let activityId = created.current ?? form.createdId ?? registered?.receipt?.activityId;
+      if (activityId === undefined || activityId === null) {
+        try { activityId = (await props.actions!.create(input.data, operationId)).id; }
+        catch (failure) {
+          if (!isOfflineQueuedError(failure) || failure.kind !== "activity" || failure.operationId !== operationId) throw failure;
+          await draft.store.setText(JSON.stringify({ ...form, operationId, queued: true }));
+          if (mounted.current) { setCreating(false); setSelected(null); latest.current.onCreated?.(); }
+          return;
+        }
+      }
       created.current = activityId;
-      await draft.store.setText(JSON.stringify({ ...form, createdId: activityId }));
+      await draft.store.setText(JSON.stringify({ ...form, operationId, createdId: activityId }));
       const lease = draft.store.beginFiles();
       if (!lease) throw new Error("Los archivos están ocupados. El registro de actividad se conserva.");
       try {
@@ -121,7 +148,7 @@ export function WorkActivities(props: Props) {
       setSelected(null); setRecentId(activityId); setCreating(false);
       await load();
       if (mounted.current) props.onCreated?.();
-    });
+    }, "create");
   }
   async function pick(source: FileSource, isCurrent: () => boolean = () => true): Promise<void> {
     if (!canWrite() || !isCurrent()) return;
@@ -136,24 +163,28 @@ export function WorkActivities(props: Props) {
   }
   async function openForm(): Promise<void> {
     await run(async () => {
-      if ((form.createdId || created.current) && draft.files.every(file => file.uploaded)) {
+      if ((form.createdId || created.current || submitted) && draft.files.every(file => file.uploaded)) {
         for (const file of draft.files) await draft.store.removeFile(file.id);
         await draft.store.setText(JSON.stringify(emptyForm));
         created.current = null;
       }
       setCreating(true); setSelected(null);
-    });
+    }, "create");
   }
   const selectedActivity = activities.find(activity => activity.id === selected);
   const orderedActivities = [...activities].sort((left, right) => Number(right.id === recentId) - Number(left.id === recentId));
   function closeFiles(): void { if (!filesBack.current?.(true) && !lock.current) setSelected(null); }
   return <View style={styles.stack} testID="work-activities">
-    <View style={styles.sectionHeading}><Ionicons name="construct-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Actividades</Text><Badge label={String(activities.length)} />
+    <View style={styles.sectionHeading}><Ionicons name="construct-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Actividades</Text><Badge label={String(activities.length + pending.length)} />
       <IconButton label="Actualizar actividades" name="refresh-outline" disabled={busy} onPress={() => void run(load, false)} />
-      {!props.readOnly ? <IconButton label="Agregar actividad" name="add-outline" disabled={disabled || !draft.hydrated} onPress={() => void openForm()} /> : null}
+      {!props.readOnly ? <IconButton label="Agregar actividad" name="add-outline" disabled={createDisabled || !draft.hydrated} onPress={() => void openForm()} /> : null}
     </View>
     {error || draft.error || !parsed.success ? <Notice message={error ?? draft.error ?? "No se pudo leer el borrador de actividad."} tone="error" /> : null}
-    {activities.length === 0 ? <BodyText>Sin actividades registradas.</BodyText> : orderedActivities.map(activity => <View key={activity.id} style={[styles.activityCard, activity.isCompleted && styles.activityComplete, activity.id === recentId && styles.activityRecent]} testID={`activity-card-${activity.id}`}>
+    {pending.map(operation => <View key={operation.id} style={styles.activityCard} testID={`pending-activity-${operation.id}`}>
+      <View style={styles.activityHeading}><Text style={styles.activityTitle}>{plainText(operation.payload.activity)}</Text><Text style={styles.activityMinutes}>{operation.payload.executionTime} min</Text></View>
+      <Badge label={operation.status === "pending" ? "Guardada local" : operation.status === "applied" ? "Confirmada · actualizando" : operationStatusLabels[operation.status]} tone={operation.status === "pending" || operation.status === "syncing" ? "warning" : operation.status === "applied" ? "success" : "danger"} />
+    </View>)}
+    {activities.length === 0 && pending.length === 0 ? <BodyText>Sin actividades registradas.</BodyText> : orderedActivities.map(activity => <View key={activity.id} style={[styles.activityCard, activity.isCompleted && styles.activityComplete, activity.id === recentId && styles.activityRecent]} testID={`activity-card-${activity.id}`}>
       <View style={styles.activityHeading}>
         <Text accessibilityRole="header" style={styles.activityTitle}>{plainText(activity.activity)}</Text>
         <Text style={styles.activityMinutes}>{activity.executionTime} min</Text>
@@ -183,17 +214,18 @@ export function WorkActivities(props: Props) {
       <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.modalCard} accessibilityViewIsModal accessibilityLabel="Nueva actividad">
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>
-            <SectionTitle title={form.createdId ? "Archivos de actividad" : "Nueva actividad"} />
+            <SectionTitle title={form.createdId || submitted ? "Archivos de actividad" : "Nueva actividad"} />
             {error || draft.error ? <Notice message={error ?? draft.error ?? ""} tone="error" /> : null}
-            <Field label="Nombre de la actividad" value={form.activity} editable={!disabled && !form.createdId && draft.hydrated} maxLength={240} onChangeText={activity => void change({ activity })} />
-            <Field label="Minutos de actividad" keyboardType="number-pad" value={form.minutes} editable={!disabled && !form.createdId} maxLength={5} onChangeText={minutes => void change({ minutes })} />
+            <Field label="Nombre de la actividad" value={form.activity} editable={!createDisabled && !form.createdId && !submitted && draft.hydrated} maxLength={240} onChangeText={activity => void change({ activity })} />
+            <Field label="Minutos de actividad" keyboardType="number-pad" value={form.minutes} editable={!createDisabled && !form.createdId && !submitted} maxLength={5} onChangeText={minutes => void change({ minutes })} />
+            {submitted && !registered?.receipt?.activityId && !form.createdId ? <Text style={styles.caption}>Actividad pendiente de sincronización.</Text> : null}
             <View style={styles.between}><SectionTitle title="Archivos" /><View style={styles.row}>
               <IconButton name="camera-outline" label="Tomar foto de actividad" disabled={disabled || draft.fileBusy} onPress={() => void pick("camera")} />
               <IconButton name="images-outline" label="Fotos de actividad" disabled={disabled || draft.fileBusy} onPress={() => void pick("library")} />
               <IconButton name="attach-outline" label="Adjuntar archivos de actividad" disabled={disabled || draft.fileBusy} onPress={() => void pick("document")} />
             </View></View>
             <PendingFileList files={draft.files} disabled={disabled || draft.fileBusy} onRemove={id => void run(() => draft.store.removeFile(id))} />
-            <Button title={form.createdId ? "Guardar archivos pendientes" : "Guardar actividad"} icon="save-outline" loading={busy} disabled={disabled || !draft.hydrated || draft.saving || draft.fileBusy || !!draft.error} onPress={() => void create()} />
+            <Button title={form.createdId || submitted ? "Guardar archivos pendientes" : "Guardar actividad"} icon="save-outline" loading={busy} disabled={createDisabled || (submitted && (!registered?.receipt?.activityId && !form.createdId || props.disabled)) || !draft.hydrated || draft.saving || draft.fileBusy || !!draft.error} onPress={() => void create()} />
             <Button title="Cancelar" variant="ghost" disabled={busy || draft.fileBusy} onPress={() => setCreating(false)} />
           </ScrollView>
         </View>

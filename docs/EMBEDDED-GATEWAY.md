@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.27
+# @qualitzer/mobile-gateway 1.0.28
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.27. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.28. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.28 incorpora `kind: "activity"` en los comandos offline, con nombre y minutos, UUID y recibo con `activityId`. Exige `technician.supportsOfflineActivities` antes del POST. El backend reutiliza la autorizacion de actividades y guarda actividad y recibo en la misma transaccion. La APK1.0.60 conserva actividades locales dependientes de la creacion del trabajo y las sincroniza despues de su confirmacion. No modifica recibos anteriores ni agrega migraciones. Edicion, completado, borrado y adjuntos de actividades siguen online; los adjuntos seleccionados permanecen en el formulario para envio explicito con conexion. Desplegar MobileSync y PanelWorkActions/TechnicianDashboard antes de instalar esta pasarela.
 
 1.0.27 agrega diagnostico acotado a GET/PATCH de edicion de trabajos. Distingue respuesta incompatible durante la autorizacion (WORK_EDIT_ASSIGNMENT_INVALID_RESPONSE) de documento, identidad o JSON invalido en PanelWorkEdit (WORK_EDIT_INVALID_RESPONSE). Solo muestra hasta cinco rutas de campos del esquema, sin valores, nombres de claves desconocidas, tokens ni datos de trabajo. No flexibiliza el esquema, no reintenta escrituras y no elimina la revision esperada. La APK1.0.56 puede mostrar los mensajes sin recompilar. Este paquete identifica la etapa/campo del fallo reportado; no acredita la correccion del dato remoto, que aun requiere reproducirlo con la respuesta real.
 

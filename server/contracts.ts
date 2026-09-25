@@ -60,7 +60,7 @@ const work = z.object({
 });
 export const assignmentsSchema: z.ZodType<Assignments> = z.object({
   generatedAt: z.string(),
-  technician: z.object({ id: id.nullable(), name: text, allowEditExecutionTime: z.boolean(), supportsWorkedDates: z.boolean().optional(), supportsRecordedTimer: z.boolean().optional(), supportsOfflineCompletion: z.boolean().optional(), avatarThumbnail: optionalLink }),
+  technician: z.object({ id: id.nullable(), name: text, allowEditExecutionTime: z.boolean(), supportsWorkedDates: z.boolean().optional(), supportsRecordedTimer: z.boolean().optional(), supportsOfflineCompletion: z.boolean().optional(), supportsOfflineActivities: z.boolean().optional(), avatarThumbnail: optionalLink }),
   summary: z.object({ totalGroups: number, totalWorks: number, activeWorks: number, overdueWorks: number, plannedMinutes: number }),
   groups: z.array(z.object({
     id: z.string(), type: z.enum(["external_ot", "internal_maintenance", "direct_assignment"]), code: text, title: text, status,

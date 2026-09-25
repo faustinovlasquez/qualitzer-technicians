@@ -18,11 +18,12 @@ import { assignmentsWithTimerRead, canonicalIntentionScopeSchema, checklistCatal
 import { isServiceFailure, requiresDeployment } from "./connection";
 import type { AssignmentReadOptions } from "../domain/assignmentRead";
 import { withAssignmentReadBatch, type AssignmentReadBatch } from "../infrastructure/assignmentReadBatch";
-import { workActions, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
+import { workActions, workActivitySchema, workActivityInputSchema, type WorkActivitiesPort } from "../domain/workActivities";
 
 export class OfflineTechnicianRepository implements TechnicianRepository, OfflineController {
   readonly engine: OfflineEngine;
   private readonly fileReads = new Map<string, symbol>();
+  private readonly activityReads = new Map<string, symbol>();
   private activityFileRevision = 0;
   constructor(readonly remote: TechnicianRepository, readonly session: Session, readonly dependencies: EngineDependencies, private readonly disableProfile: () => Promise<void> = async () => undefined) {
     this.engine = new OfflineEngine(dependencies);
@@ -38,10 +39,43 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   hasPendingChanges = () => this.engine.hasPendingChanges();
   readLocalFile = (id: string) => this.engine.readLocalFile(id);
   activities: WorkActivitiesPort["activities"] = async scope => {
-    this.checklistScope(scope);
-    return this.read(`activities:${JSON.stringify(scope)}`, () => workActions(this.remote).activities(scope), json => workActivitySchema.array().parse(JSON.parse(json)));
+    this.branch(scope.companyBranchId);
+    await this.assertReadable();
+    await this.dependency(scope);
+    const resolved = resolveScope(scope, (await this.dependencies.store.read(this.dependencies.namespace)).operations);
+    if (!resolved?.workId) return [];
+    const canonical = { ...resolved, workId: resolved.workId };
+    this.checklistScope(canonical);
+    const key = `activities:${JSON.stringify(canonical)}`;
+    const revision = Symbol();
+    this.activityReads.set(key, revision);
+    let appliedOperationIds: string[] = [];
+    try {
+      return await this.read(key, async () => {
+        const before = await this.dependencies.store.read(this.dependencies.namespace);
+        appliedOperationIds = before.operations.filter(operation => operation.kind === "activity" && operation.status === "applied"
+          && sameResource(resolveScope(operation.scope, before.operations) ?? operation.scope, canonical)).map(operation => operation.id);
+        return workActivitySchema.array().parse(await workActions(this.remote).activities(canonical));
+      }, (json, entry) => Object.assign(workActivitySchema.array().parse(JSON.parse(json)), { appliedOperationIds: entry.activityReadOperationIds ?? [] }), undefined, async activities => {
+        if (this.activityReads.get(key) === revision) {
+          await updateState(this.dependencies.store, this.dependencies.namespace, state => {
+            if (this.activityReads.get(key) !== revision) return;
+            putCache(state, { key, json: JSON.stringify(activities), fetchedAt: this.dependencies.now(), activityReadOperationIds: appliedOperationIds });
+            state.revokedResources = state.revokedResources.filter(entry => entry.key !== key);
+          });
+        }
+        return Object.assign(activities, { appliedOperationIds });
+      });
+    } finally { if (this.activityReads.get(key) === revision) this.activityReads.delete(key); }
   };
-  createActivity: WorkActivitiesPort["createActivity"] = (scope, input) => this.onlineOnly(() => workActions(this.remote).createActivity(scope, input), scope);
+  createActivity: WorkActivitiesPort["createActivity"] = async (scope, input, operationId) => {
+    this.branch(scope.companyBranchId);
+    const operations = await this.engine.enqueue([{ ...this.base(operationId), kind: "activity", scope, payload: workActivityInputSchema.parse(input) }]);
+    await this.finish(operations);
+    const activityId = operations[0]?.receipt?.activityId;
+    if (activityId === undefined) throw new OfflineUnavailableError("OFFLINE_INVALID_RECEIPT");
+    return { id: activityId };
+  };
   updateActivity: WorkActivitiesPort["updateActivity"] = (scope, id, input) => this.onlineOnly(() => workActions(this.remote).updateActivity(scope, id, input), scope);
   completeActivity: WorkActivitiesPort["completeActivity"] = (scope, id, isCompleted = true) => this.onlineOnly(() => workActions(this.remote).completeActivity(scope, id, isCompleted), scope);
   deleteActivity: WorkActivitiesPort["deleteActivity"] = (scope, id) => this.onlineOnly(() => workActions(this.remote).deleteActivity(scope, id), scope);

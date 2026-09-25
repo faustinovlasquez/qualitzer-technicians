@@ -1,8 +1,9 @@
 import type { CreationInput, CreationResult } from "./creation";
 import type { SyncStepAnswer, SyncCompletionPayload } from "./offlineProtocol";
+import type { WorkActivityInput } from "./workActivities";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, DateRange, GroupScope, LocalPhoto, StepAnswer, User, WorkScope } from "./models";
 
-export type OfflineOperationKind = "create" | "comment" | "answer" | "document" | "timer" | "checklist" | "completion";
+export type OfflineOperationKind = "create" | "comment" | "answer" | "document" | "timer" | "checklist" | "completion" | "activity";
 export type OfflineDeploymentCounts = { [Kind in OfflineOperationKind]: number };
 export type OfflineOperationStatus = "pending" | "syncing" | "applied" | "blocked" | "auth_required" | "needs_review" | "conflict";
 export type OfflineScope = GroupScope & { workId?: string };
@@ -24,6 +25,7 @@ export type OfflineCommand = {
   | { kind: "timer"; payload: OfflineTimerPayload }
   | { kind: "checklist"; payload: OfflineChecklistPayload }
   | { kind: "completion"; payload: SyncCompletionPayload }
+  | { kind: "activity"; payload: WorkActivityInput }
 );
 export interface OfflineDocumentMetadata {
   operationId: string;
@@ -36,6 +38,7 @@ export interface OfflineReceipt {
   state: "applied" | "conflict" | "rejected" | "needs_review";
   error?: string;
   fileId?: string | number;
+  activityId?: number;
 }
 export interface OfflineSyncPort {
   offlineCapabilities?(companyBranchId: number): Promise<import("./offlineProtocol").SyncCapabilities>;
@@ -69,6 +72,7 @@ export type OfflineOperation = OfflineOperationBase & (
   | { kind: "document"; scope: OfflineScope; stepId?: string; file: OfflineFile; sourceDraftId?: string; reportText?: string }
   | { kind: "timer"; scope: WorkScope; payload: OfflineTimerPayload; localClock?: { elapsedSeconds: number } }
   | { kind: "checklist"; scope: WorkScope; payload: OfflineChecklistPayload }
+  | { kind: "activity"; scope: WorkScope; payload: WorkActivityInput }
   | { kind: "completion"; scope: WorkScope; payload: SyncCompletionPayload; prerequisiteIds: string[]; localClock: { elapsedSeconds: number } }
 );
 export interface OfflineCoverage { date: string; branchId: number; fetchedAt: number; }
