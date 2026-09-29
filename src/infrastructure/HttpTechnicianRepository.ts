@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { materialReceiptInputSchema, materialReceiptResultSchema, materialReceiptsSchema, type MaterialReceiptInput } from "../domain/materialReceipts";
 import { locationAckSchema, locationBatchSchema, locationHistoryQuerySchema, locationHistorySchema, type LocationPoint } from "../domain/locationTracking";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { userSignatureInputSchema, userSignatureOptionsSchema, type UserSignatureInput } from "../domain/userSignatures";
@@ -24,6 +25,12 @@ import { notificationDeleteResultSchema, notificationDeviceInputSchema, notifica
 
 
 export class HttpTechnicianRepository implements TechnicianRepository {
+  async materialReceipts(branchId: number) {
+    return materialReceiptsSchema.parse(await this.request<unknown>(`/api/material-receipts?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  }
+  async confirmMaterialReceipts(input: MaterialReceiptInput) {
+    return materialReceiptResultSchema.parse(await this.request<unknown>("/api/material-receipts/confirm", "POST", materialReceiptInputSchema.parse(input)));
+  }
   async equipmentLocation(scope: import("../domain/models").WorkScope, target: import("../domain/equipmentLocation").EquipmentLocationTarget) {
     const { equipmentLocationSchema, equipmentLocationTargetSchema } = await import("../domain/equipmentLocation");
     return equipmentLocationSchema.parse(await this.request<unknown>(this.scopePath(scope, `/equipment-location/${equipmentLocationTargetSchema.parse(target)}`)));

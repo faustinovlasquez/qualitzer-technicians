@@ -1,6 +1,24 @@
 # Marca de Qualitzer técnicos y distribuciones por empresa
 
-## Actualización 1.0.3
+## Icono sin borde blanco 1.0.64 (2026-09-29)
+
+La captura del teléfono mostró que la versión 1.0.63 reducía todo el PNG, incluido su margen blanco, sobre un fondo Android también blanco. Ahora el generador recorta únicamente el exterior del original aprobado (`left=160`, `top=170`, `width=960`, `height=884`) y extiende los colores de sus bordes hasta cubrir el lienzo completo. No redibuja la Q ni la llave; conserva el círculo blanco que forma parte de la propia llave.
+
+El foreground adaptativo de 1024 × 1024 es opaco, con el recorte centrado a 544 px de ancho. El azul ocupa toda la máscara y el dibujo aumenta aproximadamente un 60 %, manteniendo la Q y la insignia dentro del círculo seguro 66/108. El fondo Android de respaldo es `#7DBDF8`. Los iconos de 1024/512/64 usan el mismo recorte a 816/408/51 px para una escala visual equivalente.
+
+Las cinco pruebas de recursos comprueban la fuente intacta, regeneración exacta, bordes azules opacos, conservación del dibujo y zona segura. Vista comparativa simulada: [../artifacts/launcher-preview-1.0.64.png](../artifacts/launcher-preview-1.0.64.png). No sustituye una prueba en el teléfono. Detalles: [ACTUALIZACION-1.0.64.md](ACTUALIZACION-1.0.64.md).
+
+## Logo anterior 1.0.63 (2026-09-29)
+
+La marca base usa el PNG aprobado por el usuario, con la Q azul y la llave. La copia original de 1254 × 1254 está en [../assets/qualitzer-source.png](../assets/qualitzer-source.png), SHA-256 `97f2a2a50a7e18f7b35b7df9e4b687b52883776ab4ef405a7c23f5897a267746`.
+
+El generador existente conserva la imagen completa: icono opaco de 1024 × 1024, logo de 512 × 512, favicon de 64 × 64 y foreground adaptativo de 1024 × 1024 con la imagen centrada en 440 × 440. Todos sus píxeles quedan dentro del círculo seguro Android 66/108. No se cambia el branding válido de cada empresa ni sus accesos directos.
+
+Regeneración local: `node scripts/generate-qualitzer-brand.cjs`. Las cuatro pruebas de `tests/branding-assets.test.cjs` verifican la fuente, regeneración exacta, píxeles originales y zona segura. La instalación del nuevo icono requiere actualizar el APK; no basta con recargar la app. Detalles: [ACTUALIZACION-1.0.63.md](ACTUALIZACION-1.0.63.md).
+
+Las secciones siguientes conservan la documentación histórica del logo anterior y de las distribuciones por empresa.
+
+## Actualización histórica 1.0.3
 
 La entrega vigente es **1.0.3 / código 4**, con la misma firma y assets base. El acceso empresarial ya abre sin el aviso previo y se solicita automáticamente una vez tras la sesión verificada, siempre con confirmación Android. No modifica el icono principal ni cambia de empresa al abrir. La sección 1.0.2 siguiente conserva el contexto de la marca de sucursal. Detalles y límites: [ACTUALIZACION-1.0.3.md](ACTUALIZACION-1.0.3.md).
 

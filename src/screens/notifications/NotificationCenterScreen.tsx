@@ -10,6 +10,8 @@ import { palette, radius, typography } from "../../ui/theme";
 import { notificationCounts, notificationDeliveryLabels, notificationErrorMessage, notificationKinds, notificationNoticeMessage, notificationSupportCode, notificationTimestamp, notificationWorkDate, notificationWorkReference } from "./notificationPresentation";
 
 const notificationKindColors: { [K in NotificationInboxItem["kind"]]: { iconColor: string; backgroundColor: string } } = {
+  MATERIAL_RECEIPT_AVAILABLE: { iconColor: palette.primary, backgroundColor: palette.primarySoft },
+  MATERIAL_RECEIPT_REMINDER: { iconColor: palette.amber, backgroundColor: palette.amberSoft },
   WORK_TECHNICIAN_ASSIGNED: { iconColor: palette.primary, backgroundColor: palette.primarySoft },
   RUNNING_TIMER_REMINDER: { iconColor: palette.amber, backgroundColor: palette.amberSoft },
   MOBILE_PUSH_TEST: { iconColor: palette.info, backgroundColor: palette.infoSoft },
@@ -134,7 +136,7 @@ function NotificationCenterContent({ notifications, onBack }: { notifications: M
           const expanded = detailsId === item.id;
           return <View key={item.id} style={[styles.event, !item.readAt && styles.eventUnread]}>
             <Pressable accessibilityRole="button" disabled={busy} accessibilityState={{ disabled: busy }}
-              accessibilityLabel={`${kind.title}. ${item.readAt ? "Leída" : "Sin leer"}. ${reference ?? "Prueba"}. ${notificationTimestamp(item.createdAt)}`}
+              accessibilityLabel={`${kind.title}. ${item.readAt ? "Leída" : "Sin leer"}. ${reference ?? (item.kind === "MOBILE_PUSH_TEST" ? "Prueba" : "Materiales por recibir")}. ${notificationTimestamp(item.createdAt)}`}
               accessibilityHint={item.kind === "MOBILE_PUSH_TEST" ? "Abre la notificación de prueba" : "Abre el recurso si tu cuenta conserva acceso"}
               onPress={() => { if (canAct()) void client?.openInboxItem(item.id); }} style={({ pressed }) => [styles.eventMain, pressed && styles.pressed, busy && styles.disabled]}>
               <View style={[styles.eventIcon, { backgroundColor: kindColors.backgroundColor }]}><Ionicons name={kind.icon} size={24} color={kindColors.iconColor} accessible={false} /></View>

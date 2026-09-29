@@ -2,6 +2,15 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Qualitzer: descargar APK de recepcion de materiales",
+			"type": "process",
+			"command": "C:/Users/faust/Desktop/www/Qualitzer-Mobile/node_modules/node/bin/node.exe",
+			"args": ["C:/Users/faust/Desktop/www/Qualitzer-Mobile/scripts/android/serve-apk.cjs"],
+			"options": { "env": { "QUALITZER_APK_PORT": "8840" } },
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
 			"label": "Qualitzer: descargar APK de ubicacion propia del equipo",
 			"type": "process",
 			"command": "C:\\Users\\faust\\Desktop\\www\\Qualitzer-Mobile\\node_modules\\node\\bin\\node.exe",

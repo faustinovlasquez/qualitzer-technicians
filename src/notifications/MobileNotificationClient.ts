@@ -157,7 +157,7 @@ export class MobileNotificationClient {
             if (owned) {
               confirmed = true;
               await this.fetchInbox(false, this.state.unreadOnly);
-              this.update({ notice: owned.kind === "RUNNING_TIMER_REMINDER" ? "Hay un cronómetro pendiente de revisión." : owned.kind === "MOBILE_PUSH_TEST" ? "Se recibió una notificación de prueba en esta app." : "Hay una nueva asignación técnica. Actualiza tus trabajos." });
+              this.update({ notice: owned.kind === "MATERIAL_RECEIPT_AVAILABLE" || owned.kind === "MATERIAL_RECEIPT_REMINDER" ? "Tienes materiales pendientes de confirmar." : owned.kind === "RUNNING_TIMER_REMINDER" ? "Hay un cronómetro pendiente de revisión." : owned.kind === "MOBILE_PUSH_TEST" ? "Se recibió una notificación de prueba en esta app." : "Hay una nueva asignación técnica. Actualiza tus trabajos." });
               void Promise.resolve(this.options.onForegroundRefresh?.({ session: this.options.session, storageKey: this.options.storageKey, isCurrent: this.isCurrent })).catch(() => {});
             }
           } finally { this.receivedEvents.finish(payload.eventId, confirmed); }
@@ -248,7 +248,7 @@ export class MobileNotificationClient {
     this.requireCurrent();
     const selectedPreferences = preferences ?? this.state.preferences;
     const input = notificationDeviceInputSchema.parse({ installationId, expoPushToken, projectId, platform: adapter.platform,
-      companyBranchId: this.options.session.branchId, preferences: selectedPreferences });
+      companyBranchId: this.options.session.branchId, preferences: { ...selectedPreferences, materialReceipts: selectedPreferences.materialReceipts ?? true } });
     if (interactive) this.requireInteraction();
     this.bindingMayExist = true;
     const response = await this.options.api.notificationRegister(this.options.session, input);

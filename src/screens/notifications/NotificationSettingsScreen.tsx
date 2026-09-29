@@ -163,6 +163,7 @@ function NotificationSettingsContent({ notifications, onBack }: NotificationSett
       {!loaded && !dirty ? <Card><BodyText>{client ? "Cargando tus preferencias…" : "Conecta tu sesión para consultar y guardar tus preferencias."}</BodyText></Card> : native || dirty ? <>
         <Card style={styles.stack}>
           <SectionTitle title="Qué quieres recibir" />
+          <ToggleRow icon="cube-outline" title="Materiales por recibir" description="Aviso de entrega y un recordatorio por jornada laboral." value={preferences.materialReceipts ?? true} disabled={!editable} onChange={materialReceipts => update({ materialReceipts })} />
           {!state?.registered ? <Text style={styles.caption}>Activa los avisos para editar y guardar. Tus cambios sin guardar se mantienen en esta pantalla.</Text> : null}
           <ToggleRow icon="briefcase-outline" title="Nuevas asignaciones" description="Cuando te asignen una OT o un trabajo." value={preferences.assignments} disabled={!editable} onChange={(assignments) => update({ assignments })} />
           <View style={styles.divider} />

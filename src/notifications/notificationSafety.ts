@@ -3,6 +3,7 @@ import { notificationDataSchema, type NotificationData, type NotificationPrefere
 import type { NotificationPermission } from "./contracts";
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  materialReceipts: true,
   assignments: true, timers: true, remindAfterMinutes: 30, repeatEveryMinutes: 120,
   quietHoursStart: "22:00", quietHoursEnd: "07:00",
 };

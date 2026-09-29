@@ -140,6 +140,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const [offlineSetupError, setOfflineSetupError] = useState<string | null>(null);
   const [liveVerified, setLiveVerified] = useState(false);
   const [selectedOffline, setSelectedOffline] = useState(false);
+  const [materialReceiptEventId, setMaterialReceiptEventId] = useState<string | null>(null);
   const offline: OfflineSnapshot | null = useSyncExternalStore(offlineController?.subscribe ?? subscribeNothing, offlineController?.getSnapshot ?? emptyOfflineSnapshot, offlineController?.getSnapshot ?? emptyOfflineSnapshot);
   const repository = useRef<TechnicianRepository | null>(null);
   const gatewayBlock = useRef<string | null>(gatewayConfiguration.error);
@@ -537,7 +538,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       setError("Vuelve a la bandeja de avisos para abrir la notificación. Se conservan los cambios de configuración sin guardar.");
       return false;
     }
-    if (payload.kind === "MOBILE_PUSH_TEST") {
+    if (payload.kind === "MOBILE_PUSH_TEST" || payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER") {
+      if (payload.kind !== "MOBILE_PUSH_TEST") setMaterialReceiptEventId(payload.eventId);
       state.current = { ...state.current, tab: "notifications" };
       setTab("notifications"); setError(null);
       return true;
@@ -1525,6 +1527,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     creationNotice: visibleCreationNotice,
     dismissCreationNotice: () => setCreationNotice(null),
     locationPort: remoteRepository(repository.current),
+    receiptPort: remoteRepository(repository.current),
+    materialReceiptEventId,
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,
     consumeOrderDeliveryIntent,
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,

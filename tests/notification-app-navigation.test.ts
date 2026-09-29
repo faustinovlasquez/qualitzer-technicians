@@ -25,7 +25,7 @@ type FixtureApp = Pick<AppModel,
   "offlineVerifiedAt" | "gatewayUrl" | "storageKey" | "data" | "range" | "agendaFocusDate" |
   "error" | "health" | "liveVerified" | "logout" | "refresh" | "openOffline" | "syncOffline" |
   "branch" | "checkConnection" | "closeOffline" | "focusAgendaDay" | "changeRange" | "openGroup" |
-  "openWork" | "onWorkStatus" | "openCreate" | "bindLocationActions">;
+  "openWork" | "onWorkStatus" | "openCreate" | "bindLocationActions" | "receiptPort" | "materialReceiptEventId">;
 
 interface Props {
   children?: unknown;
@@ -113,6 +113,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
   const tabCalls: FixtureApp["tab"][] = [];
   const backHandlers = new Set<() => boolean>();
   const app: FixtureApp = {
+    receiptPort: null, materialReceiptEventId: null,
     bindLocationActions: () => noop,
     session: session(mode), tab, notifications: { client: null, state: notificationState(unreadCount), storageKey: "fixture-notifications", revokeForSession: resolved },
     setTab(next) { tabCalls.push(next); app.tab = next; },
@@ -158,7 +159,10 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     if (id === "../location/LocationSettingsPanel") return { LocationSettingsPanel: "LocationSettingsPanel" };
     return forbidden(id);
   });
+  const receipts = { data: null, pending: null, busy: false, error: "", ready: true, refresh: resolved, confirm: resolved };
   const imports = new Map<string, unknown>([
+    ["./src/receipts/useMaterialReceipts", { useMaterialReceipts: () => receipts }],
+    ["./src/receipts/MaterialReceiptsScreen", { MaterialReceiptsScreen: "MaterialReceiptsScreen" }],
     ["react", react], ["react/jsx-runtime", { jsx, jsxs: jsx, Fragment: "Fragment" }], ["react-native", native],
     ["@expo/vector-icons", { Ionicons: "Ionicons" }], ["expo-status-bar", { StatusBar: "StatusBar" }],
     ["react-native-safe-area-context", { SafeAreaView: "SafeAreaView", SafeAreaProvider: "SafeAreaProvider" }],
@@ -211,7 +215,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
   }
   render();
   return {
-    app, security, accessCalls, tabCalls, backHandlers, brandingCalls, Application, render,
+    app, security, receipts, accessCalls, tabCalls, backHandlers, brandingCalls, Application, render,
     get tree() { return tree; },
     renderRoot(): Element {
       activeHooks = rootHooks;
@@ -379,6 +383,31 @@ test("actual App demo/null notifications keeps navigation and Profile Settings r
   assert.deepEqual(textLeaves(navTab(f.tree, "Avisos")), ["Avisos"]);
   press(f.settingsButton());
   assert.equal(one(f.render(), element => element.type === "NotificationSettingsScreen").props.notifications?.client, null);
+});
+
+test("actual App material receipt screen handles Android Back without navigating beneath it", context => {
+  const current = fixture("notifications"); context.after(current.close);
+  const button = one(current.tree, element => element.type === "Button" && element.props.title === "Materiales por recibir");
+  press(button); one(current.render(), element => element.type === "MaterialReceiptsScreen");
+  current.receipts.busy = true; current.render();
+  for (const handler of current.backHandlers) assert.equal(handler(), true);
+  one(current.render(), element => element.type === "MaterialReceiptsScreen");
+  current.receipts.busy = false; current.security.blocked = true; current.render();
+  for (const handler of current.backHandlers) handler();
+  one(current.render(), element => element.type === "MaterialReceiptsScreen");
+  current.security.blocked = false; current.render();
+  for (const handler of current.backHandlers) handler();
+  one(current.render(), element => element.type === "NotificationCenterScreen");
+  assert.equal(current.app.tab, "notifications");
+});
+
+test("actual App opens material notification and closes its screen when the session changes", context => {
+  const current = fixture("notifications"); context.after(current.close);
+  current.app.materialReceiptEventId = "00000000-0000-4000-8000-000000000123";
+  one(current.render(), element => element.type === "MaterialReceiptsScreen");
+  assert.ok(current.app.session);
+  current.app.session = { ...current.app.session, token: "new-session" };
+  one(current.render(), element => element.type === "NotificationCenterScreen");
 });
 
 test("AST wiring: technician notifications receive the security predicate and tab changes use the guarded context", () => {

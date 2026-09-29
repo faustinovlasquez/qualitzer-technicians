@@ -14,6 +14,7 @@ import { createNotificationsRouter } from "./notifications/routes";
 import { createOfflineRouter } from "./offline/routes";
 import { createUserSignatureRouter } from "./userSignatures/routes";
 import { createLocationRouter } from "./locations/routes";
+import { createMaterialReceiptRouter } from "./receipts/routes";
 import { type TenantRegistry, type TenantRuntime } from "./tenants";
 import type { SessionManager } from "./sessions";
 import { SessionContext } from "./session-context";
@@ -80,11 +81,12 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
     router.use("/offline", createOfflineRouter(upstream, uploadLimiter, uploads));
     router.use("/user-signatures", createUserSignatureRouter(upstream));
     router.use("/worker-locations", createLocationRouter(upstream));
+    router.use("/material-receipts", createMaterialReceiptRouter(upstream));
     mobileRouters.set(runtime, router);
     return router;
   };
   app.use("/api", (req, res, next) => {
-    if (!/^\/(creation|mobile-notifications|offline|user-signatures|worker-locations)(\/|$)/.test(req.path)) { next(); return; }
+    if (!/^\/(creation|mobile-notifications|offline|user-signatures|worker-locations|material-receipts)(\/|$)/.test(req.path)) { next(); return; }
     context.middleware()(req, res, (error?: unknown) => {
       if (error) { next(error); return; }
       mobileRouter(context.get(req).runtime)(req, res, next);

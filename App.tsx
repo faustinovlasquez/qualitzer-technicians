@@ -34,6 +34,8 @@ import { CreationSuccess } from "./src/screens/creation/CreationSuccess";
 import { CreationModal } from "./src/screens/creation/CreationModal";
 import { LocationHistoryPanel } from "./src/location/LocationHistoryPanel";
 import { LocationSettingsPanel } from "./src/location/LocationSettingsPanel";
+import { useMaterialReceipts } from "./src/receipts/useMaterialReceipts";
+import { MaterialReceiptsScreen } from "./src/receipts/MaterialReceiptsScreen";
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -54,19 +56,32 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState(false);
   const security = useDeviceSecurity();
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
+  const materialReceipts = useMaterialReceipts(app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0,
+    app.storageKey, app.session?.token ?? "", app.session?.mode === "live" && app.liveVerified && !security.blocked && !app.busy, security.isUnlocked);
+  useEffect(() => setReceiptsOpen(false), [app.session?.token, app.session?.branchId]);
+  useEffect(() => { if (app.materialReceiptEventId !== null) setReceiptsOpen(true); }, [app.materialReceiptEventId]);
+  useEffect(() => {
+    if (!receiptsOpen) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (security.isUnlocked() && !materialReceipts.busy) setReceiptsOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [receiptsOpen, materialReceipts.busy, security.isUnlocked]);
   const brandingContext = companyBrandingContext(app);
   const companyBranding = useCompanyBranding(brandingContext.input, app.busy || security.blocked, allowAutomaticPin && brandingContext.automaticPinEligible && !security.blocked);
   useEffect(() => { setLogoutConfirm(false); }, [app.session?.token]);
   useEffect(() => { setNotificationSettings(false); }, [app.session?.token, app.session?.branchId]);
   useEffect(() => { if (app.tab !== "profile") setNotificationSettings(false); }, [app.tab]);
   useEffect(() => {
-    if (!app.session || app.tab === "today" || app.selected || app.selectedOrder || app.selectedCreationKind || app.selectedOffline || notificationSettings) return;
+    if (!app.session || receiptsOpen || app.tab === "today" || app.selected || app.selectedOrder || app.selectedCreationKind || app.selectedOffline || notificationSettings) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (!app.busy) app.backTab();
       return true;
     });
     return () => subscription.remove();
-  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings]);
+  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings, receiptsOpen]);
 
   function cancelLogout(): void {
     if (!app.busy) setLogoutConfirm(false);
@@ -93,6 +108,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     {app.challenge ? <TenantSelectionScreen challenge={app.challenge} busy={app.busy} error={app.error} onSelect={(tenant) => void app.selectTenant(tenant)} onCancel={app.cancelLoginChallenge} /> : null}
   </View>;
   const branchName = app.session.user.accessBranchs.find((branch) => branch.id === app.session?.branchId)?.name ?? "Sin sucursal activa";
+  if (receiptsOpen) return <SafeAreaView style={styles.app}><MaterialReceiptsScreen receipt={materialReceipts} onBack={() => { if (security.isUnlocked() && !materialReceipts.busy) setReceiptsOpen(false); }} /></SafeAreaView>;
   if (notificationSettings && app.tab === "profile") return <SafeAreaView style={styles.app} edges={["top", "left", "right"]}>
     <NotificationSettingsScreen notifications={app.notifications} onBack={() => { if (security.isUnlocked()) setNotificationSettings(false); }} />
   </SafeAreaView>;
@@ -228,6 +244,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     {app.session.mode === "demo" && <View style={styles.demo}><Ionicons name="flask-outline" size={14} color={palette.amber} /><Text style={styles.demoText}>DEMOSTRACIÓN · No modifica datos reales</Text></View>}
     <View style={styles.body}>
       {app.tab === "notifications" ? <>
+        <View style={styles.orderError}><Button title={`Materiales por recibir${materialReceipts.data?.items.length ? ` (${materialReceipts.data.items.length})` : ""}`} icon="cube-outline" variant="secondary" disabled={app.busy} onPress={() => { if (security.isUnlocked()) setReceiptsOpen(true); }} /></View>
         {app.error ? <View style={styles.orderError}><Notice message={app.error} tone="warning" /></View> : null}
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />

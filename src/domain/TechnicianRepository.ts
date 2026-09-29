@@ -10,6 +10,8 @@ import type { UserSignaturesPort } from "./userSignatures";
 import type { LocationPoint } from "./locationTracking";
 
 export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort> {
+  materialReceipts?: import("./materialReceipts").MaterialReceiptPort["materialReceipts"];
+  confirmMaterialReceipts?: import("./materialReceipts").MaterialReceiptPort["confirmMaterialReceipts"];
   equipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget): Promise<import("./equipmentLocation").EquipmentLocation>;
   workEdit?(scope: WorkScope): Promise<import("./creation").WorkEditDocument>;
   updateWork?(scope: WorkScope, input: import("./creation").WorkEditInput): Promise<import("./creation").WorkEditDocument>;

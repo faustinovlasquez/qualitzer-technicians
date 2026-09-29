@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { clockTimeSchema, mobileUuidSchema, positiveCreationIdSchema } from "./creation";
 
-export const notificationPreferencesSchema = z.object({ assignments: z.boolean(), timers: z.boolean(), remindAfterMinutes: z.union([z.literal(30), z.literal(60), z.literal(120)]), repeatEveryMinutes: z.union([z.literal(60), z.literal(120), z.literal(240)]), quietHoursStart: clockTimeSchema, quietHoursEnd: clockTimeSchema }).strict();
+export const notificationPreferencesSchema = z.object({ materialReceipts: z.boolean().optional(), assignments: z.boolean(), timers: z.boolean(), remindAfterMinutes: z.union([z.literal(30), z.literal(60), z.literal(120)]), repeatEveryMinutes: z.union([z.literal(60), z.literal(120), z.literal(240)]), quietHoursStart: clockTimeSchema, quietHoursEnd: clockTimeSchema }).strict();
 export const notificationDeviceInputSchema = z.object({ installationId: mobileUuidSchema, expoPushToken: z.string().regex(/^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{10,200}\]$/), projectId: mobileUuidSchema, platform: z.enum(["android", "ios"]), companyBranchId: positiveCreationIdSchema, preferences: notificationPreferencesSchema }).strict();
-export const notificationKindSchema = z.enum(["WORK_TECHNICIAN_ASSIGNED", "RUNNING_TIMER_REMINDER", "MOBILE_PUSH_TEST"]);
+export const notificationKindSchema = z.enum(["WORK_TECHNICIAN_ASSIGNED", "RUNNING_TIMER_REMINDER", "MOBILE_PUSH_TEST", "MATERIAL_RECEIPT_AVAILABLE", "MATERIAL_RECEIPT_REMINDER"]);
 export const notificationStateSchema = z.enum(["pending", "sending", "accepted", "receiving", "receipt_ok", "receipt_unknown", "cancelled", "expired", "dead"]);
 export const notificationDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const timestamp = Date.parse(`${value}T00:00:00.000Z`);
@@ -14,7 +14,7 @@ export const notificationOriginSchema = z.string().max(2048).refine((value) => {
   try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && url.origin === value; } catch { return false; }
 });
 export const notificationDataSchema = z.object({ recipient: z.object({ userId: positiveCreationIdSchema, workerId: positiveCreationIdSchema }).optional(), tenantOrigin: notificationOriginSchema, companyBranchId: positiveCreationIdSchema, eventId: mobileUuidSchema, kind: notificationKindSchema, groupType: z.enum(["work", "negotiation", "maintenance"]).nullable(), groupId: positiveCreationIdSchema.nullable(), workId: positiveCreationIdSchema.nullable(), date: notificationDateSchema.nullable() }).refine((value) => {
-  if (value.kind === "MOBILE_PUSH_TEST") return value.groupType === null && value.groupId === null && value.workId === null && value.date === null;
+  if (value.kind === "MOBILE_PUSH_TEST" || value.kind === "MATERIAL_RECEIPT_AVAILABLE" || value.kind === "MATERIAL_RECEIPT_REMINDER") return value.groupType === null && value.groupId === null && value.workId === null && value.date === null;
   if (value.groupType === null || value.groupId === null) return false;
   return value.workId !== null || (value.kind === "WORK_TECHNICIAN_ASSIGNED" && (value.groupType === "negotiation" || value.groupType === "maintenance"));
 }, "MOBILE_PUSH_INVALID_DATA");

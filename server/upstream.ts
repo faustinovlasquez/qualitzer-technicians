@@ -7,6 +7,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/technician-dashboard/panel/${string}/works/${number}/edit` |
   "/user_signatures/me" | `/user_signatures/me/${number}` |
   "/worker-locations/batch" | "/worker-locations/me" |
+  "/inventory_consumptions_v2/my-receipts" | "/inventory_consumptions_v2/my-receipts/confirm" |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |
@@ -117,6 +118,13 @@ export class Upstream {
         throw new GatewayError(response.status >= 500 ? 503 : 502, "UPSTREAM_INVALID_RESPONSE");
       }
       if (!response.ok) {
+        if (path === "/inventory_consumptions_v2/my-receipts/confirm" && [404, 409].includes(response.status)) {
+          let data: unknown;
+          try { data = JSON.parse(await readBody(response)); } catch { data = null; }
+          const failure = z.object({ error: z.enum(["CONSUMPTION_NOT_FOUND", "CONSUMPTION_VERSION_CONFLICT", "CONSUMPTION_RECEIPT_NOT_PENDING", "CONSUMPTION_RECEIPT_LOCATION_EXPIRED", "CONSUMPTION_REQUEST_ID_REUSED"]) }).safeParse(data);
+          if (failure.success) throw new GatewayError(response.status, failure.data.error);
+          throw new GatewayError(response.status, "UPSTREAM_REJECTED");
+        }
         if (/\/works\/[1-9]\d*\/edit$/.test(path)) {
           let data: unknown;
           try { data = JSON.parse(await readBody(response)); } catch { data = null; }

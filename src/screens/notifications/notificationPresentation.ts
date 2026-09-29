@@ -2,6 +2,8 @@ import type { NotificationInboxItem, NotificationPreferences } from "../../domai
 import type { IconName } from "../../ui/components";
 
 export const notificationKinds: { [K in NotificationInboxItem["kind"]]: { title: string; icon: IconName; description: string } } = {
+  MATERIAL_RECEIPT_AVAILABLE: { title: "Materiales por recibir", icon: "cube-outline", description: "Confirma los materiales que recibiste." },
+  MATERIAL_RECEIPT_REMINDER: { title: "Recepciones pendientes", icon: "cube-outline", description: "Tienes materiales pendientes de confirmar." },
   WORK_TECHNICIAN_ASSIGNED: { title: "Nueva asignación", icon: "briefcase-outline", description: "Tienes una nueva asignación para revisar." },
   RUNNING_TIMER_REMINDER: { title: "Cronómetro activo", icon: "timer-outline", description: "Revisa el tiempo de tu trabajo en curso." },
   MOBILE_PUSH_TEST: { title: "Notificación de prueba", icon: "notifications-outline", description: "Una prueba de los avisos de este teléfono." },
@@ -15,7 +17,7 @@ export const notificationDeliveryLabels: { [K in NotificationInboxItem["state"]]
 
 export function notificationWorkReference(item: NotificationInboxItem): string | null {
   const { groupType, groupId, workId } = item.data;
-  if (item.kind === "MOBILE_PUSH_TEST") return null;
+  if (item.kind === "MOBILE_PUSH_TEST" || item.kind === "MATERIAL_RECEIPT_AVAILABLE" || item.kind === "MATERIAL_RECEIPT_REMINDER") return null;
   if (groupType === "negotiation") return `OT #${groupId}${workId !== null ? ` · Trabajo #${workId}` : ""}`;
   if (groupType === "maintenance") return `Mantenimiento #${groupId}${workId !== null ? ` · Trabajo #${workId}` : ""}`;
   return workId !== null || groupId !== null ? `Trabajo #${workId ?? groupId}` : "Trabajo asignado";
@@ -78,6 +80,7 @@ export function notificationSupportCode(code: string | null | undefined): string
 }
 
 const notices: { [notice: string]: string } = {
+  "Tienes materiales pendientes de confirmar.": "Tienes materiales pendientes de confirmar.",
   "Notificaciones activadas para esta sesión.": "Avisos activados para este teléfono.",
   "Preferencias guardadas en el servidor.": "Tus preferencias se han guardado.",
   "Registro de notificaciones desactivado.": "Avisos desactivados en este teléfono.",
@@ -98,7 +101,7 @@ export function notificationNoticeMessage(notice: string): string {
 }
 
 export function sameNotificationPreferences(left: NotificationPreferences, right: NotificationPreferences): boolean {
-  return left.assignments === right.assignments && left.timers === right.timers
+  return left.materialReceipts === right.materialReceipts && left.assignments === right.assignments && left.timers === right.timers
     && left.remindAfterMinutes === right.remindAfterMinutes && left.repeatEveryMinutes === right.repeatEveryMinutes
     && left.quietHoursStart === right.quietHoursStart && left.quietHoursEnd === right.quietHoursEnd;
 }

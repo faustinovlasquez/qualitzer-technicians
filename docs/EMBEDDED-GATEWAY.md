@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.28
+# @qualitzer/mobile-gateway 1.0.29
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.28. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.29. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.29 agrega GET `/api/material-receipts?companyBranchId=N` y POST `/api/material-receipts/confirm`. Revalida usuario, trabajador y sucursal; solo confirma comprobantes propios con UUID y versiones exactas, sin firma dibujada ni nuevos movimientos de stock. La respuesta conserva actor, comprobantes y revision siguiente. Requiere publicar las rutas `inventory_consumptions_v2/my-receipts` y `/confirm` del backend. Admite avisos MATERIAL_RECEIPT_AVAILABLE y MATERIAL_RECEIPT_REMINDER solo para dispositivos que envian la preferencia materialReceipts; mantiene avisos, timers, actividades y colas anteriores. Los recordatorios requieren horario laboral y zona horaria configurados. La APK1.0.65 conserva un intento ambiguo para reintento explicito, sin considerarlo confirmado offline. Ubicacion puntual opcional, con motivo si no esta disponible; el GPS declarado no acredita presencia fisica. No agrega migraciones, pero requiere el esquema vigente de Consumos V2 y MobileNotifications.
 
 1.0.28 incorpora `kind: "activity"` en los comandos offline, con nombre y minutos, UUID y recibo con `activityId`. Exige `technician.supportsOfflineActivities` antes del POST. El backend reutiliza la autorizacion de actividades y guarda actividad y recibo en la misma transaccion. La APK1.0.60 conserva actividades locales dependientes de la creacion del trabajo y las sincroniza despues de su confirmacion. No modifica recibos anteriores ni agrega migraciones. Edicion, completado, borrado y adjuntos de actividades siguen online; los adjuntos seleccionados permanecen en el formulario para envio explicito con conexion. Desplegar MobileSync y PanelWorkActions/TechnicianDashboard antes de instalar esta pasarela.
 
