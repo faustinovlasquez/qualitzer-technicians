@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
-import { ActivityIndicator, BackHandler, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, BackHandler, Image, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { useTechnicianApp } from "./src/application/useTechnicianApp";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -13,7 +13,7 @@ import { Notice } from "./src/screens/workDetail/DetailUi";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
 import { ForcedPasswordScreen } from "./src/screens/ForcedPasswordScreen";
 import { SessionSetupScreen } from "./src/screens/SessionSetupScreen";
-import { BodyText, Brand, Button, Card, EmptyState, IconButton, SectionTitle, type IconName } from "./src/ui/components";
+import { BodyText, Brand, Button, Card, CompanyMark, EmptyState, IconButton, SectionTitle, type IconName } from "./src/ui/components";
 import { palette } from "./src/ui/theme";
 import { SessionContextBar } from "./src/ui/SessionContextBar";
 import { DevelopmentQrPanel } from "./src/ui/DevelopmentQrPanel";
@@ -28,6 +28,7 @@ import { dailyRange } from "./src/domain/assignmentSchedule";
 import { useCompanyBranding } from "./src/branding/useCompanyBranding";
 import { companyBrandingContext } from "./src/branding/companyBrandingContext";
 import { gatewayConfiguration } from "./src/infrastructure/gatewayConfig";
+import { connectionPresentation } from "./src/offline/connectionPresentation";
 import { DeviceSecurityProvider } from "./src/security/DeviceSecurityProvider";
 import { PrivateModal as Modal, useDeviceSecurity } from "./src/security/DeviceSecurityContext";
 import { useLocationTracking } from "./src/location/useLocationTracking";
@@ -55,6 +56,8 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const locationViewKey = JSON.stringify([app.session?.token, app.storageKey, app.session?.branchId, app.selected?.groupId, app.selected?.workId, app.selectedOrder?.id]);
   useEffect(() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }, [locationViewKey]);
   const [notificationSettings, setNotificationSettings] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [connectionOpen, setConnectionOpen] = useState(false);
   const security = useDeviceSecurity();
   const locationConsentPending = Boolean(locationTracking.available && locationTracking.state && !locationTracking.state.actionConsentPrompted);
   useNotificationPermissionPrompt(app.notifications, !app.restoring && !app.busy && !security.blocked && !locationConsentPending, security.isUnlocked);
@@ -105,6 +108,11 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     <NotificationSettingsScreen notifications={app.notifications} onBack={() => { if (security.isUnlocked()) setNotificationSettings(false); }} />
   </SafeAreaView>;
   const unreadNotifications = app.notifications.state?.unreadCount ?? 0;
+  const searchable = (app.tab === "today" || app.tab === "agenda") && app.session.branchId !== null;
+  const connection = app.offlineController ? connectionPresentation(app.offline) : null;
+  const dotColor = app.offlineSetupError ? palette.amber : !connection ? palette.success
+    : connection.tone === "success" ? palette.success : connection.tone === "error" ? palette.danger : connection.tone === "warning" ? palette.amber : palette.info;
+  const dotLabel = app.offlineSetupError ? "Almacenamiento offline no disponible" : connection ? connection.title : "Conectado";
   const connectionStatus = <>{app.offlineController ? <View pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
     <OfflineStatusBar key={`${app.storageKey}:${app.session.user.workerId}`} snapshot={app.offline} onOpen={app.openOffline} onSync={syncAndRefresh} embedded />
   </View> : app.offlineSetupError ? <Button title="Almacenamiento offline no disponible · revisar" variant="secondary" disabled={app.busy} onPress={app.openOffline} /> : null}
@@ -224,12 +232,21 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   return <SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
     <View style={styles.top}>
       {app.tab !== "today" ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
-      <Brand tenant={app.session.tenant} showTag={false} singleLine genericLogo={false} />
+      <CompanyMark tenant={app.session.tenant} size={40} />
+      {searchable ? <View style={styles.headerSearch}>
+        <Ionicons name="search-outline" size={18} color={palette.textMuted} />
+        <TextInput accessibilityLabel="Buscar tareas" accessibilityHint="Busca por tarea, código, equipo, ubicación o cliente." placeholder="Buscar OT" placeholderTextColor={palette.textMuted}
+          value={searchQuery} onChangeText={setSearchQuery} autoCapitalize="none" autoCorrect={false} returnKeyType="search" selectionColor={palette.primary} style={styles.headerSearchInput} />
+        {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={8} onPress={() => setSearchQuery("")}><Ionicons name="close-circle" size={18} color={palette.textMuted} /></Pressable> : null}
+      </View> : <View style={styles.brandSlot} />}
       <View style={styles.headerActions}>
         {app.tab !== "today" ? <IconButton name="home-outline" label="Ir a mi jornada" disabled={app.busy} onPress={app.homeTab} /> : null}
+        <Pressable testID="connection-dot" accessibilityRole="button" accessibilityLabel={`Conexión: ${dotLabel}. ${connectionOpen ? "Ocultar detalle" : "Ver detalle"}`} accessibilityState={{ expanded: connectionOpen }} hitSlop={6} onPress={() => setConnectionOpen(value => !value)} style={[styles.headerToggle, connectionOpen && styles.headerToggleActive]}>
+          <View style={[styles.connectionDot, { backgroundColor: dotColor }]} />
+        </Pressable>
       </View>
     </View>
-    <SessionContextBar tenant={app.session.tenant} branchName={branchName} showBrand={false}>{connectionStatus}</SessionContextBar>
+    {connectionOpen ? <SessionContextBar tenant={app.session.tenant} branchName={branchName} showBrand={false}>{connectionStatus}</SessionContextBar> : null}
     {app.session.mode === "demo" && <View style={styles.demo}><Ionicons name="flask-outline" size={14} color={palette.amber} /><Text style={styles.demoText}>DEMOSTRACIÓN · No modifica datos reales</Text></View>}
     <View style={styles.body}>
       {app.tab === "notifications" ? <>
@@ -238,7 +255,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "profile" ? <ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
+      </> : app.tab === "profile" ? <ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
       {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy} /> : null}
     </View>
     <View style={styles.nav}>{navigation.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "notifications" && unreadNotifications > 0 ? `${item.label}, ${unreadNotifications} sin leer` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
@@ -299,6 +316,12 @@ const styles = StyleSheet.create({
   offlineContext: { paddingHorizontal: 16, paddingTop: 12, gap: 6 }, offlineContextText: { color: palette.textSecondary, fontSize: 12, lineHeight: 17 },
   top: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottomWidth: 1, borderColor: palette.border, backgroundColor: "white" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
+  brandSlot: { flex: 1, minWidth: 0 },
+  headerSearch: { flex: 1, minWidth: 0, height: 40, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, borderRadius: 20, backgroundColor: palette.background, borderWidth: 1, borderColor: palette.border },
+  headerSearchInput: { flex: 1, minWidth: 0, height: 38, paddingVertical: 0, fontSize: 14, color: palette.text },
+  headerToggle: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  headerToggleActive: { backgroundColor: palette.track },
+  connectionDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: "white", boxShadow: "0px 0px 0px 1px rgba(18, 44, 58, 0.15)" },
   modalOverlay: { flex: 1, padding: 24, backgroundColor: "rgba(18,44,58,0.60)", justifyContent: "center" }, modalCard: { width: "100%", maxWidth: 520, alignSelf: "center" }, modalContent: { gap: 18 },
   demo: { backgroundColor: palette.amberSoft, padding: 8, justifyContent: "center", flexDirection: "row", gap: 6 }, demoText: { color: palette.amber, fontSize: 11, fontWeight: "700" },
   nav: { flexDirection: "row", borderTopWidth: 1, borderColor: palette.border, paddingVertical: 4, backgroundColor: "white", justifyContent: "center" },

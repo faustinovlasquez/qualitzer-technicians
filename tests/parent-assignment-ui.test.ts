@@ -68,7 +68,7 @@ test("compact agenda layout selector has a bounded full-width row and preserves 
     onRefresh() {}, onRangeChange() {}, onOpenWork() {}, onOpenGroup() {}, async onWorkStatus() {} };
   const render = () => hooks.render(() => module.DashboardScreen(props));
   let tree = render();
-  elements<{ label: string; onPress(): void }>(tree, "IconButton").find(node => node.props.label === "Filtros y OTs de agenda")!.props.onPress();
+  elements<{ onOpenFilters(): void }>(tree, "AgendaTimeline")[0]!.props.onOpenFilters();
   tree = render();
   const selector = elements<{ testID?: string; style: Array<{ width?: string; alignSelf?: string; flexDirection?: string }> }>(tree, "View").find(node => node.props.testID === "agenda-layout-selector");
   assert.ok(selector);
@@ -141,7 +141,7 @@ for (const type of ["internal_maintenance", "external_ot"] as const) {
     const group: AssignmentGroup = { ...data.groups[0], type, id: type === "internal_maintenance" ? "maintenance-12" : "external-12", title: "Revision de bateria", works: [], scheduledDate: "2026-09-12", status: "pending" };
     data.groups = [group];
     const opened: string[] = [];
-    const props: DashboardScreenProps = { data, user: user(), range: { startDate: "2026-09-12", endDate: "2026-09-12" }, view: "today", loading: false, error: null,
+    const props: DashboardScreenProps = { data, user: user(), range: { startDate: "2026-09-12", endDate: "2026-09-12" }, view: "today", searchOpen: true, loading: false, error: null,
       offline: { ...uiSnapshot(), coverage: [{ date: "2026-09-12", branchId: 1, fetchedAt: 1 }] }, companyBranchId: 1,
       onRefresh() {}, onRangeChange() {}, onOpenWork() { assert.fail("NO_CHILD_AVAILABLE"); }, onOpenGroup(parent) { opened.push(parent.id); }, async onWorkStatus() { assert.fail("NO_TIMER_AVAILABLE"); } };
     const module = uiModule<{ DashboardScreen(props: DashboardScreenProps): ReactNode }>("screens/DashboardScreen.tsx", hooks, {

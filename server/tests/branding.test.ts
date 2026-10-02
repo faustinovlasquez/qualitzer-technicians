@@ -28,6 +28,7 @@ test("HTTPS logo URLs from the trusted backend are returned without downloads, c
   const https = "https://bucket.s3.example.invalid/brand.png?version=2";
   assert.equal(sanitizeLogo(https), https);
   assert.equal(sanitizeLogo("https://bucket.example.invalid?version=a@b"), "https://bucket.example.invalid/?version=a@b");
+  assert.equal(sanitizeLogo("https://bucket.s3.example.invalid/tenant/branches/Logo Eliseo.png"), "https://bucket.s3.example.invalid/tenant/branches/Logo%20Eliseo.png");
   for (const value of ["http://bucket.example.invalid/logo.png", "//example.invalid/logo.png", "javascript:alert(1)", "file:///logo.png", "https://user:password@example.invalid/logo", "https://@example.invalid/logo", " https://example.invalid/logo", "https://example.invalid/lo\tgo", "https://example.invalid/lo\ngo", "https:\\example.invalid/logo", "https://example.invalid/logo ", `https://example.invalid/${"a".repeat(2048)}`]) {
     assert.equal(sanitizeLogo(value), undefined);
   }

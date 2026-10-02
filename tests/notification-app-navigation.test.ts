@@ -15,6 +15,7 @@ import { DEFAULT_NOTIFICATION_PREFERENCES } from "../src/notifications/notificat
 import type { MobileNotificationsModel } from "../src/notifications/useMobileNotifications";
 import type { ProfileScreen } from "../src/screens/ProfileScreen";
 import type { DeviceSecurityUi } from "../src/security/DeviceSecurityContext";
+import * as connectionPresentationModule from "../src/offline/connectionPresentation";
 import { loadSource, reactFixture, tenant } from "./helpers/tenant-challenge";
 
 type AppModel = ReturnType<typeof useTechnicianApp>;
@@ -185,6 +186,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["./src/security/DeviceSecurityContext", { PrivateModal: "PrivateModal", useDeviceSecurity: () => security }],
     ["./src/notifications", { NotificationCenterScreen: "NotificationCenterScreen" }],
     ["./src/notifications/useNotificationPermissionPrompt", { useNotificationPermissionPrompt: () => undefined }],
+    ["./src/offline/connectionPresentation", connectionPresentationModule],
     ["./src/screens/notifications/NotificationSettingsScreen", { NotificationSettingsScreen: "NotificationSettingsScreen" }],
     ["./src/screens/creation", { CreationScreen: "CreationScreen", CreationQuickMenu: "CreationQuickMenu" }],
     ["./src/domain/format", { weekRange: forbidden }], ["./src/domain/assignmentSchedule", { dailyRange: forbidden }],

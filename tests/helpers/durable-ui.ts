@@ -79,6 +79,7 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id.endsWith("/DeviceSecurityContext")) return { PrivateModal: "Modal", DeviceSecurityContext: {} };
     if (id.endsWith("/files/useCameraPermissionGuide")) return uiModule("screens/workDetail/files/useCameraPermissionGuide.ts", hooks, overrides);
     if (id.endsWith("/AssignmentInfoBlock")) return uiModule("screens/orders/AssignmentInfoBlock.tsx", hooks, overrides);
+    if (id.endsWith("/schedule/AgendaTimeline")) return { AgendaTimeline: "AgendaTimeline" };
     if (id.endsWith("/files/CameraPermissionGuide")) return { CameraPermissionGuide: "CameraPermissionGuide" };
     if (id.endsWith("/security/useTrustedNativePicker")) return { useTrustedNativePicker: () => <T>(operation: () => Promise<T>) => operation() };
     if (id.endsWith("/OfflineFileCard")) return { OfflineFileCard: "OfflineFileCard" };

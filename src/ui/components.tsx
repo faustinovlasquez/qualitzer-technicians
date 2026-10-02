@@ -34,6 +34,8 @@ export interface ButtonProps {
   /** Ícono arriba y texto abajo, para barras de acciones compactas. */
   stacked?: boolean;
   iconColor?: string;
+  /** Contador sobre el ícono (solo en modo apilado), por ejemplo archivos o comentarios. */
+  badge?: string | number | null;
 }
 
 const buttonColors: { [K in ButtonVariant]: { background: string; foreground: string; border: string } } = {
@@ -52,7 +54,7 @@ const badgeColors: { [K in BadgeTone]: { background: string; foreground: string 
   info: { background: palette.infoSoft, foreground: palette.info },
 };
 
-export function Button({ title, onPress, variant = "primary", disabled = false, loading = false, icon, style, textStyle, accessibilityLabel, stacked = false, iconColor }: ButtonProps) {
+export function Button({ title, onPress, variant = "primary", disabled = false, loading = false, icon, style, textStyle, accessibilityLabel, stacked = false, iconColor, badge }: ButtonProps) {
   const colors = buttonColors[variant];
   const unavailable = disabled || loading;
 
@@ -72,8 +74,11 @@ export function Button({ title, onPress, variant = "primary", disabled = false, 
         pressed && styles.pressed,
       ]}
     >
-      {loading ? <ActivityIndicator color={iconColor ?? colors.foreground} /> : icon ? <Ionicons name={icon} size={stacked ? 18 : 20} color={iconColor ?? colors.foreground} accessible={false} /> : null}
-      <Text style={[styles.buttonText, stacked && styles.stackedText, { color: colors.foreground }, textStyle]}>{title}</Text>
+      {loading ? <ActivityIndicator color={iconColor ?? colors.foreground} /> : icon ? <View style={styles.iconSlot}>
+        <Ionicons name={icon} size={stacked ? 20 : 20} color={iconColor ?? colors.foreground} accessible={false} />
+        {stacked && badge !== undefined && badge !== null ? <View style={styles.iconBadge}><Text style={styles.iconBadgeText}>{badge}</Text></View> : null}
+      </View> : null}
+      <Text numberOfLines={stacked ? 1 : undefined} adjustsFontSizeToFit={stacked} minimumFontScale={0.75} ellipsizeMode="tail" style={[styles.buttonText, stacked && styles.stackedText, { color: colors.foreground }, textStyle]}>{title}</Text>
     </Pressable>
   );
 }
@@ -184,7 +189,7 @@ export function BodyText({ children, style }: BodyTextProps) {
   return <Text style={[styles.body, style]}>{children}</Text>;
 }
 
-export interface BrandProps { tenant?: Tenant; compact?: boolean; showTag?: boolean; singleLine?: boolean; genericLogo?: boolean; }
+export interface BrandProps { tenant?: Tenant; compact?: boolean; showTag?: boolean; singleLine?: boolean; genericLogo?: boolean; logoOnly?: boolean; }
 
 function BrandLogo({ logo, genericLogo }: { logo: string | null; genericLogo: boolean }) {
   const [failed, setFailed] = useState(false);
@@ -204,9 +209,30 @@ function BrandLogo({ logo, genericLogo }: { logo: string | null; genericLogo: bo
 }
 
 /** `genericLogo={false}`: si la empresa no tiene logo propio se muestra solo su nombre, sin el logo de Qualitzer. */
-export function Brand({ tenant, compact = false, genericLogo = true }: BrandProps = {}) {
+/** Logo de la empresa/sucursal en un cuadrado; sin logo (o si no carga) muestra sus iniciales. */
+export function CompanyMark({ tenant, size = 40 }: { tenant?: Tenant; size?: number }) {
   const name = brandName(tenant);
   const logo = safeBrandLogo(tenant?.logo);
+  const [failed, setFailed] = useState<string | null>(null);
+  const initials = name.split(/s+/).filter(Boolean).slice(0, 2).map(word => word[0]?.toUpperCase() ?? "").join("") || "Q";
+  const showLogo = logo !== null && failed !== logo;
+  return <View accessible accessibilityRole="image" accessibilityLabel={name} testID="company-mark" style={[styles.companyMark, { width: size, height: size, borderRadius: Math.round(size * 0.25) }, !showLogo && styles.companyMarkInitials]}>
+    {showLogo ? <Image source={{ uri: logo }} resizeMode="contain" style={{ width: size - 6, height: size - 6 }} onError={() => setFailed(logo)} accessible={false} />
+      : <Text style={[styles.companyMarkText, { fontSize: Math.round(size * 0.36) }]}>{initials}</Text>}
+  </View>;
+}
+
+/** Solo el logo de la empresa/sucursal, más grande y sin nombre; si no hay logo o falla la descarga, muestra el nombre. */
+function LogoOnlyBrand({ name, logo }: { name: string; logo: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (logo === null || failed) return <Text accessibilityRole="header" numberOfLines={1} ellipsizeMode="tail" style={styles.brandName}>{name}</Text>;
+  return <Image source={{ uri: logo }} resizeMode="contain" style={styles.logoOnly} onError={() => setFailed(true)} accessible accessibilityRole="image" accessibilityLabel={name} testID="brand-logo-only" />;
+}
+
+export function Brand({ tenant, compact = false, genericLogo = true, logoOnly = false }: BrandProps = {}) {
+  const name = brandName(tenant);
+  const logo = safeBrandLogo(tenant?.logo);
+  if (logoOnly) return <LogoOnlyBrand key={logo ?? "none"} name={name} logo={logo} />;
 
   return (
     <View style={styles.brand} accessible accessibilityLabel={name}>
@@ -220,7 +246,10 @@ const styles = StyleSheet.create({
   button: { minHeight: 54, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
   buttonText: { fontSize: 15, lineHeight: 22, fontWeight: "700", flexShrink: 1, textAlign: "center" },
   stackedButton: { flexDirection: "column", gap: 2, minHeight: 52, paddingHorizontal: 2, paddingVertical: 6 },
-  stackedText: { fontSize: 11, lineHeight: 14 },
+  stackedText: { fontSize: 11, lineHeight: 14, maxWidth: "100%" },
+  iconSlot: { position: "relative" },
+  iconBadge: { position: "absolute", top: -7, left: 13, minWidth: 18, height: 16, paddingHorizontal: 4, borderRadius: 8, backgroundColor: palette.navy, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: palette.white },
+  iconBadgeText: { fontSize: 9, lineHeight: 11, fontWeight: "800", color: palette.white, fontVariant: ["tabular-nums"] },
   disabled: { opacity: 0.55 },
   pressed: { opacity: 0.82, transform: [{ scale: 0.99 }] },
   card: { backgroundColor: palette.surface, borderRadius: radius.lg, padding: 20, borderWidth: 1, borderColor: palette.border, ...theme.shadow },
@@ -249,6 +278,10 @@ const styles = StyleSheet.create({
   brandMark: { width: 32, height: 32, borderRadius: 10, backgroundColor: palette.surface, alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" },
   brandImageMark: { backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
   brandLogo: { width: 28, height: 28 },
+  companyMark: { alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, flexShrink: 0 },
+  companyMarkInitials: { backgroundColor: palette.navy, borderColor: palette.navy },
+  companyMarkText: { color: palette.white, fontWeight: "800", letterSpacing: 0.5 },
+  logoOnly: { height: 38, width: 170, maxWidth: "100%", alignSelf: "flex-start" },
   brandName: { color: palette.navy, fontSize: 23, lineHeight: 30, fontWeight: "800", letterSpacing: -1, flexShrink: 1 },
   brandNameCompact: { fontSize: 14, lineHeight: 20, fontWeight: "700", letterSpacing: 0 },
 });

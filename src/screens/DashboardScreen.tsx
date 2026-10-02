@@ -13,6 +13,7 @@ import { AssignmentOrderCard } from "./orders/AssignmentOrderCard";
 import { AssignmentWorkCard } from "./orders/AssignmentWorkCard";
 import { fullDate } from "./orders/assignmentPresentation";
 import { WeeklySchedule } from "./schedule/WeeklySchedule";
+import { AgendaTimeline } from "./schedule/AgendaTimeline";
 import { RunningTimersNotice } from "./notifications/RunningTimersNotice";
 import { runningTimersFromSnapshot, type RunningTimerNoticeItem } from "../notifications/runningTimers";
 import { isPendingLocalWork, unavailableCoverageDates } from "./offline/offlineDashboardUi";
@@ -36,6 +37,11 @@ export interface DashboardScreenProps {
   focusDate?: string | null;
   onFocusDate?: (date: string) => void;
   view: "today" | "agenda";
+  /** El buscador se despliega desde la lupa de la cabecera; con texto escrito sigue visible. */
+  searchOpen?: boolean;
+  /** Búsqueda controlada desde la cabecera: si se entrega, la pantalla no muestra su propio buscador. */
+  query?: string;
+  onQueryChange?: (query: string) => void;
 }
 
 type StatusFilter = "all" | "pending" | "in_progress" | "completed";
@@ -90,9 +96,15 @@ function buildSections(entries: WorkEntry[], agenda: boolean): WorkSection[] {
   return Array.from(sections, ([key, sectionEntries]) => ({ key, date: agenda ? key : null, entries: sectionEntries }));
 }
 
-function Kpi({ title, value, note, icon, tone }: { title: string; value: number | string | null; note: string | null; icon: IconName; tone: "warning" | "teal" | "success" | "violet" | "info" }) {
+function Kpi({ title, value, note, icon, tone, inline = false }: { title: string; value: number | string | null; note: string | null; icon: IconName; tone: "warning" | "teal" | "success" | "violet" | "info"; inline?: boolean }) {
   const color = tone === "warning" ? palette.amber : tone === "success" ? palette.success : tone === "violet" ? "#6D4AB4" : tone === "info" ? palette.info : palette.primary;
   const background = tone === "warning" ? palette.amberSoft : tone === "success" ? palette.successSoft : tone === "violet" ? "#EFEAF9" : tone === "info" ? palette.infoSoft : palette.primarySoft;
+  // En una sola línea: ícono, cantidad y texto (para las HH).
+  if (inline) return <Card style={styles.kpiInline}>
+    <View style={[styles.kpiIcon, { backgroundColor: background }]}><Ionicons name={icon} size={15} color={color} accessible={false} /></View>
+    <Text style={styles.kpiInlineValue}>{value ?? "—"}</Text>
+    <Text numberOfLines={1} style={styles.kpiInlineTitle}>{title}{note ? ` · ${note}` : ""}</Text>
+  </Card>;
   return (
     <Card style={styles.kpi}>
       <View style={styles.kpiTop}>
@@ -105,11 +117,14 @@ function Kpi({ title, value, note, icon, tone }: { title: string; value: number 
   );
 }
 
-export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, serverRemindersReady = false, offline, companyBranchId, focusDate, onFocusDate, view }: DashboardScreenProps) {
+export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, serverRemindersReady = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange }: DashboardScreenProps) {
   const compact = useWindowDimensions().width < 600;
-  const [agendaLayout, setAgendaLayout] = useState<"schedule" | "list">("schedule");
+  const [agendaLayout, setAgendaLayout] = useState<"timeline" | "schedule" | "list">("timeline");
   const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");
-  const [query, setQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
+  const query = externalQuery ?? localQuery;
+  const setQuery = onQueryChange ?? setLocalQuery;
+  const headerSearch = onQueryChange !== undefined;
   const [filter, setFilter] = useState<StatusFilter[]>(() => view === "today" ? ["pending", "in_progress"] : ["all"]);
   const [daySelection, setDaySelection] = useState<DaySelection | null>(null);
   const [weekSelection, setWeekSelection] = useState<DaySelection | null>(null);
@@ -141,7 +156,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
   useEffect(() => {
     setFilter(view === "today" ? ["pending", "in_progress"] : ["all"]);
     if (view === "agenda") {
-      setAgendaLayout("schedule");
+      setAgendaLayout("timeline");
       if (range.startDate !== monthRange(range.startDate).startDate || range.endDate !== monthRange(range.startDate).endDate) setAgendaMode("week");
     }
   }, [view]);
@@ -295,12 +310,23 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
     </Pressable>)}
   </View> : null;
 
+  if (view === "agenda" && agendaLayout === "timeline") {
+    return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
+      {coverageNotice}
+      {error ? <Text accessibilityRole="alert" style={styles.preferenceError}>{error} La carga visible puede no estar actualizada.</Text> : null}
+      <AgendaTimeline data={data} range={range} today={today} busy={busy} loading={loading} query={query} onRangeChange={onRangeChange}
+        onOpenWork={(group, work) => onOpenWork(group, work)} onOpenCalendar={() => setAgendaLayout("schedule")} onOpenFilters={() => setAgendaLayout("list")} />
+    </ScrollView>;
+  }
+
   if (view === "agenda" && agendaLayout === "schedule") {
     const calendarData: Assignments = data ?? { generatedAt: "", technician: { id: user.workerId, name: user.name, allowEditExecutionTime: false }, groups: [], summary: { totalGroups: 0, totalWorks: 0, activeWorks: 0, overdueWorks: 0, plannedMinutes: 0 } };
     const calendarWeek = weekRange(focusDate && focusDate >= range.startDate && focusDate <= range.endDate ? focusDate : today >= range.startDate && today <= range.endDate ? today : range.startDate);
     const content = <>
     {!compact ? layoutSelector : null}
     <View style={styles.weekNavigation}>
+      <IconButton name="list-circle-outline" label="Volver a la agenda" disabled={busy} onPress={() => setAgendaLayout("timeline")} />
       <IconButton name="chevron-back-outline" label={agendaMode === "month" ? "Mes anterior" : "Semana anterior"} disabled={busy} onPress={() => agendaMode === "month" ? navigateWeek(-1) : onRangeChange(weekRange(shiftDate(calendarWeek.startDate, -7)))} />
       <Text style={[styles.weekRange, { flex: 1 }]}>{agendaMode === "month" ? new Intl.DateTimeFormat("es-CL", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${range.startDate}T12:00:00Z`)) : `${shortDate(calendarWeek.startDate)} – ${shortDate(calendarWeek.endDate)}`}</Text>
       <IconButton name="chevron-forward-outline" label={agendaMode === "month" ? "Mes siguiente" : "Semana siguiente"} disabled={busy} onPress={() => agendaMode === "month" ? navigateWeek(1) : onRangeChange(weekRange(shiftDate(calendarWeek.startDate, 7)))} />
@@ -324,14 +350,10 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}
     >
+      {view === "agenda" ? <Button title="Volver a la agenda" icon="arrow-back-outline" variant="ghost" disabled={busy} onPress={() => setAgendaLayout("timeline")} style={styles.agendaBack} /> : null}
       {layoutSelector}
       {coverageNotice}
-      <View testID="day-overview-heading" style={styles.heading}>
-        <Text accessibilityRole="header" style={styles.pageTitle}>{view === "today" ? "Mi jornada" : "Mi agenda"}</Text>
-        <Text style={styles.greeting}>{firstName ? `Hola, ${firstName}.` : "Hola."}</Text>
-      </View>
-
-      <View style={[styles.search, searchFocused && styles.searchFocused]}>
+      {!headerSearch && (searchOpen || query) ? <View style={[styles.search, searchFocused && styles.searchFocused]}>
         <Ionicons name="search-outline" size={21} color={palette.textMuted} accessible={false} />
         <TextInput
           accessibilityLabel="Buscar tareas"
@@ -345,20 +367,16 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
+          autoFocus={searchOpen && !query}
           selectionColor={palette.primary}
           style={styles.searchInput}
         />
         {query ? <IconButton name="close-outline" label="Borrar búsqueda" onPress={() => setQuery("")} /> : null}
-      </View>
+      </View> : null}
 
-      <View testID="day-kpis" style={styles.kpiRow}>
-        <Kpi title="Pendientes" value={hasData && !coveragePending && (!partial || counts.pending > 0) ? counts.pending : null} note={partial ? "Parcial" : null} icon="hourglass-outline" tone="warning" />
-        <Kpi title="En curso" value={hasData && !coveragePending && (!partial || counts.active > 0) ? counts.active : null} note={partial ? "Parcial" : counts.paused > 0 ? `${counts.paused} en pausa` : null} icon="pulse-outline" tone="teal" />
-        <Kpi title="Completadas" value={hasData && !coveragePending && (!partial || counts.completed > 0) ? counts.completed : null} note={partial ? "Parcial" : counts.delivered > 0 ? `${counts.delivered} entregadas` : null} icon="checkmark-done-outline" tone="success" />
-      </View>
       <View testID="day-hours" style={styles.kpiRow}>
-        <Kpi title="HH asignadas" value={hasData && !coveragePending && (!partial || counts.minutes > 0) ? manHours(counts.minutes) : null} note={partial ? "Parcial" : null} icon="time-outline" tone="violet" />
-        <Kpi title="HH reportadas" value={hasData && !coveragePending && (!partial || counts.executedMinutes > 0) ? manHours(counts.executedMinutes) : null} note={partial ? "Parcial" : null} icon="stats-chart" tone="info" />
+        <Kpi inline title="HH asignadas" value={hasData && !coveragePending && (!partial || counts.minutes > 0) ? manHours(counts.minutes) : null} note={partial ? "Parcial" : null} icon="time-outline" tone="violet" />
+        <Kpi inline title="HH reportadas" value={hasData && !coveragePending && (!partial || counts.executedMinutes > 0) ? manHours(counts.executedMinutes) : null} note={partial ? "Parcial" : null} icon="stats-chart" tone="info" />
       </View>
 
       <RunningTimersNotice data={data} selectedRangeLabel={rangeLabel} serverRemindersReady={serverRemindersReady} onOpen={openTimer} />
@@ -409,11 +427,6 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
           })}
         </ScrollView>
       </Card>
-      </View>
-
-      <View style={styles.taskHeading}>
-        <SectionTitle title={view === "agenda" ? "Agenda de trabajo" : "Mis asignaciones"} />
-        {hasData && !coveragePending ? <Text style={styles.listCount}>{visibleCount} {listView === "works" ? "trabajos" : listView === "maintenances" ? "mantenimientos" : "OTs"}{partial ? " · parcial" : ""}</Text> : null}
       </View>
 
       {entityTabs}
@@ -491,6 +504,10 @@ const styles = StyleSheet.create({
   pageTitle: { fontSize: 24, lineHeight: 30, fontWeight: "800", color: palette.navy },
   greeting: { fontSize: 13, lineHeight: 19, color: palette.textSecondary },
   kpiRow: { flexDirection: "row", gap: 8 },
+  agendaBack: { alignSelf: "flex-start", minHeight: 40, paddingVertical: 6, paddingHorizontal: 4 },
+  kpiInline: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 7, paddingHorizontal: 8, borderRadius: radius.md },
+  kpiInlineValue: { fontSize: 15, lineHeight: 20, fontWeight: "800", color: palette.navy, fontVariant: ["tabular-nums"] },
+  kpiInlineTitle: { fontSize: 11, lineHeight: 15, fontWeight: "700", color: palette.text, flexShrink: 1, minWidth: 0 },
   kpi: { flex: 1, minWidth: 0, paddingVertical: 8, paddingHorizontal: 6, gap: 2, borderRadius: radius.md },
   kpiTop: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
   kpiIcon: { width: 24, height: 24, borderRadius: 8, alignItems: "center", justifyContent: "center" },

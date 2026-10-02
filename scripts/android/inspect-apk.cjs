@@ -69,6 +69,11 @@ function inspectApk(filename, { gatewayUrl, architectures, badging, manifest, ve
     if (!badging.includes("name='android.permission.DETECT_SCREEN_CAPTURE'")) throw new Error("APK_SCREEN_CAPTURE_STARTUP_PERMISSION_MISSING");
     if (badging.includes("name='android.permission.READ_MEDIA_IMAGES'")) throw new Error("APK_UNEXPECTED_MEDIA_PERMISSION");
   }
+  // Permisos que Play Protect y la revisión de Google Play marcan como sensibles y la app no usa.
+  for (const permission of ["SYSTEM_ALERT_WINDOW", "ACCESS_BACKGROUND_LOCATION", "FOREGROUND_SERVICE_LOCATION", "RECORD_AUDIO"]) {
+    if (badging.includes(`name='android.permission.${permission}'`)) throw new Error("APK_SENSITIVE_PERMISSION_FORBIDDEN: " + permission);
+  }
+  if (/name='android\.permission\.(?:REQUEST_INSTALL_PACKAGES|READ_SMS|READ_CALL_LOG|QUERY_ALL_PACKAGES|MANAGE_EXTERNAL_STORAGE)'/.test(badging)) throw new Error("APK_PLAY_RESTRICTED_PERMISSION");
   const abis = [...new Set([...entries.keys()].filter((name) => name.startsWith("lib/")).map((name) => name.split("/")[1]))].sort();
   const actionLocationConfigured = config.extra?.locationTrackingMode === "actions";
   const locationConfigured = config.plugins?.some(plugin => Array.isArray(plugin) && plugin[0] === "expo-location") === true;

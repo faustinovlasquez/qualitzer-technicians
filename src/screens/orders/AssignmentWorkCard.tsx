@@ -35,6 +35,8 @@ export interface AssignmentWorkCardProps {
   currentWorkerId?: number | null;
 }
 
+const priorityColors: { [K in AssignmentWork["priority"]]: string } = { low: palette.success, medium: palette.amber, high: palette.danger };
+
 const priorities: { [K in AssignmentWork["priority"]]: { label: string; tone: BadgeTone } } = {
   low: { label: "Prioridad baja", tone: "neutral" },
   medium: { label: "Prioridad media", tone: "warning" },
@@ -219,6 +221,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   return <Card style={[styles.card, finished && styles.closedCard]}>
     <View style={styles.between} testID={`assignment-work-heading-${work.id}`}>
       <View style={styles.codes}>
+        <View testID="assignment-work-priority" accessible accessibilityRole="image" accessibilityLabel={priority.label} style={[styles.priorityDot, { backgroundColor: priorityColors[work.priority] }]} />
         {localWork ? <Badge label="Guardado local · pendiente" tone="warning" /> : null}
         {codeLabels.map((code) => <Text key={code} style={styles.code}>{code}</Text>)}
       </View>
@@ -237,10 +240,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       <Ionicons name="chevron-forward-outline" size={21} color={palette.primary} accessible={false} />
     </Pressable>
     {summary ? <Description text={summary} /> : null}
-    {work.priority !== "low" || (work.isOverdue && !finished) ? <View style={styles.codes}>
-      {work.priority !== "low" ? <Badge label={priority.label} tone={priority.tone} /> : null}
-      {work.isOverdue && !finished ? <Badge label="Atrasada" tone="danger" /> : null}
-    </View> : null}
+    {work.isOverdue && !finished ? <View style={styles.codes}><Badge label="Atrasada" tone="danger" /></View> : null}
     <View style={infoStyles.list}>
       {customer?.trim() ? <InfoBlock label="Cliente" value={customer} /> : null}
       <InfoBlock label="Equipo" value={equipment ? equipment.label || equipmentLabel(equipment) : "Sin equipo asociado"} detail={equipmentDetail} />
@@ -260,9 +260,9 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     <View style={styles.actionBar}>
       {!finished ? <Button stacked title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} variant="secondary" iconColor={palette.primary} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={[styles.cell, styles.cellStart]} textStyle={styles.cellStartText} /> : null}
       {!finished ? <Button stacked title="Entregar" accessibilityLabel="Entregar: abrir revisión de requisitos, sin confirmar todavía" icon="radio-button-on-outline" variant="secondary" iconColor={palette.danger} disabled={locked || !canReviewDelivery} onPress={() => openWork({ action: "deliver" })} style={[styles.cell, styles.cellDeliver]} textStyle={styles.cellDeliverText} /> : null}
-      <Button stacked title={`Archivos ${safeCount(work.filesCount)}`} accessibilityLabel={`Archivos (${safeCount(work.filesCount)})`} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.cell} textStyle={styles.cellText} />
-      <Button stacked title={`Checklist ${done}/${total}`} accessibilityLabel={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.cell} textStyle={styles.cellText} />
-      <Button stacked title={`Com. ${safeCount(work.commentsCount)}`} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbox-ellipses-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "comments" })} style={[styles.cell, styles.cellLast]} textStyle={styles.cellText} />
+      <Button stacked title="Archivos" badge={safeCount(work.filesCount)} accessibilityLabel={`Archivos (${safeCount(work.filesCount)})`} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.cell} textStyle={styles.cellText} />
+      <Button stacked title="Checklist" badge={`${done}/${total}`} accessibilityLabel={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.cell} textStyle={styles.cellText} />
+      <Button stacked title="Comentarios" badge={safeCount(work.commentsCount)} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbox-ellipses-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "comments" })} style={[styles.cell, styles.cellLast]} textStyle={styles.cellText} />
     </View>
     {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
   </Card>;
@@ -272,7 +272,8 @@ const styles = StyleSheet.create({
   card: { gap: 10, padding: 12, borderRadius: 12, overflow: "hidden" },
   closedCard: { backgroundColor: palette.successSoft, borderLeftWidth: 4, borderLeftColor: palette.primary },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
-  codes: { flexDirection: "row", flexWrap: "wrap", gap: 6, flexShrink: 1 },
+  codes: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, flexShrink: 1 },
+  priorityDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: palette.white, boxShadow: "0px 0px 0px 1px rgba(18, 44, 58, 0.18)" },
   code: { ...typography.caption, fontWeight: "800", color: palette.primary, letterSpacing: 0.5, flexShrink: 1, backgroundColor: palette.primarySoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, overflow: "hidden" },
   titleButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radius.sm },
   titleCopy: { flex: 1, minWidth: 0 },

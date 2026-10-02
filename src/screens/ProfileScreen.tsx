@@ -52,7 +52,7 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
     {locationTracking && session.mode === "live" ? <LocationSettingsPanel key={`${session.tenant.id}:${session.user.id}:${session.user.workerId}:${session.branchId}`} tracking={locationTracking} disabled={busy} /> : null}
     <Card style={styles.stack}>
       <SectionTitle title="Empresa actual" />
-      <Brand tenant={session.tenant} />
+      <Brand tenant={session.tenant} genericLogo={false} />
       <BodyText>{session.tenant.portalOrigin}</BodyText>
       <Badge label={session.tenant.environment === "development" ? "Entorno local" : "Producción"} tone={session.tenant.environment === "development" ? "warning" : "teal"} />
       <BodyText>Sucursal actual: {currentBranch?.name ?? "Sin sucursal seleccionada"}</BodyText>

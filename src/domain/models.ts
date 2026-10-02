@@ -129,7 +129,7 @@ export interface Assignments {
   summary: { totalGroups: number; totalWorks: number; activeWorks: number; overdueWorks: number; plannedMinutes: number };
   groups: AssignmentGroup[];
 }
-export interface Branch { id: number; name: string; main: boolean; isEnabled?: boolean; isDeleted?: boolean; }
+export interface Branch { id: number; name: string; main: boolean; isEnabled?: boolean; isDeleted?: boolean; /** URL pública del logo de la sucursal, si el backend la informa. */ logoUrl?: string | null; }
 export interface Tenant {
   id: string;
   name: string;

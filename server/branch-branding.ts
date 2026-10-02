@@ -32,7 +32,13 @@ export function sanitizeBranchLogo(value: unknown): string | undefined {
   } catch { return undefined; }
 }
 
-export async function selectedBranchDisplay(upstream: Upstream, token: string, tenant: Tenant, branch: { id: number; name: string }): Promise<BranchDisplay> {
+export async function selectedBranchDisplay(upstream: Upstream, token: string, tenant: Tenant, branch: { id: number; name: string; logoUrl?: string | null }): Promise<BranchDisplay> {
+  // El backend informa el logo de cada sucursal en /auth/me; evita depender de /branches/:id (consulta pesada con timeout corto).
+  const direct = sanitizeBranchLogo(branch.logoUrl);
+  if (direct !== undefined) {
+    const name = branchNameSchema.parse(branch.name) ?? tenant.name;
+    return { tenant: Object.freeze({ ...tenant, name, logo: direct }), branchBranding: { companyBranchId: branch.id, status: "APPLIED" } };
+  }
   let input: unknown;
   try {
     input = await upstream.request(`/branches/${branch.id}`, { token });

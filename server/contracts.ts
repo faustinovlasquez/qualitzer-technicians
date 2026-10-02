@@ -77,7 +77,7 @@ export const assignmentsSchema: z.ZodType<Assignments> = z.object({
 export const userSchema: z.ZodType<User> = z.object({
   id, workerId: id.nullish().transform((value) => value ?? null), name: text, lastnames: text, email: text,
   avatarThumbnail: webLink.optional(), role: z.object({ name: text, isTechnician: z.boolean().optional() }),
-  accessBranchs: z.array(z.object({ id, name: text, main: z.boolean().default(false), isEnabled: z.boolean().optional(), isDeleted: z.boolean().optional() })),
+  accessBranchs: z.array(z.object({ id, name: text, main: z.boolean().default(false), isEnabled: z.boolean().optional(), isDeleted: z.boolean().optional(), logoUrl: z.string().max(2048).nullish().catch(undefined) })),
   system: z.object({ name: text, timezone: text }),
 });
 export const loginResultSchema: z.ZodType<LoginResult> = z.object({

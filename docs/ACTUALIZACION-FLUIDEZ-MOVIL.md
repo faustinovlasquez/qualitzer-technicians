@@ -1,4 +1,12 @@
-# Perfil propio y avisos activados: gateway 1.0.30 / APK 1.0.66
+# Acceso sin bloqueo por reingresos: gateway 1.0.32 / APK 1.0.72
+
+El limite de intentos de acceso cuenta solo los fallidos; iniciar y cerrar sesion varias veces ya no bloquea. Requiere instalar el gateway 1.0.32; la app no cambia. Ver [actualizacion 1.0.72](ACTUALIZACION-1.0.72.md).
+
+## Historial: tarjetas, cabecera y logo de sucursal gateway 1.0.31 / APK 1.0.69
+
+Tarjetas de trabajo y de OT/mantenimiento con la distribucion del panel web, colacion planificada, tecnicos asignados, HH asignadas y reportadas, cabecera con lupa y punto de conexion, y barra inferior compacta. Conserva timer, checklist, actividades, recepciones, perfil, recibos y colas anteriores. Ver [actualizacion 1.0.69](ACTUALIZACION-1.0.69.md).
+
+## Historial: perfil propio y avisos activados gateway 1.0.30 / APK 1.0.66
 
 El tecnico edita sus datos personales y su foto desde Mi perfil. Las notificaciones quedan activadas por defecto y la app solicita el permiso del sistema como con la ubicacion. Conserva timer, checklist, actividades, recepciones, recibos y colas anteriores. Requiere las rutas `profiles/me` del backend. Ver [actualizacion 1.0.66](ACTUALIZACION-1.0.66.md).
 

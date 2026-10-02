@@ -37,7 +37,7 @@ test("all four assets regenerate deterministically without touching original ass
   } finally { await rm(output, { recursive: true, force: true }); }
 });
 
-test("launcher images are opaque with blue artwork reaching every edge", async () => {
+test("launcher images are opaque on a pure white background, also on Android's adaptive layer", async () => {
   for (const file of ["qualitzer-icon.png", "qualitzer-adaptive.png"]) {
     const image = sharp(await readFile(path.join(assets, file)));
     assert.equal((await image.metadata()).hasAlpha, false);
@@ -46,30 +46,28 @@ test("launcher images are opaque with blue artwork reaching every edge", async (
       for (let column = 0; column < info.width; column++) {
         if (row !== 0 && row !== info.height - 1 && column !== 0 && column !== info.width - 1) continue;
         const offset = (row * info.width + column) * info.channels;
-        assert.ok(data[offset + 2] - data[offset] > 20, `${file} has blue, not white, on its perimeter`);
+        assert.deepEqual([data[offset], data[offset + 1], data[offset + 2]], [255, 255, 255], `${file} perimeter is pure white`);
       }
     }
   }
   const config = JSON.parse(await readFile(path.resolve(assets, "../app.json"), "utf8"));
-  assert.equal(config.expo.android.adaptiveIcon.backgroundColor, "#7DBDF8");
+  assert.equal(config.expo.android.adaptiveIcon.backgroundColor, "#FFFFFF");
 });
 
-test("enlarged Q and complete wrench badge remain within Android's guaranteed circle", async () => {
-  const crop = { left: 160, top: 170, width: 960, height: 884 };
-  const resized = await sharp(await readFile(path.join(assets, "qualitzer-source.png"))).extract(crop).resize(544, 544, { fit: "inside" }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  const horizontalOffset = Math.floor((1024 - resized.info.width) / 2);
-  const verticalOffset = Math.floor((1024 - resized.info.height) / 2);
-  const actual = await sharp(await readFile(path.join(assets, "qualitzer-adaptive.png"))).extract({ left: horizontalOffset, top: verticalOffset, width: resized.info.width, height: resized.info.height }).raw().toBuffer();
-  assert.deepEqual(actual, resized.data, "original artwork is resized without redrawing or removing the badge");
-  const scale = resized.info.width / crop.width;
-  const radius = 1024 * 33 / 108;
-  const outline = [[218, 589], [437, 255], [838, 255], [1001, 589], [810, 917], [390, 917]];
-  for (const [column, row] of outline) {
-    assert.ok(Math.hypot(horizontalOffset + (column - crop.left) * scale - 512, verticalOffset + (row - crop.top) * scale - 512) < radius);
+test("the Q and its complete wrench badge stay within Android's guaranteed circle", async () => {
+  const { data, info } = await sharp(await readFile(path.join(assets, "qualitzer-adaptive.png"))).raw().toBuffer({ resolveWithObject: true });
+  const radius = info.width * 33 / 108;
+  let farthest = 0; let minX = info.width; let maxX = 0;
+  for (let row = 0; row < info.height; row++) {
+    for (let column = 0; column < info.width; column++) {
+      const offset = (row * info.width + column) * info.channels;
+      if (Math.min(data[offset], data[offset + 1], data[offset + 2]) >= 232) continue;
+      farthest = Math.max(farthest, Math.hypot(column - info.width / 2, row - info.height / 2));
+      minX = Math.min(minX, column); maxX = Math.max(maxX, column);
+    }
   }
-  const badgeDistance = Math.hypot(horizontalOffset + (945 - crop.left) * scale - 512, verticalOffset + (843 - crop.top) * scale - 512);
-  assert.ok(badgeDistance + 166 * scale < radius, "the full circular wrench badge survives the smallest mask");
-  assert.ok(890 * scale > 500, "the subject is substantially larger than the previous 312px artwork");
+  assert.ok(farthest < radius, `artwork reaches ${farthest.toFixed(1)}px, beyond the ${radius.toFixed(1)}px safe circle`);
+  assert.ok(maxX - minX > 500, "the subject keeps a visible size inside the adaptive icon");
 });
 
 test("unapproved artwork fails before any generated output is replaced", async () => {

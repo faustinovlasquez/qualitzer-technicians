@@ -20,9 +20,12 @@ export function sanitizeLogo(value: unknown): string | undefined {
     const bytes = Buffer.from(match[1], "base64");
     return bytes.length <= MAX_BRANDING_IMAGE_BYTES && bytes.toString("base64") === match[1] ? value : undefined;
   }
-  if (value.length > 2048 || !/^https:\/\//i.test(value) || /[\s\u0000-\u001f\u007f\\]/.test(value) || /^https:\/\/[^/?#]*@/i.test(value)) return undefined;
+  // El backend arma la URL de S3 con el nombre original del archivo: "Logo Empresa.png" llega con espacios.
+  // Solo se codifican espacios interiores; uno al inicio o al final sigue invalidando la URL.
+  const candidate = /^\s|\s$/.test(value) ? value : value.replace(/ /g, "%20");
+  if (candidate.length > 2048 || !/^https:\/\//i.test(candidate) || /[\s\u0000-\u001f\u007f\\]/.test(candidate) || /^https:\/\/[^/?#]*@/i.test(candidate)) return undefined;
   try {
-    const url = new URL(value);
+    const url = new URL(candidate);
     return url.protocol === "https:" && !url.username && !url.password ? url.href : undefined;
   } catch { return undefined; }
 }

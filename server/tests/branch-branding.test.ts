@@ -213,3 +213,22 @@ test("branch URL policy accepts HTTPS public DNS only, preserving signed queries
   assert.equal(Object.isFrozen(display.tenant), true);
   assert.deepEqual(requests, ["/branches/1"]);
 });
+test("branch logo reported by /auth/me is applied without the slow /branches/:id read", async () => {
+  const upstream = new Upstream({ backendUrl: "https://example.invalid/api", tenantOrigin: "https://tenant.example.invalid" });
+  let reads = 0;
+  upstream.request = async () => { reads++; throw new Error("UNEXPECTED_BRANCH_READ"); };
+  const display = await selectedBranchDisplay(upstream, TOKEN, company, { id: 7, name: "Servicios Agrícolas Eliseo", logoUrl: "https://bucket.s3.example.com/eliseo/branches/Logo Eliseo.png" });
+  assert.equal(reads, 0);
+  assert.equal(display.branchBranding.status, "APPLIED");
+  assert.equal(display.tenant.logo, "https://bucket.s3.example.com/eliseo/branches/Logo%20Eliseo.png");
+  assert.equal(display.tenant.name, "Servicios Agrícolas Eliseo");
+});
+
+test("an unusable branch logo from /auth/me falls back to the /branches/:id read", async () => {
+  const upstream = new Upstream({ backendUrl: "https://example.invalid/api", tenantOrigin: "https://tenant.example.invalid" });
+  let reads = 0;
+  upstream.request = async () => { reads++; return { id: 7, name: "Sucursal", logo }; };
+  const display = await selectedBranchDisplay(upstream, TOKEN, company, { id: 7, name: "Sucursal", logoUrl: "http://insecure.example.com/logo.png" });
+  assert.equal(reads, 1);
+  assert.equal(display.tenant.logo, logo);
+});

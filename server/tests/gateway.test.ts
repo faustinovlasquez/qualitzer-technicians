@@ -817,11 +817,11 @@ test("CORS denies arbitrary origins, no arbitrary passthrough and localhost is r
   assert.equal(denied.headers.get("access-control-allow-origin"), null);
   assert.equal((await jsonRequest(baseUrl, "/api/proxy?target=http://evil.invalid", "GET", undefined, null)).response.status, 404);
   assert.equal(state.calls.length, 0);
-  for (let index = 0; index < 10; index++) {
+  // Los accesos correctos no consumen el límite: un técnico puede entrar y salir varias veces.
+  for (let index = 0; index < 12; index++) {
     assert.equal((await jsonRequest(baseUrl, "/api/auth/login", "POST", { tenantId: "local", username: "test", password: "password", remember: false }, null)).response.status, 200);
   }
-  assert.equal((await jsonRequest(baseUrl, "/api/auth/login", "POST", { tenantId: "local", username: "test", password: "password", remember: false }, null)).response.status, 429);
-  assert.equal(writeCalls(state).length, 10);
+  assert.equal(writeCalls(state).length, 12);
 });
 
 test("production requires explicit HTTPS backend, tenant, CORS and trusted proxy IPs", () => {

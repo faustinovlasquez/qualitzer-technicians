@@ -9,6 +9,9 @@ test("screen protection keeps the permission required during Expo native initial
   assert.ok(!config.expo.android.blockedPermissions.includes("android.permission.DETECT_SCREEN_CAPTURE"));
   assert.ok(config.expo.android.permissions.includes("android.permission.DETECT_SCREEN_CAPTURE"));
   assert.ok(config.expo.android.blockedPermissions.includes("android.permission.READ_MEDIA_IMAGES"));
+  for (const permission of ["SYSTEM_ALERT_WINDOW", "FOREGROUND_SERVICE", "ACCESS_BACKGROUND_LOCATION"]) {
+    assert.ok(config.expo.android.blockedPermissions.includes(`android.permission.${permission}`), permission);
+  }
   const plugin = config.expo.plugins.find(value => Array.isArray(value) && value[0] === "expo-local-authentication");
   assert.ok(Array.isArray(plugin) && plugin[1].faceIDPermission?.includes("desbloquear"));
 });

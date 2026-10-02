@@ -175,7 +175,8 @@ function dashboardFixture() {
 
 test("actual Dashboard forwards daily overdue query and per-card weekly query even under a selected-day filter", (t) => {
   const f = dashboardFixture(); t.after(() => f.hooks.unmount());
-  action(f.render(), "Filtros y OTs de agenda").onPress();
+  // La agenda abre en la línea de tiempo; su botón de filtros lleva a la lista con tarjetas.
+  elements<{ onOpenFilters(): void }>(f.render(), "AgendaTimeline")[0]!.props.onOpenFilters();
   const cards = elements<AssignmentWorkCardProps>(f.render(), "AssignmentWorkCard");
   assert.equal(cards.length, 2);
   assert.equal(cards.find((card) => card.props.work.id === "11")?.props.queryDate, "2026-09-04");
