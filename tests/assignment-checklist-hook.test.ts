@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Assignments, WorkScope } from "../src/domain/models";
+import * as offline from "../src/domain/offline";
 import { OfflineQueuedError } from "../src/domain/offline";
 import * as progress from "../src/domain/assignmentChecklistProgress";
 import * as schedule from "../src/domain/assignmentSchedule";
@@ -42,6 +43,7 @@ async function appFixture(access?: { allowed: boolean; isAllowed(): boolean }) {
     if (id === "../domain/weeklySchedule") return { scheduleClock: () => ({ day: checklistDate }) };
     if (id === "../notifications") return { useMobileNotifications: () => ({ client: null }), bindNotificationApi: () => null };
     if (id === "../offline") return { OfflineTechnicianRepository: class {} };
+    if (id === "../domain/offline") return offline;
     if (id === "../infrastructure/sessionStorage") return { loadSession: async () => null };
     return {};
   });

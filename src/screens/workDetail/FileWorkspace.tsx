@@ -217,7 +217,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
         requireSource: callbacks.current.offline === undefined,
         onProgress: (index, total, name) => { if (active.current) setProgress(`${index}/${total} · ${name}`); },
       });
-      if (saved + queued > 0 && active.current) void load();
+      if (saved > 0 && active.current) void load();
       if (active.current) {
         const resultText = props.autoSave ? `${saved} confirmado(s) · ${queued} pendiente(s) de sincronizar.` : `${saved} confirmado(s)${props.mode === "demo" ? " en demo" : ""} · ${queued} en cola, sin confirmar.`;
         setMessage({ text: `${resultText}${failure ? ` ${failure} Los restantes se conservan; reintenta solo los pendientes.` : props.autoSave ? "" : " No repitas los transferidos."}`, tone: failure && saved + queued === 0 ? "error" : queued > 0 || failure ? "warning" : "success" });

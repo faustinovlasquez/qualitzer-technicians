@@ -13,6 +13,7 @@ import { createCreationRouter } from "./creation/routes";
 import { createNotificationsRouter } from "./notifications/routes";
 import { createOfflineRouter } from "./offline/routes";
 import { createUserSignatureRouter } from "./userSignatures/routes";
+import { createUserProfileRouter } from "./userProfile/routes";
 import { createLocationRouter } from "./locations/routes";
 import { createMaterialReceiptRouter } from "./receipts/routes";
 import { type TenantRegistry, type TenantRuntime } from "./tenants";
@@ -45,7 +46,7 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
   const parseJson = express.json({ limit: "32kb", strict: true, inflate: false });
   app.use((req, res, next) => {
     if (req.method === "POST" && (/^\/api\/assignments\/maintenance-\d+\/deliver\/?$/i.test(req.path) || /^\/api\/offline\/(commands|documents)\/?$/i.test(req.path) || /^\/api\/worker-locations\/batch\/?$/i.test(req.path))
-      || req.method === "PUT" && /^\/api\/user-signatures\/?$/i.test(req.path)) next();
+      || req.method === "PUT" && (/^\/api\/user-signatures\/?$/i.test(req.path) || /^\/api\/user-profile\/avatar\/?$/i.test(req.path))) next();
     else parseJson(req, res, next);
   });
   if (development) app.use("/api/development", development);
@@ -80,13 +81,14 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
     router.use("/mobile-notifications", createNotificationsRouter(upstream, tenant.portalOrigin));
     router.use("/offline", createOfflineRouter(upstream, uploadLimiter, uploads));
     router.use("/user-signatures", createUserSignatureRouter(upstream));
+    router.use("/user-profile", createUserProfileRouter(upstream));
     router.use("/worker-locations", createLocationRouter(upstream));
     router.use("/material-receipts", createMaterialReceiptRouter(upstream));
     mobileRouters.set(runtime, router);
     return router;
   };
   app.use("/api", (req, res, next) => {
-    if (!/^\/(creation|mobile-notifications|offline|user-signatures|worker-locations|material-receipts)(\/|$)/.test(req.path)) { next(); return; }
+    if (!/^\/(creation|mobile-notifications|offline|user-signatures|user-profile|worker-locations|material-receipts)(\/|$)/.test(req.path)) { next(); return; }
     context.middleware()(req, res, (error?: unknown) => {
       if (error) { next(error); return; }
       mobileRouter(context.get(req).runtime)(req, res, next);

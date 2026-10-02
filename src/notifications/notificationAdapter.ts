@@ -86,7 +86,8 @@ export function createNotificationAdapter(): NotificationAdapter {
       })());
     },
     getInstallationId: installationId,
-    async readConsent(key) { return await AsyncStorage.getItem(`${key}:notifications:opt-in:v1`) === "true"; },
+    // Activadas por defecto: solo una desactivación explícita del técnico ("false") las apaga.
+    async readConsent(key) { return await AsyncStorage.getItem(`${key}:notifications:opt-in:v1`) !== "false"; },
     async writeConsent(key, enabled) { await AsyncStorage.setItem(`${key}:notifications:opt-in:v1`, String(enabled)); },
     subscribe(listeners) {
       if (unsupported) return () => {};

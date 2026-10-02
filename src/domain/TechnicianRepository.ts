@@ -7,9 +7,10 @@ import type { ChecklistAssignmentPort } from "./checklistAssignment";
 import type { AssignmentReadOptions } from "./assignmentRead";
 import type { WorkActivitiesPort } from "./workActivities";
 import type { UserSignaturesPort } from "./userSignatures";
+import type { OwnProfilePort } from "./ownProfile";
 import type { LocationPoint } from "./locationTracking";
 
-export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort> {
+export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort>, Partial<OwnProfilePort> {
   materialReceipts?: import("./materialReceipts").MaterialReceiptPort["materialReceipts"];
   confirmMaterialReceipts?: import("./materialReceipts").MaterialReceiptPort["confirmMaterialReceipts"];
   equipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget): Promise<import("./equipmentLocation").EquipmentLocation>;

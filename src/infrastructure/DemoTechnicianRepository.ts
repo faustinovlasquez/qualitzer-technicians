@@ -1,5 +1,6 @@
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { userSignatureInputSchema, type UserSignature, type UserSignatureInput, type UserSignatureOptions } from "../domain/userSignatures";
+import { ownAvatarInputSchema, ownProfileInputSchema, type OwnAvatarInput, type OwnProfile, type OwnProfileInput } from "../domain/ownProfile";
 import * as Crypto from "expo-crypto";
 import type { OfflineCommand, OfflineDocumentMetadata, OfflineReceipt } from "../domain/offline";
 import { syncAnswerFromStep, syncAnswersEqual, syncResponseForStep, type SyncCommand } from "../domain/offlineProtocol";
@@ -51,6 +52,29 @@ export class DemoTechnicianRepository implements TechnicianRepository {
     if (!this.profileSignatures.some(signature => signature.id === signatureId)) throw new Error("USER_SIGNATURE_NOT_FOUND");
     this.profileSignatures = this.profileSignatures.filter(signature => signature.id !== signatureId);
     return this.userSignatures(branchId);
+  }
+  private profile: OwnProfile = {
+    userId: demoUser.id, workerId: demoUser.workerId, email: demoUser.email, firstNames: demoUser.name, lastNames: demoUser.lastnames,
+    secondLastName: null, preferredName: null, birthdate: null, gender: null, nationality: "CL", maritalStatus: null, bloodType: null,
+    identification: { type: "RUT", number: "11.111.111-1" }, avatarUrl: null, avatarThumbnailUrl: null, avatarColor: "#2f7d6b", updatedAt: null,
+  };
+
+  async ownProfile(): Promise<OwnProfile> { return structuredClone(this.profile); }
+
+  async saveOwnProfile(value: OwnProfileInput): Promise<OwnProfile> {
+    this.profile = { ...this.profile, ...ownProfileInputSchema.parse(value), updatedAt: new Date().toISOString() };
+    return this.ownProfile();
+  }
+
+  async saveOwnAvatar(value: OwnAvatarInput): Promise<OwnProfile> {
+    const { image } = ownAvatarInputSchema.parse(value);
+    this.profile = { ...this.profile, avatarUrl: image, avatarThumbnailUrl: image, updatedAt: new Date().toISOString() };
+    return this.ownProfile();
+  }
+
+  async removeOwnAvatar(): Promise<OwnProfile> {
+    this.profile = { ...this.profile, avatarUrl: null, avatarThumbnailUrl: null, updatedAt: new Date().toISOString() };
+    return this.ownProfile();
   }
   private activityFilesById = new Map<string, Attachment[]>();
   activities: WorkActivitiesPort["activities"] = async scope => structuredClone((this.find(scope).work.activities ?? []).filter(isWorkActivity));

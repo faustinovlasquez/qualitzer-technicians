@@ -195,10 +195,12 @@ function source(relative: string) {
 test("AST inventory: all four input locations use selectors and automatic time remains a read-only summary", () => {
   const inventory = [
     { path: "screens/workDetail/CompletionDialog.tsx", times: ["start", "end"], numbers: ["offset"] },
-    { path: "screens/creation/CreationScreen.tsx", times: ["form.startTime", "form.endTime"], numbers: [] },
+    { path: "screens/creation/CreationScheduleFields.tsx", times: ["form.startTime", "form.endTime"], numbers: [] },
     { path: "screens/notifications/NotificationSettingsScreen.tsx", times: ["preferences.quietHoursStart", "preferences.quietHoursEnd"], numbers: [] },
     { path: "screens/orders/lifecycle/MaintenanceDeliveryDialog.tsx", times: [], numbers: ["draft.hours", "draft.minutes"] },
   ];
+  // CreationScreen delegates its schedule inputs to CreationScheduleFields; the selector guarantees live there.
+  assert.match(source("screens/creation/CreationScreen.tsx").text, /<CreationScheduleFields form=\{form\}/);
   for (const item of inventory) {
     const file = source(item.path);
     const found = new Map<string, string>();

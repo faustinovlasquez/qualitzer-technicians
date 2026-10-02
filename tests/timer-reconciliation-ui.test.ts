@@ -60,10 +60,10 @@ test("actual card keeps intent and freezes canonical elapsed across queued to ap
     const pause = action(f.render(), "Pausar"); assert.equal(pause.disabled, false);
     f.props.offline = { ...uiSnapshot([applied]), online: true };
     const tree = f.render();
-    assert.equal(action(tree, "Pausar").disabled, true);
+    assert.equal(action(tree, "Pausar").disabled, false, "applied but unproven intent can chain a distinct pause");
     assert.equal(action(tree, "Entregar").disabled, false, "unproven applied intent allows review, not submission");
-    initial.onPress(); pause.onPress(); action(tree, "Pausar").onPress();
-    assert.equal(f.calls.length, 1, "old and current callbacks cannot repeat a confirmed operation");
+    initial.onPress(); pause.onPress(); action(tree, "Pausar").onPress(); await settle();
+    assert.deepEqual(f.calls.map((call) => call.status), ["in_progress", "paused"], "old and current callbacks cannot repeat a confirmed operation and duplicate presses chain one pause");
     assert.equal(action(tree, "Pausar").title, "Pausar · Actualizando…");
     assert.ok(elements<{ label: string }>(tree, "Badge").some((badge) => badge.props.label === "Pendiente"));
     assert.equal(clockProps(tree)?.pending, true); assert.equal(clockProps(tree)?.work.elapsedSeconds, 45);
@@ -82,7 +82,8 @@ test("read failure retains compact updating state without authorizing duplicate 
     f.props.pendingTimer = null;
     f.props.offline = { ...uiSnapshot([applied]), online: false, lastError: "OFFLINE_NETWORK_UNAVAILABLE" };
     const tree = f.render();
-    assert.equal(action(tree, "Pausar").disabled, true);
+    assert.equal(action(tree, "Pausar").disabled, false, "durable applied intent keeps the next distinct action available");
+    assert.equal(elements<{ title?: string }>(tree, "Button").some(({ props }) => props.title?.startsWith("Iniciar")), false, "applied start cannot be offered again");
     assert.equal(action(tree, "Pausar").title, "Pausar · Actualizando…");
     assert.ok(!JSON.stringify(tree).includes("No se pudo actualizar la ficha"));
     assert.equal(f.calls.length, 0);
@@ -105,9 +106,10 @@ test("overdue card uses query date for pending, applied reconciliation and deliv
     assert.equal(action(pending, "Pausar").title, "Pausar · Guardando…");
     const overdueApplied: PendingTimer = { ...overdueStart, status: "applied", receipt: applied.receipt };
     f.props.offline = { ...uiSnapshot([overdueApplied]), online: true };
-    assert.equal(action(f.render(), "Pausar").disabled, true);
+    assert.equal(action(f.render(), "Pausar").title, "Pausar · Actualizando…");
     f.props.work = readWork({ ...f.props.work, status: "paused" });
-    assert.equal(action(f.render(), "Pausar").disabled, true, "scheduled-day read proof cannot reconcile the query-day timer");
+    assert.equal(action(f.render(), "Pausar").title, "Pausar · Actualizando…", "scheduled-day read proof cannot reconcile the query-day timer");
+    assert.equal(clockProps(f.render())?.pending, true);
     const fresh: TimerReadAssignmentWork = { ...f.props.work, offlineTimerRead: { scope, appliedOperationIds: [start.id] } };
     f.props.work = fresh;
     const reconciled = f.render();
@@ -208,21 +210,21 @@ test("actual detail holds applied intent, allows manual refresh, shows failure, 
     const pause = action(f.render(), "Pausar trabajo"); assert.equal(pause.disabled, false);
     f.props.offline = { ...uiSnapshot([applied]), online: true };
     const waiting = f.render(); pause.onPress(); action(waiting, "Pausar trabajo").onPress(); await settle();
-    assert.equal(f.mutations(), 0); assert.equal(action(waiting, "Pausar trabajo").disabled, true);
+    assert.equal(f.mutations(), 1, "retained and current callbacks chain a single distinct pause on the applied intent");
     assert.equal(action(waiting, "Entregar trabajo").disabled, false);
     action(waiting, "Entregar trabajo").onPress();
-    assert.equal(elements<{ canSubmit: boolean }>(f.render(), "CompletionDialog")[0].props.canSubmit, false);
+    assert.equal(elements<{ canSubmit: boolean }>(f.render(), "CompletionDialog")[0].props.canSubmit, true, "durable delivery may queue behind the applied timer intent");
     assert.equal(clockProps(waiting)?.pending, true); assert.equal(clockProps(waiting)?.work.elapsedSeconds, 45);
     const refresh = action(waiting, "Actualizar asignación y evidencias"); assert.equal(refresh.disabled, false);
     refresh.onPress(); await settle(); assert.equal(f.refreshes(), 1);
     assert.ok(JSON.stringify(f.render()).includes("SNAPSHOT_READ_FAILED"));
-    assert.equal(action(f.render(), "Pausar trabajo").disabled, true);
+    assert.ok(JSON.stringify(f.render()).includes("Actualizando…"), "failed read keeps the applied intent unreconciled");
     f.props.work = readWork({ ...f.props.work, status: "paused", elapsedSeconds: 72 });
     const fresh = f.render(); assert.equal(action(fresh, "Reanudar trabajo").disabled, false);
     assert.equal(clockProps(fresh)?.pending, false); assert.equal(clockProps(fresh)?.work.elapsedSeconds, 72);
     f.props.offline = { ...uiSnapshot([applied]), online: true, connection: { status: "ready", networkConnected: true, foreground: false, checkedAt: 1 } };
     const retained = action(fresh, "Reanudar trabajo"); f.render(); retained.onPress(); await settle();
-    assert.equal(f.mutations(), 0);
+    assert.equal(f.mutations(), 1, "retained callback cannot cross the foreground lock");
   } finally { f.hooks.unmount(); }
 });
 
@@ -277,7 +279,7 @@ test("actual card reconciles day 14 only after all seven fresh reads and uses ex
     f.props.work = mergeDailyAssignments(weekSnapshots(false), weekRange.startDate).groups[0].works[0];
     f.props.offline = { ...uiSnapshot([weekApplied]), online: true };
     const waiting = f.render();
-    assert.equal(action(waiting, "Pausar").disabled, true); assert.equal(clockProps(waiting)?.work.elapsedSeconds, 45);
+    assert.equal(action(waiting, "Pausar").title, "Pausar · Actualizando…"); assert.equal(clockProps(waiting)?.work.elapsedSeconds, 45);
     const retained = action(waiting, "Pausar");
     f.props.work = mergeDailyAssignments(weekSnapshots(true), weekRange.startDate).groups[0].works[0];
     const fresh = f.render();
@@ -299,7 +301,7 @@ test("actual card reconciles day 14 only after all seven fresh reads and uses ex
     f.props.queryDate = weekScope.startDate;
     f.props.work = mergeDailyAssignments(weekSnapshots(false), weekRange.startDate).groups[0].works[0];
     f.props.offline = { ...uiSnapshot([weekApplied]), lastError: "OFFLINE_NETWORK_UNAVAILABLE" };
-    assert.equal(action(f.render(), "Pausar").disabled, true);
+    assert.equal(clockProps(f.render())?.pending, true);
     assert.equal(action(f.render(), "Pausar").title, "Pausar · Actualizando…");
   } finally { f.hooks.unmount(); }
 });
@@ -316,7 +318,7 @@ test("actual hook and detail render the exact merged week query after applied re
   const selection = app.selected;
   f.wrappers[0].update({ operations: [weekApplied] }); app = await f.flush();
   ui.props.range = app.detailRange; ui.props.work = app.canonicalDetailWork!; ui.props.generatedAt = app.detailGeneratedAt; ui.props.offline = app.offline;
-  assert.equal(action(ui.render(), "Pausar trabajo").disabled, true);
+  assert.ok(action(ui.render(), "Pausar trabajo")); assert.equal(clockProps(ui.render())?.pending, true, "applied intent stays unreconciled before the fresh week read");
   f.reads.at(-1)!.reject(new Error("WEEK_READ_FAILED")); app = await f.flush();
   assert.equal(app.canonicalDetailWork?.elapsedSeconds, 45);
   assert.ok(pendingTimerForWork(app.offline, weekScope, app.canonicalDetailWork));

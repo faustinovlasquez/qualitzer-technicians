@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
-import { ActivityIndicator, BackHandler, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, BackHandler, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { useTechnicianApp } from "./src/application/useTechnicianApp";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -19,6 +19,7 @@ import { SessionContextBar } from "./src/ui/SessionContextBar";
 import { DevelopmentQrPanel } from "./src/ui/DevelopmentQrPanel";
 import { CreationQuickMenu, CreationScreen } from "./src/screens/creation";
 import { NotificationCenterScreen } from "./src/notifications";
+import { useNotificationPermissionPrompt } from "./src/notifications/useNotificationPermissionPrompt";
 import { NotificationSettingsScreen } from "./src/screens/notifications/NotificationSettingsScreen";
 import { OfflineStatusBar } from "./src/screens/offline/OfflineStatusBar";
 import { OfflineCenterScreen } from "./src/screens/offline/OfflineCenterScreen";
@@ -56,6 +57,8 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState(false);
   const security = useDeviceSecurity();
+  const locationConsentPending = Boolean(locationTracking.available && locationTracking.state && !locationTracking.state.actionConsentPrompted);
+  useNotificationPermissionPrompt(app.notifications, !app.restoring && !app.busy && !security.blocked && !locationConsentPending, security.isUnlocked);
   const [receiptsOpen, setReceiptsOpen] = useState(false);
   const materialReceipts = useMaterialReceipts(app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0,
     app.storageKey, app.session?.token ?? "", app.session?.mode === "live" && app.liveVerified && !security.blocked && !app.busy, security.isUnlocked);
@@ -236,7 +239,9 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       <View style={styles.headerActions}>
         {app.tab !== "today" ? <IconButton name="home-outline" label="Ir a mi jornada" disabled={app.busy} onPress={app.homeTab} /> : null}
         {app.tab === "today" || app.tab === "agenda" ? <IconButton name="refresh-outline" label="Actualizar asignaciones" disabled={app.busy || app.loading} onPress={refreshAssignments} /> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel="Ver mi perfil y sucursal" accessibilityState={{ disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab("profile")} style={styles.avatar}><Text style={styles.avatarText}>{app.session.user.name[0]}</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Ver mi perfil y sucursal" accessibilityState={{ disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab("profile")} style={styles.avatar}>{app.profileBadge?.avatar
+          ? <Image key={app.profileBadge.avatar} source={{ uri: app.profileBadge.avatar }} style={styles.avatarImage} resizeMode="cover" accessible={false} />
+          : <Text style={styles.avatarText}>{app.profileBadge?.initials ?? app.session.user.name[0]}</Text>}</Pressable>
         <IconButton name="log-out-outline" label="Cerrar sesión" disabled={app.busy} onPress={() => setLogoutConfirm(true)} />
       </View>
     </View>
@@ -249,7 +254,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "profile" ? <ProfileScreen session={app.session} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
+      </> : app.tab === "profile" ? <ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
       {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy || logoutConfirm} /> : null}
     </View>
     <View style={styles.nav}>{navigation.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "notifications" && unreadNotifications > 0 ? `${item.label}, ${unreadNotifications} sin leer` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
@@ -325,7 +330,8 @@ const styles = StyleSheet.create({
   top: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottomWidth: 1, borderColor: palette.border, backgroundColor: "white" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
   modalOverlay: { flex: 1, padding: 24, backgroundColor: "rgba(18,44,58,0.60)", justifyContent: "center" }, modalCard: { width: "100%", maxWidth: 520, alignSelf: "center" }, modalContent: { gap: 18 },
-  avatar: { width: 44, height: 44, borderRadius: 16, backgroundColor: palette.navy, alignItems: "center", justifyContent: "center" }, avatarText: { color: "white", fontWeight: "800", fontSize: 18 },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: palette.navy, alignItems: "center", justifyContent: "center", overflow: "hidden" }, avatarText: { color: "white", fontWeight: "800", fontSize: 16 },
+  avatarImage: { width: 44, height: 44 },
   demo: { backgroundColor: palette.amberSoft, padding: 8, justifyContent: "center", flexDirection: "row", gap: 6 }, demoText: { color: palette.amber, fontSize: 11, fontWeight: "700" },
   nav: { flexDirection: "row", borderTopWidth: 1, borderColor: palette.border, paddingVertical: 9, backgroundColor: "white", justifyContent: "center" },
   navItem: { flex: 1, maxWidth: 220, minHeight: 58, alignItems: "center", gap: 4 }, navIcon: { paddingHorizontal: 22, paddingVertical: 6, borderRadius: 16 }, navActive: { backgroundColor: palette.primarySoft }, navText: { fontSize: 11, color: palette.textSecondary, fontWeight: "600" },

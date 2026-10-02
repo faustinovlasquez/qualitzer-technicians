@@ -3,6 +3,9 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { ownSignatureOptions, userSignaturesPort, type UserSignatureAccess, type UserSignatureOptions, type UserSignaturesPort } from "../domain/userSignatures";
+import { ownProfileFor, ownProfilePort, type OwnProfile, type OwnProfileAccess, type OwnProfilePort } from "../domain/ownProfile";
+
+const initialsOf = (firstNames: string, lastNames: string): string => `${firstNames.trim()[0] ?? ""}${lastNames.trim()[0] ?? ""}`.toUpperCase() || "?";
 import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
@@ -127,6 +130,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const [selectedOrder, setSelectedOrder] = useState<SelectedOrder | null>(null);
   const [selectedCreationKind, setSelectedCreationKind] = useState<CreationKind | null>(null);
   const [tab, setTab] = useState<AppTab>("today");
+  const [profileSummary, setProfileSummary] = useState<{ scopeKey: string; avatar: string | null; initials: string } | null>(null);
   const [creationNotice, setCreationNotice] = useState<{ token: string; branchId: number; groupId: string; workId?: string; kind: CreationResult["kind"]; confirmed: boolean; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1128,6 +1132,20 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     } finally { if (action !== null) endAction(action); }
   }
 
+  async function profileOperation(operation: (port: OwnProfilePort) => Promise<OwnProfile>, write = false): Promise<OwnProfile> {
+    const owner = session;
+    const repo = repository.current;
+    if (!isAccessAllowed() || !owner || !repo || owner.token !== state.current.session?.token || profileSessionVersion !== sessionVersion.current) throw new Error("La sesión cambió. Vuelve a abrir el perfil.");
+    if (write && actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
+    const version = sessionVersion.current;
+    const action = write ? beginAction() : null;
+    try {
+      const result = await operation(ownProfilePort(repo));
+      if (!isAccessAllowed() || version !== sessionVersion.current || repo !== repository.current) throw new Error("La sesión cambió. Actualiza antes de repetir la operación.");
+      return ownProfileFor(result, owner.user.id);
+    } finally { if (action !== null) endAction(action); }
+  }
+
   async function performMutation<T extends GroupScope, Result = void>(value: T, operation: (repo: TechnicianRepository, value: T) => Promise<Result>, refreshAfter = false, locationAction?: LocationAction, targetId?: string): Promise<Result> {
     if (!isAccessAllowed()) throw new Error("Desbloquea la aplicación antes de continuar.");
     if (actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
@@ -1518,7 +1536,32 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     },
   } : undefined;
 
+  const profileSessionVersion = sessionVersion.current;
+  const profileScopeKey = session ? `${profileSessionVersion}:${tenantStorageNamespace(session, gatewayUrl, null)}:profile` : "";
+  const profileAccess: OwnProfileAccess | undefined = session ? {
+    scopeKey: profileScopeKey,
+    userId: session.user.id,
+    available: session.mode === "demo" || Boolean(liveVerified && (!offline || offline.online && !offline.authBlocked)),
+    actions: {
+      ownProfile: () => profileOperation(port => port.ownProfile()),
+      saveOwnProfile: input => profileOperation(port => port.saveOwnProfile(input), true),
+      saveOwnAvatar: input => profileOperation(port => port.saveOwnAvatar(input), true),
+      removeOwnAvatar: () => profileOperation(port => port.removeOwnAvatar(), true),
+    },
+    onChanged: profile => {
+      if (profile.userId !== session.user.id) return;
+      setProfileSummary({ scopeKey: profileScopeKey, avatar: profile.avatarThumbnailUrl ?? profile.avatarUrl, initials: initialsOf(profile.firstNames, profile.lastNames) });
+    },
+  } : undefined;
+  const currentSummary = profileSummary?.scopeKey === profileScopeKey ? profileSummary : null;
+  const profileBadge = session ? {
+    avatar: currentSummary ? currentSummary.avatar : session.user.avatarThumbnail ?? null,
+    initials: currentSummary?.initials ?? initialsOf(session.user.name, session.user.lastnames),
+  } : null;
+
   return {
+    profileAccess,
+    profileBadge,
     signatureAccess,
     bindLocationActions,
     equipmentLocation: { load: loadEquipmentLocation, save: saveEquipmentLocation },

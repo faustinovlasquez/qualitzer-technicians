@@ -142,7 +142,7 @@ test("legacy retry can launch with its guide mounted, hides private modal while 
   const retry = f.guide().retry(); await settle();
   assert.equal(f.calls.cameras, 1); assert.equal(f.guide().busy, true);
   const hidden = f.modal(); assert.equal(hidden.props.visible, false); assert.equal(hidden.props.animationType, "none");
-  assert.equal(elements<{ pointerEvents: string }>(hidden, "View")[0].props.pointerEvents, "none");
+  assert.equal(elements<{ pointerEvents?: string }>(hidden, "View").find(({ props }) => props.pointerEvents !== undefined)?.props.pointerEvents, "none");
   await f.guide().retry(); assert.equal(f.calls.cameras, 1);
   f.security.state.nativeInteractionPending = false; f.security.blocked = false;
   native.resolve(selected); await retry;

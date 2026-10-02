@@ -156,6 +156,9 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     if (id === "../ui/theme") return theme;
     if (id === "../security/DeviceSecurityCard") return { DeviceSecurityCard: "DeviceSecurityCard" };
     if (id === "./signatures/UserSignaturesPanel") return { UserSignaturesPanel: "UserSignaturesPanel" };
+    if (id === "./profile/useOwnProfile") return { useOwnProfile: () => ({ profile: null, busy: null, error: null, notice: null }) };
+    if (id === "./profile/ProfileHeaderCard") return { ProfileHeaderCard: "ProfileHeaderCard" };
+    if (id === "./profile/PersonalDataEditor") return { PersonalDataEditor: "PersonalDataEditor" };
     if (id === "../location/LocationSettingsPanel") return { LocationSettingsPanel: "LocationSettingsPanel" };
     return forbidden(id);
   });
@@ -181,6 +184,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["./src/security/DeviceSecurityProvider", { DeviceSecurityProvider: "DeviceSecurityProvider" }],
     ["./src/security/DeviceSecurityContext", { PrivateModal: "PrivateModal", useDeviceSecurity: () => security }],
     ["./src/notifications", { NotificationCenterScreen: "NotificationCenterScreen" }],
+    ["./src/notifications/useNotificationPermissionPrompt", { useNotificationPermissionPrompt: () => undefined }],
     ["./src/screens/notifications/NotificationSettingsScreen", { NotificationSettingsScreen: "NotificationSettingsScreen" }],
     ["./src/screens/creation", { CreationScreen: "CreationScreen", CreationQuickMenu: "CreationQuickMenu" }],
     ["./src/domain/format", { weekRange: forbidden }], ["./src/domain/assignmentSchedule", { dailyRange: forbidden }],

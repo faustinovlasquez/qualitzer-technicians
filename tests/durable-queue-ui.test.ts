@@ -100,7 +100,7 @@ test("confirmed answer does not duplicate hook refresh and a queued response aft
 test("detail timer changes visible intent after one commit and delivery review remains mounted when pending work appears", async () => {
   const f = await detailFixture(); const commit = deferred<void>(); let changes = 0;
   f.props.onStatus = async () => { changes++; await commit.promise; };
-  action(f.render(), "Trabajo").onPress();
+  elements<{ accessibilityRole?: string; accessibilityLabel?: string; onPress(): void }>(f.render(), "Pressable").find(({ props }) => props.accessibilityRole === "tab" && props.accessibilityLabel === "Trabajo")!.props.onPress();
   const start = action(f.render(), "Iniciar trabajo"); start.onPress(); start.onPress(); await settle();
   assert.equal(changes, 1); assert.equal(action(f.render(), "Iniciar trabajo").disabled, true);
   commit.reject(queued("timer")); await settle();

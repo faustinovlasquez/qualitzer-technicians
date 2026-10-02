@@ -7,6 +7,7 @@ import type { MaintenanceDeliveryContext } from "../../src/domain/orderLifecycle
 import * as creation from "../../src/domain/creation";
 import * as workActivities from "../../src/domain/workActivities";
 import * as userSignatures from "../../src/domain/userSignatures";
+import * as ownProfile from "../../src/domain/ownProfile";
 import * as progress from "../../src/domain/assignmentChecklistProgress";
 import * as schedule from "../../src/domain/assignmentSchedule";
 import * as format from "../../src/domain/format";
@@ -276,6 +277,7 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     if (id === "../domain/offline") return { isOfflineQueuedError: (error: unknown) => error instanceof Error && error.name === "OfflineQueuedError" };
     if (id === "../domain/workActivities") return workActivities;
     if (id === "../domain/userSignatures") return userSignatures;
+    if (id === "../domain/ownProfile") return ownProfile;
     if (id === "../domain/weeklySchedule") return weeklySchedule;
     if (id === "../notifications") return { useMobileNotifications: (options: UseMobileNotificationsOptions) => { notificationOptions = options; return { client: null, revokeForSession: noop }; }, bindNotificationApi: () => null };
     if (id === "../notifications/notificationSafety") return notificationSafety;

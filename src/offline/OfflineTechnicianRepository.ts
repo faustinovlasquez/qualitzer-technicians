@@ -1,5 +1,6 @@
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { userSignaturesPort, type UserSignaturesPort } from "../domain/userSignatures";
+import { ownProfilePort, type OwnProfilePort } from "../domain/ownProfile";
 import type { Assignments, Attachment, CommentPage, DateRange, GroupScope, LocalPhoto, Session, StepAnswer, User, WorkScope } from "../domain/models";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, type CreationInput, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../domain/creation";
 import { OfflineQueuedError, OfflineUnavailableError, type OfflineAttachment, type OfflineController, type OfflineFile, type OfflineOperation, type OfflineOperationBase, type OfflinePreparationOptions, type OfflineScope } from "../domain/offline";
@@ -640,6 +641,10 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     this.branch(branchId);
     return this.onlineOnly(() => userSignaturesPort(this.remote).deleteUserSignature(branchId, signatureId));
   };
+  ownProfile: OwnProfilePort["ownProfile"] = () => this.onlineOnly(() => ownProfilePort(this.remote).ownProfile());
+  saveOwnProfile: OwnProfilePort["saveOwnProfile"] = (input) => this.onlineOnly(() => ownProfilePort(this.remote).saveOwnProfile(input));
+  saveOwnAvatar: OwnProfilePort["saveOwnAvatar"] = (input) => this.onlineOnly(() => ownProfilePort(this.remote).saveOwnAvatar(input));
+  removeOwnAvatar: OwnProfilePort["removeOwnAvatar"] = () => this.onlineOnly(() => ownProfilePort(this.remote).removeOwnAvatar());
   login: TechnicianRepository["login"] = (username, password) => this.remote.login(username, password);
   forcePassword: TechnicianRepository["forcePassword"] = (password, confirmation) => this.onlineOnly(() => this.remote.forcePassword(password, confirmation));
   async logout(): Promise<void> {

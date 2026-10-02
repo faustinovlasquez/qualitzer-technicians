@@ -4,5 +4,5 @@
     "strict": true,
     "noEmit": true
   },
-  "exclude": ["node_modules", "server", "scripts", "tests", "dist"]
+  "exclude": ["node_modules", "server", "scripts", "tests", "dist", "artifacts"]
 }

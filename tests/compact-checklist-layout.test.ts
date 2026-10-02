@@ -30,23 +30,29 @@ test("checklist and evidence routes are separate from parent scroll and inside k
   const ast = ts.createSourceFile("WorkDetailScreen.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const branches = new Map<string, ts.Expression>();
   let evidence: ts.Expression | undefined;
+  const checklistTabs: ts.JsxSelfClosingElement[] = [];
+  const assertHosted = (node: ts.Node) => {
+    const ancestors: string[] = [];
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (ts.isJsxElement(parent)) ancestors.push(parent.openingElement.tagName.getText(ast));
+    }
+    assert.equal(ancestors.includes("ScrollView"), false);
+    assert.ok(ancestors.includes("KeyboardAvoidingView"));
+    assert.ok(ancestors.indexOf("SafeAreaView") > ancestors.indexOf("KeyboardAvoidingView"));
+  };
   function visit(node: ts.Node): void {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "evidenceContent") evidence = node.initializer;
+    // The checklist stays mounted after its first visit (hidden, not unmounted, on other tabs) so it is rendered outside the tab ternary.
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "ChecklistTab") { checklistTabs.push(node); assertHosted(node); }
     if (ts.isConditionalExpression(node) && ts.isBinaryExpression(node.condition)
       && node.condition.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
       && ts.isIdentifier(node.condition.left) && node.condition.left.text === "tab"
       && ts.isStringLiteral(node.condition.right) && ["checklist", "evidence"].includes(node.condition.right.text)) {
       const branch = node.whenTrue;
-      if (ts.isJsxSelfClosingElement(branch) && branch.tagName.getText(ast) === "ChecklistTab"
+      if (node.condition.right.text === "checklist" && branch.kind === ts.SyntaxKind.NullKeyword
         || ts.isIdentifier(branch) && branch.text === "evidenceContent") {
         branches.set(node.condition.right.text, branch);
-        const ancestors: string[] = [];
-        for (let parent = node.parent; parent; parent = parent.parent) {
-          if (ts.isJsxElement(parent)) ancestors.push(parent.openingElement.tagName.getText(ast));
-        }
-        assert.equal(ancestors.includes("ScrollView"), false);
-        assert.ok(ancestors.includes("KeyboardAvoidingView"));
-        assert.ok(ancestors.indexOf("SafeAreaView") > ancestors.indexOf("KeyboardAvoidingView"));
+        assertHosted(node);
         let fallback = node.whenFalse;
         while (ts.isConditionalExpression(fallback)) fallback = fallback.whenFalse;
         assert.ok(ts.isJsxElement(fallback) && fallback.openingElement.tagName.getText(ast) === "ScrollView");
@@ -57,7 +63,12 @@ test("checklist and evidence routes are separate from parent scroll and inside k
   visit(ast);
   const checklist = branches.get("checklist");
   const files = branches.get("evidence");
-  assert.ok(checklist && ts.isJsxSelfClosingElement(checklist) && checklist.tagName.getText(ast) === "ChecklistTab");
+  assert.ok(checklist && checklist.kind === ts.SyntaxKind.NullKeyword, "The checklist route must not fall through to the parent ScrollView");
+  assert.equal(checklistTabs.length, 1);
+  const host = checklistTabs[0]!.parent;
+  assert.ok(ts.isJsxElement(host) && host.openingElement.tagName.getText(ast) === "View");
+  assert.ok(host.openingElement.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === "style"
+    && attribute.initializer?.getText(ast) === '{tab === "checklist" ? styles.screen : styles.hidden}'));
   assert.ok(files && ts.isIdentifier(files) && files.text === "evidenceContent");
   assert.ok(evidence && ts.isJsxSelfClosingElement(evidence) && evidence.tagName.getText(ast) === "FileWorkspace");
   assert.ok(evidence.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === "compact" && attribute.initializer === undefined));

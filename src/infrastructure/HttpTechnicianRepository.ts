@@ -3,6 +3,7 @@ import { materialReceiptInputSchema, materialReceiptResultSchema, materialReceip
 import { locationAckSchema, locationBatchSchema, locationHistoryQuerySchema, locationHistorySchema, type LocationPoint } from "../domain/locationTracking";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { userSignatureInputSchema, userSignatureOptionsSchema, type UserSignatureInput } from "../domain/userSignatures";
+import { ownAvatarInputSchema, ownProfileInputSchema, ownProfileSchema, type OwnAvatarInput, type OwnProfileInput } from "../domain/ownProfile";
 import { checklistAssignmentInputSchema, checklistAssignmentResultSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import type { Assignments, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginStartResult, StatusInput, StepAnswer, Tenant, User, WorkScope } from "../domain/models";
@@ -68,6 +69,18 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async deleteUserSignature(branchId: number, signatureId: number) {
     return userSignatureOptionsSchema.parse(await this.request<unknown>(`/api/user-signatures/${positiveCreationIdSchema.parse(signatureId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`, "DELETE"));
+  }
+  async ownProfile() {
+    return ownProfileSchema.parse(await this.request<unknown>("/api/user-profile"));
+  }
+  async saveOwnProfile(input: OwnProfileInput) {
+    return ownProfileSchema.parse(await this.request<unknown>("/api/user-profile", "PUT", ownProfileInputSchema.parse(input)));
+  }
+  async saveOwnAvatar(input: OwnAvatarInput) {
+    return ownProfileSchema.parse(await this.request<unknown>("/api/user-profile/avatar", "PUT", ownAvatarInputSchema.parse(input)));
+  }
+  async removeOwnAvatar() {
+    return ownProfileSchema.parse(await this.request<unknown>("/api/user-profile/avatar", "DELETE"));
   }
   activities: WorkActivitiesPort["activities"] = async scope => workActivitySchema.array().parse(await this.request<unknown>(this.scopePath(scope, "/activities")));
   createActivity: WorkActivitiesPort["createActivity"] = async (scope, input) => workActivityResultSchema.parse(await this.request<unknown>(this.scopePath(scope, "/activities"), "POST", workActivityInputSchema.parse(input)));

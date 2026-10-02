@@ -11,9 +11,14 @@ import type { UserSignatureAccess } from "../domain/userSignatures";
 import { UserSignaturesPanel } from "./signatures/UserSignaturesPanel";
 import { LocationSettingsPanel } from "../location/LocationSettingsPanel";
 import type { LocationTrackingUi } from "../location/useLocationTracking";
+import type { OwnProfileAccess } from "../domain/ownProfile";
+import { useOwnProfile } from "./profile/useOwnProfile";
+import { ProfileHeaderCard } from "./profile/ProfileHeaderCard";
+import { PersonalDataEditor } from "./profile/PersonalDataEditor";
 
-export function ProfileScreen({ session, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, locationTracking, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck }: {
+export function ProfileScreen({ session, profileAccess, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, locationTracking, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck }: {
   session: Session; gatewayUrl: string; busy: boolean; error: string | null; health: Health | null;
+  profileAccess?: OwnProfileAccess;
   companyBranding: CompanyBrandingUi;
   deviceSecurity?: DeviceSecurityUi;
   onNotificationSettings?: () => void;
@@ -24,16 +29,16 @@ export function ProfileScreen({ session, companyBranding, deviceSecurity, onNoti
 }) {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [signaturesOpen, setSignaturesOpen] = useState(false);
+  const [editingPersonal, setEditingPersonal] = useState(false);
+  const ownProfile = useOwnProfile(profileAccess);
   const currentBranch = session.user.accessBranchs.find((branch) => branch.id === session.branchId);
   if (signaturesOpen && signatureAccess) return <UserSignaturesPanel access={signatureAccess} onBack={() => setSignaturesOpen(false)} />;
+  if (editingPersonal && ownProfile.profile && profileAccess) return <PersonalDataEditor profile={ownProfile.profile} busy={ownProfile.busy === "save"} available={profileAccess.available}
+    error={ownProfile.error} onSave={ownProfile.save} onCancel={() => setEditingPersonal(false)} />;
   return <ScrollView contentContainerStyle={styles.content}>
     <SectionTitle title="Mi perfil" subtitle="Tu espacio de trabajo en terreno" />
-    <Card style={styles.stack}>
-      <View style={styles.avatar}><Text style={styles.initials}>{session.user.name[0]}{session.user.lastnames[0]}</Text></View>
-      <Text style={styles.title}>{session.user.name} {session.user.lastnames}</Text>
-      <BodyText>{session.user.email}</BodyText><Badge label={session.user.role.name} tone="teal" />
-      {session.mode === "demo" && <Badge label="Demostración · sin datos reales" tone="warning" />}
-    </Card>
+    <ProfileHeaderCard session={session} branchName={currentBranch?.name ?? null} access={profileAccess} state={ownProfile} disabled={busy}
+      onEdit={() => { ownProfile.clearMessages(); setEditingPersonal(true); }} />
     {onNotificationSettings ? <Card style={styles.stack}>
       <SectionTitle title="Notificaciones" subtitle="Decide qué avisos recibir y cuándo" />
       <BodyText>Configura permisos, nuevas asignaciones, recordatorios y horario silencioso. Tus avisos se consultan en la pestaña Avisos.</BodyText>
@@ -95,6 +100,6 @@ export function ProfileScreen({ session, companyBranding, deviceSecurity, onNoti
 }
 const styles = StyleSheet.create({
   brandingMessage: { color: palette.textSecondary, lineHeight: 22 },
-  content: { width: "100%", maxWidth: 880, alignSelf: "center", padding: 22, gap: 20, paddingBottom: 32 }, stack: { gap: 14 }, title: { fontSize: 24, color: palette.navy, fontWeight: "800" },
-  avatar: { width: 64, height: 64, borderRadius: 22, backgroundColor: palette.primarySoft, alignItems: "center", justifyContent: "center" }, initials: { fontSize: 24, fontWeight: "700", color: palette.primary }, error: { color: palette.danger, lineHeight: 22 },
+  content: { width: "100%", maxWidth: 880, alignSelf: "center", padding: 22, gap: 20, paddingBottom: 32 }, stack: { gap: 14 },
+  error: { color: palette.danger, lineHeight: 22 },
 });

@@ -54,7 +54,7 @@ test("shared session double-tap opens once; cancel/mount never emits a value", a
   assert.deepEqual(f.changes, ["00:07"]);
 });
 
-test("security lock dismisses synchronously and Home still requires normal authentication", async t => {
+test("security lock dismisses synchronously and Home follows normal app-switch handling", async t => {
   const p = await unlockedProvider(); t.after(p.close);
   const f = selectionFixture(p.security); t.after(f.close);
   const selected = f.open(); let disposed = 0;
@@ -63,13 +63,16 @@ test("security lock dismisses synchronously and Home still requires normal authe
   p.emit(false);
   assert.equal(disposed, 1, "native dismiss happens in controller subscription, before React rerender");
   selected.commit("23:59"); assert.deepEqual(f.changes, []);
-  p.emit(true); await p.settle();
   assert.equal(p.security.isUnlocked(), false);
-  assert.equal(p.adapter.prompts.length, 2, "clock is not a trusted camera/Activity exemption");
   f.control.security = p.security; f.render().open(); assert.equal(f.render().session, null);
-  p.adapter.prompts[1].resolve({ success: true }); await p.settle();
+  p.emit(true); await p.settle();
+  assert.equal(p.controller.getSnapshot().nativeInteractionPending ?? false, false, "clock is not a trusted camera/Activity exemption");
+  assert.equal(p.adapter.prompts.length, 1, "1.0.24: ordinary app switch keeps the in-memory unlock");
+  assert.equal(p.security.isUnlocked(), true);
   f.control.security = p.security; f.render(); selected.commit("00:00");
   assert.deepEqual(f.changes, []);
+  const reopened = f.open(); assert.notEqual(reopened.id, selected.id);
+  reopened.commit("00:00"); assert.deepEqual(f.changes, ["00:00"]);
 });
 
 for (const changed of ["value", "scope", "disabled", "privacy", "provider", "unmount"] as const) {

@@ -131,9 +131,13 @@ for (const order of ["result-first", "active-first"] as const) {
       assert.deepEqual(await result, expected);
       assert.equal(f.security.isUnlocked(), true);
       assert.equal(f.adapter.prompts.length, 1);
-      f.emit(false); f.emit(true); await f.settle();
-      assert.equal(f.adapter.prompts.length, 2);
+      // Lease consumed: a later ordinary app switch follows the 1.0.24 policy (in-memory unlock kept, no re-prompt, no lease).
+      f.emit(false);
       assert.equal(f.security.isUnlocked(), false);
+      f.emit(true); await f.settle();
+      assert.equal(f.security.state.nativeInteractionPending, false);
+      assert.equal(f.adapter.prompts.length, 1);
+      assert.equal(f.security.isUnlocked(), true);
     });
   }
 }

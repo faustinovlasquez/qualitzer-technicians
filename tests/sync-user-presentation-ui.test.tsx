@@ -180,7 +180,8 @@ test("actual detail and catalog omit duplicate connection/timer blocks and prese
         assert.equal(action(tree, "Entregar trabajo").disabled, false);
         action(tree, "Entregar trabajo").onPress();
         assert.equal(elements(f.render(), "CompletionDialog").length, 1);
-        assert.equal(elements<{ canSubmit: boolean }>(f.render(), "CompletionDialog")[0].props.canSubmit, false);
+        assert.equal(elements<{ canSubmit: boolean }>(f.render(), "CompletionDialog")[0].props.canSubmit, true, "durable delivery may queue behind the pending timer and answer");
+        assert.deepEqual(elements<{ reasons: string[] }>(f.render(), "CompletionDialog")[0].props.reasons, []);
       } else assert.match(visibleText(tree), /1 respuesta\(s\) pendientes/);
       f.props.error = "ENOSPC: disk full"; f.render(); tree = f.render();
       assert.match(visibleText(tree), /ENOSPC: disk full/);

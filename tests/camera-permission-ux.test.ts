@@ -230,7 +230,7 @@ test("cancel during retry invalidates its pending read before another native pro
   assert.deepEqual(picker.calls, ["read"]); assert.equal(f.render().visible, false); assert.equal(f.render().message, null);
 });
 
-test("settings uses normal provider background lock and requires biometrics plus explicit camera retry", async t => {
+test("settings uses normal provider background handling (no trusted lease, no 1.0.24 re-prompt) and requires explicit camera retry", async t => {
   const p = await unlockedProvider(); t.after(p.close);
   const f = guideFixture(() => p.security.isUnlocked()); t.after(f.close);
   f.ports.settings = async () => { p.emit(false); };
@@ -238,8 +238,8 @@ test("settings uses normal provider background lock and requires biometrics plus
   assert.equal(p.controller.getSnapshot().nativeInteractionPending ?? false, false);
   assert.equal(p.security.isUnlocked(), false); assert.equal(f.modal().props.visible, false);
   p.emit(true); await p.settle();
-  assert.equal(p.adapter.prompts.length, 2); assert.equal(f.control.retryCalls, 0);
-  p.adapter.prompts[1].resolve({ success: true }); await p.settle();
+  assert.equal(p.adapter.prompts.length, 1); assert.equal(f.control.retryCalls, 0);
+  assert.equal(p.controller.getSnapshot().nativeInteractionPending ?? false, false); assert.equal(p.security.isUnlocked(), true);
   assert.equal(f.render().visible, true); assert.equal(f.control.retryCalls, 0);
   await f.render().retry(); assert.equal(f.control.retryCalls, 1); assert.deepEqual(p.adapter.writes, []);
 });

@@ -45,6 +45,8 @@ async function httpFixture(t: TestContext) {
   const receipts = new Map<string, SyncReceipt>();
   const signatures = new Map<string, string>();
   const serverErrors: unknown[] = [];
+  // Server-side group file list: the canonical upload appears under the group the wire scope targeted.
+  const stored: Array<{ groupId: string; id: number; name: string; type: string; url: string }> = [];
   const behavior = { loseResponse: false, collision: false, missingFileId: false, appendError: false };
   let effects = 0;
   let appends = 0;
@@ -59,7 +61,9 @@ async function httpFixture(t: TestContext) {
         const receipt = receipts.get(url.pathname.split("/").at(-1)!);
         return receipt ? json(receipt.state === "applied" || receipt.state === "rejected" ? 200 : 409, receipt) : json(404, { error: "OFFLINE_RECEIPT_NOT_FOUND" });
       }
-      if (req.method === "GET" && /^\/api\/assignments\/[^/]+(?:\/works\/[^/]+)?\/files$/.test(url.pathname)) return json(200, { data: [] });
+      const groupFiles = /^\/api\/assignments\/([^/]+)\/files$/.exec(url.pathname);
+      if (req.method === "GET" && groupFiles) return json(200, { data: stored.filter((file) => file.groupId === decodeURIComponent(groupFiles[1]!)).map(({ groupId: _, ...file }) => file) });
+      if (req.method === "GET" && /^\/api\/assignments\/[^/]+\/works\/[^/]+\/files$/.test(url.pathname)) return json(200, { data: [] });
       if (req.method !== "POST" || url.pathname !== "/api/offline/documents") return json(404, { error: "FIXTURE_ROUTE_NOT_FOUND" });
       const chunks: Uint8Array[] = [];
       for await (const chunk of req) chunks.push(new Uint8Array(Buffer.from(chunk)));
@@ -85,6 +89,7 @@ async function httpFixture(t: TestContext) {
       if (!signatures.has(metadata.operationId)) { effects++; signatures.set(metadata.operationId, signature); }
       const receipt: SyncReceipt = { operationId: metadata.operationId, state: "applied", ...(behavior.missingFileId ? {} : { fileId: 321 }) };
       receipts.set(metadata.operationId, receipt);
+      if (receipt.fileId !== undefined && !stored.some((entry) => entry.id === receipt.fileId)) stored.push({ groupId: metadata.scope.groupId, id: receipt.fileId, name: file.name, type: file.type, url: `${baseUrl}/files/${receipt.fileId}` });
       if (behavior.loseResponse) { behavior.loseResponse = false; req.socket.destroy(); return; }
       json(200, receipt);
     })().catch((error: unknown) => { serverErrors.push(error); json(500, { error: "FIXTURE_ASSERTION_FAILED" }); });
@@ -185,7 +190,8 @@ for (const kind of ["work", "non_productive", "maintenance"] as const) test(`${k
   const listed = await repository.groupFiles(expected);
   assert.equal(listed.length, 1);
   assert.equal(String(listed[0]!.id), "321");
-  assert.equal(listed[0]!.url, `memory:${op.file.id}`);
+  assert.ok("offline" in listed[0]!);
+  assert.deepEqual(listed[0].offline, { operationId: op.id, status: "applied", downloaded: true, confirmed: true, localFileId: op.file.id });
   assert.ok((await f.store.read("a")).cache.some((entry) => entry.key === resourceCacheKey("files", expected)));
   assert.equal((await repository.files({ ...expected, workId: "80" })).length, 0, "Root document must not leak into child fileList");
   assert.deepEqual(f.files.contents.get(op.file.id), bytes);

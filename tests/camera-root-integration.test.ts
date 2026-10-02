@@ -77,7 +77,10 @@ function fixture() {
     closeOffline() {}, loadFiles: async () => [], loadStepFiles: async () => [],
     uploadDocuments: async () => { control.uploads++; throw new Error("UNEXPECTED_UPLOAD"); },
     loadComments: async () => ({ data: [], totalRows: 0, totalPages: 0 }),
+    bindLocationActions: () => undefined, materialReceiptEventId: null,
   };
+  const locationTracking = { available: false, state: null, error: null, busy: false, timezone: "UTC", capture: async () => undefined };
+  const materialReceipts = { data: null, pending: null, busy: false, error: "", ready: true, refresh: async () => undefined, confirm: async () => undefined };
   const access: { allowed: boolean; isAllowed(): boolean }[] = [];
   const ui = Object.fromEntries(["BodyText", "Brand", "Button", "Card", "EmptyState", "IconButton", "SectionTitle", "Badge", "Field"].map(name => [name, name]));
   const mocks: { [name: string]: unknown } = {
@@ -118,6 +121,11 @@ function fixture() {
     "screens/offline/QueuedNotice": { QueuedNotice: "QueuedNotice" }, "screens/offline/OfflineFileCard": { OfflineFileCard: "OfflineFileCard" },
     "screens/offline/OfflineStatusBar": { OfflineStatusBar: "OfflineStatusBar" }, "screens/offline/OfflineCenterScreen": { OfflineCenterScreen: "OfflineCenterScreen" },
     "screens/creation": {}, "notifications": {}, "screens/notifications/NotificationSettingsScreen": {},
+    "screens/workDetail/WorkActivities": { WorkActivities: "WorkActivities" }, "screens/creation/CreationScreen": { CreationScreen: "CreationScreen" },
+    "screens/creation/CreationSuccess": { CreationSuccess: "CreationSuccess" }, "screens/creation/CreationModal": { CreationModal: "CreationModal" },
+    "location/useLocationTracking": { useLocationTracking: () => locationTracking },
+    "location/LocationHistoryPanel": { LocationHistoryPanel: "LocationHistoryPanel" }, "location/LocationSettingsPanel": { LocationSettingsPanel: "LocationSettingsPanel" },
+    "receipts/useMaterialReceipts": { useMaterialReceipts: () => materialReceipts }, "receipts/MaterialReceiptsScreen": { MaterialReceiptsScreen: "MaterialReceiptsScreen" },
   };
   for (const name of ["LoginScreen", "TenantSelectionScreen", "DashboardScreen", "OrderDetailScreen", "ProfileScreen", "ForcedPasswordScreen", "SessionSetupScreen"]) mocks[`screens/${name}`] = { [name]: name };
   const src = resolve(__dirname, "../src");
