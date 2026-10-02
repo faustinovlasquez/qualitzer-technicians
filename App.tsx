@@ -54,7 +54,6 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const [locationSettingsOpen, setLocationSettingsOpen] = useState(false);
   const locationViewKey = JSON.stringify([app.session?.token, app.storageKey, app.session?.branchId, app.selected?.groupId, app.selected?.workId, app.selectedOrder?.id]);
   useEffect(() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }, [locationViewKey]);
-  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState(false);
   const security = useDeviceSecurity();
   const locationConsentPending = Boolean(locationTracking.available && locationTracking.state && !locationTracking.state.actionConsentPrompted);
@@ -74,7 +73,6 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   }, [receiptsOpen, materialReceipts.busy, security.isUnlocked]);
   const brandingContext = companyBrandingContext(app);
   const companyBranding = useCompanyBranding(brandingContext.input, app.busy || security.blocked, allowAutomaticPin && brandingContext.automaticPinEligible && !security.blocked);
-  useEffect(() => { setLogoutConfirm(false); }, [app.session?.token]);
   useEffect(() => { setNotificationSettings(false); }, [app.session?.token, app.session?.branchId]);
   useEffect(() => { if (app.tab !== "profile") setNotificationSettings(false); }, [app.tab]);
   useEffect(() => {
@@ -86,19 +84,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     return () => subscription.remove();
   }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings, receiptsOpen]);
 
-  function cancelLogout(): void {
-    if (!app.busy) setLogoutConfirm(false);
-  }
-
-  function confirmLogout(): void {
-    if (app.busy || !app.session) return;
-    setLogoutConfirm(false);
-    void app.logout();
-  }
-
-  function refreshAssignments(): void {
-    if (app.busy || app.loading) return;
-    void app.refresh().catch(() => undefined);
+  // El botón de la barra de conexión reemplaza al recargar de la cabecera: sincroniza la cola y actualiza las asignaciones.
+  async function syncAndRefresh(): Promise<void> {
+    await app.syncOffline();
+    if (app.tab === "today" || app.tab === "agenda") await app.refresh().catch(() => undefined);
   }
 
   if (app.restoring) return <View style={styles.center}><Brand /><ActivityIndicator size="large" color={palette.primary} /><Text>Preparando tu espacio de trabajo…</Text></View>;
@@ -117,7 +106,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   </SafeAreaView>;
   const unreadNotifications = app.notifications.state?.unreadCount ?? 0;
   const connectionStatus = <>{app.offlineController ? <View pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
-    <OfflineStatusBar key={`${app.storageKey}:${app.session.user.workerId}`} snapshot={app.offline} onOpen={app.openOffline} onSync={app.syncOffline} embedded />
+    <OfflineStatusBar key={`${app.storageKey}:${app.session.user.workerId}`} snapshot={app.offline} onOpen={app.openOffline} onSync={syncAndRefresh} embedded />
   </View> : app.offlineSetupError ? <Button title="Almacenamiento offline no disponible · revisar" variant="secondary" disabled={app.busy} onPress={app.openOffline} /> : null}
     {locationHistoryKey === locationViewKey ? <CreationModal title={locationSettingsOpen ? "Configurar ubicación" : "Mi historial de ubicación"} onClose={() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }}>
       {locationSettingsOpen ? <>
@@ -235,14 +224,9 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   return <SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
     <View style={styles.top}>
       {app.tab !== "today" ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
-      <Brand tenant={app.session.tenant} showTag={false} singleLine />
+      <Brand tenant={app.session.tenant} showTag={false} singleLine genericLogo={false} />
       <View style={styles.headerActions}>
         {app.tab !== "today" ? <IconButton name="home-outline" label="Ir a mi jornada" disabled={app.busy} onPress={app.homeTab} /> : null}
-        {app.tab === "today" || app.tab === "agenda" ? <IconButton name="refresh-outline" label="Actualizar asignaciones" disabled={app.busy || app.loading} onPress={refreshAssignments} /> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel="Ver mi perfil y sucursal" accessibilityState={{ disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab("profile")} style={styles.avatar}>{app.profileBadge?.avatar
-          ? <Image key={app.profileBadge.avatar} source={{ uri: app.profileBadge.avatar }} style={styles.avatarImage} resizeMode="cover" accessible={false} />
-          : <Text style={styles.avatarText}>{app.profileBadge?.initials ?? app.session.user.name[0]}</Text>}</Pressable>
-        <IconButton name="log-out-outline" label="Cerrar sesión" disabled={app.busy} onPress={() => setLogoutConfirm(true)} />
       </View>
     </View>
     <SessionContextBar tenant={app.session.tenant} branchName={branchName} showBrand={false}>{connectionStatus}</SessionContextBar>
@@ -255,28 +239,14 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
       </> : app.tab === "profile" ? <ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
-      {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy || logoutConfirm} /> : null}
+      {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy} /> : null}
     </View>
     <View style={styles.nav}>{navigation.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "notifications" && unreadNotifications > 0 ? `${item.label}, ${unreadNotifications} sin leer` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
-      <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}><Ionicons name={item.icon} size={22} color={app.tab === item.id ? palette.primary : palette.textSecondary} />
+      <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}>{item.id === "profile" && app.profileBadge?.avatar ? <Image key={app.profileBadge.avatar} source={{ uri: app.profileBadge.avatar }} style={[styles.navAvatar, app.tab === item.id && styles.navAvatarActive]} resizeMode="cover" accessible={false} /> : <Ionicons name={item.icon} size={20} color={app.tab === item.id ? palette.primary : palette.textSecondary} />}
         {item.id === "notifications" && unreadNotifications > 0 ? <View style={styles.unreadBadge}><Text style={styles.unreadText}>{unreadNotifications > 99 ? "99+" : unreadNotifications}</Text></View> : null}
       </View>
       <Text style={[styles.navText, app.tab === item.id && { color: palette.primary, fontWeight: "800" }]}>{item.label}</Text>
     </Pressable>)}</View>
-    <Modal visible={logoutConfirm} transparent animationType="fade" onRequestClose={cancelLogout}>
-      <View style={styles.modalOverlay}>
-        <Card style={styles.modalCard}>
-          <View accessibilityViewIsModal style={styles.modalContent}>
-            <SectionTitle title="¿Cerrar sesión?" subtitle={app.session.tenant.name} />
-            <BodyText>Si hay operaciones pendientes en el dispositivo, el cierre se bloqueará sin borrar nada. La cola y la caché offline no se eliminan al cerrar sesión.</BodyText>
-            <BodyText>Solo si no hay pendientes, se eliminarán la sesión guardada y los borradores que todavía no guardaste en la cola. Lo confirmado en Qualitzer se conservará.</BodyText>
-            <BodyText>Para elegir otra empresa tendrás que ingresar de nuevo. Cancelar mantiene tu empresa y sesión actuales.</BodyText>
-            <Button title="Comprobar pendientes y cerrar sesión" icon="log-out-outline" variant="danger" loading={app.busy} onPress={confirmLogout} />
-            <Button title="Seguir trabajando" variant="secondary" disabled={app.busy} onPress={cancelLogout} />
-          </View>
-        </Card>
-      </View>
-    </Modal>
   </SafeAreaView>;
 }
 function ApplicationRoot() {
@@ -330,11 +300,10 @@ const styles = StyleSheet.create({
   top: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottomWidth: 1, borderColor: palette.border, backgroundColor: "white" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
   modalOverlay: { flex: 1, padding: 24, backgroundColor: "rgba(18,44,58,0.60)", justifyContent: "center" }, modalCard: { width: "100%", maxWidth: 520, alignSelf: "center" }, modalContent: { gap: 18 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: palette.navy, alignItems: "center", justifyContent: "center", overflow: "hidden" }, avatarText: { color: "white", fontWeight: "800", fontSize: 16 },
-  avatarImage: { width: 44, height: 44 },
   demo: { backgroundColor: palette.amberSoft, padding: 8, justifyContent: "center", flexDirection: "row", gap: 6 }, demoText: { color: palette.amber, fontSize: 11, fontWeight: "700" },
-  nav: { flexDirection: "row", borderTopWidth: 1, borderColor: palette.border, paddingVertical: 9, backgroundColor: "white", justifyContent: "center" },
-  navItem: { flex: 1, maxWidth: 220, minHeight: 58, alignItems: "center", gap: 4 }, navIcon: { paddingHorizontal: 22, paddingVertical: 6, borderRadius: 16 }, navActive: { backgroundColor: palette.primarySoft }, navText: { fontSize: 11, color: palette.textSecondary, fontWeight: "600" },
+  nav: { flexDirection: "row", borderTopWidth: 1, borderColor: palette.border, paddingVertical: 4, backgroundColor: "white", justifyContent: "center" },
+  navAvatar: { width: 22, height: 22, borderRadius: 11 }, navAvatarActive: { borderWidth: 2, borderColor: palette.primary },
+  navItem: { flex: 1, maxWidth: 220, minHeight: 48, alignItems: "center", justifyContent: "center", gap: 1 }, navIcon: { paddingHorizontal: 18, paddingVertical: 3, borderRadius: 14 }, navActive: { backgroundColor: palette.primarySoft }, navText: { fontSize: 11, color: palette.textSecondary, fontWeight: "600" },
   unreadBadge: { position: "absolute", top: -3, right: 5, minWidth: 20, height: 20, paddingHorizontal: 4, borderRadius: 10, backgroundColor: palette.danger, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "white" },
   unreadText: { color: "white", fontSize: 10, fontWeight: "800" },
 });

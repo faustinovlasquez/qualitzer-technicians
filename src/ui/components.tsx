@@ -31,6 +31,9 @@ export interface ButtonProps {
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
   accessibilityLabel?: string;
+  /** Ícono arriba y texto abajo, para barras de acciones compactas. */
+  stacked?: boolean;
+  iconColor?: string;
 }
 
 const buttonColors: { [K in ButtonVariant]: { background: string; foreground: string; border: string } } = {
@@ -49,7 +52,7 @@ const badgeColors: { [K in BadgeTone]: { background: string; foreground: string 
   info: { background: palette.infoSoft, foreground: palette.info },
 };
 
-export function Button({ title, onPress, variant = "primary", disabled = false, loading = false, icon, style, textStyle, accessibilityLabel }: ButtonProps) {
+export function Button({ title, onPress, variant = "primary", disabled = false, loading = false, icon, style, textStyle, accessibilityLabel, stacked = false, iconColor }: ButtonProps) {
   const colors = buttonColors[variant];
   const unavailable = disabled || loading;
 
@@ -62,14 +65,15 @@ export function Button({ title, onPress, variant = "primary", disabled = false, 
       accessibilityState={{ disabled: unavailable, busy: loading }}
       style={({ pressed }) => [
         styles.button,
+        stacked && styles.stackedButton,
         { backgroundColor: colors.background, borderColor: colors.border },
         style,
         unavailable && styles.disabled,
         pressed && styles.pressed,
       ]}
     >
-      {loading ? <ActivityIndicator color={colors.foreground} /> : icon ? <Ionicons name={icon} size={20} color={colors.foreground} accessible={false} /> : null}
-      <Text style={[styles.buttonText, { color: colors.foreground }, textStyle]}>{title}</Text>
+      {loading ? <ActivityIndicator color={iconColor ?? colors.foreground} /> : icon ? <Ionicons name={icon} size={stacked ? 18 : 20} color={iconColor ?? colors.foreground} accessible={false} /> : null}
+      <Text style={[styles.buttonText, stacked && styles.stackedText, { color: colors.foreground }, textStyle]}>{title}</Text>
     </Pressable>
   );
 }
@@ -180,12 +184,13 @@ export function BodyText({ children, style }: BodyTextProps) {
   return <Text style={[styles.body, style]}>{children}</Text>;
 }
 
-export interface BrandProps { tenant?: Tenant; compact?: boolean; showTag?: boolean; singleLine?: boolean; }
+export interface BrandProps { tenant?: Tenant; compact?: boolean; showTag?: boolean; singleLine?: boolean; genericLogo?: boolean; }
 
-function BrandLogo({ logo }: { logo: string | null }) {
+function BrandLogo({ logo, genericLogo }: { logo: string | null; genericLogo: boolean }) {
   const [failed, setFailed] = useState(false);
   const showLogo = logo !== null && !failed;
 
+  if (!showLogo && !genericLogo) return null;
   return <View style={[styles.brandMark, showLogo && styles.brandImageMark]}>
     <Image
       source={showLogo ? { uri: logo } : require("../../assets/qualitzer-logo.png")}
@@ -198,13 +203,14 @@ function BrandLogo({ logo }: { logo: string | null }) {
   </View>;
 }
 
-export function Brand({ tenant, compact = false }: BrandProps = {}) {
+/** `genericLogo={false}`: si la empresa no tiene logo propio se muestra solo su nombre, sin el logo de Qualitzer. */
+export function Brand({ tenant, compact = false, genericLogo = true }: BrandProps = {}) {
   const name = brandName(tenant);
   const logo = safeBrandLogo(tenant?.logo);
 
   return (
     <View style={styles.brand} accessible accessibilityLabel={name}>
-      <BrandLogo key={JSON.stringify([tenant?.id, logo])} logo={logo} />
+      <BrandLogo key={JSON.stringify([tenant?.id, logo])} logo={logo} genericLogo={genericLogo} />
       <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.brandName, compact && styles.brandNameCompact]}>{name}</Text>
     </View>
   );
@@ -213,6 +219,8 @@ export function Brand({ tenant, compact = false }: BrandProps = {}) {
 const styles = StyleSheet.create({
   button: { minHeight: 54, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
   buttonText: { fontSize: 15, lineHeight: 22, fontWeight: "700", flexShrink: 1, textAlign: "center" },
+  stackedButton: { flexDirection: "column", gap: 2, minHeight: 52, paddingHorizontal: 2, paddingVertical: 6 },
+  stackedText: { fontSize: 11, lineHeight: 14 },
   disabled: { opacity: 0.55 },
   pressed: { opacity: 0.82, transform: [{ scale: 0.99 }] },
   card: { backgroundColor: palette.surface, borderRadius: radius.lg, padding: 20, borderWidth: 1, borderColor: palette.border, ...theme.shadow },

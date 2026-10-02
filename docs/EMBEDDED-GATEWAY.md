@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.29
+# @qualitzer/mobile-gateway 1.0.30
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.29. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.30. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.30 agrega el perfil propio: GET y PUT `/api/user-profile` (nombres, apellidos, nombre social, fecha de nacimiento, género, nacionalidad, estado civil y grupo sanguíneo) y PUT/DELETE `/api/user-profile/avatar` (foto JPEG en data URI de hasta 3 MiB, verificada por firma). El dueño se resuelve siempre desde la sesión mediante `/auth/me`; la respuesta debe pertenecer a ese usuario o se rechaza. Requiere publicar las rutas `profiles/me` y `profiles/me/avatar` del backend. Identificación, correo, rol y estado no son editables por el técnico. Conserva timer, checklist, actividades, recepciones, avisos y colas anteriores. Sin migraciones.
 
 1.0.29 agrega GET `/api/material-receipts?companyBranchId=N` y POST `/api/material-receipts/confirm`. Revalida usuario, trabajador y sucursal; solo confirma comprobantes propios con UUID y versiones exactas, sin firma dibujada ni nuevos movimientos de stock. La respuesta conserva actor, comprobantes y revision siguiente. Requiere publicar las rutas `inventory_consumptions_v2/my-receipts` y `/confirm` del backend. Admite avisos MATERIAL_RECEIPT_AVAILABLE y MATERIAL_RECEIPT_REMINDER solo para dispositivos que envian la preferencia materialReceipts; mantiene avisos, timers, actividades y colas anteriores. Los recordatorios requieren horario laboral y zona horaria configurados. La APK1.0.65 conserva un intento ambiguo para reintento explicito, sin considerarlo confirmado offline. Ubicacion puntual opcional, con motivo si no esta disponible; el GPS declarado no acredita presencia fisica. No agrega migraciones, pero requiere el esquema vigente de Consumos V2 y MobileNotifications.
 

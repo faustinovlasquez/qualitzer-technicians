@@ -1,11 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { matchesAssignmentSearch, matchesOrderSearch } from "../domain/assignmentCodes";
-import { assignmentDay, assignmentDays, assignmentIncludesDay, assignmentPlannedMinutes, assignmentWorkForDay, assignmentWorkQueryRange, dailyRange } from "../domain/assignmentSchedule";
-import { dateKey, duration, isFinished, monthRange, shiftDate, shortDate, weekRange } from "../domain/format";
+import { assignmentDay, assignmentDays, assignmentExecutedMinutes, assignmentIncludesDay, assignmentPlannedMinutes, assignmentWorkForDay, manHours, assignmentWorkQueryRange, dailyRange } from "../domain/assignmentSchedule";
+import { dateKey, isFinished, monthRange, shiftDate, shortDate, weekRange } from "../domain/format";
 import type { AssignmentGroup, Assignments, AssignmentWork, DateRange, StatusInput, User, WorkOpenOptions } from "../domain/models";
 import type { OfflineSnapshot } from "../domain/offline";
 import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconName } from "../ui/components";
@@ -91,9 +90,9 @@ function buildSections(entries: WorkEntry[], agenda: boolean): WorkSection[] {
   return Array.from(sections, ([key, sectionEntries]) => ({ key, date: agenda ? key : null, entries: sectionEntries }));
 }
 
-function Kpi({ title, value, note, icon, tone }: { title: string; value: number | null; note: string | null; icon: IconName; tone: "warning" | "teal" | "success" }) {
-  const color = tone === "warning" ? palette.amber : tone === "success" ? palette.success : palette.primary;
-  const background = tone === "warning" ? palette.amberSoft : tone === "success" ? palette.successSoft : palette.primarySoft;
+function Kpi({ title, value, note, icon, tone }: { title: string; value: number | string | null; note: string | null; icon: IconName; tone: "warning" | "teal" | "success" | "violet" | "info" }) {
+  const color = tone === "warning" ? palette.amber : tone === "success" ? palette.success : tone === "violet" ? "#6D4AB4" : tone === "info" ? palette.info : palette.primary;
+  const background = tone === "warning" ? palette.amberSoft : tone === "success" ? palette.successSoft : tone === "violet" ? "#EFEAF9" : tone === "info" ? palette.infoSoft : palette.primarySoft;
   return (
     <Card style={styles.kpi}>
       <View style={styles.kpiTop}>
@@ -172,6 +171,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       completed: works.filter(isFinished).length,
       delivered: works.filter((work) => work.status === "delivered").length,
       minutes: works.reduce((sum, work) => sum + (selectedDay ? Math.max(0, work.plannedMinutes) : assignmentPlannedMinutes(work)), 0),
+      executedMinutes: works.reduce((sum, work) => sum + (selectedDay ? Math.max(0, work.executedMinutes) : assignmentExecutedMinutes(work)), 0),
     };
   }, [scopedEntries, selectedDay]);
 
@@ -224,20 +224,8 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
   function hasDataCount(): boolean { return data !== null && !coveragePending && !partial; }
 
   const sections = useMemo(() => buildSections(filteredEntries, view === "agenda"), [filteredEntries, view]);
-  const remaining = counts.total - counts.completed;
   const hasData = data !== null;
   const isFiltered = query.trim().length > 0 || !filter.includes("all");
-  const heroTitle = coveragePending ? "Verificando datos locales" : partial ? "Cobertura parcial" : !hasData
-    ? loading ? "Preparando tu jornada" : "Tu jornada, en un solo lugar"
-    : counts.total === 0 ? emptyOrders.length > 0 ? `${emptyOrders.length} ${emptyOrders.length === 1 ? "orden asignada" : "órdenes asignadas"}` : "Todo listo para tu próxima tarea"
-      : remaining === 0 ? emptyOrders.some((group) => group.status !== "completed" && group.status !== "delivered") ? "Órdenes pendientes de trabajos" : "Buen trabajo. Todo completado."
-        : `${remaining} ${remaining === 1 ? "tarea por completar" : "tareas por completar"}`;
-  const heroDescription = coveragePending ? "La cobertura y los pendientes aún no están verificados."
-    : partial ? "Faltan días por descargar; no significan cero tareas."
-    : !hasData
-    ? "Consulta tus asignaciones y organiza tu trabajo en campo."
-    : counts.total === 0 ? emptyOrders.length > 0 ? "Pendientes de incorporar trabajos." : "No hay tareas asignadas para el período seleccionado."
-      : `${counts.completed} de ${counts.total} ${counts.total === 1 ? "tarea completada" : "tareas completadas"}.`;
 
   function navigateWeek(offset: number): void {
     if (busy || (view !== "agenda" && loading)) return;
@@ -343,22 +331,34 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
         <Text style={styles.greeting}>{firstName ? `Hola, ${firstName}.` : "Hola."}</Text>
       </View>
 
-      <LinearGradient testID="day-summary" colors={[palette.navy, "#174C57"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-        <Text style={styles.heroTitle}>{heroTitle}</Text>
-        <Text style={styles.heroDescription}>{heroDescription}</Text>
-        <View style={styles.heroBottom}>
-          <View style={styles.heroStat}>
-            <Ionicons name="calendar-outline" size={14} color={palette.onDark} accessible={false} />
-            <Text accessibilityLabel={selectedDay ? fullDate(selectedDay) : rangeLabel} style={styles.heroStatText}>{selectedDay ? `${shortDate(selectedDay)} · ${selectedDay.slice(0, 4)}` : rangeLabel}</Text>
-          </View>
-          {hasData && !coveragePending ? <View style={styles.heroStat}><Ionicons name="time-outline" size={14} color={palette.onDark} accessible={false} /><Text style={styles.heroStatText}>{partial && counts.total === 0 ? "Carga no disponible" : `${duration(counts.minutes)} planificadas${partial ? " · parcial" : ""}`}</Text></View> : null}
-        </View>
-      </LinearGradient>
+      <View style={[styles.search, searchFocused && styles.searchFocused]}>
+        <Ionicons name="search-outline" size={21} color={palette.textMuted} accessible={false} />
+        <TextInput
+          accessibilityLabel="Buscar tareas"
+          accessibilityHint="Busca por tarea, código, equipo, ubicación o cliente."
+          placeholder="Buscar tarea, código o equipo"
+          placeholderTextColor={palette.textMuted}
+          value={query}
+          onChangeText={setQuery}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          selectionColor={palette.primary}
+          style={styles.searchInput}
+        />
+        {query ? <IconButton name="close-outline" label="Borrar búsqueda" onPress={() => setQuery("")} /> : null}
+      </View>
 
       <View testID="day-kpis" style={styles.kpiRow}>
         <Kpi title="Pendientes" value={hasData && !coveragePending && (!partial || counts.pending > 0) ? counts.pending : null} note={partial ? "Parcial" : null} icon="hourglass-outline" tone="warning" />
         <Kpi title="En curso" value={hasData && !coveragePending && (!partial || counts.active > 0) ? counts.active : null} note={partial ? "Parcial" : counts.paused > 0 ? `${counts.paused} en pausa` : null} icon="pulse-outline" tone="teal" />
         <Kpi title="Completadas" value={hasData && !coveragePending && (!partial || counts.completed > 0) ? counts.completed : null} note={partial ? "Parcial" : counts.delivered > 0 ? `${counts.delivered} entregadas` : null} icon="checkmark-done-outline" tone="success" />
+      </View>
+      <View testID="day-hours" style={styles.kpiRow}>
+        <Kpi title="HH asignadas" value={hasData && !coveragePending && (!partial || counts.minutes > 0) ? manHours(counts.minutes) : null} note={partial ? "Parcial" : null} icon="time-outline" tone="violet" />
+        <Kpi title="HH reportadas" value={hasData && !coveragePending && (!partial || counts.executedMinutes > 0) ? manHours(counts.executedMinutes) : null} note={partial ? "Parcial" : null} icon="stats-chart" tone="info" />
       </View>
 
       <RunningTimersNotice data={data} selectedRangeLabel={rangeLabel} serverRemindersReady={serverRemindersReady} onOpen={openTimer} />
@@ -366,19 +366,19 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       <View testID="week-selector">
       <Card style={styles.weekCard}>
         <View style={styles.weekNavigation}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Semana anterior" accessibilityState={{ disabled: busy || loading }} disabled={busy || loading} onPress={() => navigateWeek(-1)} style={({ pressed }) => [styles.weekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Semana anterior" accessibilityState={{ disabled: busy || loading }} disabled={busy || loading} onPress={() => navigateWeek(-1)} hitSlop={6} style={({ pressed }) => [styles.weekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
             <Ionicons name="chevron-back-outline" size={22} color={palette.primary} accessible={false} />
           </Pressable>
           <View style={styles.weekHeaderContent}>
           <Text accessibilityLabel={`${fullDate(displayedWeek.startDate)} – ${fullDate(displayedWeek.endDate)}`} style={[styles.weekRange, styles.weekCaption]}>{compactWeekLabel}</Text>
-          {view === "agenda" ? <Pressable accessibilityRole="button" accessibilityLabel="Mostrar todas las tareas de la semana" accessibilityState={{ selected: selectedDay === null, disabled: busy || loading }} disabled={busy || loading} onPress={() => { if (!busy && !loading) setDaySelection(null); }} style={({ pressed }) => [styles.weekButton, styles.allWeekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
+          {view === "agenda" ? <Pressable accessibilityRole="button" accessibilityLabel="Mostrar todas las tareas de la semana" accessibilityState={{ selected: selectedDay === null, disabled: busy || loading }} disabled={busy || loading} onPress={() => { if (!busy && !loading) setDaySelection(null); }} hitSlop={6} style={({ pressed }) => [styles.weekButton, styles.allWeekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
             <Text style={styles.weekActionLabel}>{"Toda\nsemana"}</Text>
           </Pressable> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={view === "today" ? "Ir a hoy" : "Ir a la semana actual"} accessibilityState={{ disabled: busy || loading }} disabled={busy || loading} onPress={() => { if (busy || loading) return; setDaySelection(null); setWeekSelection(null); onRangeChange(view === "today" ? dailyRange(today) : weekRange(today)); }} style={({ pressed }) => [styles.weekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={view === "today" ? "Ir a hoy" : "Ir a la semana actual"} accessibilityState={{ disabled: busy || loading }} disabled={busy || loading} onPress={() => { if (busy || loading) return; setDaySelection(null); setWeekSelection(null); onRangeChange(view === "today" ? dailyRange(today) : weekRange(today)); }} hitSlop={6} style={({ pressed }) => [styles.weekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
             <Text style={styles.weekActionLabel}>Hoy</Text>
           </Pressable>
           </View>
-          <Pressable accessibilityRole="button" accessibilityLabel="Semana siguiente" accessibilityState={{ disabled: busy || loading }} disabled={busy || loading} onPress={() => navigateWeek(1)} style={({ pressed }) => [styles.weekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Semana siguiente" accessibilityState={{ disabled: busy || loading }} disabled={busy || loading} onPress={() => navigateWeek(1)} hitSlop={6} style={({ pressed }) => [styles.weekButton, pressed && styles.pressed, (busy || loading) && styles.dayDisabled]}>
             <Ionicons name="chevron-forward-outline" size={22} color={palette.primary} accessible={false} />
           </Pressable>
         </View>
@@ -419,25 +419,6 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       {entityTabs}
       {preferenceError ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.preferenceError}>{preferenceError}</Text> : null}
 
-      <View style={[styles.search, searchFocused && styles.searchFocused]}>
-        <Ionicons name="search-outline" size={21} color={palette.textMuted} accessible={false} />
-        <TextInput
-          accessibilityLabel="Buscar tareas"
-          accessibilityHint="Busca por tarea, código, equipo, ubicación o cliente."
-          placeholder="Buscar tarea, código o equipo"
-          placeholderTextColor={palette.textMuted}
-          value={query}
-          onChangeText={setQuery}
-          onFocus={() => setSearchFocused(true)}
-          onBlur={() => setSearchFocused(false)}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          selectionColor={palette.primary}
-          style={styles.searchInput}
-        />
-        {query ? <IconButton name="close-outline" label="Borrar búsqueda" onPress={() => setQuery("")} /> : null}
-      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.filters}>
         {filters.map((item) => (
           <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityHint={countHint(statusCounts[item.value])} accessibilityState={{ selected: filter.includes(item.value), disabled: busy }} aria-pressed={filter.includes(item.value)} disabled={busy} onPress={() => toggleFilter(item.value)} style={({ pressed }) => [styles.filter, filter.includes(item.value) && styles.filterSelected, pressed && styles.pressed]}>
@@ -479,7 +460,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
               {section.date === today ? <Badge label="Hoy" tone="teal" /> : null}
             </View>
           ) : null}
-          {section.entries.map(({ group, work }) => <AssignmentWorkCard key={JSON.stringify([group.type, group.id, work.workType, work.id, work.scheduledDate])} group={group} work={work} queryDate={assignmentWorkQueryRange(work, range).startDate} companyBranchId={companyBranchId} onOpenWork={onOpenWork} onWorkStatus={onWorkStatus} busy={busy} generatedAt={data.generatedAt} offline={offline} online={offline?.online ?? !coveragePending} staleReadOnly={coveragePending || offline?.authBlocked === true || isPendingLocalWork(work)} />)}
+          {section.entries.map(({ group, work }) => <AssignmentWorkCard key={JSON.stringify([group.type, group.id, work.workType, work.id, work.scheduledDate])} currentWorkerId={user.workerId} group={group} work={work} queryDate={assignmentWorkQueryRange(work, range).startDate} companyBranchId={companyBranchId} onOpenWork={onOpenWork} onWorkStatus={onWorkStatus} busy={busy} generatedAt={data.generatedAt} offline={offline} online={offline?.online ?? !coveragePending} staleReadOnly={coveragePending || offline?.authBlocked === true || isPendingLocalWork(work)} />)}
         </View>
       )) : hasData && !loading && !error ? (
         <Card>
@@ -509,12 +490,6 @@ const styles = StyleSheet.create({
   heading: { flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 6 },
   pageTitle: { fontSize: 24, lineHeight: 30, fontWeight: "800", color: palette.navy },
   greeting: { fontSize: 13, lineHeight: 19, color: palette.textSecondary },
-  hero: { borderRadius: radius.md, padding: 14, gap: 4 },
-  heroTitle: { fontSize: 20, lineHeight: 26, fontWeight: "700", color: palette.white },
-  heroDescription: { fontSize: 13, lineHeight: 18, color: palette.onDark },
-  heroBottom: { marginTop: 4, gap: 6, flexDirection: "row", flexWrap: "wrap", columnGap: 14 },
-  heroStat: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 1 },
-  heroStatText: { ...typography.caption, color: palette.onDark, flexShrink: 1 },
   kpiRow: { flexDirection: "row", gap: 8 },
   kpi: { flex: 1, minWidth: 0, paddingVertical: 8, paddingHorizontal: 6, gap: 2, borderRadius: radius.md },
   kpiTop: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
@@ -522,24 +497,24 @@ const styles = StyleSheet.create({
   kpiValue: { fontSize: 22, lineHeight: 27, fontWeight: "800", color: palette.navy, fontVariant: ["tabular-nums"] },
   kpiTitle: { fontSize: 12, lineHeight: 18, fontWeight: "700", color: palette.text },
   kpiNote: { fontSize: 11, lineHeight: 16, color: palette.textMuted },
-  weekCard: { padding: 8, gap: 4 },
+  weekCard: { paddingHorizontal: 6, paddingVertical: 4, gap: 0 },
   weekNavigation: { flexDirection: "row", alignItems: "center", gap: 4 },
   weekHeaderContent: { flex: 1, minWidth: 0, flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 4 },
   weekCaption: { flexGrow: 1, flexShrink: 1, flexBasis: 64, minWidth: 64 },
   weekRange: { ...typography.caption, color: palette.textSecondary, textAlign: "center" },
-  weekButton: { minWidth: 44, minHeight: 44, padding: 4, borderRadius: radius.sm, alignItems: "center", justifyContent: "center" },
+  weekButton: { minWidth: 40, minHeight: 32, paddingHorizontal: 4, paddingVertical: 2, borderRadius: radius.sm, alignItems: "center", justifyContent: "center" },
   allWeekButton: { flexShrink: 0 },
   weekActionLabel: { ...typography.caption, fontWeight: "700", color: palette.primary, textAlign: "center", flexShrink: 1 },
   weekScroll: { flexGrow: 0 },
   weekDays: { flexGrow: 1 },
-  day: { minWidth: 44, minHeight: 52, flexGrow: 1, flexShrink: 0, flexBasis: "auto", alignItems: "center", justifyContent: "center", paddingHorizontal: 2, paddingVertical: 4, borderRadius: radius.sm, borderWidth: 1, borderColor: "transparent" },
+  day: { minWidth: 40, minHeight: 44, flexGrow: 1, flexShrink: 0, flexBasis: "auto", alignItems: "center", justifyContent: "center", paddingHorizontal: 2, paddingVertical: 2, borderRadius: radius.sm, borderWidth: 1, borderColor: "transparent" },
   dayToday: { borderColor: "#C4E1DC", backgroundColor: palette.primarySoft },
   dayUnavailable: { borderColor: palette.amber, backgroundColor: palette.amberSoft },
   dayDisabled: { opacity: 0.55 },
   daySelected: { backgroundColor: palette.primary, borderColor: palette.primary },
-  dayName: { ...typography.caption, color: palette.textSecondary },
+  dayName: { fontSize: 11, lineHeight: 15, fontWeight: "500", color: palette.textSecondary },
   dayCoverage: { fontSize: 10, lineHeight: 14, color: palette.amber, textAlign: "center", alignSelf: "stretch" },
-  dayNumber: { fontSize: 18, lineHeight: 24, fontWeight: "700", color: palette.text },
+  dayNumber: { fontSize: 17, lineHeight: 22, fontWeight: "700", color: palette.text },
   dayNumberToday: { color: palette.primary },
   dayTextSelected: { color: palette.white },
   textButton: { minHeight: 44, paddingHorizontal: 9, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 6, borderRadius: radius.sm },

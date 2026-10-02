@@ -90,6 +90,10 @@ export interface AssignmentWork {
   schedules?: AssignmentWorkSnapshot[];
   systemName?: string | null;
   componentName?: string | null;
+  /** Colación planificada del trabajo (HH:mm); solo si hasBreakTime es true. */
+  hasBreakTime?: boolean;
+  breakStartTime?: string | null;
+  breakEndTime?: string | null;
 }
 export interface AssignmentGroup {
   id: string;

@@ -11,7 +11,7 @@ function step(id: number, title: string, type: ChecklistStep["type"], options: C
 }
 function work(id: string, title: string, overrides: Partial<AssignmentWork> = {}): AssignmentWork {
   return {
-    id, title, summary: "Realiza la inspección con el equipo detenido y siguiendo los procedimientos de seguridad de la empresa. Registra los hallazgos y adjunta evidencia del trabajo realizado.", specialty: "Mecánica", workType: "productive", status: "pending", priority: "medium", scheduledDate: dateKey(), scheduledStartTime: "08:30", scheduledEndTime: "10:30", plannedMinutes: 120, executedMinutes: 0, elapsedSeconds: 0, commentsCount: 0, filesCount: 0, isFilesRequired: false, checklistDone: 0, checklistTotal: 0, isOverdue: false, canExecute: true, canEditDefinition: false, missingRequiredInfo: [], materials: [], checklists: [], responsibles: [{ id: 10001, name: "Alex Martínez" }], ...overrides,
+    id, title, summary: "Realiza la inspección con el equipo detenido y siguiendo los procedimientos de seguridad de la empresa. Registra los hallazgos y adjunta evidencia del trabajo realizado.", specialty: "Mecánica", hasBreakTime: true, breakStartTime: "13:00", breakEndTime: "14:00", workType: "productive", status: "pending", priority: "medium", scheduledDate: dateKey(), scheduledStartTime: "08:30", scheduledEndTime: "10:30", plannedMinutes: 120, executedMinutes: 0, elapsedSeconds: 0, commentsCount: 0, filesCount: 0, isFilesRequired: false, checklistDone: 0, checklistTotal: 0, isOverdue: false, canExecute: true, canEditDefinition: false, missingRequiredInfo: [], materials: [], checklists: [], responsibles: [{ id: 10001, name: "Alex Martínez" }], ...overrides,
   };
 }
 export function makeDemoData(): Assignments {

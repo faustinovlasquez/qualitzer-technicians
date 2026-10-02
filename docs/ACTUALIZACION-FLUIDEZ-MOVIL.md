@@ -1,4 +1,8 @@
-# Recepcion de materiales: gateway 1.0.29 / APK 1.0.65
+# Perfil propio y avisos activados: gateway 1.0.30 / APK 1.0.66
+
+El tecnico edita sus datos personales y su foto desde Mi perfil. Las notificaciones quedan activadas por defecto y la app solicita el permiso del sistema como con la ubicacion. Conserva timer, checklist, actividades, recepciones, recibos y colas anteriores. Requiere las rutas `profiles/me` del backend. Ver [actualizacion 1.0.66](ACTUALIZACION-1.0.66.md).
+
+## Historial: recepcion de materiales gateway 1.0.29 / APK 1.0.65
 
 Confirmacion propia sin firma, individual o por los comprobantes mostrados, con fecha del servidor, usuario y ubicacion puntual o motivo de ausencia. Conserva timer, checklist, actividades, recibos y colas anteriores. Requiere las rutas y recordatorios de Consumos V2 y MobileNotifications del backend. Ver [actualizacion 1.0.65](ACTUALIZACION-1.0.65.md). No equivale a una confirmacion offline ni a una prueba certificada de presencia.
 

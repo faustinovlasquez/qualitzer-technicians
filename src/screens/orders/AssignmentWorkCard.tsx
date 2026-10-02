@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { assignmentCodes } from "../../domain/assignmentCodes";
 import { assignmentDay, assignmentProgress, assignmentWorkForQueryDate, assignmentWorkSnapshotForQueryDate } from "../../domain/assignmentSchedule";
 import { clock, duration, isFinished, plainText, shortDate, STATUS_LABELS } from "../../domain/format";
@@ -13,6 +13,7 @@ import { isPendingLocalWork } from "../offline/offlineDashboardUi";
 import { operationsForWork, pendingTimerForWork, timerPendingLabel, type PendingTimer, type QueuedTimerMarker } from "../offline/offlineUi";
 import { operationNeedsAttention, syncUserError, userActionError as errorMessage } from "../offline/syncUserPresentation";
 import { AssignmentMetadataRow } from "./AssignmentMetadataRow";
+import { InfoBlock, infoStyles } from "./AssignmentInfoBlock";
 import { equipmentLabel, fullDate, safeCount, scheduleTime, statusTones } from "./assignmentPresentation";
 import { localTimerElapsedSeconds } from "../../offline/queueIntentions";
 import { completionForWork, completionStatusLabel } from "../offline/offlineUi";
@@ -30,6 +31,8 @@ export interface AssignmentWorkCardProps {
   queryDate?: string;
   companyBranchId?: number;
   pendingTimer?: PendingTimer | null;
+  /** Trabajador de la sesión: se marca como «Tú» entre los técnicos asignados. */
+  currentWorkerId?: number | null;
 }
 
 const priorities: { [K in AssignmentWork["priority"]]: { label: string; tone: BadgeTone } } = {
@@ -56,22 +59,68 @@ function WorkExecution({ work, generatedAt, online = true, pending = false, loca
   const elapsed = (localTimer ? localTimerElapsedSeconds(localTimer, now) : null) ?? work.elapsedSeconds + (running ? Math.max(0, (now - baseline) / 1000) : 0);
   const timing = assignmentProgress(work, elapsed);
 
+  const remaining = Math.max(0, timing.totalPlannedMinutes - timing.totalExecutedMinutes);
   return <View style={styles.execution} testID="assignment-work-execution">
     <View style={styles.between}>
-      <Text style={styles.executionTitle}>Ejecutado</Text>
-      <Text style={styles.elapsed}>{clock(timing.totalExecutedMinutes * 60)}</Text>
-    </View>
-    <View style={styles.between}>
-      <Text style={styles.note}>{timing.percentage === null ? "Sin tiempo planificado" : `${duration(timing.totalPlannedMinutes)} asignados`}</Text>
-      {timing.percentage !== null ? <Text style={[styles.count, timing.overtimeMinutes > 0 && styles.overtime]}>{timing.percentage}%</Text> : null}
+      <Text style={styles.overline}>Avance total del trabajo</Text>
+      <Text style={styles.progressValue} accessibilityLabel={`Ejecutado ${duration(timing.totalExecutedMinutes)}${timing.percentage === null ? "" : ` de ${duration(timing.totalPlannedMinutes)}, ${timing.percentage}%`}`}>
+        <Text style={styles.elapsed}>{running ? clock(timing.totalExecutedMinutes * 60) : duration(timing.totalExecutedMinutes)}</Text>
+        {timing.percentage !== null ? <Text> / {duration(timing.totalPlannedMinutes)}  </Text> : null}
+        {timing.percentage !== null ? <Text style={[styles.count, timing.overtimeMinutes > 0 && styles.overtime]}>{timing.percentage}%</Text> : null}
+      </Text>
     </View>
     {timing.percentage !== null ? <View accessibilityRole="progressbar" accessibilityLabel="Tiempo ejecutado frente al planificado" accessibilityValue={{ min: 0, max: 100, now: timing.barPercentage, text: `${timing.percentage}% ejecutado` }} style={styles.progressTrack}>
       <View style={[styles.progressFill, timing.overtimeMinutes > 0 && styles.overtimeFill, { width: `${timing.barPercentage}%` }]} />
     </View> : null}
-    {timing.overtimeMinutes > 0 ? <Text style={styles.overtime}>{duration(timing.overtimeMinutes)} sobre lo planificado</Text> : null}
+    {timing.percentage === null ? <Text style={styles.note}>Sin tiempo planificado</Text>
+      : timing.overtimeMinutes > 0 ? <Text style={styles.overtime}>{duration(timing.overtimeMinutes)} sobre lo planificado</Text>
+      : <Text style={styles.note}>Faltan {duration(remaining)}</Text>}
     {running ? <Text style={styles.note}>En ejecución · el servidor confirma el tiempo final.</Text> : null}
     {pending || !online ? <Text style={styles.note}>{localTimer?.localClock || !pending ? "Tiempo local · pendiente de confirmar" : "Último tiempo recibido"}</Text> : null}
   </View>;
+}
+
+function Description({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > 90 || text.includes("\n");
+  return <View style={styles.description}>
+    <Text style={styles.descriptionText} numberOfLines={expanded ? undefined : 2}>{text}</Text>
+    {long ? <Pressable accessibilityRole="button" accessibilityLabel={expanded ? "Leer menos de la descripción" : "Leer más de la descripción"} hitSlop={8} onPress={() => setExpanded(value => !value)}>
+      <Text style={styles.readMore}>{expanded ? "Leer menos" : "Leer más"}</Text>
+    </Pressable> : null}
+  </View>;
+}
+
+function initials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+function TeamChips({ responsibles, currentWorkerId }: { responsibles: AssignmentWork["responsibles"]; currentWorkerId?: number | null }) {
+  if (responsibles.length === 0) return null;
+  const isSelf = (id: number | string): boolean => currentWorkerId != null && String(id) === String(currentWorkerId);
+  const ordered = [...responsibles].sort((a, b) => Number(isSelf(b.id)) - Number(isSelf(a.id)));
+  return <View style={styles.team} accessible accessibilityLabel={`Técnicos asignados: ${ordered.map(person => isSelf(person.id) ? "tú" : person.name).join(", ")}`}>
+    <Ionicons name="people-outline" size={15} color={palette.textMuted} accessible={false} />
+    {ordered.map(person => {
+      const self = isSelf(person.id);
+      return <View key={String(person.id)} style={[styles.member, self && styles.memberSelf]}>
+        {person.avatarThumbnail ? <Image source={{ uri: person.avatarThumbnail }} style={styles.memberAvatar} accessible={false} />
+          : <View style={[styles.memberAvatar, styles.memberInitials]}><Text style={styles.memberInitialsText}>{initials(person.name)}</Text></View>}
+        <Text style={[styles.memberName, self && styles.memberNameSelf]} numberOfLines={1}>{self ? "Tú" : person.name}</Text>
+      </View>;
+    })}
+  </View>;
+}
+
+function hhmm(value: string | null | undefined): string | null {
+  const match = /^(\d{1,2}):(\d{2})/.exec(value ?? "");
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : null;
+}
+
+function breakTime(work: AssignmentWork): string | null {
+  const start = hhmm(work.breakStartTime);
+  const end = hhmm(work.breakEndTime);
+  return work.hasBreakTime === true && start && end ? `${start} - ${end}` : null;
 }
 
 export function AssignmentWorkCard(props: AssignmentWorkCardProps) {
@@ -82,7 +131,7 @@ export function AssignmentWorkCard(props: AssignmentWorkCardProps) {
   return <AssignmentWorkCardContent key={scopeKey} {...props} work={work ?? props.work} generatedAt={snapshot?.generatedAt ?? props.generatedAt} staleReadOnly={props.staleReadOnly || !work} />;
 }
 
-function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy = false, generatedAt, online = true, staleReadOnly = false, offline, queryDate, companyBranchId, pendingTimer: suppliedTimer }: AssignmentWorkCardProps) {
+function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy = false, generatedAt, online = true, staleReadOnly = false, offline, queryDate, companyBranchId, pendingTimer: suppliedTimer, currentWorkerId }: AssignmentWorkCardProps) {
   const [acting, setActing] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [queuedTimer, setQueuedTimer] = useState<QueuedTimerMarker | null>(null);
@@ -162,6 +211,11 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     catch (error) { setOperationError(errorMessage(error)); }
   }
 
+  const equipment = work.workEquipment ?? group.equipment;
+  const equipmentDetail = equipment ? [equipment.identifier, equipment.internalNumber].filter((value) => value && value !== equipment.label).join(" · ") || null : null;
+  const summary = plainText(work.summary);
+  const colacion = breakTime(work);
+
   return <Card style={[styles.card, finished && styles.closedCard]}>
     <View style={styles.between} testID={`assignment-work-heading-${work.id}`}>
       <View style={styles.codes}>
@@ -182,74 +236,75 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       <View style={styles.titleCopy}><Text numberOfLines={2} ellipsizeMode="tail" style={styles.title}>{title}</Text></View>
       <Ionicons name="chevron-forward-outline" size={21} color={palette.primary} accessible={false} />
     </Pressable>
-    <View style={styles.codes}>
-      <Badge label={priority.label} tone={priority.tone} />
+    {summary ? <Description text={summary} /> : null}
+    {work.priority !== "low" || (work.isOverdue && !finished) ? <View style={styles.codes}>
+      {work.priority !== "low" ? <Badge label={priority.label} tone={priority.tone} /> : null}
       {work.isOverdue && !finished ? <Badge label="Atrasada" tone="danger" /> : null}
-    </View>
-    <View style={styles.metadata}>
-      <AssignmentMetadataRow icon="hardware-chip-outline" text={equipmentLabel(work.workEquipment ?? group.equipment)} strong />
-      <AssignmentMetadataRow icon="location-outline" text={location?.trim() ? location : "Ubicación no informada"} />
-      {customer?.trim() ? <AssignmentMetadataRow icon="business-outline" text={customer} /> : null}
-    </View>
-    <View style={styles.schedule} testID="assignment-work-schedule">
-      <View style={styles.scheduleRow} accessibilityLabel={`${fullDate(work.scheduledDate)}. ${scheduleTime(work)}`}>
-        <Ionicons name="calendar-outline" size={16} color={palette.textMuted} accessible={false} />
-        <Text style={styles.scheduleText}>{scheduledLabel} · {scheduleTime(work)}</Text>
+    </View> : null}
+    <View style={infoStyles.list}>
+      {customer?.trim() ? <InfoBlock label="Cliente" value={customer} /> : null}
+      <InfoBlock label="Equipo" value={equipment ? equipment.label || equipmentLabel(equipment) : "Sin equipo asociado"} detail={equipmentDetail} />
+      <InfoBlock label="Ubicación" icon="location-outline" value={location?.trim() ? location : "Sin ubicación"} />
+      <View style={infoStyles.row} testID="assignment-work-schedule" accessibilityLabel={`${fullDate(work.scheduledDate)}. ${scheduleTime(work)}`}>
+        <InfoBlock label="Horario" icon="calendar-outline" tone="blue" value={`${scheduledLabel} · ${scheduleTime(work)}`} style={infoStyles.half} />
+        {colacion ? <InfoBlock label="Colación" icon="cafe-outline" tone="orange" value={colacion} style={infoStyles.half} /> : null}
       </View>
       {plannedDates.length > 1 ? <AssignmentMetadataRow icon="calendar-outline" text={`Fechas planificadas: ${plannedDates.map(shortDate).join(" · ")}`} /> : null}
     </View>
+    <TeamChips responsibles={work.responsibles} currentWorkerId={currentWorkerId} />
     {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
     {completion ? <Notice message={completion.status === "applied" ? "Entrega confirmada · actualizando" : "Entrega guardada · pendiente de sincronizar"} /> : null}
     <WorkExecution work={completion ? { ...work, status: "paused", elapsedSeconds: completion.localClock.elapsedSeconds } : work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending || Boolean(completion)} localTimer={completion ? null : pendingTimer} />
-    {total > 0 ? <View style={styles.execution}>
-      <View style={styles.between}><Text style={styles.note}>Verificación completada</Text><Text style={styles.count}>{done}/{total}</Text></View>
-      <View accessibilityRole="progressbar" accessibilityLabel="Lista de verificación" accessibilityValue={{ min: 0, max: total, now: done, text: `${done} de ${total} completados` }} style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${Math.round(done / total * 100)}%` }]} />
-      </View>
-    </View> : null}
-    <View style={styles.footer}>
-      {!finished ? <View style={styles.actions}>
-        <Button title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={styles.action} textStyle={styles.actionText} />
-        <Button title="Entregar" accessibilityLabel="Entregar: abrir revisión de requisitos, sin confirmar todavía" icon="checkmark-done-outline" variant="secondary" disabled={locked || !canReviewDelivery} onPress={() => openWork({ action: "deliver" })} style={styles.action} textStyle={styles.actionText} />
-      </View> : <Text style={styles.note}>Trabajo {work.status === "delivered" ? "entregado" : "completado"} · archivos, checklist y comentarios disponibles para consulta.</Text>}
-      {!finished && !work.canExecute ? <Text style={styles.note}>La ejecución aún no está habilitada. Pulsa Entregar para revisar los requisitos pendientes.</Text> : null}
-      <View style={styles.actions}>
-        <Button title={String(safeCount(work.filesCount))} accessibilityLabel={`Archivos (${safeCount(work.filesCount)})`} icon="attach-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.shortcut} textStyle={styles.shortcutText} />
-        <Button title={`${done}/${total}`} accessibilityLabel={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.shortcut} textStyle={styles.shortcutText} />
-        <Button title={String(safeCount(work.commentsCount))} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbubble-ellipses-outline" variant="secondary" disabled={locked} onPress={() => openWork({ tab: "comments" })} style={styles.shortcut} textStyle={styles.shortcutText} />
-      </View>
-      {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
+    {finished ? <Text style={styles.note}>Trabajo {work.status === "delivered" ? "entregado" : "completado"} · archivos, checklist y comentarios disponibles para consulta.</Text> : null}
+    {!finished && !work.canExecute ? <Text style={styles.note}>La ejecución aún no está habilitada. Pulsa Entregar para revisar los requisitos pendientes.</Text> : null}
+    <View style={styles.actionBar}>
+      {!finished ? <Button stacked title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} variant="secondary" iconColor={palette.primary} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={[styles.cell, styles.cellStart]} textStyle={styles.cellStartText} /> : null}
+      {!finished ? <Button stacked title="Entregar" accessibilityLabel="Entregar: abrir revisión de requisitos, sin confirmar todavía" icon="radio-button-on-outline" variant="secondary" iconColor={palette.danger} disabled={locked || !canReviewDelivery} onPress={() => openWork({ action: "deliver" })} style={[styles.cell, styles.cellDeliver]} textStyle={styles.cellDeliverText} /> : null}
+      <Button stacked title={`Archivos ${safeCount(work.filesCount)}`} accessibilityLabel={`Archivos (${safeCount(work.filesCount)})`} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.cell} textStyle={styles.cellText} />
+      <Button stacked title={`Checklist ${done}/${total}`} accessibilityLabel={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.cell} textStyle={styles.cellText} />
+      <Button stacked title={`Com. ${safeCount(work.commentsCount)}`} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbox-ellipses-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "comments" })} style={[styles.cell, styles.cellLast]} textStyle={styles.cellText} />
     </View>
+    {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
   </Card>;
 }
 
 const styles = StyleSheet.create({
-  card: { gap: 8, padding: 12, borderRadius: 8 },
+  card: { gap: 10, padding: 12, borderRadius: 12, overflow: "hidden" },
   closedCard: { backgroundColor: palette.successSoft, borderLeftWidth: 4, borderLeftColor: palette.primary },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
   codes: { flexDirection: "row", flexWrap: "wrap", gap: 6, flexShrink: 1 },
-  code: { ...typography.caption, fontWeight: "800", color: palette.primary, letterSpacing: 0.5, flexShrink: 1, backgroundColor: palette.primarySoft, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.sm, overflow: "hidden" },
-  titleButton: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radius.sm },
+  code: { ...typography.caption, fontWeight: "800", color: palette.primary, letterSpacing: 0.5, flexShrink: 1, backgroundColor: palette.primarySoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, overflow: "hidden" },
+  titleButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radius.sm },
   titleCopy: { flex: 1, minWidth: 0 },
-  title: { fontSize: 16, lineHeight: 22, fontWeight: "700", letterSpacing: 0, color: palette.navy },
-  metadata: { gap: 4 },
-  schedule: { gap: 4 },
-  scheduleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  scheduleText: { ...typography.caption, color: palette.textSecondary, flex: 1, minWidth: 0 },
+  title: { fontSize: 16, lineHeight: 22, fontWeight: "800", letterSpacing: 0, color: palette.navy, textTransform: "uppercase" },
+  description: { gap: 2, marginTop: -6 },
+  descriptionText: { fontSize: 13, lineHeight: 18, color: palette.textSecondary },
+  readMore: { fontSize: 12, lineHeight: 18, fontWeight: "700", color: palette.info },
+  team: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  member: { flexDirection: "row", alignItems: "center", gap: 5, paddingLeft: 2, paddingRight: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: palette.background, maxWidth: "100%" },
+  memberSelf: { backgroundColor: palette.infoSoft, borderWidth: 1, borderColor: "#C9D7EE" },
+  memberAvatar: { width: 22, height: 22, borderRadius: 11 },
+  memberInitials: { backgroundColor: palette.navyLight, alignItems: "center", justifyContent: "center" },
+  memberInitialsText: { fontSize: 9, fontWeight: "800", color: palette.white },
+  memberName: { fontSize: 11, lineHeight: 15, fontWeight: "600", color: palette.text, flexShrink: 1 },
+  memberNameSelf: { color: palette.info, fontWeight: "800" },
   execution: { gap: 4 },
-  executionTitle: { ...typography.caption, color: palette.text, fontWeight: "700", flexShrink: 1 },
+  overline: { fontSize: 10, lineHeight: 14, fontWeight: "800", letterSpacing: 0.8, color: palette.textMuted, textTransform: "uppercase", flexShrink: 1 },
+  progressValue: { fontSize: 12, lineHeight: 17, color: palette.textSecondary, fontVariant: ["tabular-nums"] },
   note: { ...typography.caption, color: palette.textSecondary },
-  elapsed: { ...typography.label, color: palette.primary, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  elapsed: { fontSize: 12, lineHeight: 17, color: palette.navy, fontWeight: "700", fontVariant: ["tabular-nums"] },
   count: { ...typography.caption, color: palette.primary, fontWeight: "700", fontVariant: ["tabular-nums"] },
   overtime: { ...typography.caption, color: palette.amber, fontWeight: "700" },
   overtimeFill: { backgroundColor: palette.amber },
   progressTrack: { height: 5, borderRadius: radius.pill, backgroundColor: palette.track, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: palette.teal, borderRadius: radius.pill },
-  footer: { gap: 6, borderTopWidth: 1, borderTopColor: palette.track, paddingTop: 8 },
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  action: { flex: 1, minWidth: 112, minHeight: 44, paddingHorizontal: 8, paddingVertical: 8, gap: 6, flexWrap: "wrap" },
-  actionText: { fontSize: 13, lineHeight: 18, maxWidth: "100%", minWidth: 0 },
-  shortcut: { flex: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 4, paddingVertical: 8, gap: 4 },
-  shortcutText: { fontSize: 13, lineHeight: 18 },
+  actionBar: { flexDirection: "row", marginHorizontal: -12, marginBottom: -12, borderTopWidth: 1, borderTopColor: palette.border },
+  cell: { flex: 1, minWidth: 0, borderRadius: 0, borderWidth: 0, borderRightWidth: 1, borderRightColor: palette.border, backgroundColor: palette.surface },
+  cellLast: { borderRightWidth: 0 },
+  cellStart: { backgroundColor: palette.primarySoft },
+  cellStartText: { color: palette.primary },
+  cellDeliver: { backgroundColor: palette.dangerSoft },
+  cellDeliverText: { color: palette.danger },
+  cellText: { color: palette.textSecondary },
   pressed: { opacity: 0.72 },
 });

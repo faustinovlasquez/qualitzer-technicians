@@ -4,8 +4,7 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "rea
 import type { OfflineSnapshot } from "../../domain/offline";
 import { palette } from "../../ui/theme";
 import { captureSyncAttempt, syncAttemptMessage, syncAttemptPresentation, syncSnapshotKey, type SyncAttempt } from "./syncAttemptPresentation";
-import { compactConnectionPresentation, connectionPresentation } from "../../offline/connectionPresentation";
-import { storageBytesLabel } from "../../offline/storageCapacity";
+import { compactConnectionPresentation, connectionPresentation, snapshotConnection } from "../../offline/connectionPresentation";
 
 export interface OfflineStatusBarProps {
   snapshot: OfflineSnapshot | null;
@@ -37,6 +36,9 @@ export function OfflineStatusBar({ snapshot, onOpen, onSync, embedded = false }:
   const color = presentation.tone === "success" ? palette.success : presentation.tone === "error" ? palette.danger : presentation.tone === "warning" ? palette.amber : palette.info;
   const backgroundColor = presentation.tone === "success" ? palette.successSoft : presentation.tone === "error" ? palette.dangerSoft : presentation.tone === "warning" ? palette.amberSoft : palette.infoSoft;
   const label = feedback ? syncAttemptMessage(feedback) : presentation.label;
+  // Una sola línea: el detalle de pendientes, conflictos y espacio se consulta al tocar la barra (centro offline).
+  const status = snapshot?.authBlocked ? "auth_required" : snapshot ? snapshotConnection(snapshot).status : null;
+  const title = feedback ? [feedback.title, feedback.detail].filter(Boolean).join(" · ") : (status === "ready" ? "Conectado" : status === "offline" || status === "unreachable" ? "Offline" : compact.title);
   async function sync(): Promise<void> {
     if (lock.current || disabled) return;
     lock.current = true;
@@ -52,11 +54,7 @@ export function OfflineStatusBar({ snapshot, onOpen, onSync, embedded = false }:
     <TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityHint={`${compact.detail}. ${presentation.secondary} Abre el centro offline: cobertura, pendientes y detalles de sincronización.`} onPress={() => { setResult(null); onOpen(); }} style={styles.summary}>
       <Ionicons name={presentation.ready ? "cloud-done-outline" : presentation.tone === "error" ? "cloud-offline-outline" : "cloud-outline"} size={18} color={color} accessible={false} />
       <View style={styles.text}>
-        <Text testID="connection-status-title" numberOfLines={1} ellipsizeMode="tail" style={[styles.label, { color: feedback?.tone === "error" ? palette.danger : color }]}>{feedback?.title ?? compact.title}</Text>
-        <Text testID="connection-status-detail" numberOfLines={1} ellipsizeMode="tail" style={styles.secondary}>{feedback?.detail ?? compact.detail}</Text>
-        {snapshot?.connection && ["offline", "unreachable"].includes(snapshot.connection.status) ? <Text testID="offline-storage-summary" style={styles.storage}>
-          {snapshot.storage ? `Archivos offline: ${storageBytesLabel(snapshot.storage.usedBytes)} usados · ${storageBytesLabel(snapshot.storage.availableBytes)} disponibles${snapshot.storage.capacitySource === "application" ? " (cuota local)" : " aprox."}` : "Archivos offline: espacio sin verificar"}
-        </Text> : null}
+        <Text testID="connection-status-title" numberOfLines={1} ellipsizeMode="tail" style={[styles.label, { color: feedback?.tone === "error" ? palette.danger : color }]}>{title}</Text>
       </View>
     </TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sincronizar ahora" accessibilityState={{ disabled, busy: syncing }} disabled={disabled} onPress={() => void sync()} style={[styles.sync, disabled && styles.disabled]}>
@@ -71,8 +69,8 @@ const styles = StyleSheet.create({
   text: { flex: 1, minWidth: 0 },
   secondary: { fontSize: 12, lineHeight: 17, color: palette.textSecondary },
   storage: { fontSize: 11, lineHeight: 15, color: palette.textSecondary, flexShrink: 1 },
-  summary: { flex: 1, minWidth: 0, minHeight: 44, paddingVertical: 4, paddingHorizontal: 4, flexDirection: "row", alignItems: "center", gap: 6 },
-  label: { fontSize: 12, lineHeight: 17, fontWeight: "600", color: palette.text, flexShrink: 1 },
-  sync: { width: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  summary: { flex: 1, minWidth: 0, minHeight: 36, paddingVertical: 2, paddingHorizontal: 4, flexDirection: "row", alignItems: "center", gap: 6 },
+  label: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: palette.text, flexShrink: 1 },
+  sync: { width: 44, minHeight: 36, alignItems: "center", justifyContent: "center" },
   disabled: { opacity: 0.45 },
 });

@@ -46,7 +46,7 @@ test("actual center uses manual API, presents partial results once, and drops th
   } finally { hooks.unmount(); }
 });
 
-test("actual compact bar captures post-render snapshots, stays at two lines and retires failures on automatic updates", async () => {
+test("actual compact bar captures post-render snapshots, stays at one line and retires failures on automatic updates", async () => {
   const hooks = durableReactFixture();
   const { OfflineStatusBar } = uiModule<typeof import("../src/screens/offline/OfflineStatusBar")>("screens/offline/OfflineStatusBar.tsx", hooks, {
     "react-native": { ActivityIndicator: "ActivityIndicator", View: "View", Text: "Text", TouchableOpacity: "TouchableOpacity", StyleSheet: { create: (value: object) => value } },
@@ -64,7 +64,7 @@ test("actual compact bar captures post-render snapshots, stays at two lines and 
     press(); await settle(); render(); let tree = render();
     assert.equal(calls, 1); assert.match(text(tree), /Se enviaron 2 cambios; quedan 7 pendientes/);
     const lines = elements<{ numberOfLines: number }>(tree, "Text");
-    assert.equal(lines.length, 2); assert.ok(lines.every((line) => line.props.numberOfLines === 1));
+    assert.equal(lines.length, 1); assert.ok(lines.every((line) => line.props.numberOfLines === 1));
     assert.doesNotMatch(text(tree), /MOBILE_|OFFLINE_/);
     props.snapshot = { ...initial(), lastSyncedAt: 2 }; render();
     fail = true; press(); await settle(); render(); tree = render();

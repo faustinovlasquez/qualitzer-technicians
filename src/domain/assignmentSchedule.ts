@@ -59,6 +59,17 @@ export function assignmentPlannedMinutes(work: ScheduledAssignmentWork): number 
   return work.schedules?.reduce((sum, snapshot) => sum + minutes(snapshot.work.plannedMinutes), 0) ?? minutes(work.plannedMinutes);
 }
 
+/** Minutos reportados (registrados por cronómetro o ejecución manual); no incluye el tiempo en curso aún no guardado. */
+export function assignmentExecutedMinutes(work: ScheduledAssignmentWork): number {
+  return work.schedules?.reduce((sum, snapshot) => sum + minutes(snapshot.work.executedMinutes), 0) ?? minutes(work.executedMinutes);
+}
+
+/** Horas-hombre con máximo un decimal: 480 min → "8", 90 min → "1,5". */
+export function manHours(totalMinutes: number): string {
+  const hours = Math.round(Math.max(0, totalMinutes) / 6) / 10;
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1).replace(".", ",");
+}
+
 export function mergeDailyAssignments(snapshots: readonly DailyAssignmentSnapshot[], selectedDate?: string): ScheduledAssignments {
   const ordered = [...snapshots].sort((left, right) => generatedTime(left.data.generatedAt) - generatedTime(right.data.generatedAt) || left.date.localeCompare(right.date));
   const newest = ordered.at(-1);

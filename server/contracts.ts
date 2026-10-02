@@ -57,6 +57,7 @@ const work = z.object({
   workCustomerName: nullableText.optional(), workEquipment: equipment.nullable().optional(), plannedDates: z.array(z.string()).optional(),
   workedDates: z.array(z.string()).refine(workedDatesAllowed).optional(),
   systemName: nullableText.optional(), componentName: nullableText.optional(),
+  hasBreakTime: z.boolean().optional(), breakStartTime: nullableText.optional(), breakEndTime: nullableText.optional(),
 });
 export const assignmentsSchema: z.ZodType<Assignments> = z.object({
   generatedAt: z.string(),
