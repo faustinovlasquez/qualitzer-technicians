@@ -59,5 +59,9 @@ export class NotificationEventDeduper {
 
 export function notificationFailure(error: unknown): string {
   if (error instanceof Error && /^MOBILE_PUSH_[A-Z_]{1,100}$/.test(error.message)) return error.message;
+  // Errores del servidor llegan con el código en `code` y un mensaje en español: se conserva el código para soporte
+  // (por ejemplo, el límite de pruebas por hora) en vez de un fallo genérico.
+  const code = error !== null && typeof error === "object" && "code" in error ? (error as { code: unknown }).code : undefined;
+  if (typeof code === "string" && /^[A-Z][A-Z0-9_]{2,100}$/.test(code)) return code;
   return "MOBILE_PUSH_CLIENT_OPERATION_FAILED";
 }
