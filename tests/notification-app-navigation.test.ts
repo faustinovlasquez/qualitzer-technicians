@@ -168,6 +168,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     if (id === "../infrastructure/privacyPolicy") return { openPrivacyPolicy: resolved };
     if (id === "../ui/colorScheme") return { readColorPreference: () => "light", changeColorPreference: resolved };
     if (id === "@expo/vector-icons") return { Ionicons: "Ionicons" };
+    if (id === "./permissions/PermissionsPanel") return { PermissionsPanel: "PermissionsPanel" };
     if (id === "expo-constants") return { __esModule: true, default: { expoConfig: { version: "1.0.84" } } };
     return forbidden(id);
   });

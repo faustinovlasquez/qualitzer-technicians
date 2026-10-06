@@ -19,16 +19,17 @@ import { ProfileHeaderCard } from "./profile/ProfileHeaderCard";
 import { PersonalDataEditor } from "./profile/PersonalDataEditor";
 import { connectionPresentation } from "../offline/connectionPresentation";
 import { openPrivacyPolicy } from "../infrastructure/privacyPolicy";
+import { PermissionsPanel } from "./permissions/PermissionsPanel";
 import { changeColorPreference, readColorPreference, type ColorPreference } from "../ui/colorScheme";
 
-type Section = "profile" | "appearance" | "security" | "location" | "company" | "connection" | "privacy" | "logout";
+type Section = "profile" | "permissions" | "appearance" | "security" | "location" | "company" | "connection" | "privacy" | "logout";
 const sectionTitles: { [K in Section]: string } = {
-  profile: "Mi perfil", appearance: "Apariencia", security: "Seguridad", location: "Ubicación", company: "Empresa y sucursal",
+  profile: "Mi perfil", permissions: "Permisos", appearance: "Apariencia", security: "Seguridad", location: "Ubicación", company: "Empresa y sucursal",
   connection: "Conexión con Qualitzer", privacy: "Privacidad y datos", logout: "Cerrar sesión",
 };
 
 /** Ajustes al estilo de Android: un menú agrupado y cada opción abre su propia vista de detalle. */
-export function ProfileScreen({ session, profileAccess, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, locationTracking, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck, onSectionChange }: {
+export function ProfileScreen({ session, profileAccess, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, locationTracking, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck, onSectionChange, onEnableNotifications }: {
   session: Session; gatewayUrl: string; busy: boolean; error: string | null; health: Health | null;
   profileAccess?: OwnProfileAccess;
   companyBranding: CompanyBrandingUi;
@@ -40,6 +41,8 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
   onBranch: (id: number) => void; onLogout: () => void; onCheck: () => void;
   /** Avisa a la App cuando hay una vista de detalle abierta, para que el botón atrás vuelva al menú. */
   onSectionChange?: (open: boolean) => void;
+  /** Activa el registro de avisos de este teléfono; también pide el permiso del sistema. */
+  onEnableNotifications?: () => Promise<unknown>;
 }) {
   const [section, setSection] = useState<Section | null>(null);
   const [signaturesOpen, setSignaturesOpen] = useState(false);
@@ -72,6 +75,7 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
     </View>
     {section === "profile" ? <ProfileHeaderCard session={session} branchName={currentBranch?.name ?? null} access={profileAccess} state={ownProfile} disabled={busy}
       onEdit={() => { ownProfile.clearMessages(); setEditingPersonal(true); }} /> : null}
+    {section === "permissions" ? <PermissionsPanel disabled={busy} onEnableNotifications={onEnableNotifications} /> : null}
     {section === "appearance" ? <AppearanceCard busy={busy} /> : null}
     {section === "security" && deviceSecurity ? <DeviceSecurityCard security={deviceSecurity} disabled={busy} /> : null}
     {section === "location" && locationTracking ? <LocationSettingsPanel key={`${session.tenant.id}:${session.user.id}:${session.user.workerId}:${session.branchId}`} tracking={locationTracking} disabled={busy} /> : null}
@@ -153,6 +157,7 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
         subtitle={`${presentation.title} · ${pending === 1 ? "1 pendiente" : `${pending} pendientes`}${conflicts > 0 ? ` · ${conflicts} por revisar` : ""}`}
         disabled={busy} onPress={onOffline} /> : null}
       {onNotificationSettings ? <MenuRow icon="notifications" color={palette.orange} title="Notificaciones" subtitle="Permisos · Avisos · Horario silencioso" disabled={busy} onPress={onNotificationSettings} /> : null}
+      <MenuRow icon="shield-half" color={palette.success} title="Permisos" subtitle="Notificaciones · Cámara · Ubicación" onPress={() => setSection("permissions")} />
       <MenuRow icon="color-palette" color={palette.violet} title="Apariencia" subtitle={`Modo ${appearance.toLowerCase()}`} onPress={() => setSection("appearance")} />
     </Group>
 

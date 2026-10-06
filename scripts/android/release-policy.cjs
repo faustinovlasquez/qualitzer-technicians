@@ -10,8 +10,8 @@ const packageName = "com.qualitzer.field";
 const applicationName = "Qualitzer técnicos";
 const certificateSha256 = "06da359352b67f02805c065a4f7054fc863cc606221dfe054462f261da32b510";
 const previous = Object.freeze({
-  name: "qualitzer-tecnicos-1.0.83-android.apk", version: "1.0.83", versionCode: 84,
-  sha256: "a1fa2a5c6935e517eb2a2b3fadc97e57fc6255e63127baf5d8c9074351b90c4e",
+  name: "qualitzer-tecnicos-1.0.84-android.apk", version: "1.0.84", versionCode: 85,
+  sha256: "6d154d020f524871e12756268adc05a4a11b60b0f6449ad81f34c53541fed3b8",
 });
 
 function releaseEndpoints(root, environment = process.env) {
