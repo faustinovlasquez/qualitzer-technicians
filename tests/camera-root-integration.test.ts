@@ -126,6 +126,7 @@ function fixture() {
     "location/useLocationTracking": { useLocationTracking: () => locationTracking },
     "location/LocationHistoryPanel": { LocationHistoryPanel: "LocationHistoryPanel" }, "location/LocationSettingsPanel": { LocationSettingsPanel: "LocationSettingsPanel" },
     "receipts/useMaterialReceipts": { useMaterialReceipts: () => materialReceipts }, "receipts/MaterialReceiptsScreen": { MaterialReceiptsScreen: "MaterialReceiptsScreen" },
+    "diagnostics/errorReporter": { flushAppErrors: async () => {}, installAppErrorReporting: () => {}, recordAppError: async () => {}, setAppErrorScreen: () => {} },
   };
   for (const name of ["LoginScreen", "TenantSelectionScreen", "DashboardScreen", "OrderDetailScreen", "ProfileScreen", "ForcedPasswordScreen", "SessionSetupScreen"]) mocks[`screens/${name}`] = { [name]: name };
   const src = resolve(__dirname, "../src");

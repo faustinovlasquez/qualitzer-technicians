@@ -1626,6 +1626,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     dismissCreationNotice: () => setCreationNotice(null),
     locationPort: remoteRepository(repository.current),
     receiptPort: remoteRepository(repository.current),
+    diagnosticsPort: remoteRepository(repository.current) as (TechnicianRepository & Partial<import("../domain/diagnostics").AppErrorPort>) | null,
     materialReceiptEventId,
     noticeError, dismissNoticeError: () => setNoticeError(null), activeTimers, openActiveTimer,
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,

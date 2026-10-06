@@ -42,11 +42,12 @@ import { useMaterialReceipts } from "./src/receipts/useMaterialReceipts";
 import { MaterialReceiptsScreen } from "./src/receipts/MaterialReceiptsScreen";
 import { pendingMaterialCount } from "./src/receipts/receiptTimeline";
 import { createDemoMaterialReceiptPort } from "./src/receipts/demoReceipts";
+import { flushAppErrors, installAppErrorReporting, recordAppError, setAppErrorScreen } from "./src/diagnostics/errorReporter";
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(_error: Error, _info: ErrorInfo) {}
+  componentDidCatch(error: Error, _info: ErrorInfo) { void recordAppError(error, "render"); }
   render() {
     if (!this.state.failed) return this.props.children;
     return <View style={styles.center}><EmptyState title="No se pudo mostrar esta pantalla" message="Los cambios enviados siguen guardados en Qualitzer. Vuelve a abrir la app para recuperar los borradores locales." /><Button title="Volver a intentar" onPress={() => this.setState({ failed: false })} /></View>;
@@ -55,6 +56,11 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTechnicianApp>; allowAutomaticPin: boolean }) {
   const locationTracking = useLocationTracking(app.session, app.gatewayUrl, app.offline, app.offlineVerifiedAt, app.locationPort, !app.restoring && !app.busy);
   useEffect(() => app.bindLocationActions(locationTracking.capture), [app.bindLocationActions, locationTracking.capture]);
+  // Reporte de errores: se capturan siempre y se envían al log de Qualitzer con sesión real verificada.
+  useEffect(() => { installAppErrorReporting(); }, []);
+  useEffect(() => { setAppErrorScreen(app.selected ? "work-detail" : app.selectedOrder ? "order-detail" : app.tab); }, [app.tab, app.selected, app.selectedOrder]);
+  const diagnosticsReady = app.session?.mode === "live" && app.liveVerified;
+  useEffect(() => { if (diagnosticsReady) void flushAppErrors(app.diagnosticsPort); }, [diagnosticsReady, app.session?.token, app.diagnosticsPort]);
   const [locationHistoryKey, setLocationHistoryKey] = useState<string | null>(null);
   const [locationSettingsOpen, setLocationSettingsOpen] = useState(false);
   const locationViewKey = JSON.stringify([app.session?.token, app.storageKey, app.session?.branchId, app.selected?.groupId, app.selected?.workId, app.selectedOrder?.id]);

@@ -3,6 +3,7 @@ import { materialDispositionInputSchema, materialReceiptInputSchema, materialRec
   type MaterialDispositionInput, type MaterialReceiptInput, type MaterialReceiptStatus } from "../domain/materialReceipts";
 import { locationAckSchema, locationBatchSchema, locationHistoryQuerySchema, locationHistorySchema, type LocationPoint } from "../domain/locationTracking";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
+import { appErrorBatchSchema, appErrorResultSchema, type AppError } from "../domain/diagnostics";
 import { userSignatureInputSchema, userSignatureOptionsSchema, type UserSignatureInput } from "../domain/userSignatures";
 import { ownAvatarInputSchema, ownProfileInputSchema, ownProfileSchema, type OwnAvatarInput, type OwnProfileInput } from "../domain/ownProfile";
 import { checklistAssignmentInputSchema, checklistAssignmentResultSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistCatalogQuery } from "../domain/checklistAssignment";
@@ -33,6 +34,9 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async confirmMaterialReceipts(input: MaterialReceiptInput) {
     return materialReceiptResultSchema.parse(await this.request<unknown>("/api/material-receipts/confirm", "POST", materialReceiptInputSchema.parse(input)));
+  }
+  async reportAppErrors(errors: AppError[]) {
+    return appErrorResultSchema.parse(await this.request<unknown>("/api/diagnostics/errors", "POST", appErrorBatchSchema.parse({ errors })));
   }
   async materialDispositions(input: MaterialDispositionInput) {
     const { id, ...body } = materialDispositionInputSchema.parse(input);

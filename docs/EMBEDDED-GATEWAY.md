@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.35
+# @qualitzer/mobile-gateway 1.0.36
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.35. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.36. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.36 agrega `POST /api/diagnostics/errors` con `{ errors: [{ message, stack, source, fatal, screen, appVersion, platform, occurredAt }] }` (1 a 10, contrato estricto, sesión requerida), que reenvía a `POST /mobile-diagnostics/errors`. El backend los escribe en su log con el título `MOBILE_APP_ERROR` y limita a 30 errores por usuario cada 10 minutos. La app 1.0.86 oculta correos, tokens y números largos antes de enviar. Conserva todo lo de 1.0.35. Sin migraciones.
 
 1.0.35 incluye todo lo de 1.0.34 (que no llegó a desplegarse) y agrega `GET /api/mobile-notifications/active-timers?companyBranchId=N`, que reenvía a `GET /mobile-notifications/active-timers` y devuelve `{ items: [{ groupType, groupId, workId, date, startedAt, title }] }` (máximo 20): los cronómetros en curso del técnico sin importar la fecha planificada del trabajo. La app 1.0.84 los muestra como alerta fija en Mi jornada. **Desplegar backend y gateway juntos.** Sin migraciones.
 

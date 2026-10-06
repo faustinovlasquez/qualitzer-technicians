@@ -13,6 +13,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |
   "/technician-dashboard/mobile-creations" | "/technician-dashboard/mobile-creations/options" |
+  "/mobile-diagnostics/errors" |
   "/mobile-notifications/status" | "/mobile-notifications/active-timers" | "/mobile-notifications/device" | "/mobile-notifications/inbox" | "/mobile-notifications/test" |
   `/mobile-notifications/device/${string}` | `/mobile-notifications/inbox/${string}/read` | `/mobile-notifications/inbox/${string}` |
   `/works/activity-checklist-steps/${number}` | `/maintenances/works/steps/${number}/response` |

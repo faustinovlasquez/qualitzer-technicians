@@ -16,6 +16,7 @@ import { createUserSignatureRouter } from "./userSignatures/routes";
 import { createUserProfileRouter } from "./userProfile/routes";
 import { createLocationRouter } from "./locations/routes";
 import { createMaterialReceiptRouter } from "./receipts/routes";
+import { createDiagnosticsRouter } from "./diagnostics/routes";
 import { type TenantRegistry, type TenantRuntime } from "./tenants";
 import type { SessionManager } from "./sessions";
 import { SessionContext } from "./session-context";
@@ -85,6 +86,7 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
     router.use("/user-profile", createUserProfileRouter(upstream));
     router.use("/worker-locations", createLocationRouter(upstream));
     router.use("/material-receipts", createMaterialReceiptRouter(upstream));
+    router.use("/diagnostics", createDiagnosticsRouter(upstream));
     mobileRouters.set(runtime, router);
     return router;
   };
