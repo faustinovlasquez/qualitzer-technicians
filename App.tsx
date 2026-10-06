@@ -43,11 +43,12 @@ import { MaterialReceiptsScreen } from "./src/receipts/MaterialReceiptsScreen";
 import { pendingMaterialCount } from "./src/receipts/receiptTimeline";
 import { createDemoMaterialReceiptPort } from "./src/receipts/demoReceipts";
 import { flushAppErrors, installAppErrorReporting, recordAppError, setAppErrorScreen } from "./src/diagnostics/errorReporter";
+import { recordNonFatal, setCrashContext, setCrashScreen } from "./src/diagnostics/nativeCrashReporter";
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(error: Error, _info: ErrorInfo) { void recordAppError(error, "render"); }
+  componentDidCatch(error: Error, _info: ErrorInfo) { void recordAppError(error, "render"); recordNonFatal(error, "render"); }
   render() {
     if (!this.state.failed) return this.props.children;
     return <View style={styles.center}><EmptyState title="No se pudo mostrar esta pantalla" message="Los cambios enviados siguen guardados en Qualitzer. Vuelve a abrir la app para recuperar los borradores locales." /><Button title="Volver a intentar" onPress={() => this.setState({ failed: false })} /></View>;
@@ -58,7 +59,8 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   useEffect(() => app.bindLocationActions(locationTracking.capture), [app.bindLocationActions, locationTracking.capture]);
   // Reporte de errores: se capturan siempre y se envían al log de Qualitzer con sesión real verificada.
   useEffect(() => { installAppErrorReporting(); }, []);
-  useEffect(() => { setAppErrorScreen(app.selected ? "work-detail" : app.selectedOrder ? "order-detail" : app.tab); }, [app.tab, app.selected, app.selectedOrder]);
+  useEffect(() => { const screen = app.selected ? "work-detail" : app.selectedOrder ? "order-detail" : app.tab; setAppErrorScreen(screen); setCrashScreen(screen); }, [app.tab, app.selected, app.selectedOrder]);
+  useEffect(() => { setCrashContext({ userId: app.session?.user.id ?? null, tenant: app.session ? app.session.tenant.portalOrigin.replace(/^https?:\/\//, "") : null, branchId: app.session?.branchId ?? null }); }, [app.session?.user.id, app.session?.tenant.portalOrigin, app.session?.branchId]);
   const diagnosticsReady = app.session?.mode === "live" && app.liveVerified;
   useEffect(() => { if (diagnosticsReady) void flushAppErrors(app.diagnosticsPort); }, [diagnosticsReady, app.session?.token, app.diagnosticsPort]);
   const [locationHistoryKey, setLocationHistoryKey] = useState<string | null>(null);

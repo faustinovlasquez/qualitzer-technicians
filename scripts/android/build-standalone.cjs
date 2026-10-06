@@ -133,7 +133,10 @@ async function main() {
     if (packageJson.dependencies?.["expo-dev-client"] || fs.existsSync(path.join(root, "node_modules/expo-dev-client"))) throw new Error("DEV_CLIENT_NOT_ALLOWED");
     const config = resolveReleaseConfig(root, environment);
     const pushConfig = verifyPushConfig(root, config);
-    if (config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.enabled !== false || config.android?.package !== "com.qualitzer.field" || config.version !== expected.version || config.android.versionCode !== expected.versionCode) throw new Error("INVALID_PUBLIC_RELEASE_CONFIG");
+    if (config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.android?.package !== "com.qualitzer.field" || config.version !== expected.version || config.android.versionCode !== expected.versionCode) throw new Error("INVALID_PUBLIC_RELEASE_CONFIG");
+    // OTA solo firmado con el certificado de Qualitzer y atado a la versión de la app.
+    if (config.updates?.enabled !== true || config.updates.codeSigningCertificate !== "./certs/certificate.pem" || config.updates.codeSigningMetadata?.keyid !== "main"
+      || config.runtimeVersion?.policy !== "appVersion" || !fs.existsSync(path.join(root, "certs/certificate.pem"))) throw new Error("INVALID_OTA_SIGNING_CONFIG");
     const profile = JSON.parse(fs.readFileSync(path.join(root, "eas.json"), "utf8")).build?.["standalone-apk"];
     if (profile?.developmentClient !== false || profile.android?.buildType !== "apk" || profile.env?.EXPO_PUBLIC_GATEWAY_URL !== undefined || profile.env?.BACKEND_URL !== undefined || profile.env?.EXPO_PUBLIC_STANDALONE !== "true") throw new Error("INVALID_STANDALONE_EAS_PROFILE");
     fs.writeFileSync(path.join(logs, "release-config.json"), JSON.stringify(config, null, 2).replace(/AIza[A-Za-z0-9_-]{35}/g, "[GOOGLE_API_KEY_REDACTED]"));

@@ -235,7 +235,7 @@ function main() {
     const config = JSON.parse(entry("assets/app.config"));
     ensure(bundle.length === publication.bundleBytes && digest(bundle) === publication.bundleSha256
       && bundle.subarray(0, 8).toString("hex") === "c61fbc03c103191f" && config.version === "1.0.14" && config.android.versionCode === 15
-      && config.android.package === publication.package && config.extra.gateway.standalone && config.updates.enabled === false, "APK_EMBEDDED_CONTENT_MISMATCH");
+      && config.android.package === publication.package && config.extra.gateway.standalone && config.updates.enabled === true && config.updates.codeSigningCertificate === "./certs/certificate.pem", "APK_EMBEDDED_CONTENT_MISMATCH");
     report.apk = { path: apkFile, bytes: bytes.length, sha256: apkSha, certificateSha256: certificate, signatureLog: signaturePath,
       signatureReexecuted: false, actualBundleSha256: digest(bundle), version: "1.0.14", versionCode: 15, previousSha256: oldSha, previousUnchanged: true };
     return report.apk;

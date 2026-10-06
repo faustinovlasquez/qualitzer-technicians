@@ -46,7 +46,11 @@ function inspectApk(filename, { gatewayUrl, architectures, badging, manifest, ve
   const bundle = entryBytes(bytes, entries.get("assets/index.android.bundle"));
   if (bundle.subarray(0, 8).toString("hex") !== "c61fbc03c103191f") throw new Error("APK_BUNDLE_IS_NOT_HERMES_BYTECODE");
   const config = JSON.parse(entryBytes(bytes, entries.get("assets/app.config")).toString("utf8"));
-  if (config.android?.package !== packageName || config.version !== version || config.android.versionCode !== versionCode || config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.enabled !== false || config.updates.useEmbeddedUpdate !== true) throw new Error("APK_EMBEDDED_CONFIG_INVALID");
+  if (config.android?.package !== packageName || config.version !== version || config.android.versionCode !== versionCode || config.extra?.gateway?.standalone !== true || config.extra.gateway.url !== gatewayUrl || config.updates?.useEmbeddedUpdate !== true) throw new Error("APK_EMBEDDED_CONFIG_INVALID");
+  // OTA solo firmado: certificado de Qualitzer, canal de Expo del proyecto y runtime atado a la versión de la app.
+  // Expo quita el certificado de la configuración pública del APK; la firma queda en el manifiesto de Android.
+  if (config.updates.enabled !== true || config.updates.url !== `https://u.expo.dev/${config.extra?.eas?.projectId}` || config.runtimeVersion?.policy !== "appVersion") throw new Error("APK_OTA_NOT_SIGNED");
+  if (!manifest.includes("expo.modules.updates.CODE_SIGNING_CERTIFICATE") || !manifest.includes("expo.modules.updates.CODE_SIGNING_METADATA")) throw new Error("APK_OTA_CERTIFICATE_NOT_EMBEDDED");
   if (config.name !== applicationName || !badging.includes(`application-label:'${applicationName}'`)) throw new Error("APK_APPLICATION_NAME_MISMATCH");
   if (config.icon !== "./assets/qualitzer-icon.png" || config.android.adaptiveIcon?.foregroundImage !== "./assets/qualitzer-adaptive.png") throw new Error("APK_BRANDING_ASSETS_MISMATCH");
   for (const component of ["CompanyShortcutActivity", "CompanyPinReceiver"]) {

@@ -177,6 +177,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["./src/receipts/useMaterialReceipts", { useMaterialReceipts: () => receipts }],
     ["./src/receipts/MaterialReceiptsScreen", { MaterialReceiptsScreen: "MaterialReceiptsScreen" }],
     ["./src/screens/notifications/ActiveTimersBanner", { ActiveTimersBanner: "ActiveTimersBanner" }],
+    ["./src/diagnostics/nativeCrashReporter", { recordNonFatal: () => {}, setCrashContext: () => {}, setCrashScreen: () => {} }],
     ["./src/diagnostics/errorReporter", { flushAppErrors: async () => {}, installAppErrorReporting: () => {}, recordAppError: async () => {}, setAppErrorScreen: () => {} }],
     ["./src/receipts/receiptTimeline", receiptTimelineModule], ["./src/ui/BranchSwitcher", { BranchSwitcher: "BranchSwitcher" }], ["./src/receipts/demoReceipts", { createDemoMaterialReceiptPort: () => ({}) }],
     ["react", react], ["react/jsx-runtime", { jsx, jsxs: jsx, Fragment: "Fragment" }], ["react-native", native],

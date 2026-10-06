@@ -140,7 +140,7 @@ interface ReleaseEnvironment {
 function evaluatedConfig(env: ReleaseEnvironment) {
   const inherited = { ...process.env };
   for (const key of ["BACKEND_URL", "EXPO_PUBLIC_GATEWAY_URL", "EXPO_PUBLIC_STANDALONE", "EAS_BUILD_PROFILE", "QUALITZER_BRAND_FILE", "EXPO_PROJECT_ID", "GOOGLE_SERVICES_FILE"]) delete inherited[key];
-  return spawnSync(process.execPath, ["-e", "const {getConfig}=require('@expo/config'); const {exp}=getConfig(process.cwd(), {skipPlugins:true}); process.stdout.write(JSON.stringify({gateway:exp.extra.gateway,updates:exp.updates}));"], {
+  return spawnSync(process.execPath, ["-e", "const {getConfig}=require('@expo/config'); const {exp}=getConfig(process.cwd(), {skipPlugins:true}); process.stdout.write(JSON.stringify({gateway:exp.extra.gateway,updates:exp.updates,runtimeVersion:exp.runtimeVersion}));"], {
     cwd: root, env: { ...inherited, EXPO_NO_DOTENV: "1", GOOGLE_MAPS_API_KEY: `AIza${"0".repeat(35)}`, ...env }, encoding: "utf8",
   });
 }
@@ -158,7 +158,11 @@ test("Expo evaluates actual standalone app config and APK profile without prebui
   for (const backendUrl of ["https://dev-api.example.com/api", "https://production-api.example.com/api"]) {
     const result = evaluatedConfig({ ...profile.env, BACKEND_URL: backendUrl, EAS_BUILD_PROFILE: "standalone-apk" });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), { gateway: { standalone: true, url: new URL("mobile", backendUrl).href }, updates: { enabled: false, useEmbeddedUpdate: true } });
+    const projectId = (JSON.parse(readFileSync(resolve(root, "app.json"), "utf8")) as { expo: { extra: { eas: { projectId: string } } } }).expo.extra.eas.projectId;
+    // OTA habilitado solo con firma de código de Qualitzer y el canal de producción.
+    assert.deepEqual(JSON.parse(result.stdout), { gateway: { standalone: true, url: new URL("mobile", backendUrl).href }, runtimeVersion: { policy: "appVersion" }, updates: { enabled: true, useEmbeddedUpdate: true,
+      url: `https://u.expo.dev/${projectId}`, checkAutomatically: "ON_LOAD", fallbackToCacheTimeout: 0, codeSigningCertificate: "./certs/certificate.pem",
+      codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" }, requestHeaders: { "expo-channel-name": "production" } } });
   }
 });
 

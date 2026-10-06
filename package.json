@@ -8,6 +8,8 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-community/netinfo": "12.0.1",
+    "@react-native-firebase/app": "^26.4.0",
+    "@react-native-firebase/crashlytics": "^26.4.0",
     "cors": "^2.8.6",
     "expo": "~57.0.20",
     "expo-background-task": "~57.0.19",
@@ -26,6 +28,7 @@
     "expo-sqlite": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "expo-task-manager": "~57.0.19",
+    "expo-updates": "~57.0.25",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
@@ -63,7 +66,8 @@
     "typecheck": "tsc --noEmit && tsc --project server/tsconfig.json",
     "test": "node scripts/test.cjs",
     "export:web": "expo export --platform web",
-    "export:mobile": "expo export --platform android --platform ios"
+    "export:mobile": "expo export --platform android --platform ios",
+    "publish:ota": "node scripts/android/publish-ota.cjs"
   },
   "overrides": {
     "xcode": {

@@ -62,6 +62,25 @@ function resolveBrandIcon(projectRoot: string, value: string, genericPath: strin
   return `./${path}`;
 }
 
+/**
+ * Actualizaciones OTA firmadas: la app solo instala código firmado con la clave privada de Qualitzer (fuera del repositorio).
+ * Runtime por versión de la app: un OTA solo llega a APKs de la misma versión; un cambio nativo exige APK nuevo.
+ */
+export const OTA_CERTIFICATE = "./certs/certificate.pem";
+function standaloneUpdates(config: Partial<ExpoConfig>, projectRoot: string): Pick<ExpoConfig, "updates" | "runtimeVersion"> {
+  const projectId = z.uuid().safeParse(config.extra?.eas?.projectId);
+  if (!projectId.success) throw new Error("OTA_REQUIRES_EAS_PROJECT_ID");
+  if (!existsSync(resolve(projectRoot, OTA_CERTIFICATE))) throw new Error("OTA_CODE_SIGNING_CERTIFICATE_MISSING");
+  const channel = process.env.QUALITZER_UPDATES_CHANNEL ?? "production";
+  if (!/^[a-z][a-z0-9-]{1,40}$/.test(channel)) throw new Error("QUALITZER_UPDATES_CHANNEL_INVALID");
+  return {
+    runtimeVersion: { policy: "appVersion" },
+    updates: { ...config.updates, enabled: true, useEmbeddedUpdate: true, url: `https://u.expo.dev/${projectId.data}`, checkAutomatically: "ON_LOAD",
+      fallbackToCacheTimeout: 0, codeSigningCertificate: OTA_CERTIFICATE, codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" },
+      requestHeaders: { "expo-channel-name": channel } },
+  };
+}
+
 export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   requireBaseConfig(config);
   const standaloneFlag = process.env.EXPO_PUBLIC_STANDALONE;
@@ -77,7 +96,6 @@ export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   config = {
     ...config,
     extra: { ...config.extra, gateway: { standalone, url: gatewayUrl } },
-    ...(standalone ? { updates: { ...config.updates, enabled: false, useEmbeddedUpdate: true } } : {}),
   };
   const projectId = process.env.EXPO_PROJECT_ID;
   if (projectId !== undefined) {
@@ -91,6 +109,7 @@ export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
     if (!statSync(filename).isFile()) throw new Error("GOOGLE_SERVICES_FILE_NOT_FOUND");
     config = { ...config, android: { ...config.android, googleServicesFile: filename } };
   }
+  if (standalone) config = { ...config, ...standaloneUpdates(config, projectRoot) };
   requireBaseConfig(config);
   const brandFile = process.env.QUALITZER_BRAND_FILE;
   const mapsFile = resolve(projectRoot, ".env");

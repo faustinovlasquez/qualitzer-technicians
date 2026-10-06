@@ -50,3 +50,6 @@ assets/branding/
 
 # local signed releases and build reports
 /artifacts/
+
+# Certificado PÚBLICO de firma OTA (la clave privada vive fuera del repositorio)
+!/certs/certificate.pem
