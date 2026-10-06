@@ -131,7 +131,7 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
     <View style={styles.actionBar}>
       <Button stacked title="Detalle" accessibilityLabel={worksTitle} icon="document-text-outline" variant="secondary" iconColor={palette.info} disabled={busy} onPress={() => onOpenGroup(group, "works")} style={[styles.cell, styles.cellPrimary]} textStyle={styles.cellPrimaryText} />
       <Button stacked title="Archivos" accessibilityLabel={filesTitle} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={busy} onPress={() => onOpenGroup(group, "files")} style={[styles.cell, !canDeliver && styles.cellLast]} textStyle={styles.cellText} />
-      {canDeliver ? <Button stacked title="Entregar OT" accessibilityLabel="Entregar OT" icon="checkmark-circle-outline" variant="secondary" iconColor="#C4510A" disabled={busy} onPress={() => onOpenGroup(group, "deliver")} style={[styles.cell, styles.cellLast, styles.cellDeliver]} textStyle={styles.cellDeliverText} /> : null}
+      {canDeliver ? <Button stacked title="Entregar OT" accessibilityLabel="Entregar OT" icon="checkmark-circle-outline" variant="secondary" iconColor={palette.orange} disabled={busy} onPress={() => onOpenGroup(group, "deliver")} style={[styles.cell, styles.cellLast, styles.cellDeliver]} textStyle={styles.cellDeliverText} /> : null}
     </View>
   </Card>;
 }
@@ -143,12 +143,12 @@ const styles = StyleSheet.create({
   typeIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: palette.primarySoft, alignItems: "center", justifyContent: "center" },
   type: { ...typography.caption, color: palette.textSecondary, flex: 1 },
   codes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
-  title: { ...typography.heading, color: palette.navy },
+  title: { ...typography.heading, color: palette.heading },
   statusLabel: { ...typography.caption, color: palette.text, fontWeight: "700" },
   metadata: { gap: 8 },
   metrics: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   metric: { flex: 1, minWidth: 105, padding: 13, gap: 3, borderRadius: radius.sm, backgroundColor: palette.background },
-  metricValue: { fontSize: 25, lineHeight: 31, fontWeight: "800", color: palette.navy, fontVariant: ["tabular-nums"] },
+  metricValue: { fontSize: 25, lineHeight: 31, fontWeight: "800", color: palette.heading, fontVariant: ["tabular-nums"] },
   caption: { ...typography.caption, color: palette.textSecondary },
   progress: { gap: 7 },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
   typeLine: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: -4 },
   typeText: { ...typography.caption, color: palette.textMuted },
   heading: { gap: 2 },
-  orderTitle: { fontSize: 16, lineHeight: 22, fontWeight: "800", color: palette.navy, textTransform: "uppercase" },
+  orderTitle: { fontSize: 16, lineHeight: 22, fontWeight: "800", color: palette.heading, textTransform: "uppercase" },
   orderProgress: { gap: 4 },
   overline: { fontSize: 10, lineHeight: 14, fontWeight: "800", letterSpacing: 0.8, color: palette.textMuted, textTransform: "uppercase" },
   actionBar: { flexDirection: "row", marginHorizontal: -12, marginBottom: -12, borderTopWidth: 1, borderTopColor: palette.border },
@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
   cellLast: { borderRightWidth: 0 },
   cellPrimary: { backgroundColor: palette.infoSoft },
   cellPrimaryText: { color: palette.info },
-  cellDeliver: { backgroundColor: "#FFF1E6" },
-  cellDeliverText: { color: "#C4510A" },
+  cellDeliver: { backgroundColor: palette.orangeSoft },
+  cellDeliverText: { color: palette.orange },
   cellText: { color: palette.textSecondary },
 });

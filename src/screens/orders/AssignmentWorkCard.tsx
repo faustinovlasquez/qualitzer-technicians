@@ -58,15 +58,17 @@ function WorkExecution({ work, generatedAt, online = true, pending = false, loca
     return () => clearInterval(timer);
   }, [running, baseline, localTimer]);
 
-  const elapsed = (localTimer ? localTimerElapsedSeconds(localTimer, now) : null) ?? work.elapsedSeconds + (running ? Math.max(0, (now - baseline) / 1000) : 0);
-  const timing = assignmentProgress(work, elapsed);
+  const localElapsed = localTimer ? localTimerElapsedSeconds(localTimer, now) : null;
+  const elapsed = localElapsed ?? work.elapsedSeconds + (running ? Math.max(0, (now - baseline) / 1000) : 0);
+  // Un inicio o pausa guardado offline aún no cambia el estado del servidor: el avance usa el estado local para contar el tiempo.
+  const timing = assignmentProgress(localElapsed !== null && localTimer ? { ...work, status: localTimer.payload.status, isManualExecution: false } : work, elapsed);
 
   const remaining = Math.max(0, timing.totalPlannedMinutes - timing.totalExecutedMinutes);
   return <View style={styles.execution} testID="assignment-work-execution">
     <View style={styles.between}>
       <Text style={styles.overline}>Avance total del trabajo</Text>
       <Text style={styles.progressValue} accessibilityLabel={`Ejecutado ${duration(timing.totalExecutedMinutes)}${timing.percentage === null ? "" : ` de ${duration(timing.totalPlannedMinutes)}, ${timing.percentage}%`}`}>
-        <Text style={styles.elapsed}>{running ? clock(timing.totalExecutedMinutes * 60) : duration(timing.totalExecutedMinutes)}</Text>
+        <Text style={styles.elapsed}>{running ? clock(Math.floor(timing.totalExecutedMinutes * 60)) : duration(timing.totalExecutedMinutes)}</Text>
         {timing.percentage !== null ? <Text> / {duration(timing.totalPlannedMinutes)}  </Text> : null}
         {timing.percentage !== null ? <Text style={[styles.count, timing.overtimeMinutes > 0 && styles.overtime]}>{timing.percentage}%</Text> : null}
       </Text>
@@ -148,10 +150,14 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const scope = { groupId: group.id, workId: work.id, startDate: date, endDate: date, companyBranchId };
   const scopedOperations = operationsForWork(offline, scope);
   const completion = completionForWork(scopedOperations, work);
-  const statusLabel = completion ? completionStatusLabel(completion) : STATUS_LABELS[work.status];
   const pendingTimer = offline !== undefined || suppliedTimer === undefined ? pendingTimerForWork(offline, scope, work) : suppliedTimer;
   const unobservedTimer = queuedTimer && pendingTimer?.id !== queuedTimer.operationId && !scopedOperations.some((operation) => operation.id === queuedTimer.operationId) ? queuedTimer : null;
   const desiredStatus = unobservedTimer?.status ?? pendingTimer?.payload.status ?? work.status;
+  // Mientras el inicio/pausa local no se confirma, el estado visible es el de la acción del técnico, no el último del servidor.
+  // Una acción local que requiere revisión no se presenta como estado vigente.
+  const healthyLocalTimer = unobservedTimer !== null || (pendingTimer !== null && ["pending", "syncing", "applied"].includes(pendingTimer.status));
+  const visibleStatus = completion || !healthyLocalTimer ? work.status : desiredStatus;
+  const statusLabel = completion ? completionStatusLabel(completion) : STATUS_LABELS[visibleStatus];
   const timerPending = Boolean(pendingTimer || unobservedTimer);
   const timerNeedsAttention = offline?.connection?.foreground === false || pendingTimer !== null && !["pending", "syncing", "applied"].includes(pendingTimer.status);
   const offlineReady = offline !== null && !offline?.authBlocked;
@@ -225,7 +231,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
         {localWork ? <Badge label="Guardado local · pendiente" tone="warning" /> : null}
         {codeLabels.map((code) => <Text key={code} style={styles.code}>{code}</Text>)}
       </View>
-      <Badge label={statusLabel} tone={completion ? "warning" : statusTones[work.status]} />
+      <Badge label={statusLabel} tone={completion ? "warning" : statusTones[visibleStatus]} />
     </View>
     <Pressable
       onPress={() => openWork()}
@@ -273,17 +279,17 @@ const styles = StyleSheet.create({
   closedCard: { backgroundColor: palette.successSoft, borderLeftWidth: 4, borderLeftColor: palette.primary },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
   codes: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, flexShrink: 1 },
-  priorityDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: palette.white, boxShadow: "0px 0px 0px 1px rgba(18, 44, 58, 0.18)" },
+  priorityDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: palette.surface, boxShadow: "0px 0px 0px 1px rgba(18, 44, 58, 0.18)" },
   code: { ...typography.caption, fontWeight: "800", color: palette.primary, letterSpacing: 0.5, flexShrink: 1, backgroundColor: palette.primarySoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, overflow: "hidden" },
   titleButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radius.sm },
   titleCopy: { flex: 1, minWidth: 0 },
-  title: { fontSize: 16, lineHeight: 22, fontWeight: "800", letterSpacing: 0, color: palette.navy, textTransform: "uppercase" },
+  title: { fontSize: 16, lineHeight: 22, fontWeight: "800", letterSpacing: 0, color: palette.heading, textTransform: "uppercase" },
   description: { gap: 2, marginTop: -6 },
   descriptionText: { fontSize: 13, lineHeight: 18, color: palette.textSecondary },
   readMore: { fontSize: 12, lineHeight: 18, fontWeight: "700", color: palette.info },
   team: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
   member: { flexDirection: "row", alignItems: "center", gap: 5, paddingLeft: 2, paddingRight: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: palette.background, maxWidth: "100%" },
-  memberSelf: { backgroundColor: palette.infoSoft, borderWidth: 1, borderColor: "#C9D7EE" },
+  memberSelf: { backgroundColor: palette.infoSoft, borderWidth: 1, borderColor: palette.infoBorder },
   memberAvatar: { width: 22, height: 22, borderRadius: 11 },
   memberInitials: { backgroundColor: palette.navyLight, alignItems: "center", justifyContent: "center" },
   memberInitialsText: { fontSize: 9, fontWeight: "800", color: palette.white },
@@ -293,7 +299,7 @@ const styles = StyleSheet.create({
   overline: { fontSize: 10, lineHeight: 14, fontWeight: "800", letterSpacing: 0.8, color: palette.textMuted, textTransform: "uppercase", flexShrink: 1 },
   progressValue: { fontSize: 12, lineHeight: 17, color: palette.textSecondary, fontVariant: ["tabular-nums"] },
   note: { ...typography.caption, color: palette.textSecondary },
-  elapsed: { fontSize: 12, lineHeight: 17, color: palette.navy, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  elapsed: { fontSize: 12, lineHeight: 17, color: palette.heading, fontWeight: "700", fontVariant: ["tabular-nums"] },
   count: { ...typography.caption, color: palette.primary, fontWeight: "700", fontVariant: ["tabular-nums"] },
   overtime: { ...typography.caption, color: palette.amber, fontWeight: "700" },
   overtimeFill: { backgroundColor: palette.amber },

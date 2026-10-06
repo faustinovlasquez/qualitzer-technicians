@@ -237,8 +237,8 @@ function TimeChip({ label, selected, disabled, onPress }: { label: string; selec
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background }, content: { padding: 16, gap: 16, width: "100%", maxWidth: 880, alignSelf: "center" },
-  header: { flexDirection: "row", alignItems: "center", gap: 8 }, grow: { flex: 1, minWidth: 0, gap: 4 }, title: { ...typography.title, color: palette.navy },
-  stack: { gap: 16 }, label: { ...typography.label, color: palette.navy }, caption: { ...typography.caption, color: palette.textSecondary },
+  header: { flexDirection: "row", alignItems: "center", gap: 8 }, grow: { flex: 1, minWidth: 0, gap: 4 }, title: { ...typography.title, color: palette.heading },
+  stack: { gap: 16 }, label: { ...typography.label, color: palette.heading }, caption: { ...typography.caption, color: palette.textSecondary },
   toggle: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48 }, toggleHeading: { flexDirection: "row", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 0 },
   switchTarget: { minWidth: 52, minHeight: 48, justifyContent: "center", alignItems: "center" }, divider: { height: 1, backgroundColor: palette.border },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, chip: { minHeight: 48, minWidth: 72, borderWidth: 1, borderColor: palette.border, borderRadius: radius.md, paddingHorizontal: 16, paddingVertical: 12, justifyContent: "center", alignItems: "center", flexGrow: 1 },

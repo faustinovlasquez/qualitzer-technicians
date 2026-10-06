@@ -9,6 +9,7 @@ import { gatewayLoopbackWarning, probeGatewayConnection, safeGatewayUrl, suggest
 import { uploadFetch } from "../infrastructure/photos";
 import { apiMessage, NetworkError } from "../infrastructure/errors";
 import { gatewayConfiguration } from "../infrastructure/gatewayConfig";
+import { openPrivacyPolicy } from "../infrastructure/privacyPolicy";
 
 const loginFailure = "No se pudo iniciar sesión. Revisa tus credenciales y tu conexión e inténtalo de nuevo.";
 const connectionFailure = "No se pudo conectar con Qualitzer. Revisa tu conexión a internet e inténtalo de nuevo. Si el problema continúa, contacta a tu administrador.";
@@ -226,6 +227,10 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
             </View>
           </View>
           <Text style={styles.footer}>Menos escritorio. Más terreno.</Text>
+          <Pressable accessibilityRole="link" accessibilityLabel="Política de privacidad" hitSlop={8} onPress={() => { void openPrivacyPolicy().catch(() => undefined); }} style={styles.privacy}>
+            <Ionicons name="shield-checkmark-outline" size={15} color={palette.primary} accessible={false} />
+            <Text style={styles.privacyText}>Política de privacidad</Text>
+          </Pressable>
         </ScrollView>
       </SafeAreaView>
     </KeyboardAvoidingView>
@@ -256,6 +261,8 @@ const styles = StyleSheet.create({
   divider: { flex: 1, height: 1, backgroundColor: palette.border },
   dividerText: { ...typography.caption, color: palette.textMuted, flexShrink: 1 },
   demo: { gap: 10 },
+  privacy: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, alignSelf: "center", minHeight: 40, paddingHorizontal: 12 },
+  privacyText: { ...typography.label, color: palette.primary, textDecorationLine: "underline" },
   demoNote: { ...typography.caption, color: palette.textSecondary, textAlign: "center" },
   connectionCard: { padding: 0 },
   connectionToggle: { minHeight: 76, padding: 16, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radius.lg },

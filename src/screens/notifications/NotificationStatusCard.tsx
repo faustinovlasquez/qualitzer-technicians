@@ -61,7 +61,7 @@ export function NotificationStatusCard({ notifications }: { notifications: Mobil
 
 const styles = StyleSheet.create({
   card: { gap: 12 }, row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
-  title: { ...typography.heading, color: palette.navy, flexGrow: 1 },
+  title: { ...typography.heading, color: palette.heading, flexGrow: 1 },
   actions: { gap: 4 }, detail: { ...typography.caption, color: palette.textSecondary },
   advanced: { gap: 10, borderTopWidth: 1, borderTopColor: palette.border, paddingTop: 16 }, failure: { gap: 4 },
 });

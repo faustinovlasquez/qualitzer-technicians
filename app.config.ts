@@ -97,6 +97,16 @@ export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   const mapsKey = process.env.GOOGLE_MAPS_API_KEY ?? (existsSync(mapsFile) ? parseEnv(readFileSync(mapsFile, "utf8")).GOOGLE_MAPS_API_KEY : undefined);
   if (mapsKey !== undefined && !/^AIza[A-Za-z0-9_-]{35}$/.test(mapsKey)) throw new Error("GOOGLE_MAPS_API_KEY_INVALID");
   if (standalone && !mapsKey) throw new Error("GOOGLE_MAPS_API_KEY_REQUIRED");
+  // Política de privacidad (Google Play): PRIVACY_POLICY_URL en el entorno o en .env; solo HTTPS. Cambiarla requiere nueva compilación.
+  const privacyInput = process.env.PRIVACY_POLICY_URL ?? (existsSync(mapsFile) ? parseEnv(readFileSync(mapsFile, "utf8")).PRIVACY_POLICY_URL : undefined);
+  let privacyPolicyUrl = "https://qualitzer.com/politica-de-privacidad";
+  if (privacyInput !== undefined && privacyInput !== "") {
+    let parsed: URL;
+    try { parsed = new URL(privacyInput); } catch { throw new Error("PRIVACY_POLICY_URL_INVALID"); }
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("PRIVACY_POLICY_URL_MUST_BE_HTTPS");
+    privacyPolicyUrl = parsed.href;
+  }
+  config = { ...config, extra: { ...config.extra, privacyPolicyUrl } };
   if (mapsKey) config = { ...config,
     plugins: [...(config.plugins ?? []).filter(plugin => (Array.isArray(plugin) ? plugin[0] : plugin) !== "react-native-maps"), ["react-native-maps", { androidGoogleMapsApiKey: mapsKey }]],
     extra: { ...config.extra, googleMaps: { native: true } },

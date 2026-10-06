@@ -88,7 +88,7 @@ function receiptHookFixture() {
     if (name === "expo-crypto") return { randomUUID: () => input.requestId };
     if (name === "react-native") return { AppState: { get currentState() { return state.appState; }, addEventListener: () => ({ remove() {} }) } };
     if (name === "../domain/materialReceipts") return receiptDomain;
-    if (name === "./receiptLocation") return { captureMaterialReceiptLocation: () => capture() };
+    if (name === "./receiptLocation") return { captureMaterialReceiptLocation: () => capture(), waitForActiveApp: async () => state.appState === "active" };
     if (name === "./receiptJournal") return receiptJournal;
     if (name === "../infrastructure/errors") return errors;
     throw new Error(name);

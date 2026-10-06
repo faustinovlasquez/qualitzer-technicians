@@ -149,6 +149,6 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
 
 const styles = StyleSheet.create({
   panel: { gap: 12 }, option: { borderWidth: 1, borderColor: palette.border, borderRadius: 12, padding: 14, gap: 6 },
-  selected: { borderColor: palette.primary, backgroundColor: palette.primarySoft }, name: { fontWeight: "700", color: palette.navy },
+  selected: { borderColor: palette.primary, backgroundColor: palette.primarySoft }, name: { fontWeight: "700", color: palette.heading },
   error: { color: palette.danger }, pagination: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
 });

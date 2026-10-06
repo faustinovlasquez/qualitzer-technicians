@@ -36,11 +36,16 @@ export function protectDeploymentCooldown(operations: OfflineOperation[], failed
   }
 }
 
+const SETTLED_FOR_COMPLETION = new Set(["applied", "conflict", "needs_review", "blocked"]);
 export function runnableOperations(operations: readonly OfflineOperation[]): OfflineOperation[] {
   const applied = new Set(operations.filter((operation) => operation.status === "applied").map((operation) => operation.id));
+  // Para la entrega, una evidencia (foto, respuesta, comentario, checklist, actividad) que ya terminó con un problema no la detiene;
+  // el cronómetro sí debe estar aplicado. Si falta una evidencia obligatoria el servidor deja la entrega en revisión, sin perderla.
+  const settled = new Set(operations.filter((operation) => operation.kind !== "timer" && operation.kind !== "create" && SETTLED_FOR_COMPLETION.has(operation.status)).map((operation) => operation.id));
+  const known = new Set(operations.map((operation) => operation.id));
   return operations.filter((operation) => (operation.status === "pending" || operation.status === "syncing")
     && (!operation.dependencyId || applied.has(operation.dependencyId))
-    && (operation.kind !== "completion" || operation.prerequisiteIds.every(id => applied.has(id))));
+    && (operation.kind !== "completion" || operation.prerequisiteIds.every(id => applied.has(id) || settled.has(id) || !known.has(id))));
 }
 
 export function awaitingDeploymentCounts(operations: readonly OfflineOperation[]): OfflineDeploymentCounts {

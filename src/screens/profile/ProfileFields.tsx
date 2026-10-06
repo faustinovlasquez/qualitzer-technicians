@@ -97,6 +97,6 @@ const styles = StyleSheet.create({
   chipText: { ...typography.label, color: palette.text },
   chipTextSelected: { color: palette.white },
   disabled: { opacity: 0.55 },
-  preview: { ...typography.heading, color: palette.navy, textAlign: "center" },
+  preview: { ...typography.heading, color: palette.heading, textAlign: "center" },
   clear: { alignSelf: "center", padding: 12 }, clearText: { ...typography.label, color: palette.danger },
 });

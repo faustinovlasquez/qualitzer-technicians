@@ -7,6 +7,7 @@ import { isOfflineQueuedError } from "../../domain/offline";
 import type { OfflineAttachment, OfflineOperation, OfflineOperationStatus, OfflineQueuedOutcome, OfflineScope, OfflineSnapshot } from "../../domain/offline";
 import { requiresDeployment } from "../../offline/connection";
 import { timerReconciledWithWork } from "../../offline/queueIntentions";
+import { isStatusConflict } from "../../offline/timerConflicts";
 
 export type PendingComment = Extract<OfflineOperation, { kind: "comment" }>;
 export type PendingAnswer = Extract<OfflineOperation, { kind: "answer" }>;
@@ -45,7 +46,7 @@ export interface QueuedTimerMarker { operationId: string; status: "in_progress" 
 export const PENDING_TIMER_LABEL = "Guardando…";
 export function timerPendingLabel(timer: PendingTimer | null): string {
   return timer?.status === "applied" ? "Actualizando…"
-    : timer?.status === "conflict" ? "Conflicto · revisar"
+    : timer?.status === "conflict" ? isStatusConflict(timer) ? "Actualizando con el servidor…" : "Conflicto · revisar"
     : timer?.status === "needs_review" || timer?.status === "blocked" ? "Requiere revisión"
     : timer?.status === "auth_required" ? "Verificar sesión"
     : timer?.payload.recordedAt ? timer.status === "syncing" ? "Sincronizando…" : "Guardado local" : PENDING_TIMER_LABEL;
@@ -66,6 +67,8 @@ export const operationStatusLabels: { [Status in OfflineOperationStatus]: string
 };
 
 export function canRetryOperation(operation: OfflineOperation, now = Date.now()): boolean {
+  // Un conflicto de estado de cronómetro/entrega se reintenta sobre el estado actual del servidor.
+  if (isStatusConflict(operation)) return true;
   if (operation.receipt && operation.receipt.state !== "applied") return false;
   if (operation.lastError === "MOBILE_SYNC_OPERATION_REUSED" || operation.lastError === "MOBILE_CREATION_REQUEST_CONFLICT") return false;
   if ((requiresDeployment(operation.lastError) || operation.lastError === "MOBILE_SYNC_IN_PROGRESS") && operation.nextAttemptAt > now) return false;

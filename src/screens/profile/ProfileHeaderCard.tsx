@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
   card: { gap: 16, paddingTop: 0, overflow: "hidden" },
   cover: { height: 72, marginHorizontal: -20, backgroundColor: palette.primarySoft },
   identity: { alignItems: "center", gap: 8, marginTop: -60 },
-  name: { ...typography.title, fontSize: 24, lineHeight: 30, color: palette.navy, textAlign: "center", marginTop: 4 },
+  name: { ...typography.title, fontSize: 24, lineHeight: 30, color: palette.heading, textAlign: "center", marginTop: 4 },
   legal: { ...typography.label, color: palette.textSecondary, textAlign: "center" },
   badges: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
   meta: { gap: 4, alignItems: "center", maxWidth: "100%" },

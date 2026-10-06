@@ -65,7 +65,7 @@ test("actual card keeps intent and freezes canonical elapsed across queued to ap
     initial.onPress(); pause.onPress(); action(tree, "Pausar").onPress(); await settle();
     assert.deepEqual(f.calls.map((call) => call.status), ["in_progress", "paused"], "old and current callbacks cannot repeat a confirmed operation and duplicate presses chain one pause");
     assert.equal(action(tree, "Pausar").title, "Pausar · Actualizando…");
-    assert.ok(elements<{ label: string }>(tree, "Badge").some((badge) => badge.props.label === "Pendiente"));
+    assert.ok(elements<{ label: string }>(tree, "Badge").some((badge) => badge.props.label === "En curso"));
     assert.equal(clockProps(tree)?.pending, true); assert.equal(clockProps(tree)?.work.elapsedSeconds, 45);
     f.props.work = readWork({ ...f.props.work, status: "paused", elapsedSeconds: 63 });
     const fresh = f.render();

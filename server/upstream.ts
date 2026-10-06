@@ -8,7 +8,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   "/user_signatures/me" | `/user_signatures/me/${number}` |
   "/profiles/me" | "/profiles/me/avatar" |
   "/worker-locations/batch" | "/worker-locations/me" |
-  "/inventory_consumptions_v2/my-receipts" | "/inventory_consumptions_v2/my-receipts/confirm" |
+  "/inventory_consumptions_v2/my-receipts" | "/inventory_consumptions_v2/my-receipts/confirm" | `/inventory_consumptions_v2/my-receipts/${number}/dispositions` |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |
@@ -123,6 +123,13 @@ export class Upstream {
           let data: unknown;
           try { data = JSON.parse(await readBody(response)); } catch { data = null; }
           const failure = z.object({ error: z.enum(["CONSUMPTION_NOT_FOUND", "CONSUMPTION_VERSION_CONFLICT", "CONSUMPTION_RECEIPT_NOT_PENDING", "CONSUMPTION_RECEIPT_LOCATION_EXPIRED", "CONSUMPTION_REQUEST_ID_REUSED"]) }).safeParse(data);
+          if (failure.success) throw new GatewayError(response.status, failure.data.error);
+          throw new GatewayError(response.status, "UPSTREAM_REJECTED");
+        }
+        if (/^\/inventory_consumptions_v2\/my-receipts\/[1-9]\d*\/dispositions$/.test(path) && [404, 409].includes(response.status)) {
+          let data: unknown;
+          try { data = JSON.parse(await readBody(response)); } catch { data = null; }
+          const failure = z.object({ error: z.enum(["CONSUMPTION_NOT_FOUND", "CONSUMPTION_VERSION_CONFLICT", "CONSUMPTION_RECEIPT_NOT_CONFIRMED", "CONSUMPTION_DISPOSITION_CLOSED", "CONSUMPTION_DISPOSITION_RETURN_PROCESSED"]) }).safeParse(data);
           if (failure.success) throw new GatewayError(response.status, failure.data.error);
           throw new GatewayError(response.status, "UPSTREAM_REJECTED");
         }

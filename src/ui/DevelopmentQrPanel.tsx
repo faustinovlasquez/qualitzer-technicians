@@ -142,7 +142,7 @@ function DevelopmentQrPanelContent({ gatewayUrl }: DevelopmentQrPanelProps) {
 const styles = StyleSheet.create({
   nativeDock: { position: "absolute", zIndex: 1000 },
   compact: { width: 164, padding: 9, gap: 4, borderWidth: 1, borderColor: palette.border, borderRadius: radius.md, backgroundColor: palette.surface, ...theme.shadow },
-  compactTitle: { color: palette.navy, fontSize: 13, lineHeight: 18, fontWeight: "800", textAlign: "center" },
+  compactTitle: { color: palette.heading, fontSize: 13, lineHeight: 18, fontWeight: "800", textAlign: "center" },
   compactQr: { width: 144, height: 144, backgroundColor: palette.white },
   compactPlaceholder: { width: 144, height: 144, alignItems: "center", justifyContent: "center", padding: 8, gap: 12 },
   compactAction: { color: palette.primary, fontSize: 12, lineHeight: 18, fontWeight: "700", textAlign: "center", paddingVertical: 9 },
@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: "row", alignItems: "center", gap: 8, padding: 16, borderBottomWidth: 1, borderColor: palette.border },
   heading: { flex: 1, gap: 4 },
   overline: { ...typography.overline, color: palette.primary },
-  title: { ...typography.heading, color: palette.navy },
+  title: { ...typography.heading, color: palette.heading },
   modalScroll: { flexGrow: 0, flexShrink: 1 },
   modalContent: { padding: 20, gap: 16 },
   modalQr: { alignSelf: "center", backgroundColor: palette.white },

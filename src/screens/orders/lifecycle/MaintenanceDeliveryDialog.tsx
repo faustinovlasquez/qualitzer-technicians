@@ -7,6 +7,7 @@ import { defaultUserSignature, ownSignatureOptions, type UserSignatureAccess, ty
 import { signatureImagePng } from "../../../infrastructure/signatureImage";
 import { UserSignaturesPanel } from "../../signatures/UserSignaturesPanel";
 import { Button, Field, SectionTitle } from "../../../ui/components";
+import { palette } from "../../../ui/theme";
 import { NumericSelectField } from "../../../ui/time/NumericSelectField";
 import { Notice } from "../../workDetail/DetailUi";
 import { DELIVERY_NOTE_LIMIT, deliveryDraftErrors, technicianDeliveryInput, lifecycleError, type DeliveryDraft, type DeliveryErrors } from "./lifecycleRules";
@@ -149,7 +150,7 @@ export function MaintenanceDeliveryDialog(props: MaintenanceDeliveryDialogProps)
           </View>
         </ScrollView>
         <View style={styles.footer}>
-          <Button title={props.mode === "demo" ? "Entregar OT en demo" : "Entregar OT"} icon="checkmark-circle-outline" loading={locked} disabled={unavailable || drawing} onPress={() => { void prepare(); }} style={{ backgroundColor: "#C4510A", borderColor: "#C4510A" }} />
+          <Button title={props.mode === "demo" ? "Entregar OT en demo" : "Entregar OT"} icon="checkmark-circle-outline" loading={locked} disabled={unavailable || drawing} onPress={() => { void prepare(); }} style={{ backgroundColor: palette.orange, borderColor: palette.orange }} />
           <Button title="Volver" variant="ghost" disabled={locked || drawing} onPress={props.onClose} />
         </View>
       </KeyboardAvoidingView>

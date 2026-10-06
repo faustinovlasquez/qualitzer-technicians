@@ -111,8 +111,20 @@ export function putCache(state: OfflineState, entry: CacheEntry): void {
   if (entry.json.length * 2 > OFFLINE_LIMITS.cacheBytes) throw new OfflineUnavailableError("OFFLINE_CACHE_ENTRY_TOO_LARGE");
   const entries = state.cache.filter((item) => item.key !== entry.key).concat(entry).sort((a, b) => a.fetchedAt - b.fetchedAt || a.key.localeCompare(b.key));
   let bytes = entries.reduce((total, item) => total + item.json.length * 2, 0);
-  while (entries.length > OFFLINE_LIMITS.cacheEntries || bytes > OFFLINE_LIMITS.cacheBytes) bytes -= (entries.shift()?.json.length ?? 0) * 2;
-  state.cache = entries;
+  // La agenda de cada día es la base para ver las OT y trabajar offline: se expulsan primero archivos, comentarios y catálogos,
+  // después agendas sin cambios pendientes y nunca la agenda de un día con trabajo local por enviar ni la entrada recién guardada.
+  const pendingDates = new Set(state.operations.filter((operation) => operation.status !== "applied")
+    .map((operation) => operation.kind === "create" ? operation.input.schedule.date : operation.scope.startDate));
+  const agenda = (item: CacheEntry) => item.key.startsWith("assignments:");
+  const order = [...entries.filter((item) => !agenda(item)), ...entries.filter((item) => agenda(item) && !pendingDates.has(item.key.slice("assignments:".length)))];
+  const evicted = new Set<CacheEntry>();
+  for (const item of order) {
+    if (entries.length - evicted.size <= OFFLINE_LIMITS.cacheEntries && bytes <= OFFLINE_LIMITS.cacheBytes) break;
+    if (item === entry) continue;
+    evicted.add(item);
+    bytes -= item.json.length * 2;
+  }
+  state.cache = entries.filter((item) => !evicted.has(item));
 }
 export function validateQuota(size: number, used: number, limit: number = OFFLINE_LIMITS.totalFileBytes): void {
   if (!Number.isSafeInteger(size) || size <= 0 || size > OFFLINE_LIMITS.fileBytes) throw new OfflineUnavailableError("OFFLINE_FILE_LIMIT_25_MIB");

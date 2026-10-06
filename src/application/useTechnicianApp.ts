@@ -50,7 +50,7 @@ async function pendingOfflineChanges(repo: TechnicianRepository | null): Promise
   return repo instanceof OfflineTechnicianRepository ? repo.hasPendingChanges() : hasPendingChanges(await createDurableStore());
 }
 
-type AppTab = "today" | "agenda" | "notifications" | "profile";
+type AppTab = "today" | "agenda" | "notifications" | "profile" | "materials";
 interface SelectedWork {
   groupId: string;
   workId: string;
@@ -538,14 +538,18 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       setError("Vuelve al listado antes de abrir la notificación. Se conservará tu selección y cualquier borrador.");
       return false;
     }
-    if (state.current.tab === "profile") {
+    // Los avisos de materiales solo cambian de pestaña: se pueden abrir también desde Mi perfil.
+    const materialNotice = payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER";
+    if (state.current.tab === "profile" && !materialNotice) {
       setError("Vuelve a la bandeja de avisos para abrir la notificación. Se conservan los cambios de configuración sin guardar.");
       return false;
     }
     if (payload.kind === "MOBILE_PUSH_TEST" || payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER") {
+      // Los avisos de entrega de materiales abren directamente la pestaña Materiales.
+      const target = payload.kind === "MOBILE_PUSH_TEST" ? "notifications" : "materials";
       if (payload.kind !== "MOBILE_PUSH_TEST") setMaterialReceiptEventId(payload.eventId);
-      state.current = { ...state.current, tab: "notifications" };
-      setTab("notifications"); setError(null);
+      state.current = { ...state.current, tab: target };
+      setTab(target); setError(null);
       return true;
     }
     const version = sessionVersion.current;

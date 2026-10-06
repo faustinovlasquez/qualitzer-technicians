@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.32
+# @qualitzer/mobile-gateway 1.0.34
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,11 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.32. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.34. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.34 agrega el historial de materiales confirmados y Utilizado/Devolver. `GET /api/material-receipts` acepta `status=CONFIRMED` (sin `status` se comporta igual que antes) y cada entrega puede traer `sourceCode`, `equipmentLabel`, `customerName`, `dispositionDeadline` y `dispositionClosed`; cada material puede traer `description`, `imageUrl`, `unitCost`, `currencyIso`, `returnedQuantity`, `disposition` y `dispositionAt`. Nueva ruta `POST /api/material-receipts/:id/dispositions` con `{ companyBranchId, version, lines: [{ lineId, disposition: "USED" | "RETURN_REQUESTED" }] }`, que reenvía a `POST /inventory_consumptions_v2/my-receipts/:id/dispositions` y verifica que la respuesta sea la misma entrega con las marcas aplicadas. El plazo es de 7 días desde la confirmación. **Desplegar backend y gateway juntos:** el gateway 1.0.33 rechaza los campos nuevos (contrato estricto) y la pestaña Materiales respondería 502. Conserva todo lo de 1.0.33. Sin migraciones.
+
+1.0.33 acepta en `GET /api/material-receipts` el contexto opcional que el backend agrega a cada entrega por confirmar: `requestedByName` y `requestedAt` (quién solicitó la confirmación y cuándo, desde el evento `CONSUMPTION_CONFIRMATION_REQUESTED`), `sourceType`, `warehouseName`, `reasonLabel` y `notes`. La app 1.0.76 los muestra en la pestaña Materiales. Un backend anterior sigue siendo válido. **Desplegar backend y gateway juntos:** el gateway 1.0.32 rechaza esos campos nuevos (contrato estricto) y la recepción de materiales respondería 502. Conserva todo lo de 1.0.32. Sin migraciones.
 
 1.0.32 corrige el bloqueo de acceso "Demasiados intentos": el límite de credenciales (10 por IP cada 15 minutos sobre `/api/auth/login`, `/login/start`, `/login/complete` y `/api/auth/forced_password`) ahora cuenta solo los intentos fallidos. Antes contaba también los accesos correctos y cada inicio de sesión consumía dos solicitudes, por lo que unos cinco ingresos seguidos bloqueaban al técnico. La protección contra fuerza bruta no cambia. Conserva todo lo de 1.0.31. Sin migraciones.
 

@@ -179,7 +179,11 @@ for (const status of ["conflict", "needs_review", "blocked", "auth_required"] as
   await assert.rejects(restarted.status(scope, { status: "in_progress" }), /REVIEW_REQUIRED/);
   await restarted.syncNow();
   assert.equal(f.upstream.commands.length, 0); assert.equal((await f.store.read("a")).operations.length, 2);
-  await assert.rejects(restarted.retry(first.operationId), /REVIEW_REQUIRED/);
+  if (status !== "conflict") { await assert.rejects(restarted.retry(first.operationId), /REVIEW_REQUIRED/); return; }
+  // Un conflicto de estado se reintenta sobre el estado real del servidor: la cadena se reescribe con identificadores nuevos.
+  await restarted.retry(first.operationId);
+  const after = await f.store.read("a");
+  assert.ok(after.operations.every(operation => operation.status !== "conflict" && operation.id !== first.operationId));
 });
 
 test("timer dependency in progress preserves retry delay, ordered commands and unchanged base", async () => {

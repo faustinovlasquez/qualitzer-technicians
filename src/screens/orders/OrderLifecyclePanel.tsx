@@ -8,6 +8,7 @@ import { assignmentWorkOrderCode } from "../../domain/assignmentCodes";
 import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../../domain/orderLifecycle";
 import type { UserSignatureAccess } from "../../domain/userSignatures";
 import { Badge, BodyText, Button, Card, SectionTitle } from "../../ui/components";
+import { palette } from "../../ui/theme";
 import { Notice } from "../workDetail/DetailUi";
 import { deleteLifecycleDraft, readLifecycleDraft, saveLifecycleDraft } from "./lifecycle/lifecycleDrafts";
 import { deliveryWarnings, initialDeliveryDraft, lifecycleError, type DeliveryDraft } from "./lifecycle/lifecycleRules";
@@ -178,7 +179,7 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     {readOnly && context?.finalizationNote ? <BodyText>{context.finalizationNote}</BodyText> : null}
     {!readOnly ? <View style={props.dock ? { flexDirection: "row", gap: 8, alignItems: "stretch" } : styles.stack}>
       {canStart || props.dock ? <Button title={canStart ? "Iniciar OT" : "OT iniciada"} icon="play-outline" variant="secondary" disabled={locked || !canStart} onPress={() => { setError(null); setSuccess(null); setDialog("start"); }} style={props.dock ? { flex: 1, minWidth: 0, minHeight: 44, flexDirection: "row", gap: 6, paddingHorizontal: 8, paddingVertical: 8 } : undefined} textStyle={props.dock ? { fontSize: 13, lineHeight: 18, textAlign: "center" } : undefined} /> : null}
-      <Button title="Entregar OT" icon="checkmark-circle-outline" disabled={locked || !canDeliver} onPress={() => openDelivery()} style={[{ backgroundColor: "#C4510A", borderColor: "#C4510A" }, props.dock && { flex: 1, minWidth: 0, minHeight: 44, flexDirection: "row", gap: 6, paddingHorizontal: 8, paddingVertical: 8 }]} textStyle={props.dock ? { fontSize: 13, lineHeight: 18, textAlign: "center" } : undefined} />
+      <Button title="Entregar OT" icon="checkmark-circle-outline" disabled={locked || !canDeliver} onPress={() => openDelivery()} style={[{ backgroundColor: palette.orange, borderColor: palette.orange }, props.dock && { flex: 1, minWidth: 0, minHeight: 44, flexDirection: "row", gap: 6, paddingHorizontal: 8, paddingVertical: 8 }]} textStyle={props.dock ? { fontSize: 13, lineHeight: 18, textAlign: "center" } : undefined} />
       {draft && !props.dock ? <Button title="Descartar borrador" variant="ghost" icon="trash-outline" disabled={locked} onPress={discardDraft} /> : null}
     </View> : null}
     {!props.dock ? <Button title="Actualizar estado de OT" icon="refresh-outline" variant="ghost" loading={action === "load"} disabled={locked} onPress={reload} /> : null}
@@ -186,7 +187,7 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     {dialog === "preflight" || dialog === "ready" ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setDialog(null); }}>
       <SafeAreaView style={styles.overlay}><View style={styles.modal}>
         <View style={styles.header}>
-          <Ionicons name={dialog === "ready" ? "checkmark-circle-outline" : "alert-circle-outline"} size={44} color={dialog === "ready" ? "#16805D" : "#C4510A"} accessible={false} />
+          <Ionicons name={dialog === "ready" ? "checkmark-circle-outline" : "alert-circle-outline"} size={44} color={dialog === "ready" ? palette.success : palette.orange} accessible={false} />
           <SectionTitle title={dialog === "ready" ? "Tus trabajos ya están entregados" : "Antes de entregar la OT"} subtitle={orderLabel} />
         </View>
         <ScrollView contentContainerStyle={styles.content}>
@@ -197,7 +198,7 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
           </View>}
         </ScrollView>
         <View style={styles.footer}>
-          <Button title={dialog === "ready" ? "Sí, entregar OT" : "Entendido, continuar"} icon="arrow-forward-outline" disabled={locked || !canDeliver} onPress={() => setDialog(dialog === "ready" ? "preflight" : "deliver")} style={{ backgroundColor: "#C4510A", borderColor: "#C4510A" }} />
+          <Button title={dialog === "ready" ? "Sí, entregar OT" : "Entendido, continuar"} icon="arrow-forward-outline" disabled={locked || !canDeliver} onPress={() => setDialog(dialog === "ready" ? "preflight" : "deliver")} style={{ backgroundColor: palette.orange, borderColor: palette.orange }} />
           <Button title={dialog === "ready" ? "Más tarde" : "Cancelar"} variant="ghost" disabled={locked} onPress={() => setDialog(null)} />
         </View>
       </View></SafeAreaView>

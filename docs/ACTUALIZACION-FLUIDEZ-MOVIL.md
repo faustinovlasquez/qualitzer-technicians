@@ -1,6 +1,14 @@
-# Acceso sin bloqueo por reingresos: gateway 1.0.32 / APK 1.0.72
+# Materiales por confirmar y confirmados: gateway 1.0.34 / APK 1.0.83
 
-El limite de intentos de acceso cuenta solo los fallidos; iniciar y cerrar sesion varias veces ya no bloquea. Requiere instalar el gateway 1.0.32; la app no cambia. Ver [actualizacion 1.0.72](ACTUALIZACION-1.0.72.md).
+Nuevo diseño de Materiales con OT, equipo, fotos y precios, pestañas Por confirmar / Confirmadas y Utilizado/Devolver con plazo de 7 días. Backend y gateway 1.0.34 deben desplegarse juntos. Ver [actualizacion 1.0.83](ACTUALIZACION-1.0.83.md).
+
+## Historial: materiales con linea de tiempo gateway 1.0.33 / APK 1.0.76
+
+Nueva pestaña Materiales con badge de pendientes y confirmacion por entrega o total. El backend agrega quien solicita la confirmacion y el contexto de la entrega; backend y gateway 1.0.33 deben desplegarse juntos. Ver [actualizacion 1.0.76](ACTUALIZACION-1.0.76.md).
+
+## Historial: acceso sin bloqueo por reingresos gateway 1.0.32 / APK 1.0.72
+
+El limite de intentos de acceso cuenta solo los fallidos; iniciar y cerrar sesion varias veces ya no bloquea. Ver [actualizacion 1.0.72](ACTUALIZACION-1.0.72.md).
 
 ## Historial: tarjetas, cabecera y logo de sucursal gateway 1.0.31 / APK 1.0.69
 

@@ -40,9 +40,9 @@ export interface ButtonProps {
 
 const buttonColors: { [K in ButtonVariant]: { background: string; foreground: string; border: string } } = {
   primary: { background: palette.primary, foreground: palette.white, border: palette.primary },
-  secondary: { background: palette.surface, foreground: palette.navy, border: palette.border },
+  secondary: { background: palette.surface, foreground: palette.heading, border: palette.border },
   ghost: { background: "transparent", foreground: palette.primary, border: "transparent" },
-  danger: { background: palette.danger, foreground: palette.white, border: palette.danger },
+  danger: { background: palette.dangerSolid, foreground: palette.white, border: palette.dangerSolid },
 };
 
 const badgeColors: { [K in BadgeTone]: { background: string; foreground: string } } = {
@@ -178,7 +178,7 @@ export function IconButton({ name, onPress, label, disabled = false }: IconButto
       disabled={disabled}
       style={({ pressed }) => [styles.iconButton, disabled && styles.disabled, pressed && styles.iconPressed]}
     >
-      <Ionicons name={name} size={22} color={palette.navy} accessible={false} />
+      <Ionicons name={name} size={22} color={palette.heading} accessible={false} />
     </Pressable>
   );
 }
@@ -214,7 +214,7 @@ export function CompanyMark({ tenant, size = 40 }: { tenant?: Tenant; size?: num
   const name = brandName(tenant);
   const logo = safeBrandLogo(tenant?.logo);
   const [failed, setFailed] = useState<string | null>(null);
-  const initials = name.split(/s+/).filter(Boolean).slice(0, 2).map(word => word[0]?.toUpperCase() ?? "").join("") || "Q";
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]?.toUpperCase() ?? "").join("") || "Q";
   const showLogo = logo !== null && failed !== logo;
   return <View accessible accessibilityRole="image" accessibilityLabel={name} testID="company-mark" style={[styles.companyMark, { width: size, height: size, borderRadius: Math.round(size * 0.25) }, !showLogo && styles.companyMarkInitials]}>
     {showLogo ? <Image source={{ uri: logo }} resizeMode="contain" style={{ width: size - 6, height: size - 6 }} onError={() => setFailed(logo)} accessible={false} />
@@ -282,6 +282,6 @@ const styles = StyleSheet.create({
   companyMarkInitials: { backgroundColor: palette.navy, borderColor: palette.navy },
   companyMarkText: { color: palette.white, fontWeight: "800", letterSpacing: 0.5 },
   logoOnly: { height: 38, width: 170, maxWidth: "100%", alignSelf: "flex-start" },
-  brandName: { color: palette.navy, fontSize: 23, lineHeight: 30, fontWeight: "800", letterSpacing: -1, flexShrink: 1 },
+  brandName: { color: palette.heading, fontSize: 23, lineHeight: 30, fontWeight: "800", letterSpacing: -1, flexShrink: 1 },
   brandNameCompact: { fontSize: 14, lineHeight: 20, fontWeight: "700", letterSpacing: 0 },
 });

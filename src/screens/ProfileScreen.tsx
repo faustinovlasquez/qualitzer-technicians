@@ -15,6 +15,9 @@ import type { OwnProfileAccess } from "../domain/ownProfile";
 import { useOwnProfile } from "./profile/useOwnProfile";
 import { ProfileHeaderCard } from "./profile/ProfileHeaderCard";
 import { PersonalDataEditor } from "./profile/PersonalDataEditor";
+import { connectionPresentation } from "../offline/connectionPresentation";
+import { openPrivacyPolicy } from "../infrastructure/privacyPolicy";
+import { changeColorPreference, readColorPreference, type ColorPreference } from "../ui/colorScheme";
 
 export function ProfileScreen({ session, profileAccess, companyBranding, deviceSecurity, onNotificationSettings, signatureAccess, locationTracking, gatewayUrl, busy, error, health, offline, offlineVerifiedAt, onOffline, onBranch, onLogout, onCheck }: {
   session: Session; gatewayUrl: string; busy: boolean; error: string | null; health: Health | null;
@@ -39,9 +42,11 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
     <SectionTitle title="Mi perfil" subtitle="Tu espacio de trabajo en terreno" />
     <ProfileHeaderCard session={session} branchName={currentBranch?.name ?? null} access={profileAccess} state={ownProfile} disabled={busy}
       onEdit={() => { ownProfile.clearMessages(); setEditingPersonal(true); }} />
+    {onOffline ? <OfflineCenterCard offline={offline ?? null} busy={busy} onOpen={onOffline} /> : null}
+    <AppearanceCard busy={busy} />
     {onNotificationSettings ? <Card style={styles.stack}>
       <SectionTitle title="Notificaciones" subtitle="Decide qué avisos recibir y cuándo" />
-      <BodyText>Configura permisos, nuevas asignaciones, recordatorios y horario silencioso. Tus avisos se consultan en la pestaña Avisos.</BodyText>
+      <BodyText>Configura permisos, nuevas asignaciones, recordatorios y horario silencioso. Tus avisos se consultan en la campana de la parte superior.</BodyText>
       <Button title="Configurar notificaciones" icon="notifications-outline" variant="secondary" disabled={busy} onPress={onNotificationSettings} />
     </Card> : null}
     {signatureAccess ? <Card style={styles.stack}>
@@ -89,6 +94,7 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
       <BodyText>Última verificación online del perfil: {offlineVerifiedAt ? new Date(offlineVerifiedAt).toLocaleString("es-CL") : "No disponible"}. No es una garantía de autorización actual sin conexión.</BodyText>
       <BodyText>La cola y la caché no se borran al cerrar sesión. El acceso local se deshabilita hasta un nuevo acceso verificado. Los borradores no están cifrados por la app: protege tu dispositivo con bloqueo de pantalla.</BodyText>
       {onOffline ? <Button title="Revisar cobertura y pendientes" variant="secondary" icon="cloud-offline-outline" onPress={onOffline} disabled={busy} /> : null}
+      <Button title="Política de privacidad" variant="secondary" icon="shield-checkmark-outline" onPress={() => { void openPrivacyPolicy().catch(() => undefined); }} />
     </Card>
     {confirmLogout ? <Card style={styles.stack}>
       <SectionTitle title="¿Cerrar sesión / cambiar empresa?" subtitle={`Si hay operaciones sin confirmar en el dispositivo, el cierre se bloqueará sin borrar nada. Si no hay pendientes, se eliminarán la sesión y los borradores aún no guardados en la cola de ${session.tenant.name}. La cola y la caché se conservan aisladas.`} />
@@ -98,7 +104,55 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
     <BodyText style={{ textAlign: "center" }}>Qualitzer técnicos · Versión 1.0.16</BodyText>
   </ScrollView>;
 }
+const appearanceOptions: Array<{ value: ColorPreference; label: string; icon: "sunny-outline" | "moon-outline" | "phone-portrait-outline" }> = [
+  { value: "light", label: "Claro", icon: "sunny-outline" },
+  { value: "dark", label: "Oscuro", icon: "moon-outline" },
+  { value: "system", label: "Según el teléfono", icon: "phone-portrait-outline" },
+];
+
+/** Apariencia de la app: al elegir otra opción se guarda y la app se recarga para aplicar los colores. */
+function AppearanceCard({ busy }: { busy: boolean }) {
+  const [current] = useState(readColorPreference);
+  const [saving, setSaving] = useState<ColorPreference | null>(null);
+  const [failed, setFailed] = useState(false);
+  async function choose(value: ColorPreference): Promise<void> {
+    if (value === current || saving) return;
+    setSaving(value); setFailed(false);
+    try { await changeColorPreference(value); }
+    catch { setFailed(true); setSaving(null); }
+  }
+  return <Card style={styles.stack}>
+    <SectionTitle title="Apariencia" subtitle="Modo claro u oscuro de la app" />
+    <View style={styles.appearance}>
+      {appearanceOptions.map(option => <Button key={option.value} title={option.label} icon={option.icon} variant={option.value === current ? "primary" : "secondary"}
+        accessibilityLabel={`Apariencia: ${option.label}${option.value === current ? ", seleccionada" : ""}`} loading={saving === option.value}
+        disabled={busy || Boolean(saving)} onPress={() => { void choose(option.value); }} style={styles.appearanceOption} />)}
+    </View>
+    <BodyText>Al cambiarla, la app se recarga en un instante. No se pierde tu sesión ni tus cambios pendientes.</BodyText>
+    {failed ? <Text accessibilityRole="alert" style={styles.error}>No se pudo aplicar la apariencia. Cierra y vuelve a abrir la app.</Text> : null}
+  </Card>;
+}
+
+function OfflineCenterCard({ offline, busy, onOpen }: { offline: OfflineSnapshot | null; busy: boolean; onOpen: () => void }) {
+  const presentation = connectionPresentation(offline);
+  const pending = offline?.pending ?? 0;
+  const conflicts = offline?.conflicts ?? 0;
+  return <Card style={styles.stack}>
+    <SectionTitle title="Centro offline" subtitle="Cobertura sin conexión y operaciones por enviar" />
+    <View style={styles.badges}>
+      <Badge label={presentation.title} tone={presentation.tone === "error" ? "danger" : presentation.tone} />
+      <Badge label={pending === 1 ? "1 pendiente" : `${pending} pendientes`} tone={pending > 0 ? "warning" : "neutral"} />
+      {conflicts > 0 ? <Badge label={`${conflicts} por revisar`} tone="danger" /> : null}
+    </View>
+    {presentation.secondary ? <BodyText>{presentation.secondary}</BodyText> : null}
+    <Button title="Abrir centro offline" icon="cloud-offline-outline" variant="secondary" disabled={busy} onPress={onOpen} />
+  </Card>;
+}
+
 const styles = StyleSheet.create({
+  badges: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  appearance: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  appearanceOption: { flexGrow: 1, flexBasis: 140 },
   brandingMessage: { color: palette.textSecondary, lineHeight: 22 },
   content: { width: "100%", maxWidth: 880, alignSelf: "center", padding: 22, gap: 20, paddingBottom: 32 }, stack: { gap: 14 },
   error: { color: palette.danger, lineHeight: 22 },

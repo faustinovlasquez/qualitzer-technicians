@@ -41,5 +41,5 @@ const styles = StyleSheet.create({
   name: { ...typography.label, color: palette.text, fontWeight: "700" },
   caption: { ...typography.caption, color: palette.textSecondary },
   quantity: { alignItems: "flex-end", maxWidth: "100%", gap: 3, backgroundColor: palette.background, borderRadius: radius.sm, padding: 10 },
-  amount: { ...typography.heading, color: palette.navy, fontVariant: ["tabular-nums"] },
+  amount: { ...typography.heading, color: palette.heading, fontVariant: ["tabular-nums"] },
 });

@@ -6,9 +6,9 @@ import { palette, radius } from "../../ui/theme";
 export type InfoTone = "neutral" | "blue" | "orange";
 
 const tones: { [K in InfoTone]: { background: string; accent: string; value: string } } = {
-  neutral: { background: palette.background, accent: palette.textMuted, value: palette.navy },
+  neutral: { background: palette.background, accent: palette.textMuted, value: palette.heading },
   blue: { background: palette.infoSoft, accent: palette.info, value: palette.info },
-  orange: { background: "#FFF1E6", accent: "#C2410C", value: "#9A3412" },
+  orange: { background: palette.orangeSoft, accent: palette.orange, value: palette.orange },
 };
 
 /** Bloque de dato de las tarjetas (cliente, equipo, ubicación, horario, colación), con el formato del panel web. */

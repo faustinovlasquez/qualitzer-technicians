@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
   actionDock: { flexShrink: 0, padding: 12, borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
   createDock: { position: "absolute", top: -72, right: 16, zIndex: 900 },
   createSpace: { paddingBottom: 88 },
-  headerTitle: { ...typography.label, color: palette.navy, fontWeight: "700" },
+  headerTitle: { ...typography.label, color: palette.heading, fontWeight: "700" },
   headerSubtitle: { ...typography.caption, color: palette.textSecondary, flexShrink: 1 },
   codes: { flexDirection: "row", alignItems: "center", gap: 6 },
   tabsContainer: { flexDirection: "row", alignItems: "center", backgroundColor: palette.surface, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: palette.border },

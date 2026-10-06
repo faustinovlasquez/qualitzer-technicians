@@ -30,6 +30,6 @@ export function RunningTimersNotice({ data, selectedRangeLabel, serverRemindersR
 
 const styles = StyleSheet.create({
   card: { gap: 12, borderColor: palette.amber }, row: { flexDirection: "row", gap: 10, alignItems: "center", flexWrap: "wrap" },
-  title: { ...typography.heading, color: palette.navy }, timer: { gap: 8 }, name: { ...typography.label, color: palette.navy },
+  title: { ...typography.heading, color: palette.heading }, timer: { gap: 8 }, name: { ...typography.label, color: palette.heading },
   detail: { ...typography.caption, color: palette.textSecondary },
 });

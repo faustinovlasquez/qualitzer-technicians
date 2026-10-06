@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
-import { materialReceiptInputSchema, materialReceiptResultSchema, materialReceiptsSchema, type MaterialReceiptInput } from "../domain/materialReceipts";
+import { materialDispositionInputSchema, materialReceiptInputSchema, materialReceiptResultSchema, materialReceiptSchema, materialReceiptsSchema, materialReceiptStatusSchema,
+  type MaterialDispositionInput, type MaterialReceiptInput, type MaterialReceiptStatus } from "../domain/materialReceipts";
 import { locationAckSchema, locationBatchSchema, locationHistoryQuerySchema, locationHistorySchema, type LocationPoint } from "../domain/locationTracking";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { userSignatureInputSchema, userSignatureOptionsSchema, type UserSignatureInput } from "../domain/userSignatures";
@@ -26,11 +27,16 @@ import { notificationDeleteResultSchema, notificationDeviceInputSchema, notifica
 
 
 export class HttpTechnicianRepository implements TechnicianRepository {
-  async materialReceipts(branchId: number) {
-    return materialReceiptsSchema.parse(await this.request<unknown>(`/api/material-receipts?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  async materialReceipts(branchId: number, status: MaterialReceiptStatus = "PENDING") {
+    const query = `companyBranchId=${positiveCreationIdSchema.parse(branchId)}${materialReceiptStatusSchema.parse(status) === "CONFIRMED" ? "&status=CONFIRMED" : ""}`;
+    return materialReceiptsSchema.parse(await this.request<unknown>(`/api/material-receipts?${query}`));
   }
   async confirmMaterialReceipts(input: MaterialReceiptInput) {
     return materialReceiptResultSchema.parse(await this.request<unknown>("/api/material-receipts/confirm", "POST", materialReceiptInputSchema.parse(input)));
+  }
+  async materialDispositions(input: MaterialDispositionInput) {
+    const { id, ...body } = materialDispositionInputSchema.parse(input);
+    return materialReceiptSchema.parse(await this.request<unknown>(`/api/material-receipts/${id}/dispositions`, "POST", body));
   }
   async equipmentLocation(scope: import("../domain/models").WorkScope, target: import("../domain/equipmentLocation").EquipmentLocationTarget) {
     const { equipmentLocationSchema, equipmentLocationTargetSchema } = await import("../domain/equipmentLocation");

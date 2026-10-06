@@ -16,6 +16,8 @@ import type { MobileNotificationsModel } from "../src/notifications/useMobileNot
 import type { ProfileScreen } from "../src/screens/ProfileScreen";
 import type { DeviceSecurityUi } from "../src/security/DeviceSecurityContext";
 import * as connectionPresentationModule from "../src/offline/connectionPresentation";
+import * as receiptTimelineModule from "../src/receipts/receiptTimeline";
+import type { MaterialReceipts } from "../src/domain/materialReceipts";
 import { loadSource, reactFixture, tenant } from "./helpers/tenant-challenge";
 
 type AppModel = ReturnType<typeof useTechnicianApp>;
@@ -134,6 +136,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     useState: <T>(initial: T | (() => T)) => activeHooks.react.useState(initial),
     useRef: <T>(initial: T) => activeHooks.react.useRef(initial),
     useEffect: (effect: () => void | (() => void), dependencies: readonly unknown[]) => activeHooks.react.useEffect(effect, dependencies),
+    useMemo: <T>(factory: () => T) => factory(),
   };
   const native = {
     ActivityIndicator: "ActivityIndicator", Pressable: "Pressable", View: "View", Text: "Text", ScrollView: "ScrollView",
@@ -161,12 +164,16 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     if (id === "./profile/ProfileHeaderCard") return { ProfileHeaderCard: "ProfileHeaderCard" };
     if (id === "./profile/PersonalDataEditor") return { PersonalDataEditor: "PersonalDataEditor" };
     if (id === "../location/LocationSettingsPanel") return { LocationSettingsPanel: "LocationSettingsPanel" };
+    if (id === "../offline/connectionPresentation") return connectionPresentationModule;
+    if (id === "../infrastructure/privacyPolicy") return { openPrivacyPolicy: resolved };
+    if (id === "../ui/colorScheme") return { readColorPreference: () => "light", changeColorPreference: resolved };
     return forbidden(id);
   });
-  const receipts = { data: null, pending: null, busy: false, error: "", ready: true, refresh: resolved, confirm: resolved };
+  const receipts: { data: MaterialReceipts | null; pending: null; busy: boolean; error: string; ready: boolean; recent: never[]; refresh: () => Promise<void>; confirm: () => Promise<void> } = { data: null, pending: null, busy: false, error: "", ready: true, recent: [], refresh: resolved, confirm: resolved };
   const imports = new Map<string, unknown>([
     ["./src/receipts/useMaterialReceipts", { useMaterialReceipts: () => receipts }],
     ["./src/receipts/MaterialReceiptsScreen", { MaterialReceiptsScreen: "MaterialReceiptsScreen" }],
+    ["./src/receipts/receiptTimeline", receiptTimelineModule], ["./src/ui/BranchSwitcher", { BranchSwitcher: "BranchSwitcher" }], ["./src/receipts/demoReceipts", { createDemoMaterialReceiptPort: () => ({}) }],
     ["react", react], ["react/jsx-runtime", { jsx, jsxs: jsx, Fragment: "Fragment" }], ["react-native", native],
     ["@expo/vector-icons", { Ionicons: "Ionicons" }], ["expo-status-bar", { StatusBar: "StatusBar" }],
     ["react-native-safe-area-context", { SafeAreaView: "SafeAreaView", SafeAreaProvider: "SafeAreaProvider" }],
@@ -243,7 +250,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
 }
 
 function navTab(tree: Element, label: string): Element {
-  return one(tree, element => element.type === "Pressable" && element.props.accessibilityRole === "tab"
+  return one(tree, element => element.type === "Pressable" && element.props.testID === "header-notifications"
     && element.props.accessibilityLabel === label);
 }
 
@@ -259,30 +266,29 @@ for (const tab of ["notifications", "profile"] as const) {
     assert.equal(f.app.notifications.state?.inbox.length, 1);
     const avisos = navTab(f.tree, "Avisos, 87 sin leer");
     assert.equal(avisos.props.accessibilityState?.selected, tab === "notifications");
-    assert.deepEqual(textLeaves(avisos), [87, "Avisos"]);
+    assert.deepEqual(textLeaves(avisos), [87]);
     const tabs = elements(f.tree).filter(element => element.props.accessibilityRole === "tab");
-    assert.equal(tabs.length, 4);
-    assert.deepEqual(tabs.flatMap(textLeaves).filter(value => typeof value === "number"), [87]);
+    assert.deepEqual(tabs.flatMap(textLeaves), ["Mi jornada", "Agenda", "Materiales"]);
     assert.equal(elements(avisos).filter(element => element.type === "Text" && element.props.children === 87).length, 1);
   });
 }
 
 test("actual App caps only the visual badge at 99+ and announces all 100 unread", t => {
   const f = fixture("notifications", 100); t.after(f.close);
-  assert.deepEqual(textLeaves(navTab(f.tree, "Avisos, 100 sin leer")), ["99+", "Avisos"]);
+  assert.deepEqual(textLeaves(navTab(f.tree, "Avisos, 100 sin leer")), ["99+"]);
 });
 
 for (const count of [0, null] as const) {
   test(`actual App unread ${count}: no badge and plain Avisos accessibility label`, t => {
     const f = fixture("profile", count); t.after(f.close);
-    assert.deepEqual(textLeaves(navTab(f.tree, "Avisos")), ["Avisos"]);
+    assert.deepEqual(textLeaves(navTab(f.tree, "Avisos")), []);
   });
 }
 
 test("actual App absent notification state does not invent a numeric badge", t => {
   const f = fixture(); t.after(f.close);
   f.app.notifications = { ...f.app.notifications, state: null };
-  assert.deepEqual(textLeaves(navTab(f.render(), "Avisos")), ["Avisos"]);
+  assert.deepEqual(textLeaves(navTab(f.render(), "Avisos")), []);
 });
 
 test("actual Profile button opens local Settings with the same model; Back returns without changing the app tab", t => {
@@ -386,34 +392,41 @@ test("actual App demo/null notifications keeps navigation and Profile Settings r
   f.app.notifications = { ...f.app.notifications, state: null }; f.render();
   assert.equal(f.app.session?.user.workerId, 42);
   assert.equal(f.brandingCalls.at(-1)?.input.session?.mode, "demo");
-  assert.deepEqual(textLeaves(navTab(f.tree, "Avisos")), ["Avisos"]);
+  assert.deepEqual(textLeaves(navTab(f.tree, "Avisos")), []);
   press(f.settingsButton());
   assert.equal(one(f.render(), element => element.type === "NotificationSettingsScreen").props.notifications?.client, null);
 });
 
-test("actual App material receipt screen handles Android Back without navigating beneath it", context => {
-  const current = fixture("notifications"); context.after(current.close);
-  const button = one(current.tree, element => element.type === "Button" && element.props.title === "Materiales por recibir");
-  press(button); one(current.render(), element => element.type === "MaterialReceiptsScreen");
-  current.receipts.busy = true; current.render();
-  for (const handler of current.backHandlers) assert.equal(handler(), true);
-  one(current.render(), element => element.type === "MaterialReceiptsScreen");
-  current.receipts.busy = false; current.security.blocked = true; current.render();
-  for (const handler of current.backHandlers) handler();
-  one(current.render(), element => element.type === "MaterialReceiptsScreen");
-  current.security.blocked = false; current.render();
-  for (const handler of current.backHandlers) handler();
-  one(current.render(), element => element.type === "NotificationCenterScreen");
-  assert.equal(current.app.tab, "notifications");
+function materialTab(tree: Element): Element {
+  return one(tree, element => element.type === "Pressable" && element.props.accessibilityRole === "tab" && String(element.props.accessibilityLabel).startsWith("Materiales"));
+}
+const pendingDelivery = (id: number, products: number, receiptStatus: "PENDING" | "INCIDENT" = "PENDING"): MaterialReceipts["items"][number] => ({
+  id, version: 1, code: `CE-${id}`, sourceLabel: "OT-1", destination: "Planta", deliveredAt: "2026-09-12T12:00:00Z", receiptStatus,
+  products: Array.from({ length: products }, (_, index) => ({ id: id * 10 + index, productId: index + 1, name: `Producto ${index}`, code: `P-${index}`, quantity: 1, unit: "UN" })),
 });
 
-test("actual App opens material notification and closes its screen when the session changes", context => {
-  const current = fixture("notifications"); context.after(current.close);
-  current.app.materialReceiptEventId = "00000000-0000-4000-8000-000000000123";
+test("actual App Materiales tab shows the pending material badge and opens the timeline screen", context => {
+  const current = fixture("today"); context.after(current.close);
+  assert.deepEqual(textLeaves(materialTab(current.tree)), ["Materiales"]);
+  current.receipts.data = { hasMore: false, items: [pendingDelivery(1, 2), pendingDelivery(2, 1, "INCIDENT")] };
+  const tab = materialTab(current.render());
+  assert.equal(tab.props.accessibilityLabel, "Materiales, 3 por confirmar");
+  assert.deepEqual(textLeaves(tab), [3, "Materiales"]);
+  press(tab);
+  assert.deepEqual(current.tabCalls, ["materials"]);
   one(current.render(), element => element.type === "MaterialReceiptsScreen");
-  assert.ok(current.app.session);
-  current.app.session = { ...current.app.session, token: "new-session" };
-  one(current.render(), element => element.type === "NotificationCenterScreen");
+});
+
+test("actual App Android Back leaves Materiales only when no confirmation is running", context => {
+  const current = fixture("materials"); context.after(current.close);
+  one(current.tree, element => element.type === "MaterialReceiptsScreen");
+  current.receipts.busy = true; current.render();
+  assert.equal(materialTab(current.tree).props.disabled, true);
+  for (const handler of current.backHandlers) assert.equal(handler(), true);
+  assert.deepEqual(current.tabCalls, []);
+  current.receipts.busy = false; current.render();
+  for (const handler of current.backHandlers) handler();
+  assert.deepEqual(current.tabCalls, ["today"]);
 });
 
 test("AST wiring: technician notifications receive the security predicate and tab changes use the guarded context", () => {

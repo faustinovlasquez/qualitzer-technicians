@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import { useMemo, Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { ActivityIndicator, BackHandler, Image, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { useTechnicianApp } from "./src/application/useTechnicianApp";
@@ -14,8 +14,9 @@ import { ProfileScreen } from "./src/screens/ProfileScreen";
 import { ForcedPasswordScreen } from "./src/screens/ForcedPasswordScreen";
 import { SessionSetupScreen } from "./src/screens/SessionSetupScreen";
 import { BodyText, Brand, Button, Card, CompanyMark, EmptyState, IconButton, SectionTitle, type IconName } from "./src/ui/components";
-import { palette } from "./src/ui/theme";
+import { activeColorScheme, palette } from "./src/ui/theme";
 import { SessionContextBar } from "./src/ui/SessionContextBar";
+import { BranchSwitcher } from "./src/ui/BranchSwitcher";
 import { DevelopmentQrPanel } from "./src/ui/DevelopmentQrPanel";
 import { CreationQuickMenu, CreationScreen } from "./src/screens/creation";
 import { NotificationCenterScreen } from "./src/notifications";
@@ -28,7 +29,7 @@ import { dailyRange } from "./src/domain/assignmentSchedule";
 import { useCompanyBranding } from "./src/branding/useCompanyBranding";
 import { companyBrandingContext } from "./src/branding/companyBrandingContext";
 import { gatewayConfiguration } from "./src/infrastructure/gatewayConfig";
-import { connectionPresentation } from "./src/offline/connectionPresentation";
+import { connectionPresentation, snapshotConnection } from "./src/offline/connectionPresentation";
 import { DeviceSecurityProvider } from "./src/security/DeviceSecurityProvider";
 import { PrivateModal as Modal, useDeviceSecurity } from "./src/security/DeviceSecurityContext";
 import { useLocationTracking } from "./src/location/useLocationTracking";
@@ -38,6 +39,8 @@ import { LocationHistoryPanel } from "./src/location/LocationHistoryPanel";
 import { LocationSettingsPanel } from "./src/location/LocationSettingsPanel";
 import { useMaterialReceipts } from "./src/receipts/useMaterialReceipts";
 import { MaterialReceiptsScreen } from "./src/receipts/MaterialReceiptsScreen";
+import { pendingMaterialCount } from "./src/receipts/receiptTimeline";
+import { createDemoMaterialReceiptPort } from "./src/receipts/demoReceipts";
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -57,35 +60,27 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   useEffect(() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }, [locationViewKey]);
   const [notificationSettings, setNotificationSettings] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [connectionOpen, setConnectionOpen] = useState(false);
   const security = useDeviceSecurity();
   const locationConsentPending = Boolean(locationTracking.available && locationTracking.state && !locationTracking.state.actionConsentPrompted);
   useNotificationPermissionPrompt(app.notifications, !app.restoring && !app.busy && !security.blocked && !locationConsentPending, security.isUnlocked);
-  const [receiptsOpen, setReceiptsOpen] = useState(false);
-  const materialReceipts = useMaterialReceipts(app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0,
-    app.storageKey, app.session?.token ?? "", app.session?.mode === "live" && app.liveVerified && !security.blocked && !app.busy, security.isUnlocked);
-  useEffect(() => setReceiptsOpen(false), [app.session?.token, app.session?.branchId]);
-  useEffect(() => { if (app.materialReceiptEventId !== null) setReceiptsOpen(true); }, [app.materialReceiptEventId]);
-  useEffect(() => {
-    if (!receiptsOpen) return;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (security.isUnlocked() && !materialReceipts.busy) setReceiptsOpen(false);
-      return true;
-    });
-    return () => subscription.remove();
-  }, [receiptsOpen, materialReceipts.busy, security.isUnlocked]);
+  const demoMode = app.session?.mode === "demo";
+  const demoReceiptPort = useMemo(() => demoMode ? createDemoMaterialReceiptPort(app.session?.user.id ?? 0) : null, [demoMode, app.session?.token, app.session?.user.id]);
+  const materialReceipts = useMaterialReceipts(demoReceiptPort ?? app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0,
+    app.storageKey, app.session?.token ?? "", (demoMode || app.session?.mode === "live" && app.liveVerified) && !security.blocked && !app.busy, security.isUnlocked);
+  const pendingMaterials = pendingMaterialCount(materialReceipts.data);
   const brandingContext = companyBrandingContext(app);
   const companyBranding = useCompanyBranding(brandingContext.input, app.busy || security.blocked, allowAutomaticPin && brandingContext.automaticPinEligible && !security.blocked);
   useEffect(() => { setNotificationSettings(false); }, [app.session?.token, app.session?.branchId]);
   useEffect(() => { if (app.tab !== "profile") setNotificationSettings(false); }, [app.tab]);
   useEffect(() => {
-    if (!app.session || receiptsOpen || app.tab === "today" || app.selected || app.selectedOrder || app.selectedCreationKind || app.selectedOffline || notificationSettings) return;
+    if (!app.session || app.tab === "today" || app.selected || app.selectedOrder || app.selectedCreationKind || app.selectedOffline || notificationSettings) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (!app.busy) app.backTab();
+      // Mientras se confirma una recepción no se sale de Materiales.
+      if (!app.busy && !(app.tab === "materials" && materialReceipts.busy)) app.backTab();
       return true;
     });
     return () => subscription.remove();
-  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings, receiptsOpen]);
+  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings, materialReceipts.busy]);
 
   // El botón de la barra de conexión reemplaza al recargar de la cabecera: sincroniza la cola y actualiza las asignaciones.
   async function syncAndRefresh(): Promise<void> {
@@ -103,7 +98,6 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     {app.challenge ? <TenantSelectionScreen challenge={app.challenge} busy={app.busy} error={app.error} onSelect={(tenant) => void app.selectTenant(tenant)} onCancel={app.cancelLoginChallenge} /> : null}
   </View>;
   const branchName = app.session.user.accessBranchs.find((branch) => branch.id === app.session?.branchId)?.name ?? "Sin sucursal activa";
-  if (receiptsOpen) return <SafeAreaView style={styles.app}><MaterialReceiptsScreen receipt={materialReceipts} onBack={() => { if (security.isUnlocked() && !materialReceipts.busy) setReceiptsOpen(false); }} /></SafeAreaView>;
   if (notificationSettings && app.tab === "profile") return <SafeAreaView style={styles.app} edges={["top", "left", "right"]}>
     <NotificationSettingsScreen notifications={app.notifications} onBack={() => { if (security.isUnlocked()) setNotificationSettings(false); }} />
   </SafeAreaView>;
@@ -113,6 +107,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const dotColor = app.offlineSetupError ? palette.amber : !connection ? palette.success
     : connection.tone === "success" ? palette.success : connection.tone === "error" ? palette.danger : connection.tone === "warning" ? palette.amber : palette.info;
   const dotLabel = app.offlineSetupError ? "Almacenamiento offline no disponible" : connection ? connection.title : "Conectado";
+  // La barra de conexión se muestra sola cuando no hay red, falla la sincronización o quedan pendientes; tocarla abre el centro offline.
+  const connectionStatusKey = app.offline ? (app.offline.authBlocked ? "auth_required" : snapshotConnection(app.offline).status) : null;
+  const connectionAlert = Boolean(app.offlineSetupError) || Boolean(app.offline && (app.offline.pending > 0 || app.offline.conflicts > 0
+    || ["offline", "unreachable", "auth_required", "service_error"].includes(connectionStatusKey ?? "")));
   const connectionStatus = <>{app.offlineController ? <View pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
     <OfflineStatusBar key={`${app.storageKey}:${app.session.user.workerId}`} snapshot={app.offline} onOpen={app.openOffline} onSync={syncAndRefresh} embedded />
   </View> : app.offlineSetupError ? <Button title="Almacenamiento offline no disponible · revisar" variant="secondary" disabled={app.busy} onPress={app.openOffline} /> : null}
@@ -227,12 +225,21 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       {app.error ? <View style={styles.orderError}><Notice message={app.error} tone="warning" /></View> : null}
     </View>;
   }
-  const navigation: { id: "today" | "agenda" | "notifications" | "profile"; label: string; icon: IconName }[] = [{ id: "today", label: "Mi jornada", icon: "grid-outline" }, { id: "agenda", label: "Agenda", icon: "calendar-outline" }, { id: "notifications", label: "Avisos", icon: "notifications-outline" }, { id: "profile", label: "Mi perfil", icon: "person-circle-outline" }];
+  const navigation: { id: "today" | "agenda" | "materials"; label: string; icon: IconName }[] = [{ id: "today", label: "Mi jornada", icon: "grid-outline" }, { id: "agenda", label: "Agenda", icon: "calendar-outline" }, { id: "materials", label: "Materiales", icon: "cube-outline" }];
+  const navBusy = app.busy || materialReceipts.busy;
+  const navTab = (item: (typeof navigation)[number]) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "materials" && pendingMaterials > 0 ? `${item.label}, ${pendingMaterials} por confirmar` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: navBusy }} disabled={navBusy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
+    <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}><Ionicons name={app.tab === item.id && item.id === "materials" ? "cube" : item.icon} size={20} color={app.tab === item.id ? palette.primary : palette.textSecondary} />
+      {item.id === "materials" && pendingMaterials > 0 ? <View style={styles.navBadge}><Text style={styles.unreadText}>{pendingMaterials > 99 ? "99+" : pendingMaterials}</Text></View> : null}
+    </View>
+    <Text style={[styles.navText, app.tab === item.id && { color: palette.primary, fontWeight: "800" }]}>{item.label}</Text>
+  </Pressable>;
   const canCreate = Boolean(app.session.branchId && app.session.user.workerId && app.session.user.accessBranchs.some((branch) => branch.id === app.session?.branchId && branch.isEnabled !== false && branch.isDeleted !== true));
   return <SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
     <View style={styles.top}>
       {app.tab !== "today" ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
-      <CompanyMark tenant={app.session.tenant} size={40} />
+      <BranchSwitcher session={app.session} busy={app.busy} error={app.error} onSelect={(id) => void app.branch(id)}
+        blockedReason={!app.offline ? null : !app.offline.online || app.offline.authBlocked ? "Necesitas conexión para cambiar de sucursal."
+          : app.offline.pending > 0 ? "Hay cambios sin sincronizar en esta sucursal. Sincronízalos antes de cambiar; no se borrará nada." : null} />
       {searchable ? <View style={styles.headerSearch}>
         <Ionicons name="search-outline" size={18} color={palette.textMuted} />
         <TextInput accessibilityLabel="Buscar tareas" accessibilityHint="Busca por tarea, código, equipo, ubicación o cliente." placeholder="Buscar OT" placeholderTextColor={palette.textMuted}
@@ -240,30 +247,36 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={8} onPress={() => setSearchQuery("")}><Ionicons name="close-circle" size={18} color={palette.textMuted} /></Pressable> : null}
       </View> : <View style={styles.brandSlot} />}
       <View style={styles.headerActions}>
-        {app.tab !== "today" ? <IconButton name="home-outline" label="Ir a mi jornada" disabled={app.busy} onPress={app.homeTab} /> : null}
-        <Pressable testID="connection-dot" accessibilityRole="button" accessibilityLabel={`Conexión: ${dotLabel}. ${connectionOpen ? "Ocultar detalle" : "Ver detalle"}`} accessibilityState={{ expanded: connectionOpen }} hitSlop={6} onPress={() => setConnectionOpen(value => !value)} style={[styles.headerToggle, connectionOpen && styles.headerToggleActive]}>
-          <View style={[styles.connectionDot, { backgroundColor: dotColor }]} />
+        <Pressable testID="header-notifications" accessibilityRole="button" accessibilityLabel={unreadNotifications > 0 ? `Avisos, ${unreadNotifications} sin leer` : "Avisos"} accessibilityState={{ selected: app.tab === "notifications", disabled: app.busy }} disabled={app.busy} hitSlop={4} onPress={() => app.setTab("notifications")} style={[styles.headerToggle, app.tab === "notifications" && styles.headerToggleActive]}>
+          <Ionicons name={app.tab === "notifications" ? "notifications" : "notifications-outline"} size={23} color={app.tab === "notifications" ? palette.primary : palette.textSecondary} />
+          {unreadNotifications > 0 ? <View style={styles.unreadBadge}><Text style={styles.unreadText}>{unreadNotifications > 99 ? "99+" : unreadNotifications}</Text></View> : null}
+        </Pressable>
+        <Pressable testID="header-profile" accessibilityRole="button" accessibilityLabel={`Mi perfil. Conexión: ${dotLabel}`} accessibilityState={{ selected: app.tab === "profile", disabled: app.busy }} disabled={app.busy} hitSlop={4} onPress={() => app.setTab("profile")} style={[styles.headerAvatar, app.tab === "profile" && styles.headerAvatarActive]}>
+          {app.profileBadge?.avatar ? <Image key={app.profileBadge.avatar} source={{ uri: app.profileBadge.avatar }} style={styles.headerAvatarImage} resizeMode="cover" accessible={false} />
+            : <Text style={styles.headerAvatarInitials}>{app.profileBadge?.initials ?? ""}</Text>}
+          <View testID="connection-dot" style={[styles.connectionDot, { backgroundColor: dotColor }]} />
         </Pressable>
       </View>
     </View>
-    {connectionOpen ? <SessionContextBar tenant={app.session.tenant} branchName={branchName} showBrand={false}>{connectionStatus}</SessionContextBar> : null}
-    {app.session.mode === "demo" && <View style={styles.demo}><Ionicons name="flask-outline" size={14} color={palette.amber} /><Text style={styles.demoText}>DEMOSTRACIÓN · No modifica datos reales</Text></View>}
+    {connectionAlert ? <SessionContextBar tenant={app.session.tenant} branchName={branchName} showBrand={false}>{connectionStatus}</SessionContextBar> : null}
+    {app.session.mode === "demo" && <View style={styles.demo}><Ionicons name="flask-outline" size={14} color={palette.amber} /><Text style={styles.demoText}>DEMOSTRACIÓN · No modifica datos reales</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Salir de la demostración" hitSlop={8} disabled={app.busy} onPress={() => void app.logout()} style={styles.demoExit}>
+        <Ionicons name="log-out-outline" size={14} color={palette.amber} /><Text style={styles.demoExitText}>Salir</Text>
+      </Pressable>
+    </View>}
     <View style={styles.body}>
       {app.tab === "notifications" ? <>
-        <View style={styles.orderError}><Button title={`Materiales por recibir${materialReceipts.data?.items.length ? ` (${materialReceipts.data.items.length})` : ""}`} icon="cube-outline" variant="secondary" disabled={app.busy} onPress={() => { if (security.isUnlocked()) setReceiptsOpen(true); }} /></View>
         {app.error ? <View style={styles.orderError}><Notice message={app.error} tone="warning" /></View> : null}
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "profile" ? <ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
-      {canCreate && (app.tab === "today" || app.tab === "agenda") ? <CreationQuickMenu onCreate={app.openCreate} disabled={app.busy} /> : null}
+      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} /> : app.tab === "profile" ? <ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} serverRemindersReady={Boolean(app.notifications.state?.registered && app.notifications.state.preferences.timers && app.notifications.state.status?.enabled && !app.notifications.state.status.reconciliationStale)} view={app.tab} />}
     </View>
-    <View style={styles.nav}>{navigation.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "notifications" && unreadNotifications > 0 ? `${item.label}, ${unreadNotifications} sin leer` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: app.busy }} disabled={app.busy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
-      <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}>{item.id === "profile" && app.profileBadge?.avatar ? <Image key={app.profileBadge.avatar} source={{ uri: app.profileBadge.avatar }} style={[styles.navAvatar, app.tab === item.id && styles.navAvatarActive]} resizeMode="cover" accessible={false} /> : <Ionicons name={item.icon} size={20} color={app.tab === item.id ? palette.primary : palette.textSecondary} />}
-        {item.id === "notifications" && unreadNotifications > 0 ? <View style={styles.unreadBadge}><Text style={styles.unreadText}>{unreadNotifications > 99 ? "99+" : unreadNotifications}</Text></View> : null}
-      </View>
-      <Text style={[styles.navText, app.tab === item.id && { color: palette.primary, fontWeight: "800" }]}>{item.label}</Text>
-    </Pressable>)}</View>
+    <View style={styles.nav}>
+      <View style={styles.navSide}>{navigation.slice(0, 2).map(navTab)}</View>
+      {canCreate ? <View style={styles.navCreate}><CreationQuickMenu inline onCreate={app.openCreate} disabled={navBusy} /></View> : null}
+      <View style={styles.navSide}>{navigation.slice(2).map(navTab)}</View>
+    </View>
   </SafeAreaView>;
 }
 function ApplicationRoot() {
@@ -309,24 +322,32 @@ function ApplicationRoot() {
     {showDevelopmentTools && <DevelopmentQrPanel gatewayUrl={app.gatewayUrl} />}
   </View>;
 }
-export default function App() { return <SafeAreaProvider><StatusBar style="dark" /><DeviceSecurityProvider><AppErrorBoundary><ApplicationRoot /></AppErrorBoundary></DeviceSecurityProvider></SafeAreaProvider>; }
+export default function App() { return <SafeAreaProvider><StatusBar style={activeColorScheme === "dark" ? "light" : "dark"} /><DeviceSecurityProvider><AppErrorBoundary><ApplicationRoot /></AppErrorBoundary></DeviceSecurityProvider></SafeAreaProvider>; }
 const styles = StyleSheet.create({
   app: { flex: 1, minHeight: 0, backgroundColor: palette.background }, body: { flex: 1, minHeight: 0, position: "relative" }, hidden: { display: "none" }, center: { flex: 1, backgroundColor: palette.background, padding: 24, justifyContent: "center", alignItems: "center", gap: 24 },
   orderError: { paddingHorizontal: 16, paddingBottom: 16 },
   offlineContext: { paddingHorizontal: 16, paddingTop: 12, gap: 6 }, offlineContextText: { color: palette.textSecondary, fontSize: 12, lineHeight: 17 },
-  top: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottomWidth: 1, borderColor: palette.border, backgroundColor: "white" },
+  top: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottomWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
   brandSlot: { flex: 1, minWidth: 0 },
   headerSearch: { flex: 1, minWidth: 0, height: 40, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, borderRadius: 20, backgroundColor: palette.background, borderWidth: 1, borderColor: palette.border },
   headerSearchInput: { flex: 1, minWidth: 0, height: 38, paddingVertical: 0, fontSize: 14, color: palette.text },
   headerToggle: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   headerToggleActive: { backgroundColor: palette.track },
-  connectionDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: "white", boxShadow: "0px 0px 0px 1px rgba(18, 44, 58, 0.15)" },
+  connectionDot: { position: "absolute", right: -1, bottom: -1, width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: palette.surface },
+  headerAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  headerAvatarActive: { borderWidth: 2, borderColor: palette.primary },
+  headerAvatarImage: { width: "100%", height: "100%", borderRadius: 20 },
+  headerAvatarInitials: { color: palette.primary, fontSize: 14, fontWeight: "800" },
   modalOverlay: { flex: 1, padding: 24, backgroundColor: "rgba(18,44,58,0.60)", justifyContent: "center" }, modalCard: { width: "100%", maxWidth: 520, alignSelf: "center" }, modalContent: { gap: 18 },
   demo: { backgroundColor: palette.amberSoft, padding: 8, justifyContent: "center", flexDirection: "row", gap: 6 }, demoText: { color: palette.amber, fontSize: 11, fontWeight: "700" },
-  nav: { flexDirection: "row", borderTopWidth: 1, borderColor: palette.border, paddingVertical: 4, backgroundColor: "white", justifyContent: "center" },
-  navAvatar: { width: 22, height: 22, borderRadius: 11 }, navAvatarActive: { borderWidth: 2, borderColor: palette.primary },
+  demoExit: { flexDirection: "row", alignItems: "center", gap: 3, marginLeft: 8, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, borderWidth: 1, borderColor: palette.amber },
+  demoExitText: { color: palette.amber, fontSize: 11, fontWeight: "800" },
+  nav: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderColor: palette.border, paddingVertical: 4, backgroundColor: palette.surface, justifyContent: "center" },
+  navCreate: { width: 72, alignItems: "center", justifyContent: "center" },
+  navSide: { flex: 1, flexDirection: "row", justifyContent: "space-around" },
+  navBadge: { position: "absolute", top: -6, right: 4, minWidth: 20, height: 20, paddingHorizontal: 4, borderRadius: 10, backgroundColor: palette.amber, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: palette.surface },
   navItem: { flex: 1, maxWidth: 220, minHeight: 48, alignItems: "center", justifyContent: "center", gap: 1 }, navIcon: { paddingHorizontal: 18, paddingVertical: 3, borderRadius: 14 }, navActive: { backgroundColor: palette.primarySoft }, navText: { fontSize: 11, color: palette.textSecondary, fontWeight: "600" },
-  unreadBadge: { position: "absolute", top: -3, right: 5, minWidth: 20, height: 20, paddingHorizontal: 4, borderRadius: 10, backgroundColor: palette.danger, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "white" },
-  unreadText: { color: "white", fontSize: 10, fontWeight: "800" },
+  unreadBadge: { position: "absolute", top: 0, right: -2, minWidth: 20, height: 20, paddingHorizontal: 4, borderRadius: 10, backgroundColor: palette.danger, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: palette.surface },
+  unreadText: { color: palette.white, fontSize: 10, fontWeight: "800" },
 });

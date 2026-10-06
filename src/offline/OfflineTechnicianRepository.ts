@@ -20,6 +20,7 @@ import { isServiceFailure, requiresDeployment } from "./connection";
 import type { AssignmentReadOptions } from "../domain/assignmentRead";
 import { withAssignmentReadBatch, type AssignmentReadBatch } from "../infrastructure/assignmentReadBatch";
 import { workActions, workActivitySchema, workActivityInputSchema, type WorkActivitiesPort } from "../domain/workActivities";
+import { conflictedTimerScopes, isStatusConflict, rebaseTimerChain, type ServerWorkStatus } from "./timerConflicts";
 
 export class OfflineTechnicianRepository implements TechnicianRepository, OfflineController {
   readonly engine: OfflineEngine;
@@ -31,12 +32,56 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   }
   getSnapshot = () => this.engine.getSnapshot();
   subscribe = (listener: () => void) => this.engine.subscribe(listener);
-  start = () => this.engine.start();
-  stop = () => this.engine.stop();
+  private resolvingTimers = false;
+  private readonly timerResolveAttempts = new Map<string, number>();
+  private unsubscribeTimerResolution: (() => void) | null = null;
+  start = () => {
+    // Un inicio, pausa o entrega en conflicto de estado se resuelve solo al volver la conexión, sin esperar al técnico.
+    this.unsubscribeTimerResolution ??= this.engine.subscribe(() => {
+      const snapshot = this.engine.getSnapshot();
+      if (snapshot?.connection?.status === "ready" && !snapshot.syncing && snapshot.operations.some(isStatusConflict)) setTimeout(() => { void this.resolveTimerConflicts().catch(() => undefined); }, 0);
+    });
+    return this.engine.start();
+  };
+  stop = () => { this.unsubscribeTimerResolution?.(); this.unsubscribeTimerResolution = null; return this.engine.stop(); };
   setForeground = (active: boolean) => this.engine.setForeground(active);
   syncNow = () => this.engine.syncNow();
   requestSync = () => this.engine.requestSync();
-  retry = (id: string) => this.engine.retry(id);
+  retry = async (id: string) => {
+    const operation = this.engine.getSnapshot()?.operations.find(entry => entry.id === id);
+    if (operation && isStatusConflict(operation)) { this.timerResolveAttempts.clear(); await this.resolveTimerConflicts(); return; }
+    return this.engine.retry(id);
+  };
+  /**
+   * Relee el estado real de cada trabajo con un cronómetro o entrega en conflicto y reescribe la cadena local sobre ese estado,
+   * conservando la hora original de cada acción. Devuelve cuántas operaciones se reemplazaron o se dieron por reflejadas.
+   */
+  resolveTimerConflicts = async (): Promise<number> => {
+    if (this.resolvingTimers) return 0;
+    this.resolvingTimers = true;
+    try {
+      const { store, namespace, uuid } = this.dependencies;
+      const state = await store.read(namespace);
+      if (state.authBlocked) return 0;
+      let changed = 0;
+      for (const scope of conflictedTimerScopes(state)) {
+        const key = JSON.stringify(scope);
+        const attempts = this.timerResolveAttempts.get(key) ?? 0;
+        if (attempts >= 3) continue;
+        this.timerResolveAttempts.set(key, attempts + 1);
+        const fresh = await this.remote.assignments(dailyRange(scope.startDate), scope.companyBranchId);
+        if (fresh.technician.id !== this.session.user.workerId) throw new ApiError(401, "OFFLINE_WORKER_CHANGED", "La identidad cambió.");
+        const work = fresh.groups.find(group => group.id === scope.groupId)?.works.find(item => item.id === scope.workId);
+        if (!work) continue;
+        await updateState(store, namespace, (draft) => {
+          const result = rebaseTimerChain(draft, scope, work.status as ServerWorkStatus, uuid);
+          changed += result.replaced.length + result.resolved.length;
+        });
+      }
+      if (changed > 0) { await this.engine.refresh(); void this.engine.requestSync(); }
+      return changed;
+    } finally { this.resolvingTimers = false; }
+  };
   hasPendingChanges = () => this.engine.hasPendingChanges();
   readLocalFile = (id: string) => this.engine.readLocalFile(id);
   activities: WorkActivitiesPort["activities"] = async scope => {
@@ -388,8 +433,11 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     const work = assignments.groups.find((group) => group.id === scope.groupId)?.works.find((item) => item.id === scope.workId);
     const step = work?.checklists.flatMap((checklist) => checklist.steps).find((item) => String(item.stepId) === stepId);
     if (!step) throw new OfflineUnavailableError("OFFLINE_ANSWER_BASE_MISSING");
-    const base = answerFromStep(step);
-    const wire = { answer: toSyncAnswer(step.type, answer), base: syncAnswerFromStep(step) };
+    const state = await this.dependencies.store.read(this.dependencies.namespace);
+    const queued = state.operations.filter((entry): entry is Extract<OfflineOperation, { kind: "answer" }> => entry.kind === "answer" && entry.stepId === stepId
+      && sameResource(entry.scope, scope) && entry.scope.startDate === scope.startDate && ["pending", "syncing"].includes(entry.status) && entry.wire !== undefined).at(-1);
+    const base = queued ? queued.answer : answerFromStep(step);
+    const wire = { answer: toSyncAnswer(step.type, answer), base: queued?.wire ? queued.wire.answer : syncAnswerFromStep(step) };
     const operation: OfflineOperation = { ...this.base(), kind: "answer", scope, stepId, answer, base, wire };
     const registered = await this.engine.enqueue([operation]);
     await this.finish(registered);

@@ -204,7 +204,7 @@ test("actual card uses compact pending label without canonical progress or deliv
     let tree = render(); assertQuiet(tree);
     assert.equal(action(tree, "Pausar").title, "Pausar · Guardando…");
     assert.equal(action(tree, "Entregar").disabled, false); action(tree, "Entregar").onPress();
-    assert.ok(elements<{ label: string }>(tree, "Badge").some(({ props }) => props.label === "Pendiente"));
+    assert.ok(elements<{ label: string }>(tree, "Badge").some(({ props }) => props.label === "En curso"), "the badge shows the technician's saved start");
     assert.match(visibleText(tree), /0\/3/); assert.match(visibleText(tree), /Último tiempo recibido/);
     assert.equal(candidate.elapsedSeconds, 45); assert.equal(candidate.checklistDone, 0);
     const retained = action(tree, "Pausar");

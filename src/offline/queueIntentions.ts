@@ -96,7 +96,8 @@ export function prepareQueuedIntention(state: OfflineState, input: Extract<Offli
       return parent?.kind === "create" && parent.status === "applied" && parent.input.companyBranchId === branchId
         && parent.result?.companyBranchId === branchId && parent.result.groupId === scope.groupId && String(parent.result.workId) === scope.workId;
     });
-    for (const operation of prerequisites) assertSafeDependency(operation, state.operations);
+    // Solo el cronómetro es causal para la entrega; el resto de evidencias con problemas se revisa aparte y el servidor valida lo obligatorio.
+    for (const operation of prerequisites) if (operation.kind === "timer") assertSafeDependency(operation, state.operations);
     const timer = prerequisites.filter((entry): entry is Extract<OfflineOperation, { kind: "timer" }> => entry.kind === "timer" && sameIntentionScope(entry.scope, scope)).at(-1);
     const reconciled = timer?.status === "applied" && cached.timerReadOperationIds?.includes(timer.id) === true;
     const baseStatus = timer && !reconciled ? timer.payload.status : work.status;

@@ -1,4 +1,6 @@
 import { registerRootComponent } from 'expo';
+// Debe ir antes de App: los estilos de cada pantalla se calculan con la paleta activa al cargarse.
+import './src/ui/initColorScheme';
 import './src/location/locationRuntime';
 
 import App from './App';

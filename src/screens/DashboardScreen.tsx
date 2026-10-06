@@ -97,8 +97,8 @@ function buildSections(entries: WorkEntry[], agenda: boolean): WorkSection[] {
 }
 
 function Kpi({ title, value, note, icon, tone, inline = false }: { title: string; value: number | string | null; note: string | null; icon: IconName; tone: "warning" | "teal" | "success" | "violet" | "info"; inline?: boolean }) {
-  const color = tone === "warning" ? palette.amber : tone === "success" ? palette.success : tone === "violet" ? "#6D4AB4" : tone === "info" ? palette.info : palette.primary;
-  const background = tone === "warning" ? palette.amberSoft : tone === "success" ? palette.successSoft : tone === "violet" ? "#EFEAF9" : tone === "info" ? palette.infoSoft : palette.primarySoft;
+  const color = tone === "warning" ? palette.amber : tone === "success" ? palette.success : tone === "violet" ? palette.violet : tone === "info" ? palette.info : palette.primary;
+  const background = tone === "warning" ? palette.amberSoft : tone === "success" ? palette.successSoft : tone === "violet" ? palette.violetSoft : tone === "info" ? palette.infoSoft : palette.primarySoft;
   // En una sola línea: ícono, cantidad y texto (para las HH).
   if (inline) return <Card style={styles.kpiInline}>
     <View style={[styles.kpiIcon, { backgroundColor: background }]}><Ionicons name={icon} size={15} color={color} accessible={false} /></View>
@@ -501,17 +501,17 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
   content: { width: "100%", maxWidth: theme.contentWidth, alignSelf: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 96, gap: 12 },
   heading: { flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 6 },
-  pageTitle: { fontSize: 24, lineHeight: 30, fontWeight: "800", color: palette.navy },
+  pageTitle: { fontSize: 24, lineHeight: 30, fontWeight: "800", color: palette.heading },
   greeting: { fontSize: 13, lineHeight: 19, color: palette.textSecondary },
   kpiRow: { flexDirection: "row", gap: 8 },
   agendaBack: { alignSelf: "flex-start", minHeight: 40, paddingVertical: 6, paddingHorizontal: 4 },
   kpiInline: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 7, paddingHorizontal: 8, borderRadius: radius.md },
-  kpiInlineValue: { fontSize: 15, lineHeight: 20, fontWeight: "800", color: palette.navy, fontVariant: ["tabular-nums"] },
+  kpiInlineValue: { fontSize: 15, lineHeight: 20, fontWeight: "800", color: palette.heading, fontVariant: ["tabular-nums"] },
   kpiInlineTitle: { fontSize: 11, lineHeight: 15, fontWeight: "700", color: palette.text, flexShrink: 1, minWidth: 0 },
   kpi: { flex: 1, minWidth: 0, paddingVertical: 8, paddingHorizontal: 6, gap: 2, borderRadius: radius.md },
   kpiTop: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
   kpiIcon: { width: 24, height: 24, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  kpiValue: { fontSize: 22, lineHeight: 27, fontWeight: "800", color: palette.navy, fontVariant: ["tabular-nums"] },
+  kpiValue: { fontSize: 22, lineHeight: 27, fontWeight: "800", color: palette.heading, fontVariant: ["tabular-nums"] },
   kpiTitle: { fontSize: 12, lineHeight: 18, fontWeight: "700", color: palette.text },
   kpiNote: { fontSize: 11, lineHeight: 16, color: palette.textMuted },
   weekCard: { paddingHorizontal: 6, paddingVertical: 4, gap: 0 },
@@ -525,7 +525,7 @@ const styles = StyleSheet.create({
   weekScroll: { flexGrow: 0 },
   weekDays: { flexGrow: 1 },
   day: { minWidth: 40, minHeight: 44, flexGrow: 1, flexShrink: 0, flexBasis: "auto", alignItems: "center", justifyContent: "center", paddingHorizontal: 2, paddingVertical: 2, borderRadius: radius.sm, borderWidth: 1, borderColor: "transparent" },
-  dayToday: { borderColor: "#C4E1DC", backgroundColor: palette.primarySoft },
+  dayToday: { borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
   dayUnavailable: { borderColor: palette.amber, backgroundColor: palette.amberSoft },
   dayDisabled: { opacity: 0.55 },
   daySelected: { backgroundColor: palette.primary, borderColor: palette.primary },
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
   agendaDate: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 10, paddingTop: 8 },
   agendaDateIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: palette.primarySoft, alignItems: "center", justifyContent: "center" },
   agendaDateText: { ...typography.label, color: palette.text, flex: 1, textTransform: "capitalize" },
-  errorCard: { borderColor: "#F2CBCF", gap: 16 },
+  errorCard: { borderColor: palette.dangerBorder, gap: 16 },
   errorContent: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
   errorCopy: { flex: 1, gap: 6 },
   errorTitle: { ...typography.label, color: palette.danger, fontWeight: "700" },

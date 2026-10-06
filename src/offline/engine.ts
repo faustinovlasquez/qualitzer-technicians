@@ -460,10 +460,12 @@ export class OfflineEngine {
             current.lastError = current.kind === "document" && errorCode(error) === "OFFLINE_SYNC_UNEXPECTED_RESPONSE"
               ? "OFFLINE_DOCUMENT_SUBMISSION_FAILED" : errorCode(error);
             const inProgress = error instanceof ApiError && error.code === "MOBILE_SYNC_IN_PROGRESS";
+            // El gateway corta una subida lenta (408/UPLOAD_TIMEOUT) o interrumpida antes de reenviarla: reintentar con el mismo id es seguro.
+            const interruptedUpload = error instanceof ApiError && (error.status === 408 || ["UPLOAD_TIMEOUT", "UPLOAD_ABORTED"].includes(error.code));
             const deployment = error instanceof ApiError && requiresDeployment(error.code);
             const invalidDocumentReceipt = (current.kind === "document" || current.kind === "activity") && error instanceof ApiError && error.code === "OFFLINE_INVALID_RECEIPT";
             current.status = invalidDocumentReceipt || error instanceof ApiError && error.code === "MOBILE_SYNC_OPERATION_REUSED" ? "needs_review"
-              : deployment || inProgress || error instanceof NetworkError || (error instanceof OfflineUnavailableError && error.code === "OFFLINE_CYCLE_INTERRUPTED") || (error instanceof ApiError && (error.status >= 500 || error.status === 429)) ? "pending"
+              : deployment || inProgress || interruptedUpload || error instanceof NetworkError || (error instanceof OfflineUnavailableError && error.code === "OFFLINE_CYCLE_INTERRUPTED") || (error instanceof ApiError && (error.status >= 500 || error.status === 429)) ? "pending"
               : error instanceof ApiError && error.status === 409 ? "conflict"
                 : error instanceof ApiError && [400, 403, 404, 422].includes(error.status) ? "blocked" : "needs_review";
             current.nextAttemptAt = now() + Math.max(deployment ? 60_000 : inProgress ? 5_000 : 0, backoffMs(current.attempts));
