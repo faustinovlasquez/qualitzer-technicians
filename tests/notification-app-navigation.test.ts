@@ -167,12 +167,15 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     if (id === "../offline/connectionPresentation") return connectionPresentationModule;
     if (id === "../infrastructure/privacyPolicy") return { openPrivacyPolicy: resolved };
     if (id === "../ui/colorScheme") return { readColorPreference: () => "light", changeColorPreference: resolved };
+    if (id === "@expo/vector-icons") return { Ionicons: "Ionicons" };
+    if (id === "expo-constants") return { __esModule: true, default: { expoConfig: { version: "1.0.84" } } };
     return forbidden(id);
   });
   const receipts: { data: MaterialReceipts | null; pending: null; busy: boolean; error: string; ready: boolean; recent: never[]; refresh: () => Promise<void>; confirm: () => Promise<void> } = { data: null, pending: null, busy: false, error: "", ready: true, recent: [], refresh: resolved, confirm: resolved };
   const imports = new Map<string, unknown>([
     ["./src/receipts/useMaterialReceipts", { useMaterialReceipts: () => receipts }],
     ["./src/receipts/MaterialReceiptsScreen", { MaterialReceiptsScreen: "MaterialReceiptsScreen" }],
+    ["./src/screens/notifications/ActiveTimersBanner", { ActiveTimersBanner: "ActiveTimersBanner" }],
     ["./src/receipts/receiptTimeline", receiptTimelineModule], ["./src/ui/BranchSwitcher", { BranchSwitcher: "BranchSwitcher" }], ["./src/receipts/demoReceipts", { createDemoMaterialReceiptPort: () => ({}) }],
     ["react", react], ["react/jsx-runtime", { jsx, jsxs: jsx, Fragment: "Fragment" }], ["react-native", native],
     ["@expo/vector-icons", { Ionicons: "Ionicons" }], ["expo-status-bar", { StatusBar: "StatusBar" }],
@@ -243,7 +246,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
       activeHooks = profileHooks;
       const output = profileHooks.render(() => profile.ProfileScreen(props));
       profileHooks.flush();
-      return one(output, element => element.type === "Button" && element.props.title === "Configurar notificaciones");
+      return one(output, element => typeof element.type === "function" && element.props.title === "Notificaciones");
     },
     close() { hooks.unmount(); rootHooks.unmount(); profileHooks.unmount(); },
   };

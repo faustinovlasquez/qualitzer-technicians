@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.34
+# @qualitzer/mobile-gateway 1.0.35
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.34. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.35. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.35 incluye todo lo de 1.0.34 (que no llegó a desplegarse) y agrega `GET /api/mobile-notifications/active-timers?companyBranchId=N`, que reenvía a `GET /mobile-notifications/active-timers` y devuelve `{ items: [{ groupType, groupId, workId, date, startedAt, title }] }` (máximo 20): los cronómetros en curso del técnico sin importar la fecha planificada del trabajo. La app 1.0.84 los muestra como alerta fija en Mi jornada. **Desplegar backend y gateway juntos.** Sin migraciones.
 
 1.0.34 agrega el historial de materiales confirmados y Utilizado/Devolver. `GET /api/material-receipts` acepta `status=CONFIRMED` (sin `status` se comporta igual que antes) y cada entrega puede traer `sourceCode`, `equipmentLabel`, `customerName`, `dispositionDeadline` y `dispositionClosed`; cada material puede traer `description`, `imageUrl`, `unitCost`, `currencyIso`, `returnedQuantity`, `disposition` y `dispositionAt`. Nueva ruta `POST /api/material-receipts/:id/dispositions` con `{ companyBranchId, version, lines: [{ lineId, disposition: "USED" | "RETURN_REQUESTED" }] }`, que reenvía a `POST /inventory_consumptions_v2/my-receipts/:id/dispositions` y verifica que la respuesta sea la misma entrega con las marcas aplicadas. El plazo es de 7 días desde la confirmación. **Desplegar backend y gateway juntos:** el gateway 1.0.33 rechaza los campos nuevos (contrato estricto) y la pestaña Materiales respondería 502. Conserva todo lo de 1.0.33. Sin migraciones.
 

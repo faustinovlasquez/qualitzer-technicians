@@ -6,13 +6,15 @@ import { palette, typography } from "../../ui/theme";
 
 export interface RunningTimersNoticeProps {
   data: Assignments | null;
+  /** Trabajos que ya muestra la alerta fija de cronómetros activos. */
+  hidden?: readonly string[];
   selectedRangeLabel: string;
   serverRemindersReady: boolean;
   onOpen(item: RunningTimerNoticeItem): void;
 }
 
-export function RunningTimersNotice({ data, selectedRangeLabel, serverRemindersReady, onOpen }: RunningTimersNoticeProps) {
-  const timers = runningTimersFromSnapshot(data);
+export function RunningTimersNotice({ data, hidden, selectedRangeLabel, serverRemindersReady, onOpen }: RunningTimersNoticeProps) {
+  const timers = runningTimersFromSnapshot(data).filter((timer) => !hidden?.includes(timer.workId));
   if (!timers.length) return null;
   return <Card style={styles.card}>
     <View style={styles.row}><Text accessibilityRole="header" style={styles.title}>Cronómetros activos</Text><Badge label={String(timers.length)} tone="warning" /></View>

@@ -99,7 +99,7 @@ export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   if (standalone && !mapsKey) throw new Error("GOOGLE_MAPS_API_KEY_REQUIRED");
   // Política de privacidad (Google Play): PRIVACY_POLICY_URL en el entorno o en .env; solo HTTPS. Cambiarla requiere nueva compilación.
   const privacyInput = process.env.PRIVACY_POLICY_URL ?? (existsSync(mapsFile) ? parseEnv(readFileSync(mapsFile, "utf8")).PRIVACY_POLICY_URL : undefined);
-  let privacyPolicyUrl = "https://qualitzer.com/politica-de-privacidad";
+  let privacyPolicyUrl = "https://qualitzer.com/app/tecnicos/politica-de-privacidad";
   if (privacyInput !== undefined && privacyInput !== "") {
     let parsed: URL;
     try { parsed = new URL(privacyInput); } catch { throw new Error("PRIVACY_POLICY_URL_INVALID"); }

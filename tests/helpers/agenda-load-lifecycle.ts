@@ -152,14 +152,15 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
   let statusGate: (() => Promise<void>) | undefined;
   let deliveryGate: (() => Promise<MaintenanceDeliveryContext>) | undefined;
   const deliveryReads: { scope: WorkScope; requireFresh?: boolean }[] = [];
-  let notificationData: Assignments | undefined;
+  const notificationReads: DateRange[] = [];
+  let notificationData: Assignments | ((range: DateRange) => Assignments) | undefined;
   let notificationOptions: UseMobileNotificationsOptions | undefined;
   const account: User = { ...user(), accessBranchs: [...user().accessBranchs, { id: 2, name: "Secundaria", main: false }] };
   const snapshot = (): OfflineSnapshot => ({ online: options.online ?? false, preparing: false, syncing: false, authBlocked: false,
     pending: 0, conflicts: 0, lastSyncedAt: null, lastError: null, coverage: [], operations: [] });
 
   function assignments(range: DateRange, branchId: number, readOptions?: AssignmentReadOptions): Promise<Assignments> {
-    if (!readOptions && notificationData) return Promise.resolve(structuredClone(notificationData));
+    if (!readOptions && notificationData) { notificationReads.push(range); return Promise.resolve(structuredClone(typeof notificationData === "function" ? notificationData(range) : notificationData)); }
     assert.ok(readOptions?.signal, "assignments must receive third-argument options.signal");
     const signal = readOptions.signal;
     const ignoreAbort = ignoreNextAbort;
@@ -326,7 +327,8 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     setLocalAssignments: (gate: () => Promise<Assignments>) => { localGate = gate; },
     setStatusGate: (gate: () => Promise<void>) => { statusGate = gate; },
     setDeliveryGate: (gate: () => Promise<MaintenanceDeliveryContext>) => { deliveryGate = gate; },
-    setNotificationAssignments: (value: Assignments) => { notificationData = value; },
+    setNotificationAssignments: (value: Assignments | ((range: DateRange) => Assignments)) => { notificationData = value; },
+    notificationReads,
     async openNotification(payload: NotificationData): Promise<boolean> {
       assert.ok(notificationOptions?.session);
       return notificationOptions.onOpen(payload, { session: notificationOptions.session, storageKey: notificationOptions.storageKey, isCurrent: () => true });

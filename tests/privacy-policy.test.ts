@@ -6,7 +6,7 @@ import { loadSource } from "./helpers/tenant-challenge";
 
 const opened: string[] = [];
 const policy = loadSource<typeof import("../src/infrastructure/privacyPolicy")>("infrastructure/privacyPolicy.ts", (id) => {
-  if (id === "expo-constants") return { default: { expoConfig: { extra: { privacyPolicyUrl: "https://qualitzer.com/politica-de-privacidad" } } } };
+  if (id === "expo-constants") return { default: { expoConfig: { extra: { privacyPolicyUrl: "https://qualitzer.com/app/tecnicos/politica-de-privacidad" } } } };
   if (id === "react-native") return { Linking: { openURL: async (url: string) => { opened.push(url); } } };
   throw new Error(`UNEXPECTED_TEST_IMPORT:${id}`);
 }, { URL });
@@ -17,7 +17,7 @@ test("privacy policy uses the configured HTTPS URL and falls back to the public 
     assert.equal(policy.privacyPolicyUrl({ privacyPolicyUrl: value }), policy.DEFAULT_PRIVACY_POLICY_URL, String(value));
   }
   await policy.openPrivacyPolicy();
-  assert.deepEqual(opened, ["https://qualitzer.com/politica-de-privacidad"]);
+  assert.deepEqual(opened, ["https://qualitzer.com/app/tecnicos/politica-de-privacidad"]);
 });
 
 test("the policy link is reachable from login and profile, and configurable from .env", () => {

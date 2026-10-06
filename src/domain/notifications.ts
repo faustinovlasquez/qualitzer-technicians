@@ -28,6 +28,11 @@ export const notificationInboxSchema = z.object({ items: z.array(notificationInb
 export const notificationReadResultSchema = z.object({ id: mobileUuidSchema, read: z.literal(true) });
 export const notificationDeleteResultSchema = z.object({ id: mobileUuidSchema, deleted: z.literal(true) });
 export const notificationTestResultSchema = z.object({ eventId: mobileUuidSchema, state: z.literal("pending") });
+/** Cronómetros en curso del técnico sin importar la fecha planificada del trabajo (misma fuente que el aviso de cronómetro). */
+export const activeTimerSchema = z.object({ groupType: z.enum(["work", "negotiation", "maintenance"]), groupId: positiveCreationIdSchema, workId: positiveCreationIdSchema,
+  date: notificationDateSchema.nullable(), startedAt: isoDate, title: z.string().max(300).nullable() }).strict();
+export const activeTimersSchema = z.object({ items: z.array(activeTimerSchema).max(20) }).strict();
+export type ActiveTimer = z.infer<typeof activeTimerSchema>;
 export type NotificationPreferences = z.infer<typeof notificationPreferencesSchema>;
 export type NotificationDeviceInput = z.infer<typeof notificationDeviceInputSchema>;
 export type NotificationData = z.infer<typeof notificationDataSchema>;

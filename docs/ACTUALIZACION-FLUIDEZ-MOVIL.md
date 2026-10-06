@@ -1,6 +1,10 @@
-# Materiales por confirmar y confirmados: gateway 1.0.34 / APK 1.0.83
+# Cronómetros activos visibles y Ajustes tipo Android: gateway 1.0.35 / APK 1.0.84
 
-Nuevo diseño de Materiales con OT, equipo, fotos y precios, pestañas Por confirmar / Confirmadas y Utilizado/Devolver con plazo de 7 días. Backend y gateway 1.0.34 deben desplegarse juntos. Ver [actualizacion 1.0.83](ACTUALIZACION-1.0.83.md).
+Alerta fija de cronómetros en curso aunque el trabajo esté planificado otro día, avisos de cronómetro que abren el trabajo correcto y perfil como menú de ajustes. Incluye el nuevo diseño de Materiales de la 1.0.83. Backend y gateway 1.0.35 deben desplegarse juntos. Ver [actualizacion 1.0.84](ACTUALIZACION-1.0.84.md).
+
+## Historial: materiales por confirmar y confirmados gateway 1.0.34 / APK 1.0.83
+
+Nuevo diseño de Materiales con OT, equipo, fotos y precios, pestañas Por confirmar / Confirmadas y Utilizado/Devolver con plazo de 7 días. Ver [actualizacion 1.0.83](ACTUALIZACION-1.0.83.md).
 
 ## Historial: materiales con linea de tiempo gateway 1.0.33 / APK 1.0.76
 

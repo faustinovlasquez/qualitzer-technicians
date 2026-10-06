@@ -19,6 +19,8 @@ import { runningTimersFromSnapshot, type RunningTimerNoticeItem } from "../notif
 import { isPendingLocalWork, unavailableCoverageDates } from "./offline/offlineDashboardUi";
 
 export interface DashboardScreenProps {
+  /** Trabajos con cronómetro que ya muestra la alerta fija superior. */
+  hiddenTimerWorkIds?: readonly string[];
   data: Assignments | null;
   user: User;
   range: DateRange;
@@ -117,7 +119,7 @@ function Kpi({ title, value, note, icon, tone, inline = false }: { title: string
   );
 }
 
-export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, serverRemindersReady = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange }: DashboardScreenProps) {
+export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, serverRemindersReady = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange }: DashboardScreenProps) {
   const compact = useWindowDimensions().width < 600;
   const [agendaLayout, setAgendaLayout] = useState<"timeline" | "schedule" | "list">("timeline");
   const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");
@@ -379,7 +381,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
         <Kpi inline title="HH reportadas" value={hasData && !coveragePending && (!partial || counts.executedMinutes > 0) ? manHours(counts.executedMinutes) : null} note={partial ? "Parcial" : null} icon="stats-chart" tone="info" />
       </View>
 
-      <RunningTimersNotice data={data} selectedRangeLabel={rangeLabel} serverRemindersReady={serverRemindersReady} onOpen={openTimer} />
+      <RunningTimersNotice data={data} hidden={hiddenTimerWorkIds} selectedRangeLabel={rangeLabel} serverRemindersReady={serverRemindersReady} onOpen={openTimer} />
 
       <View testID="week-selector">
       <Card style={styles.weekCard}>

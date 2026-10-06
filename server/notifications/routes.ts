@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { mobileUuidSchema } from "../../src/domain/creation";
-import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema } from "../../src/domain/notifications";
+import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, activeTimersSchema } from "../../src/domain/notifications";
 import { mobileActor } from "../creation/authorization";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
@@ -24,6 +24,12 @@ export function createNotificationsRouter(upstream: Upstream, tenantOrigin: stri
     const { companyBranchId } = branchQuery.parse(req.query);
     const { token } = await mobileActor(upstream, req, companyBranchId);
     res.json(parseUpstream(notificationStatusSchema, await upstream.request("/mobile-notifications/status", { token, query: queryFor(companyBranchId) })));
+  });
+  router.get("/active-timers", async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const { companyBranchId } = branchQuery.parse(req.query);
+    const { token } = await mobileActor(upstream, req, companyBranchId);
+    res.json(parseUpstream(activeTimersSchema, await upstream.request("/mobile-notifications/active-timers", { token, query: queryFor(companyBranchId) })));
   });
   router.put("/device", async (req, res) => {
     const body: unknown = req.body;

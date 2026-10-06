@@ -11,7 +11,8 @@ import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
 import { dateKey, monthRange, weekRange } from "../domain/format";
-import { assignmentDay, assignmentDays, assignmentWorkForDay, assignmentWorkForQueryDate, assignmentWorkQueryRange, assignmentWorkSnapshotForQueryDate, dailyRange } from "../domain/assignmentSchedule";
+import { assignmentDay, assignmentDays, assignmentWorkForDay, assignmentWorkForQueryDate, assignmentWorkQueryRange, assignmentWorkSnapshotForQueryDate, dailyRange, locateNotice, noticeDayInRange, noticeSearchRange, type NoticeTarget } from "../domain/assignmentSchedule";
+import type { ActiveTimer } from "../domain/notifications";
 import { normalizeAssignmentsChecklistProgress } from "../domain/assignmentChecklistProgress";
 import { DEMO_TENANT, requireSessionTenant, sameTenant, tenantStorageNamespace } from "../domain/tenantSession";
 import { getTenantChallengeRemaining } from "../infrastructure/tenantChallengeClock";
@@ -145,6 +146,10 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const [liveVerified, setLiveVerified] = useState(false);
   const [selectedOffline, setSelectedOffline] = useState(false);
   const [materialReceiptEventId, setMaterialReceiptEventId] = useState<string | null>(null);
+  // Error al abrir un aviso: se muestra aparte del estado de la jornada.
+  const [noticeError, setNoticeError] = useState<string | null>(null);
+  // Cronómetros en curso según el servidor, sin importar el rango de fechas cargado.
+  const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
   const offline: OfflineSnapshot | null = useSyncExternalStore(offlineController?.subscribe ?? subscribeNothing, offlineController?.getSnapshot ?? emptyOfflineSnapshot, offlineController?.getSnapshot ?? emptyOfflineSnapshot);
   const repository = useRef<TechnicianRepository | null>(null);
   const gatewayBlock = useRef<string | null>(gatewayConfiguration.error);
@@ -535,13 +540,13 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const repo = repository.current;
     if (!notificationContextIsCurrent(context) || !current || !repo || !notificationForSession(payload, current) || actionLock.current) return false;
     if (state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) {
-      setError("Vuelve al listado antes de abrir la notificación. Se conservará tu selección y cualquier borrador.");
+      setNoticeError("Vuelve al listado antes de abrir la notificación. Se conservará tu selección y cualquier borrador.");
       return false;
     }
     // Los avisos de materiales solo cambian de pestaña: se pueden abrir también desde Mi perfil.
     const materialNotice = payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER";
     if (state.current.tab === "profile" && !materialNotice) {
-      setError("Vuelve a la bandeja de avisos para abrir la notificación. Se conservan los cambios de configuración sin guardar.");
+      setNoticeError("Vuelve a la bandeja de avisos para abrir la notificación. Se conservan los cambios de configuración sin guardar.");
       return false;
     }
     if (payload.kind === "MOBILE_PUSH_TEST" || payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER") {
@@ -549,46 +554,79 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       const target = payload.kind === "MOBILE_PUSH_TEST" ? "notifications" : "materials";
       if (payload.kind !== "MOBILE_PUSH_TEST") setMaterialReceiptEventId(payload.eventId);
       state.current = { ...state.current, tab: target };
-      setTab(target); setError(null);
+      setTab(target); setError(null); setNoticeError(null);
       return true;
     }
+    if (payload.groupType === null || payload.groupId === null) { setNoticeError("La notificación no identifica un trabajo disponible."); return false; }
+    return await openAssignmentTarget({ groupType: payload.groupType, groupId: payload.groupId, workId: payload.workId }, payload.date, () => notificationContextIsCurrent(context));
+  }
+
+  /** Abre el cronómetro activo informado por el servidor, aunque el trabajo esté planificado en otra fecha. */
+  async function openActiveTimer(timer: ActiveTimer): Promise<boolean> {
+    const current = state.current.session;
+    if (!current || actionLock.current || state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) return false;
+    return await openAssignmentTarget({ groupType: timer.groupType, groupId: timer.groupId, workId: timer.workId }, timer.date,
+      () => isAccessAllowed() && state.current.session === current);
+  }
+
+  /**
+   * Lleva al detalle de un trabajo u orden de un aviso. El servidor informa la primera fecha planificada, pero un cronómetro
+   * puede seguir abierto días después: si no está en esa fecha se busca hoy y luego en el rango entre esa fecha y hoy.
+   */
+  async function openAssignmentTarget(target: NoticeTarget, noticeDate: string | null, isCurrent: () => boolean): Promise<boolean> {
+    const current = state.current.session;
+    const repo = repository.current;
+    if (!current || !repo || actionLock.current) return false;
     const version = sessionVersion.current;
     const action = beginAction();
     requestVersion.current += 1;
     setLoading(false);
+    const stale = new Error("NOTICE_CONTEXT_CHANGED");
+    const still = () => version === sessionVersion.current && repository.current === repo && isCurrent();
     try {
-      const day = payload.date ?? scheduleClock(current.user.system.timezone)?.day;
-      if (!day || current.branchId === null) throw new Error("La sucursal no tiene una fecha o zona horaria válida para abrir el aviso.");
-      const nextRange = dailyRange(day);
-      const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(nextRange, current.branchId));
-      if (version !== sessionVersion.current || repository.current !== repo || !notificationContextIsCurrent(context)) return false;
-      if (fresh.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
-      const group = fresh.groups.find((item) => payload.groupType === "maintenance"
-        ? item.type === "internal_maintenance" && item.id === `maintenance-${payload.groupId}`
-        : payload.groupType === "negotiation"
-          ? item.type === "external_ot" && item.id === `external-${payload.groupId}`
-          : payload.groupType === "work" && item.type === "direct_assignment" && (item.id === `direct-${payload.groupId}` || item.id === `direct-np-${payload.groupId}`));
-      if (!group) throw new Error("La orden ya no está disponible para este trabajador en la fecha del aviso.");
-      let nextWork: SelectedWork | null = null;
-      if (payload.workId !== null) {
-        const work = group.works.find((item) => item.id === String(payload.workId) && (payload.groupType !== "work"
-          || (group.id === `direct-${item.id}` && item.workType === "productive")
-          || (group.id === `direct-np-${item.id}` && item.workType === "non_productive")));
-        const snapshots = work?.schedules?.filter((item) => item.queryDates.includes(day));
-        const snapshot = snapshots?.find((item) => assignmentDay(item.work.scheduledDate) === day) ?? snapshots?.[0];
-        if (!work || (work.schedules && !snapshot)) throw new Error("La orden o el trabajo ya no está disponible en la fecha del aviso.");
-        nextWork = { groupId: group.id, workId: work.id, queryDate: day, scheduledDate: assignmentDay(snapshot?.work.scheduledDate ?? work.scheduledDate), initialTab: "work" };
-      } else if (payload.groupType !== "negotiation" && payload.groupType !== "maintenance") {
-        throw new Error("La notificación no identifica un trabajo disponible.");
+      const today = scheduleClock(current.user.system.timezone)?.day;
+      const firstDay = noticeDate ?? today;
+      if (!firstDay || current.branchId === null) throw new Error("La sucursal no tiene una fecha o zona horaria válida para abrir el aviso.");
+      if (target.workId === null && target.groupType === "work") throw new Error("La notificación no identifica un trabajo disponible.");
+      const branchId = current.branchId;
+      const read = async (range: DateRange) => {
+        const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(range, branchId));
+        if (!still()) throw stale;
+        if (fresh.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
+        return fresh;
+      };
+      let day = firstDay;
+      let fresh = await read(dailyRange(day));
+      let located = locateNotice(fresh, target, day);
+      if (!located && target.workId !== null && today) {
+        if (today !== day) {
+          const todayData = await read(dailyRange(today));
+          const found = locateNotice(todayData, target, today);
+          if (found) { fresh = todayData; located = found; day = today; }
+        }
+        if (!located) {
+          const range = noticeSearchRange(firstDay, today);
+          const found = noticeDayInRange(await read(range), target, range, today);
+          if (found && found !== firstDay && found !== today) {
+            const foundData = await read(dailyRange(found));
+            const match = locateNotice(foundData, target, found);
+            if (match) { fresh = foundData; located = match; day = found; }
+          }
+        }
       }
-      const nextOrder: SelectedOrder = { id: group.id, queryDate: day, initialTab: "works" };
+      if (!located) throw new Error(target.workId === null ? "La orden ya no está disponible para este trabajador en la fecha del aviso."
+        : "No encontramos ese trabajo en tu agenda del último mes. Puede que ya no esté asignado a ti o que se haya cerrado.");
+      const nextRange = dailyRange(day);
+      const nextWork: SelectedWork | null = located.work ? { groupId: located.group.id, workId: located.work.id, queryDate: day, scheduledDate: located.scheduledDate ?? day, initialTab: "work" } : null;
+      const nextOrder: SelectedOrder = { id: located.group.id, queryDate: day, initialTab: "works" };
       manualRefresh.current = { session: current, range: nextRange };
       state.current = { ...state.current, data: fresh, range: nextRange, selected: nextWork, selectedOrder: nextOrder, tab: "today" };
-      setData(fresh); setRange(nextRange); setSelected(nextWork); setSelectedOrder(nextOrder); setTab("today"); setError(null);
+      setData(fresh); setRange(nextRange); setSelected(nextWork); setSelectedOrder(nextOrder); setTab("today"); setError(null); setNoticeError(null);
       setAgendaFocusDate(day);
       return true;
     } catch (caught) {
-      if (version === sessionVersion.current && notificationContextIsCurrent(context)) setError(errorText(caught));
+      // El error del aviso se muestra aparte: no es un fallo al actualizar la jornada.
+      if (caught !== stale && still()) setNoticeError(errorText(caught));
       return false;
     } finally { endAction(action); }
   }
@@ -1527,6 +1565,19 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     prepareWeek: (nextRange, branchId, options) => isAccessAllowed() && repository.current === offlineController ? offlineController.prepareWeek(nextRange, branchId, options) : Promise.reject(new Error("Desbloquea la app y verifica la sesión offline.")),
   } : null, [offlineController, isAccessAllowed]);
 
+  useEffect(() => { setNoticeError(null); }, [tab, session?.token, session?.branchId]);
+  // Cronómetros activos: al iniciar, cada 2 minutos y después de cada actualización de la jornada. Sin conexión se conserva la última lista.
+  const timersBranch = session?.mode === "live" && liveVerified ? session.branchId : null;
+  useEffect(() => {
+    const remote = remoteRepository(repository.current) as (TechnicianRepository & { activeTimers?: (branch: number) => Promise<ActiveTimer[]> }) | null;
+    if (timersBranch === null || !remote?.activeTimers) { setActiveTimers([]); return; }
+    let active = true;
+    const load = () => { void remote.activeTimers!(timersBranch).then(items => { if (active) setActiveTimers(items); }, () => undefined); };
+    load();
+    const interval = setInterval(load, 120000);
+    return () => { active = false; clearInterval(interval); };
+  }, [session?.token, timersBranch, data]);
+
   const signatureSessionVersion = sessionVersion.current;
   const signatureAccess: UserSignatureAccess | undefined = session?.branchId ? {
     scopeKey: `${signatureSessionVersion}:${tenantStorageNamespace(session, gatewayUrl, session.branchId)}:signatures`,
@@ -1576,6 +1627,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     locationPort: remoteRepository(repository.current),
     receiptPort: remoteRepository(repository.current),
     materialReceiptEventId,
+    noticeError, dismissNoticeError: () => setNoticeError(null), activeTimers, openActiveTimer,
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,
     consumeOrderDeliveryIntent,
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,

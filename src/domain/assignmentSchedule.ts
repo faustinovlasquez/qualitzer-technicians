@@ -180,3 +180,64 @@ export function assignmentProgress(work: AssignmentWork, liveElapsedSeconds = wo
     percentage, barPercentage: Math.min(100, percentage ?? 0), overtimeMinutes: Math.max(0, totalExecutedMinutes - totalPlannedMinutes),
   };
 }
+
+// --- Ubicar el trabajo de un aviso (asignación o cronómetro) en la agenda ---
+type Group = Assignments["groups"][number];
+type Work = Group["works"][number];
+export interface NoticeTarget { groupType: "work" | "negotiation" | "maintenance"; groupId: number; workId: number | null; }
+export interface LocatedNotice { group: Group; work: Work | null; scheduledDate: string | null; }
+
+
+export function noticeGroupMatches(group: Group, target: NoticeTarget): boolean {
+  return target.groupType === "maintenance" ? group.type === "internal_maintenance" && group.id === `maintenance-${target.groupId}`
+    : target.groupType === "negotiation" ? group.type === "external_ot" && group.id === `external-${target.groupId}`
+      : group.type === "direct_assignment" && (group.id === `direct-${target.groupId}` || group.id === `direct-np-${target.groupId}`);
+}
+
+function noticeWork(group: Group, target: NoticeTarget): Work | undefined {
+  return group.works.find((item) => item.id === String(target.workId) && (target.groupType !== "work"
+    || (group.id === `direct-${item.id}` && item.workType === "productive")
+    || (group.id === `direct-np-${item.id}` && item.workType === "non_productive")));
+}
+
+/** Grupo y trabajo del aviso dentro de las asignaciones de un día. `null` si no está ese día. */
+export function locateNotice(data: Assignments, target: NoticeTarget, day: string): LocatedNotice | null {
+  const group = data.groups.find((item) => noticeGroupMatches(item, target));
+  if (!group) return null;
+  if (target.workId === null) return { group, work: null, scheduledDate: null };
+  const work = noticeWork(group, target);
+  if (!work) return null;
+  const snapshots = work.schedules?.filter((item) => item.queryDates.includes(day));
+  const snapshot = snapshots?.find((item) => assignmentDay(item.work.scheduledDate) === day) ?? snapshots?.[0];
+  if (work.schedules && !snapshot) return null;
+  return { group, work, scheduledDate: assignmentDay(snapshot?.work.scheduledDate ?? work.scheduledDate) };
+}
+
+/**
+ * Rango para buscar un trabajo que no aparece en la fecha del aviso. El servidor informa la primera fecha planificada,
+ * pero un cronómetro puede seguir corriendo días después: se busca entre esa fecha y hoy, con un máximo de 31 días.
+ */
+export function noticeSearchRange(day: string, today: string): DateRange {
+  const start = day < today ? day : today;
+  const end = day < today ? today : day;
+  const earliest = shiftDate(end, -30);
+  return { startDate: start < earliest ? earliest : start, endDate: end };
+}
+
+/** Día en que mostrar el trabajo encontrado en un rango: hoy si está, si no el más reciente hasta hoy, si no el más próximo. */
+export function noticeDayInRange(data: Assignments, target: NoticeTarget, range: DateRange, today: string): string | null {
+  if (target.workId === null) return null;
+  const days = new Set<string>();
+  for (const group of data.groups) {
+    if (!noticeGroupMatches(group, target)) continue;
+    const work = noticeWork(group, target);
+    if (!work) continue;
+    for (const schedule of work.schedules ?? []) for (const day of schedule.queryDates) days.add(day);
+    const scheduled = assignmentDay(work.scheduledDate ?? "");
+    if (!work.schedules?.length && scheduled) days.add(scheduled);
+  }
+  const candidates = [...days].filter((day) => day >= range.startDate && day <= range.endDate).sort();
+  if (candidates.includes(today)) return today;
+  const past = candidates.filter((day) => day < today);
+  return past.at(-1) ?? candidates[0] ?? null;
+}

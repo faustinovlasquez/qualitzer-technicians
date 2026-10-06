@@ -23,7 +23,7 @@ import { withAssignmentReadBatch } from "./assignmentReadBatch";
 import { workActivityInputSchema, workActivityResultSchema, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
 import { cachedAttachmentSchema } from "../offline/cacheSchemas";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, mobileUuidSchema, positiveCreationIdSchema, type CreationInput, type CreationOptionsQuery } from "../domain/creation";
-import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
+import { activeTimersSchema, notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
 
 
 export class HttpTechnicianRepository implements TechnicianRepository {
@@ -176,6 +176,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   private notificationPath(branch: number, suffix: string): string {
     return `/api/mobile-notifications/${suffix}?companyBranchId=${positiveCreationIdSchema.parse(branch)}`;
   }
+  async activeTimers(branch: number) { return activeTimersSchema.parse(await this.request<unknown>(this.notificationPath(branch, "active-timers"))).items; }
   async notificationStatus(branch: number) { return notificationStatusSchema.parse(await this.request<unknown>(this.notificationPath(branch, "status"))); }
   async registerNotificationDevice(input: NotificationDeviceInput) {
     return notificationDeviceResultSchema.parse(await this.request<unknown>("/api/mobile-notifications/device", "PUT", notificationDeviceInputSchema.parse(input)));
