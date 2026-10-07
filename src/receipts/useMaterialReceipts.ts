@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import { AppState } from "react-native";
 import { materialDispositionInputSchema, materialReceiptInputSchema, verifyMaterialDispositionResult, verifyMaterialReceiptResult, type MaterialDispositionInput, type MaterialReceipt,
-  type MaterialReceiptInput, type MaterialReceiptPort, type MaterialReceipts } from "../domain/materialReceipts";
+  type MaterialReceiptInput, type MaterialReceiptLocation, type MaterialReceiptPort, type MaterialReceipts } from "../domain/materialReceipts";
 import { captureMaterialReceiptLocation, waitForActiveApp } from "./receiptLocation";
 import { ApiError } from "../infrastructure/errors";
 import { prepareReceipt, settleReceipt } from "./receiptJournal";
@@ -11,6 +11,7 @@ import { prepareReceipt, settleReceipt } from "./receiptJournal";
 export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, userId: number, branchId: number, storageKey: string, sessionIdentity: string, enabled: boolean, isAllowed: () => boolean) {
   const key = `material-receipts:${storageKey}:${userId}:${branchId}`;
   const [data, setData] = useState<MaterialReceipts | null>(null);
+  const dataRef = useRef(data); dataRef.current = data;
   const [pending, setPending] = useState<MaterialReceiptInput | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -82,7 +83,11 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
   }, [key, sessionIdentity, ready, enabled, port]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  async function confirm(items: MaterialReceipts["items"], retriedExpiredLocation = false): Promise<void> {
+  /**
+   * `attempt`: 0 al tocar; 1 reintento automático con ubicación nueva; 2 si el servidor vuelve a rechazar la ubicación
+   * (p. ej. reloj del teléfono adelantado), se confirma sin ubicación como cuando el GPS no responde.
+   */
+  async function confirm(items: MaterialReceipts["items"], attempt = 0): Promise<void> {
     if (!ready || lock.current || !port?.confirmMaterialReceipts || items.length === 0 && !pending) return;
     const startBlocked = await ensureReady();
     if (startBlocked) { if (sameScope()) setError(`No se pudo confirmar. Desbloquea el teléfono y vuelve a intentarlo. (código: ${startBlocked})`); return; }
@@ -91,9 +96,11 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
     let command: MaterialReceiptInput | null = null;
     let reload = false;
     let retryWithFreshLocation = false;
+    let retryItems = items;
     try {
       command = await prepareReceipt(AsyncStorage, key, branchId, async () => {
-        const location = await captureMaterialReceiptLocation(() => ensureReady());
+        const location: MaterialReceiptLocation = attempt >= 2 ? { status: "UNAVAILABLE", reason: "UNAVAILABLE" }
+          : await captureMaterialReceiptLocation(() => ensureReady());
         const after = await ensureReady();
         if (after) throw new Error(after);
         return materialReceiptInputSchema.parse({ companyBranchId: branchId, requestId: Crypto.randomUUID(), client: "MOBILE",
@@ -119,10 +126,18 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
         } catch { if (sameScope()) setError("No se pudo recuperar el intento. Reintenta la misma confirmacion."); return; }
       }
       // Un intento guardado (p. ej. tras un corte) se reenvía con su ubicación original y el servidor la rechaza si ya
-      // venció: se descarta y se repite una sola vez con ubicación nueva, sin pedirle al técnico que vuelva a confirmar.
+      // venció: se descarta y se repite con ubicación nueva (y, si tampoco la acepta, sin ubicación) en el mismo toque.
       const staleStoredAttempt = command !== null && JSON.stringify(command.deliveries.map(delivery => delivery.id))
         !== JSON.stringify(items.map(item => item.id).sort((left, right) => left - right));
-      if (rejected && failure instanceof ApiError && (failure.code === "CONSUMPTION_RECEIPT_LOCATION_EXPIRED" || staleStoredAttempt) && !retriedExpiredLocation && items.length > 0) {
+      // "Reintentar confirmación" no envía materiales: se repite con las entregas del intento guardado que siguen
+      // pendientes en la lista, con su versión actual.
+      if (items.length === 0 && command !== null) {
+        const storedIds = new Set(command.deliveries.map(delivery => delivery.id));
+        retryItems = (dataRef.current?.items ?? []).filter(item => storedIds.has(item.id));
+      }
+      const locationExpired = failure instanceof ApiError && failure.code === "CONSUMPTION_RECEIPT_LOCATION_EXPIRED";
+      const retryable = locationExpired ? attempt < 2 : items.length > 0 && staleStoredAttempt && attempt < 1;
+      if (rejected && retryable && retryItems.length > 0) {
         retryWithFreshLocation = true;
         return;
       }
@@ -135,7 +150,7 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
     } finally {
       if (lock.current === operation) {
         lock.current = null;
-        if (retryWithFreshLocation && sameScope()) await confirm(items, true);
+        if (retryWithFreshLocation && sameScope()) await confirm(retryItems, attempt + 1);
         else { if (sameScope()) setBusy(false); if (reload && valid()) void refresh(); }
       }
     }

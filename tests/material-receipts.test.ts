@@ -134,6 +134,41 @@ test("actual hook retains ambiguous intent, replays it unchanged, and unlocks de
   assert.equal(current.pending, null); assert.equal(fixture.stored(), null); assert.equal(current.busy, false);
 });
 
+test("retrying a stored attempt whose location expired confirms again with a fresh location on the same tap", async context => {
+  const fixture = receiptHookFixture(); context.after(fixture.dispose);
+  let current = await fixture.flush();
+  fixture.setSend(async () => { throw new Error("NETWORK_LOST"); });
+  await current.confirm(current.data!.items); current = await fixture.flush();
+  assert.ok(current.pending);
+  let captures = 0;
+  fixture.setCapture(async () => { captures++; return input.location; });
+  let attempts = 0;
+  fixture.setSend(async command => {
+    attempts++;
+    if (attempts === 1) throw new errors.ApiError(409, "CONSUMPTION_RECEIPT_LOCATION_EXPIRED", "expired");
+    return { ...result, requestId: command.requestId, receipts: result.receipts.map(receipt => ({ ...receipt, acknowledgement: { ...receipt.acknowledgement, requestId: command.requestId } })) };
+  });
+  await current.confirm([]); current = await fixture.flush();
+  assert.equal(attempts, 2); assert.equal(captures, 1, "the retry captures a new location");
+  assert.deepEqual(fixture.sends.at(-1)!.deliveries, [{ id: 5, version: 2 }]);
+  assert.equal(current.error, ""); assert.equal(current.pending, null); assert.equal(fixture.stored(), null); assert.equal(current.busy, false);
+});
+
+test("a phone clock the server keeps rejecting still confirms on the first tap, without location", async context => {
+  const fixture = receiptHookFixture(); context.after(fixture.dispose);
+  let current = await fixture.flush();
+  let captures = 0;
+  fixture.setCapture(async () => { captures++; return { status: "AVAILABLE", latitude: -33, longitude: -70, accuracy: 10, capturedAt: "2026-09-29T12:02:00.000Z" }; });
+  fixture.setSend(async command => {
+    if (command.location.status === "AVAILABLE") throw new errors.ApiError(409, "CONSUMPTION_RECEIPT_LOCATION_EXPIRED", "expired");
+    return { ...result, requestId: command.requestId, receipts: result.receipts.map(receipt => ({ ...receipt, acknowledgement: { ...receipt.acknowledgement, requestId: command.requestId, location: command.location } })) };
+  });
+  await current.confirm(current.data!.items); current = await fixture.flush();
+  assert.equal(fixture.sends.length, 3); assert.equal(captures, 2);
+  assert.deepEqual(fixture.sends.at(-1)!.location, { status: "UNAVAILABLE", reason: "UNAVAILABLE" });
+  assert.equal(current.error, ""); assert.equal(current.pending, null); assert.equal(fixture.stored(), null); assert.equal(current.busy, false);
+});
+
 test("actual hook cannot send after location resolves into a locked or changed session", async context => {
   const fixture = receiptHookFixture(); context.after(fixture.dispose);
   let current = await fixture.flush();
