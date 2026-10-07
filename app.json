@@ -3,7 +3,7 @@
     "name": "Qualitzer técnicos",
     "slug": "qualitzer-tecnicos",
     "scheme": "qualitzer-field",
-    "version": "1.0.89",
+    "version": "1.0.91",
     "orientation": "portrait",
     "icon": "./assets/qualitzer-icon.png",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.qualitzer.field",
-      "versionCode": 90,
+      "versionCode": 92,
       "allowBackup": false,
       "googleServicesFile": "./config/firebase/google-services.json",
       "blockedPermissions": [

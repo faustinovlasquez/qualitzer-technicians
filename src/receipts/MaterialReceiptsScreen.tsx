@@ -144,7 +144,7 @@ function MoreProducts({ hidden, showAll, onPress }: { hidden: number; showAll: b
 }
 
 function PendingCard({ item, expanded, disabled, busy, onToggle, onConfirm }: { item: MaterialReceipt; expanded: boolean; disabled: boolean; busy: boolean; onToggle: () => void; onConfirm: () => void }) {
-  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(item.products.map(product => product.id)));
   const [showAll, setShowAll] = useState(false);
   const [asking, setAsking] = useState(false);
   const incident = item.receiptStatus === "INCIDENT";

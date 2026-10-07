@@ -277,7 +277,10 @@ export class MobileNotificationClient {
       }).finally(() => { if (this.refreshPending === pending) this.refreshPending = null; });
       this.refreshPending = pending;
     }
-    return Promise.all([inbox, this.refreshPending]).then(results => results.every(Boolean));
+    return Promise.all([inbox, this.refreshPending]).then(async results => {
+      await this.resumeDeferredResponse().catch(() => undefined);
+      return results.every(Boolean);
+    });
   };
 
   retryEnable = (): Promise<boolean> => this.run(async () => {
@@ -480,10 +483,20 @@ export class MobileNotificationClient {
     return null;
   }
 
+  // Un toque que llega con la app bloqueada (p. ej. al abrirla desde el aviso) se guarda y se abre al desbloquear.
+  private deferredResponse: NativeNotificationResponse | null = null;
+
+  private resumeDeferredResponse = async (): Promise<void> => {
+    const response = this.deferredResponse;
+    if (!response || !this.isCurrent() || !this.interactionAllowed()) return;
+    this.deferredResponse = null;
+    await this.handleResponse(response);
+  };
+
   private async openResponse(response: NativeNotificationResponse): Promise<void> {
     this.requireCurrent();
-    if (!this.interactionAllowed()) return;
     if (!response.defaultAction) return;
+    if (!this.interactionAllowed()) { this.deferredResponse = response; return; }
     const payload = notificationForSession(response.data, this.options.session);
     if (!payload) return;
     if (this.events.has(payload.eventId)) { await notificationReadWithTimeout(this.options.adapter.clearResponse(response.identifier), 2_000).catch(() => {}); return; }
@@ -492,10 +505,12 @@ export class MobileNotificationClient {
     try {
       const owned = await this.findOwnedEvent(payload);
       this.requireCurrent();
+      if (!this.interactionAllowed()) this.deferredResponse = response;
       this.requireInteraction();
       if (!owned) return;
       accepted = await this.options.onOpen(owned, { session: this.options.session, storageKey: this.options.storageKey, isCurrent: this.isCurrent });
       this.requireCurrent();
+      if (!accepted && !this.interactionAllowed()) this.deferredResponse = response;
       if (accepted) {
         await notificationReadWithTimeout(this.options.adapter.clearResponse(response.identifier), 2_000);
         this.requireCurrent();

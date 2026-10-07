@@ -82,7 +82,7 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
   }, [key, sessionIdentity, ready, enabled, port]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  async function confirm(items: MaterialReceipts["items"]) {
+  async function confirm(items: MaterialReceipts["items"], retriedExpiredLocation = false): Promise<void> {
     if (!ready || lock.current || !port?.confirmMaterialReceipts || items.length === 0 && !pending) return;
     const startBlocked = await ensureReady();
     if (startBlocked) { if (sameScope()) setError(`No se pudo confirmar. Desbloquea el teléfono y vuelve a intentarlo. (código: ${startBlocked})`); return; }
@@ -90,6 +90,7 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
     lock.current = operation; readRevision.current++; setBusy(true); setError("");
     let command: MaterialReceiptInput | null = null;
     let reload = false;
+    let retryWithFreshLocation = false;
     try {
       command = await prepareReceipt(AsyncStorage, key, branchId, async () => {
         const location = await captureMaterialReceiptLocation(() => ensureReady());
@@ -117,13 +118,27 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
           reload = true;
         } catch { if (sameScope()) setError("No se pudo recuperar el intento. Reintenta la misma confirmacion."); return; }
       }
+      // Un intento guardado (p. ej. tras un corte) se reenvía con su ubicación original y el servidor la rechaza si ya
+      // venció: se descarta y se repite una sola vez con ubicación nueva, sin pedirle al técnico que vuelva a confirmar.
+      const staleStoredAttempt = command !== null && JSON.stringify(command.deliveries.map(delivery => delivery.id))
+        !== JSON.stringify(items.map(item => item.id).sort((left, right) => left - right));
+      if (rejected && failure instanceof ApiError && (failure.code === "CONSUMPTION_RECEIPT_LOCATION_EXPIRED" || staleStoredAttempt) && !retriedExpiredLocation && items.length > 0) {
+        retryWithFreshLocation = true;
+        return;
+      }
       // El código ayuda a soporte a distinguir conexión, sesión, permisos o un error del servidor sin exponer detalles internos.
       const code = failure instanceof ApiError ? failure.code : failure instanceof Error && /^[A-Z][A-Z0-9_]{2,60}$/.test(failure.message) ? failure.message : "";
       if (sameScope()) setError(rejected ? `${failure instanceof ApiError && failure.code === "CONSUMPTION_RECEIPT_LOCATION_EXPIRED"
         ? "La ubicación del teléfono no estaba actualizada. Vuelve a confirmar."
         : "La entrega cambió. Revisa los materiales y confirma nuevamente."}${code ? ` (código: ${code})` : ""}`
         : `No se pudo confirmar. Reintenta la misma recepción cuando tengas conexión.${code ? ` (código: ${code})` : ""}`);
-    } finally { if (lock.current === operation) { lock.current = null; if (sameScope()) setBusy(false); if (reload && valid()) void refresh(); } }
+    } finally {
+      if (lock.current === operation) {
+        lock.current = null;
+        if (retryWithFreshLocation && sameScope()) await confirm(items, true);
+        else { if (sameScope()) setBusy(false); if (reload && valid()) void refresh(); }
+      }
+    }
   }
   /** Utilizado / Devolver por material. Requiere conexión: la respuesta del servidor reemplaza la entrega en el historial. */
   async function dispose(item: MaterialReceipt, lines: MaterialDispositionInput["lines"]): Promise<boolean> {
