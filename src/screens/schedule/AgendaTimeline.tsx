@@ -16,6 +16,8 @@ export interface AgendaTimelineProps {
   today: string;
   busy: boolean;
   loading: boolean;
+  /** Descarga por días en segundo plano: la agenda sigue navegable y lo descargado queda guardado. */
+  downloading?: boolean;
   query: string;
   onRangeChange(range: DateRange): void;
   onOpenWork(group: AssignmentGroup, work: AssignmentWork): void;
@@ -91,7 +93,7 @@ function AgendaRow({ item, today, onOpen, disabled }: { item: AgendaWorkItem; to
 }
 
 /** Agenda con días de la semana, modos Día/Semana/Mes, horas por estado y lista de trabajos. */
-export function AgendaTimeline({ data, range, today, busy, loading, query, onRangeChange, onOpenWork, onOpenCalendar, onOpenFilters }: AgendaTimelineProps) {
+export function AgendaTimeline({ data, range, today, busy, loading, downloading = false, query, onRangeChange, onOpenWork, onOpenCalendar, onOpenFilters }: AgendaTimelineProps) {
   const isMonthRange = range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate;
   const [mode, setMode] = useState<AgendaMode>(isMonthRange ? "month" : "week");
   const week = weekRange(mode === "month" ? (today >= range.startDate && today <= range.endDate ? today : range.startDate) : range.startDate);
@@ -100,7 +102,7 @@ export function AgendaTimeline({ data, range, today, busy, loading, query, onRan
   const visible: DateRange = mode === "day" ? dailyRange(selected) : mode === "month" ? monthRange(selected) : week;
   const summary = useMemo(() => buildAgenda(data?.groups ?? [], visible, query), [data, visible.startDate, visible.endDate, query]);
   const days = weekDays(week.startDate);
-  const locked = busy || loading;
+  const locked = busy || (loading && !downloading);
   const heading = mode === "day" ? "Trabajos del día" : mode === "month" ? "Trabajos del mes" : "Trabajos de la semana";
   const groupedByDay = mode !== "day" && new Set(summary.items.map(item => item.day)).size > 1;
 
@@ -170,7 +172,7 @@ export function AgendaTimeline({ data, range, today, busy, loading, query, onRan
       <Text style={styles.headingCount}>{summary.items.length} OT · {summary.counts.unscheduled} sin hora</Text>
     </View>
 
-    {summary.items.length === 0 ? <EmptyState icon="calendar-clear-outline" title={loading ? "Cargando agenda…" : "Sin trabajos"}
+    {summary.items.length === 0 ? <EmptyState icon="calendar-clear-outline" title={loading || downloading ? "Cargando agenda…" : "Sin trabajos"}
       message={query.trim() ? "Ningún trabajo coincide con la búsqueda." : mode === "day" ? "No hay trabajos para este día." : "No hay trabajos en este período."} />
       : summary.items.map((item, index) => <View key={item.key} style={styles.item}>
         {groupedByDay && item.day !== summary.items[index - 1]?.day ? <Text style={[styles.dayHeader, item.day === today && styles.dayHeaderToday]}>

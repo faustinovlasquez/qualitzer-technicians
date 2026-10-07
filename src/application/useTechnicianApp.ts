@@ -5,6 +5,9 @@ import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { ownSignatureOptions, userSignaturesPort, type UserSignatureAccess, type UserSignatureOptions, type UserSignaturesPort } from "../domain/userSignatures";
 import { ownProfileFor, ownProfilePort, type OwnProfile, type OwnProfileAccess, type OwnProfilePort } from "../domain/ownProfile";
 
+/** Al volver a la agenda o a la jornada, un día descargado hace menos de esto no se vuelve a pedir al servidor. */
+const ASSIGNMENT_CACHE_FRESH_MS = 5 * 60_000;
+
 const initialsOf = (firstNames: string, lastNames: string): string => `${firstNames.trim()[0] ?? ""}${lastNames.trim()[0] ?? ""}`.toUpperCase() || "?";
 import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { workActions, type WorkActivityInput } from "../domain/workActivities";
@@ -155,7 +158,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const repository = useRef<TechnicianRepository | null>(null);
   const gatewayBlock = useRef<string | null>(gatewayConfiguration.error);
   const requestVersion = useRef(0);
-  const assignmentRead = useRef<{ key: string; version: number; generation: number; repo: TechnicianRepository; controller: AbortController; pending: Promise<void> } | null>(null);
+  const assignmentRead = useRef<{ key: string; version: number; generation: number; repo: TechnicianRepository; controller: AbortController; pending: Promise<void>; preferCache: boolean } | null>(null);
   const baselineRead = useRef<AbortController | null>(null);
   const sessionVersion = useRef(0);
   const creationVersion = useRef(0);
@@ -459,14 +462,16 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     && (selected?.groupId === creationNotice?.groupId && selected?.workId === creationNotice?.workId || selectedOrder?.id === creationNotice?.groupId) ? creationNotice : null;
   useEffect(() => { if (creationNotice && !visibleCreationNotice) setCreationNotice(null); }, [creationNotice, visibleCreationNotice]);
 
-  const refreshAssignments = useCallback(async (background = false, reportError = true): Promise<void> => {
+  // preferCache: al entrar o cambiar de rango, los días descargados hace poco se muestran desde la copia local y solo se
+  // piden al servidor los que faltan o están viejos. Refrescar a mano, guardar cambios o sincronizar consulta todo.
+  const refreshAssignments = useCallback(async (background = false, reportError = true, preferCache = false): Promise<void> => {
     const { session: current, range: currentRange } = state.current;
     const repo = repository.current;
     if (!isAccessAllowed() || !current || current.branchId === null || !repo) return;
     const key = `${current.branchId}:${currentRange.startDate}:${currentRange.endDate}`;
     const existing = assignmentRead.current;
     if (existing && existing.key === key && existing.repo === repo && existing.version === requestVersion.current
-      && existing.generation === sessionVersion.current && !existing.controller.signal.aborted) return existing.pending;
+      && existing.generation === sessionVersion.current && !existing.controller.signal.aborted && (preferCache || !existing.preferCache)) return existing.pending;
     existing?.controller.abort();
     baselineRead.current?.abort();
     const version = ++requestVersion.current;
@@ -482,6 +487,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     try {
       const next = normalizeAssignmentsChecklistProgress(await repo.assignments(currentRange, branchId, {
         signal: controller.signal,
+        ...(preferCache ? { maxAgeMs: ASSIGNMENT_CACHE_FRESH_MS } : {}),
         ...(agenda ? {
           priorityDate: agendaFocus.current && requestedDays.includes(agendaFocus.current) ? agendaFocus.current : requestedDays.includes(dateKey()) ? dateKey() : currentRange.startDate,
           getPriorityDate: () => agendaFocus.current,
@@ -526,7 +532,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       if (version === requestVersion.current) setLoading(false);
     }
     });
-    assignmentRead.current = { key, version, generation, repo, controller, pending };
+    assignmentRead.current = { key, version, generation, repo, controller, pending, preferCache };
     return pending;
   }, [unauthorized, isAccessAllowed]);
 
@@ -547,7 +553,10 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const current = state.current.session;
     const repo = repository.current;
     if (!notificationContextIsCurrent(context) || !current || !repo || !notificationForSession(payload, current)) return false;
-    if (!await waitForActionUnlock(8000) || !notificationContextIsCurrent(context)) {
+    // Materiales y prueba solo cambian de pestaña: no esperan la actualización inicial (al abrir la app desde el aviso
+    // puede tardar más que la espera y el toque se perdía en la vista principal).
+    const tabOnlyNotice = payload.kind === "MOBILE_PUSH_TEST" || payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER";
+    if (!tabOnlyNotice && (!await waitForActionUnlock(8000) || !notificationContextIsCurrent(context))) {
       setNoticeError("La app está terminando una actualización. Vuelve a tocar el aviso en unos segundos.");
       return false;
     }
@@ -670,13 +679,18 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   });
   notificationClient.current = notifications.client;
 
+  // Un aviso tocado con la app bloqueada queda guardado: al desbloquear se abre su destino (p. ej. Materiales).
+  useEffect(() => {
+    if (accessAllowed) void notifications.client?.resumeDeferred().catch(() => undefined);
+  }, [accessAllowed, notifications.client]);
+
   useEffect(() => {
     if (!accessAllowed || !session || session.branchId === null) return;
     if (manualRefresh.current?.session === session && manualRefresh.current.range === range) {
       manualRefresh.current = null;
       return;
     }
-    void refreshAssignments().catch(() => undefined);
+    void refreshAssignments(false, true, true).catch(() => undefined);
   }, [session, range, refreshAssignments, accessAllowed]);
 
   const appliedRevision = offline?.operations.filter((operation) => operation.status === "applied").map((operation) => operation.id).sort().join("|") ?? "";

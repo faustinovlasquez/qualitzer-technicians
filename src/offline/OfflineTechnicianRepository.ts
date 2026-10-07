@@ -282,8 +282,9 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       const results = await batch.map(requestedDays, async (date) => {
         let data: Assignments;
         let timerReadOperationIds: string[] = [];
+        const fresh = options?.maxAgeMs !== undefined ? await this.freshAssignments(date, branchId, options.maxAgeMs, batch) : null;
         try {
-          data = await batch.wait(() => this.read(`assignments:${date}`, async () => {
+          data = fresh ?? await batch.wait(() => this.read(`assignments:${date}`, async () => {
             const beforeRead = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
             if (beforeRead.authBlocked || (this.dependencies.canAccessLocal && !await this.dependencies.canAccessLocal())) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
             batch.check();
@@ -322,6 +323,19 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       if (!snapshots.length) throw new OfflineUnavailableError("OFFLINE_CACHE_MISS");
       return mergeDailyAssignments(snapshots, range.startDate);
     });
+  }
+  /** Copia local del día si se descargó hace menos de `maxAgeMs`; así volver a la agenda no repite la descarga. */
+  private async freshAssignments(date: string, branchId: number, maxAgeMs: number, batch: { wait<T>(operation: () => Promise<T>): Promise<T> }): Promise<Assignments | null> {
+    const key = `assignments:${date}`;
+    const state = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
+    if (state.authBlocked || state.revokedResources.some((entry) => entry.key === key)) return null;
+    const entry = state.cache.filter((item) => item.key === key).sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
+    if (!entry || this.dependencies.now() - entry.fetchedAt >= maxAgeMs || entry.coverage?.branchId !== branchId || entry.coverage.date !== date) return null;
+    let json: unknown;
+    try { json = JSON.parse(entry.json); } catch { return null; }
+    const parsed = cachedAssignmentsSchema.safeParse(json);
+    if (!parsed.success || parsed.data.technician.id !== this.session.user.workerId) return null;
+    return assignmentsWithTimerRead(parsed.data, date, branchId, entry.timerReadOperationIds);
   }
   private emptyAssignments(): Assignments {
     return { generatedAt: "", technician: { id: this.session.user.workerId, name: this.session.user.name, allowEditExecutionTime: false }, summary: { totalGroups: 0, totalWorks: 0, activeWorks: 0, overdueWorks: 0, plannedMinutes: 0 }, groups: [] };

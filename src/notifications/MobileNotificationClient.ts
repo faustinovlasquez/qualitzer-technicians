@@ -493,6 +493,9 @@ export class MobileNotificationClient {
     await this.handleResponse(response);
   };
 
+  /** La app avisa al desbloquearse: el toque guardado mientras estaba bloqueada se abre en ese momento. */
+  resumeDeferred = (): Promise<void> => this.resumeDeferredResponse();
+
   private async openResponse(response: NativeNotificationResponse): Promise<void> {
     this.requireCurrent();
     if (!response.defaultAction) return;

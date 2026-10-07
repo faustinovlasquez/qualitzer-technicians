@@ -79,6 +79,26 @@ test("agenda prioritizes the selected day and publishes it before other dates co
   assert.equal(result.groups[0].works[0].schedules?.length, 7);
 });
 
+test("agenda reuses days downloaded recently and only asks the server for missing or stale ones", async () => {
+  const current = repositoryFixture();
+  const week = { startDate: "2026-09-14", endDate: "2026-09-20" };
+  await current.repository.assignments({ startDate: "2026-09-14", endDate: "2026-09-16" }, 1);
+  assert.equal(current.dates.length, 3);
+  current.dates.length = 0;
+  const loaded: string[][] = [];
+  await current.repository.assignments(week, 1, { maxAgeMs: 60_000, onProgress: (_data, dates) => { loaded.push(dates); } });
+  assert.deepEqual([...current.dates].sort(), ["2026-09-17", "2026-09-18", "2026-09-19", "2026-09-20"]);
+  assert.equal(loaded.at(-1)!.length, 7);
+  current.dates.length = 0;
+  await current.repository.assignments(week, 1, { maxAgeMs: 60_000 });
+  assert.deepEqual(current.dates, [], "a second visit within the freshness window makes no request");
+  await current.repository.assignments(week, 1, { maxAgeMs: 0 });
+  assert.equal(current.dates.length, 7, "stale days are downloaded again");
+  current.dates.length = 0;
+  await current.repository.assignments(week, 1);
+  assert.equal(current.dates.length, 7, "an explicit refresh always asks the server");
+});
+
 test("confirmed activity file deletion invalidates cache and rejects late listings without deleting drafts or queue", async () => {
   const current = repositoryFixture();
   const files: Attachment[] = [{ id: 401, name: "Foto", type: "image/png", url: "https://files.invalid/photo.png" }];

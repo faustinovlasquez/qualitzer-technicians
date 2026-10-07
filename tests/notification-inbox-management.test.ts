@@ -631,6 +631,18 @@ for (const action of ["openInboxItem", "handleResponse"] as const) {
   });
 }
 
+test("a notification tapped while the app is locked opens once the app unlocks", async t => {
+  const f = fixture(); t.after(f.client.start()); await f.client.refresh();
+  f.setAllowed(false);
+  await f.client.handleResponse({ identifier: "tapped-while-locked", data: row(1).data, defaultAction: true });
+  assert.equal(f.calls.includes("open"), false);
+  await f.client.resumeDeferred(); assert.equal(f.calls.includes("open"), false);
+  f.setAllowed(true); await f.client.resumeDeferred();
+  assert.equal(f.calls.filter(call => call === "open").length, 1);
+  assert.deepEqual(f.cleared, ["tapped-while-locked"]); assert.deepEqual(f.reads, [row(1).id]);
+  await f.client.resumeDeferred(); assert.equal(f.calls.filter(call => call === "open").length, 1);
+});
+
 test("queued delete rechecks interaction without undoing the preceding read acknowledgement", async t => {
   const f = fixture([row(1), row(2)]); t.after(f.client.start()); await f.client.refresh();
   const original = f.api.notificationRead; const entered = deferred<void>(); const release = deferred<void>();

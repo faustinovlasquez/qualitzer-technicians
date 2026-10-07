@@ -148,11 +148,27 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
   const sameWeekMonth = displayedWeek.startDate.slice(0, 7) === displayedWeek.endDate.slice(0, 7);
   const crossYearWeek = displayedWeek.startDate.slice(0, 4) !== displayedWeek.endDate.slice(0, 4);
   const compactWeekLabel = `${sameWeekMonth ? Number(displayedWeek.startDate.slice(-2)) : shortDate(displayedWeek.startDate)}${crossYearWeek ? ` ${displayedWeek.startDate.slice(0, 4)}` : ""}–${shortDate(displayedWeek.endDate)}${crossYearWeek || displayedWeek.endDate.slice(0, 4) !== range.endDate.slice(0, 4) ? ` ${displayedWeek.endDate.slice(0, 4)}` : ""}`;
-  const unavailableDates = [...new Set([...unavailableCoverageDates(offline, range, companyBranchId), ...(view === "agenda" ? pendingDates ?? (!data ? assignmentDays(range) : []) : [])])];
-  const unavailableWeekDates = unavailableCoverageDates(offline, displayedWeek, companyBranchId);
+  // Mientras se descarga la agenda por días no se avisa "no descargados": se muestra el avance.
+  const rangeDays = assignmentDays(range);
+  const downloadingDates = view === "agenda" && loading ? pendingDates ?? (!data ? rangeDays : []) : [];
+  const downloading = downloadingDates.length > 0;
+  const unavailableDates = [...new Set([...unavailableCoverageDates(offline, range, companyBranchId).filter((date) => !downloadingDates.includes(date)),
+    ...(view === "agenda" && !downloading ? pendingDates ?? (!data ? rangeDays : []) : [])])];
+  const unavailableWeekDates = unavailableCoverageDates(offline, displayedWeek, companyBranchId).filter((date) => !downloadingDates.includes(date));
   const partial = (selectedDay ? unavailableWeekDates.includes(selectedDay) : unavailableDates.length > 0);
   const coveragePending = offline === null;
-  const coverageNotice = unavailableDates.length > 0
+  const downloadedDays = rangeDays.length - downloadingDates.length;
+  const downloadProgress = downloading ? <View accessibilityRole="progressbar" accessibilityLabel={`Descargando agenda: ${downloadedDays} de ${rangeDays.length} días`}
+    accessibilityValue={{ min: 0, max: rangeDays.length, now: downloadedDays }} accessibilityLiveRegion="polite" style={styles.downloadCard}>
+    <View style={styles.downloadHeader}>
+      <Ionicons name="cloud-download-outline" size={18} color={palette.primary} accessible={false} />
+      <Text style={styles.downloadTitle}>Descargando agenda · {downloadedDays} de {rangeDays.length} días</Text>
+      <ActivityIndicator size="small" color={palette.primary} />
+    </View>
+    <View style={styles.downloadTrack}><View style={[styles.downloadFill, { width: `${Math.round(downloadedDays / Math.max(1, rangeDays.length) * 100)}%` }]} /></View>
+    <Text style={styles.downloadNote}>Puedes seguir usando la app. Los días descargados quedan guardados para verlos sin conexión.</Text>
+  </View> : null;
+  const coverageNotice = downloading ? downloadProgress : unavailableDates.length > 0
     ? <Text accessibilityRole="alert" style={styles.coverageWarning}>{unavailableDates.length} días no descargados · no es carga cero</Text>
     : coveragePending ? <Text style={styles.preferenceError}>Verificando copia local…</Text> : null;
 
@@ -328,10 +344,10 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
 
   if (view === "agenda" && agendaLayout === "timeline") {
     return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
+      refreshControl={<RefreshControl refreshing={loading && !downloading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
       {coverageNotice}
       {error ? <Text accessibilityRole="alert" style={styles.preferenceError}>{error} La carga visible puede no estar actualizada.</Text> : null}
-      <AgendaTimeline data={data} range={range} today={today} busy={busy} loading={loading} query={query} onRangeChange={onRangeChange}
+      <AgendaTimeline data={data} range={range} today={today} busy={busy} loading={loading} downloading={downloading} query={query} onRangeChange={onRangeChange}
         onOpenWork={(group, work) => onOpenWork(group, work)} onOpenCalendar={() => setAgendaLayout("schedule")} onOpenFilters={() => setAgendaLayout("list")} />
     </ScrollView>;
   }
@@ -350,12 +366,12 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       {compact ? <IconButton name="options-outline" label="Filtros y OTs de agenda" disabled={busy} onPress={() => setAgendaLayout("list")} /> : null}
     </View>
     {error ? <Text accessibilityRole="alert" style={styles.preferenceError}>{error} La carga visible puede no estar actualizada.</Text> : null}
-    {!data || coveragePending ? coverageNotice : null}
-    {loading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={styles.loadingText}>Actualizando agenda…</Text></View> : null}
+    {!data || coveragePending || downloading ? coverageNotice : null}
+    {loading && !downloading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={styles.loadingText}>Actualizando agenda…</Text></View> : null}
     {runningTimersFromSnapshot(data).length > 0 ? <Pressable accessibilityRole="button" onPress={() => setAgendaLayout("list")} style={styles.textButton}><Text style={styles.textButtonLabel}>Hay cronómetros activos · revisar en Lista</Text></Pressable> : null}
     {!coveragePending ? <WeeklySchedule data={calendarData} range={range} viewMode={agendaMode} onViewModeChange={changeAgendaMode} unavailableDates={unavailableDates} selectedDate={focusDate} onSelectDate={onFocusDate} onOpenWork={onOpenWork} onOpenGroup={onOpenGroup} busy={busy} timezone={user.system.timezone} /> : null}
     </>;
-    return compact ? <ScrollView style={styles.screen} contentContainerStyle={styles.mobileSchedule} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>{content}</ScrollView> : <View style={styles.desktopSchedule}>{content}</View>;
+    return compact ? <ScrollView style={styles.screen} contentContainerStyle={styles.mobileSchedule} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading && !downloading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>{content}</ScrollView> : <View style={styles.desktopSchedule}>{content}</View>;
   }
 
   return (
@@ -368,7 +384,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       keyboardDismissMode="on-drag"
       onScroll={handleListScroll}
       scrollEventThrottle={100}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}
+      refreshControl={<RefreshControl refreshing={loading && !downloading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}
     >
       {view === "agenda" ? <Button title="Volver a la agenda" icon="arrow-back-outline" variant="ghost" disabled={busy} onPress={() => setAgendaLayout("timeline")} style={styles.agendaBack} /> : null}
       {layoutSelector}
@@ -473,7 +489,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
           <Button title="Reintentar" variant="secondary" icon="refresh-outline" onPress={onRefresh} loading={loading} />
         </Card>
       ) : null}
-      {loading ? (
+      {loading && !downloading ? (
         <View accessibilityLiveRegion="polite" accessibilityState={{ busy: true }} style={[styles.loading, !hasData && styles.initialLoading]}>
           <ActivityIndicator color={palette.primary} size={hasData ? "small" : "large"} />
           <Text style={styles.loadingText}>{hasData ? "Actualizando asignaciones…" : "Cargando tus asignaciones…"}</Text>
@@ -575,6 +591,12 @@ const styles = StyleSheet.create({
   segmentTextSelected: { color: palette.white },
   preferenceError: { ...typography.caption, color: palette.amber },
   coverageWarning: { ...typography.caption, color: palette.amber, backgroundColor: palette.amberSoft, borderRadius: radius.sm, padding: 8 },
+  downloadCard: { gap: 6, padding: 10, borderRadius: radius.md, borderWidth: 1, borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
+  downloadHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  downloadTitle: { ...typography.caption, flex: 1, fontWeight: "700", color: palette.text, fontVariant: ["tabular-nums"] },
+  downloadTrack: { height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: palette.track },
+  downloadFill: { height: 6, borderRadius: 3, backgroundColor: palette.primary },
+  downloadNote: { ...typography.caption, fontSize: 11, color: palette.textSecondary },
   search: { minHeight: 56, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, borderRadius: radius.md, flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 4, gap: 10 },
   searchFocused: { borderColor: palette.primary },
   searchInput: { flex: 1, minWidth: 0, minHeight: 54, paddingVertical: 14, fontSize: 15, color: palette.text },
