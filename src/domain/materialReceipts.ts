@@ -37,6 +37,8 @@ export type MaterialReceiptStatus = z.infer<typeof materialReceiptStatusSchema>;
 export type MaterialDisposition = z.infer<typeof materialDispositionSchema>;
 export type MaterialDispositionInput = z.infer<typeof materialDispositionInputSchema>;
 export type MaterialReceiptLocation = z.infer<typeof materialReceiptLocationSchema>;
+/** Entregas que originaron un aviso: al abrirlo, la vista de Materiales se filtra por ellas. */
+export interface MaterialReceiptFocus { eventId: string; receiptIds: number[]; }
 export interface MaterialReceiptPort {
   materialReceipts(branchId: number, status?: MaterialReceiptStatus): Promise<MaterialReceipts>;
   confirmMaterialReceipts(input: MaterialReceiptInput): Promise<MaterialReceiptResult>;

@@ -10,9 +10,10 @@ import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
-import { dateKey, monthRange, weekRange } from "../domain/format";
+import { dateKey, monthRange, shiftDate, weekRange } from "../domain/format";
 import { assignmentDay, assignmentDays, assignmentWorkForDay, assignmentWorkForQueryDate, assignmentWorkQueryRange, assignmentWorkSnapshotForQueryDate, dailyRange, locateNotice, noticeDayInRange, noticeSearchRange, type NoticeTarget } from "../domain/assignmentSchedule";
 import type { ActiveTimer } from "../domain/notifications";
+import type { MaterialReceiptFocus } from "../domain/materialReceipts";
 import { normalizeAssignmentsChecklistProgress } from "../domain/assignmentChecklistProgress";
 import { DEMO_TENANT, requireSessionTenant, sameTenant, tenantStorageNamespace } from "../domain/tenantSession";
 import { getTenantChallengeRemaining } from "../infrastructure/tenantChallengeClock";
@@ -145,7 +146,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const [offlineSetupError, setOfflineSetupError] = useState<string | null>(null);
   const [liveVerified, setLiveVerified] = useState(false);
   const [selectedOffline, setSelectedOffline] = useState(false);
-  const [materialReceiptEventId, setMaterialReceiptEventId] = useState<string | null>(null);
+  const [materialReceiptFocus, setMaterialReceiptFocus] = useState<MaterialReceiptFocus | null>(null);
   // Error al abrir un aviso: se muestra aparte del estado de la jornada.
   const [noticeError, setNoticeError] = useState<string | null>(null);
   // Cronómetros en curso según el servidor, sin importar el rango de fechas cargado.
@@ -535,11 +536,27 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       && context.storageKey === tenantStorageNamespace(current, state.current.gatewayUrl, current.branchId);
   }
 
+  /** Espera a que termine la acción en curso (p. ej. el refresco que dispara el mismo aviso) en vez de descartar el toque. */
+  async function waitForActionUnlock(timeoutMs: number): Promise<boolean> {
+    const startedAt = Date.now();
+    while (actionLock.current && Date.now() - startedAt < timeoutMs) await new Promise((resolve) => setTimeout(resolve, 150));
+    return !actionLock.current;
+  }
+
   async function openNotification(payload: NotificationData, context: NotificationOpenContext): Promise<boolean> {
     const current = state.current.session;
     const repo = repository.current;
-    if (!notificationContextIsCurrent(context) || !current || !repo || !notificationForSession(payload, current) || actionLock.current) return false;
-    if (state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) {
+    if (!notificationContextIsCurrent(context) || !current || !repo || !notificationForSession(payload, current)) return false;
+    if (!await waitForActionUnlock(8000) || !notificationContextIsCurrent(context)) {
+      setNoticeError("La app está terminando una actualización. Vuelve a tocar el aviso en unos segundos.");
+      return false;
+    }
+    const timerNotice = payload.kind === "RUNNING_TIMER_REMINDER" && payload.groupType !== null && payload.groupId !== null && payload.workId !== null;
+    if (timerNotice && !state.current.selectedCreationKind) {
+      const selectedWork = state.current.selected;
+      const groupIds = payload.groupType === "maintenance" ? [`maintenance-${payload.groupId}`] : payload.groupType === "negotiation" ? [`external-${payload.groupId}`] : [`direct-${payload.groupId}`, `direct-np-${payload.groupId}`];
+      if (selectedWork && groupIds.includes(selectedWork.groupId) && selectedWork.workId === String(payload.workId)) { setNoticeError(null); return true; }
+    } else if (state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) {
       setNoticeError("Vuelve al listado antes de abrir la notificación. Se conservará tu selección y cualquier borrador.");
       return false;
     }
@@ -552,7 +569,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (payload.kind === "MOBILE_PUSH_TEST" || payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER") {
       // Los avisos de entrega de materiales abren directamente la pestaña Materiales.
       const target = payload.kind === "MOBILE_PUSH_TEST" ? "notifications" : "materials";
-      if (payload.kind !== "MOBILE_PUSH_TEST") setMaterialReceiptEventId(payload.eventId);
+      if (payload.kind !== "MOBILE_PUSH_TEST") setMaterialReceiptFocus({ eventId: payload.eventId, receiptIds: payload.materialReceiptIds ?? [] });
       state.current = { ...state.current, tab: target };
       setTab(target); setError(null); setNoticeError(null);
       return true;
@@ -605,7 +622,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
           if (found) { fresh = todayData; located = found; day = today; }
         }
         if (!located) {
-          const range = noticeSearchRange(firstDay, today);
+          // Un cronómetro que sigue abierto puede venir de un trabajo planificado días antes: si el aviso es de hoy, se busca hacia atrás.
+          const range = noticeSearchRange(firstDay === today ? shiftDate(today, -30) : firstDay, today);
           const found = noticeDayInRange(await read(range), target, range, today);
           if (found && found !== firstDay && found !== today) {
             const foundData = await read(dailyRange(found));
@@ -1627,7 +1645,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     locationPort: remoteRepository(repository.current),
     receiptPort: remoteRepository(repository.current),
     diagnosticsPort: remoteRepository(repository.current) as (TechnicianRepository & Partial<import("../domain/diagnostics").AppErrorPort>) | null,
-    materialReceiptEventId,
+    materialReceiptFocus,
     noticeError, dismissNoticeError: () => setNoticeError(null), activeTimers, openActiveTimer,
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,
     consumeOrderDeliveryIntent,

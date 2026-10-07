@@ -14,6 +14,11 @@ export async function waitForActiveApp(timeoutMs = 3000): Promise<boolean> {
   });
 }
 
+/** Lectura válida para el servidor: de los últimos 2 minutos (margen frente a su límite de 10) y no del futuro. */
+export function freshReceiptFix(timestamp: number, now: number): boolean {
+  return Number.isFinite(timestamp) && timestamp <= now + 30000 && now - timestamp <= 120000;
+}
+
 /**
  * Ubicación de la confirmación. `ensureReady` devuelve el motivo que impide seguir (sesión cambiada, teléfono bloqueado,
  * app en segundo plano) tras esperar a que se recupere, o null. El permiso solo se pide si nunca se respondió:
@@ -30,16 +35,25 @@ export async function captureMaterialReceiptLocation(ensureReady: () => Promise<
       if (after) throw new Error(after);
     }
     if (!permission.granted) return { status: "UNAVAILABLE", reason: "PERMISSION_DENIED" };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const point = await Promise.race([
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false }),
-        new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 10000); })
-      ]);
-      if (!point) return { status: "UNAVAILABLE", reason: "TIMEOUT" };
-      if (point.coords.accuracy === null) return { status: "UNAVAILABLE", reason: "UNAVAILABLE" };
-      return { status: "AVAILABLE", latitude: point.coords.latitude, longitude: point.coords.longitude, accuracy: point.coords.accuracy, capturedAt: new Date(point.timestamp).toISOString() };
-    } finally { if (timer) clearTimeout(timer); }
+    const deadline = Date.now() + 10000;
+    // Android puede entregar una lectura guardada de hace minutos y el servidor rechaza ubicaciones de más de 10 minutos:
+    // si la lectura no es reciente se pide otra al GPS, y si tampoco lo es se confirma sin ubicación en vez de fallar.
+    for (const accuracy of [Location.Accuracy.Balanced, Location.Accuracy.High]) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const point = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy, mayShowUserSettingsDialog: false }),
+          new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), remaining); })
+        ]);
+        if (!point) return { status: "UNAVAILABLE", reason: "TIMEOUT" };
+        if (point.coords.accuracy === null) return { status: "UNAVAILABLE", reason: "UNAVAILABLE" };
+        if (!freshReceiptFix(point.timestamp, Date.now())) continue;
+        return { status: "AVAILABLE", latitude: point.coords.latitude, longitude: point.coords.longitude, accuracy: point.coords.accuracy, capturedAt: new Date(point.timestamp).toISOString() };
+      } finally { if (timer) clearTimeout(timer); }
+    }
+    return { status: "UNAVAILABLE", reason: "TIMEOUT" };
   } catch (error) {
     if (error instanceof Error && /^MATERIAL_RECEIPT_/.test(error.message)) throw error;
     const blockedAfter = await ensureReady();

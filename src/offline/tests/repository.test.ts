@@ -557,7 +557,7 @@ test("prepare caches combined creation options, first comment page and date-inde
   f.remote.stepFiles = async () => [];
   f.remote.groupFiles = async (scope) => { groupDates.push(scope.startDate); return [{ id: 3, name: "group.pdf", url: "https://files.invalid/3" }]; };
   await f.repository.prepareWeek({ startDate: "2026-09-07", endDate: "2026-09-13" }, 1);
-  assert.deepEqual(queries.map((query) => query.kind), [undefined, "equipment", "specialties"]); assert.deepEqual(pages, [0]);
+  assert.deepEqual(queries.map((query) => query.kind), [undefined, "equipment", "specialties", "systems"]); assert.deepEqual(pages, [0]);
   assert.deepEqual(groupDates, ["2026-09-08"]);
   f.connect(false);
   assert.deepEqual(await f.repository.creationOptions({ companyBranchId: 1 }), options);

@@ -48,11 +48,11 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async workEdit(scope: import("../domain/models").WorkScope) {
     const { workEditDocumentSchema } = await import("../domain/creation");
-    return workEditDocumentSchema.parse(await this.request<unknown>(this.scopePath(scope, "/edit")));
+    return workEditDocumentSchema.parse(await this.request<unknown>(this.scopePath(scope, "/edit/full")));
   }
   async updateWork(scope: import("../domain/models").WorkScope, input: import("../domain/creation").WorkEditInput) {
     const { workEditDocumentSchema, workEditInputSchema } = await import("../domain/creation");
-    return workEditDocumentSchema.parse(await this.request<unknown>(this.scopePath(scope, "/edit"), "PATCH", workEditInputSchema.parse(input)));
+    return workEditDocumentSchema.parse(await this.request<unknown>(this.scopePath(scope, "/edit/full"), "PATCH", workEditInputSchema.parse(input)));
   }
   async updateEquipmentLocation(scope: import("../domain/models").WorkScope, target: import("../domain/equipmentLocation").EquipmentLocationTarget, input: import("../domain/equipmentLocation").EquipmentLocationUpdate) {
     const { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } = await import("../domain/equipmentLocation");
@@ -174,6 +174,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     if (parsed.kind !== undefined) query.set("kind", parsed.kind);
     if (parsed.search !== undefined) query.set("search", parsed.search);
     if (parsed.internalNumber !== undefined) query.set("internalNumber", parsed.internalNumber);
+    if (parsed.systemId !== undefined) query.set("systemId", String(parsed.systemId));
     if (parsed.page !== undefined) query.set("page", String(parsed.page));
     return creationOptionsSchema.parse(await this.request<unknown>(`/api/creation/options?${query}`));
   }

@@ -13,7 +13,9 @@ export const notificationOriginSchema = z.string().max(2048).refine((value) => {
   if (/[\s\x00-\x1f\x7f]/.test(value)) return false;
   try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && url.origin === value; } catch { return false; }
 });
-export const notificationDataSchema = z.object({ recipient: z.object({ userId: positiveCreationIdSchema, workerId: positiveCreationIdSchema }).optional(), tenantOrigin: notificationOriginSchema, companyBranchId: positiveCreationIdSchema, eventId: mobileUuidSchema, kind: notificationKindSchema, groupType: z.enum(["work", "negotiation", "maintenance"]).nullable(), groupId: positiveCreationIdSchema.nullable(), workId: positiveCreationIdSchema.nullable(), date: notificationDateSchema.nullable() }).refine((value) => {
+export const notificationDataSchema = z.object({ recipient: z.object({ userId: positiveCreationIdSchema, workerId: positiveCreationIdSchema }).optional(), tenantOrigin: notificationOriginSchema, companyBranchId: positiveCreationIdSchema, eventId: mobileUuidSchema, kind: notificationKindSchema, groupType: z.enum(["work", "negotiation", "maintenance"]).nullable(), groupId: positiveCreationIdSchema.nullable(), workId: positiveCreationIdSchema.nullable(), date: notificationDateSchema.nullable(),
+  materialReceiptIds: z.array(positiveCreationIdSchema).min(1).max(50).optional() }).refine((value) => {
+  if (value.materialReceiptIds !== undefined && value.kind !== "MATERIAL_RECEIPT_AVAILABLE" && value.kind !== "MATERIAL_RECEIPT_REMINDER") return false;
   if (value.kind === "MOBILE_PUSH_TEST" || value.kind === "MATERIAL_RECEIPT_AVAILABLE" || value.kind === "MATERIAL_RECEIPT_REMINDER") return value.groupType === null && value.groupId === null && value.workId === null && value.date === null;
   if (value.groupType === null || value.groupId === null) return false;
   return value.workId !== null || (value.kind === "WORK_TECHNICIAN_ASSIGNED" && (value.groupType === "negotiation" || value.groupType === "maintenance"));

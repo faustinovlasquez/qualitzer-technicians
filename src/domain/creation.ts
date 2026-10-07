@@ -15,15 +15,22 @@ export const creationScheduleSchema = z.object({ date: calendarDateSchema, start
 const optionalClockTimeSchema = clockTimeSchema.or(z.literal("")).default("");
 export const workCreationScheduleSchema = z.object({ date: calendarDateSchema, startTime: optionalClockTimeSchema, endTime: optionalClockTimeSchema, endDateOffset: z.literal(0).optional() }).strict().refine((value) => !value.startTime || !value.endTime || value.startTime < value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE");
 const base = { companyBranchId: positiveCreationIdSchema, clientRequestId: mobileUuidSchema, schedule: creationScheduleSchema };
+const workSystemFields = { systemId: positiveCreationIdSchema.optional(), componentId: positiveCreationIdSchema.optional() };
+const hasValidSystem = (value: { systemId?: number; componentId?: number }): boolean => value.componentId === undefined || value.systemId !== undefined;
 export const creationInputSchema = z.discriminatedUnion("kind", [
-  z.object({ ...base, schedule: workCreationScheduleSchema, kind: z.literal("work"), maintenanceId: positiveCreationIdSchema.optional(), work: z.object({ title: text(255), summary: text(5000, 0).default(""), priority: creationPrioritySchema, specialtyId: positiveCreationIdSchema.optional(), rentalEquipmentId: positiveCreationIdSchema.optional() }).strict() }).strict().refine(value => value.maintenanceId === undefined || value.work.rentalEquipmentId === undefined, "MOBILE_CREATION_INHERITED_EQUIPMENT"),
-  z.object({ ...base, kind: z.literal("maintenance"), maintenance: z.object({ type: z.enum(["correctivo", "detencion"]), title: text(255), motive: text(5000), equipmentId: positiveCreationIdSchema, priority: creationPrioritySchema.optional(), specialtyId: positiveCreationIdSchema.optional(), damageType: z.enum(["operacional", "desgaste"]).optional() }).strict() }).strict(),
+  z.object({ ...base, schedule: workCreationScheduleSchema, kind: z.literal("work"), maintenanceId: positiveCreationIdSchema.optional(), work: z.object({ title: text(255), summary: text(5000, 0).default(""), priority: creationPrioritySchema, specialtyId: positiveCreationIdSchema.optional(), rentalEquipmentId: positiveCreationIdSchema.optional(), ...workSystemFields }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED") }).strict()
+    .refine(value => value.maintenanceId === undefined || value.work.rentalEquipmentId === undefined, "MOBILE_CREATION_INHERITED_EQUIPMENT")
+    .refine(value => value.maintenanceId !== undefined || (value.work.systemId === undefined && value.work.componentId === undefined), "MOBILE_CREATION_SYSTEM_REQUIRES_MAINTENANCE"),
+  z.object({ ...base, kind: z.literal("maintenance"), maintenance: z.object({ type: z.enum(["correctivo", "detencion"]), title: text(255), motive: text(5000), equipmentId: positiveCreationIdSchema, priority: creationPrioritySchema.optional(), specialtyId: positiveCreationIdSchema.optional(), damageType: z.enum(["operacional", "desgaste"]).optional(), ...workSystemFields }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED") }).strict(),
   z.object({ ...base, kind: z.literal("non_productive"), nonProductive: z.object({ reason: nonProductiveReasonSchema, reasonText: text(500).optional(), initialComment: text(5000).optional() }).strict().refine((value) => value.reason !== "other" || !!value.reasonText, "NON_PRODUCTIVE_REASON_TEXT_REQUIRED") }).strict(),
 ]);
 export const normalizeEquipmentInternalNumber = (value: string): string => value.trim().toLowerCase();
-export const creationOptionsQuerySchema = z.object({ companyBranchId: positiveCreationIdSchema, kind: z.enum(["equipment", "specialties"]).optional(), search: z.string().max(100).trim().optional(),
+export const creationCatalogResourceSchema = z.enum(["equipment", "specialties", "systems", "components"]);
+export const creationOptionsQuerySchema = z.object({ companyBranchId: positiveCreationIdSchema, kind: creationCatalogResourceSchema.optional(), search: z.string().max(100).trim().optional(),
   internalNumber: z.string().max(100).regex(/^[^\x00-\x1f\x7f]*$/).trim().min(1).transform(normalizeEquipmentInternalNumber).optional(),
-  page: z.number().int().min(0).max(1000).optional() }).strict().refine((query) => query.internalNumber === undefined || (query.kind === "equipment" && !query.search), "MOBILE_CREATION_INVALID_INTERNAL_NUMBER");
+  systemId: positiveCreationIdSchema.optional(),
+  page: z.number().int().min(0).max(1000).optional() }).strict().refine((query) => query.internalNumber === undefined || (query.kind === "equipment" && !query.search), "MOBILE_CREATION_INVALID_INTERNAL_NUMBER")
+  .refine((query) => (query.kind === "components") === (query.systemId !== undefined), "MOBILE_CREATION_SYSTEM_REQUIRED");
 export const creationCatalogPageSchema = z.object({ items: z.array(z.object({ id: positiveCreationIdSchema, label: z.string(),
   internalNumber: z.string().nullable().optional(), identifier: z.string().nullable().optional(), equipmentType: z.string().nullable().optional(),
 })).max(25), page: z.number().int().min(0).max(1000), pageSize: z.literal(25), hasMore: z.boolean() });
@@ -33,6 +40,7 @@ export const creationOptionsSchema = z.object({
   maintenanceTypes: z.array(z.object({ value: z.enum(["correctivo", "detencion", "preventivo", "rutinario", "checklist"]), enabled: z.boolean(), instruction: z.string().nullable() })),
   schedule: z.object({ sameDayOnly: z.literal(true), conflictPolicy: z.literal("warning") }),
   equipment: creationCatalogPageSchema.optional(), specialties: creationCatalogPageSchema.optional(),
+  systems: creationCatalogPageSchema.optional(), components: creationCatalogPageSchema.optional(),
 });
 export const creationResultSchema = z.object({
   kind: creationKindSchema, groupId: z.string(), workId: positiveCreationIdSchema, companyBranchId: positiveCreationIdSchema,
@@ -53,6 +61,7 @@ export type CreationResult = z.infer<typeof creationResultSchema>;
 export type CreationOptionsQuery = z.infer<typeof creationOptionsQuerySchema>;
 export type CreationOptions = z.infer<typeof creationOptionsSchema>;
 export type CreationKind = z.infer<typeof creationKindSchema>;
+export type CreationCatalogResource = z.infer<typeof creationCatalogResourceSchema>;
 export type CreationSchedule = z.infer<typeof creationScheduleSchema>;
 export type NonProductiveReason = z.infer<typeof nonProductiveReasonSchema>;
 
@@ -67,7 +76,15 @@ export const workEditDocumentSchema = z.object({
   equipment: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable(),
   specialty: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable(),
   equipmentInherited: z.boolean(), scheduleEditable: z.boolean(),
+  workSystem: z.object({
+    systemId: positiveCreationIdSchema.nullable(), componentId: positiveCreationIdSchema.nullable(),
+    system: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable(),
+    component: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable(),
+    editable: z.boolean(),
+  }).strict().optional(),
 }).strict();
-export const workEditInputSchema = z.object({ expectedRevision: z.string().regex(/^[a-f0-9]{64}$/), fields: workEditFieldsSchema }).strict();
+export const workSystemInputSchema = z.object({ systemId: positiveCreationIdSchema.nullable(), componentId: positiveCreationIdSchema.nullable() }).strict()
+  .refine((value) => value.componentId === null || value.systemId !== null, "MOBILE_CREATION_SYSTEM_REQUIRED");
+export const workEditInputSchema = z.object({ expectedRevision: z.string().regex(/^[a-f0-9]{64}$/), fields: workEditFieldsSchema, workSystem: workSystemInputSchema.optional() }).strict();
 export type WorkEditDocument = z.infer<typeof workEditDocumentSchema>;
 export type WorkEditInput = z.infer<typeof workEditInputSchema>;

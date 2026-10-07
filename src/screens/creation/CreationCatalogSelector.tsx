@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { creationOptionsSchema, type CreationOptions, type CreationOptionsQuery } from "../../domain/creation";
+import { creationOptionsSchema, type CreationCatalogResource, type CreationOptions, type CreationOptionsQuery } from "../../domain/creation";
 import { Button, Field } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { CatalogItem } from "./creationForm";
@@ -8,9 +8,13 @@ import { CreationModal } from "./CreationModal";
 
 export type CreationCatalogPage = NonNullable<CreationOptions["equipment"]>;
 export type CreationCatalogCache = Map<string, CreationCatalogPage>;
+const catalogTitles: { [Resource in CreationCatalogResource]: string } = {
+  equipment: "Seleccionar equipo", specialties: "Seleccionar especialidad", systems: "Seleccionar sistema", components: "Seleccionar subsistema",
+};
 interface Props {
   embedded?: boolean;
-  resource: "equipment" | "specialties";
+  resource: CreationCatalogResource;
+  systemId?: number;
   companyBranchId: number;
   userId: number;
   workerId: number | null;
@@ -21,7 +25,7 @@ interface Props {
   onClose: () => void;
 }
 
-export function CreationCatalogSelector({ resource, companyBranchId, userId, workerId, selected, cache, onLoadOptions, onSelect, onClose, embedded = false }: Props) {
+export function CreationCatalogSelector({ resource, systemId, companyBranchId, userId, workerId, selected, cache, onLoadOptions, onSelect, onClose, embedded = false }: Props) {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [items, setItems] = useState<CatalogItem[]>([]);
@@ -40,10 +44,12 @@ export function CreationCatalogSelector({ resource, companyBranchId, userId, wor
     setError("");
     if (nextPage === 0) { setItems([]); setHasMore(false); setPage(-1); setAppliedSearch(query); }
     try {
-      const key = JSON.stringify([resource, query, nextPage]);
+      const scopedSystemId = resource === "components" ? systemId : undefined;
+      if (resource === "components" && scopedSystemId === undefined) throw new Error("CREATION_SYSTEM_REQUIRED");
+      const key = JSON.stringify(scopedSystemId === undefined ? [resource, query, nextPage] : [resource, scopedSystemId, query, nextPage]);
       let result = cache.get(key);
       if (!result) {
-        const options = creationOptionsSchema.parse(await loader.current({ companyBranchId, kind: resource, search: query, page: nextPage }));
+        const options = creationOptionsSchema.parse(await loader.current({ companyBranchId, kind: resource, search: query, page: nextPage, ...(scopedSystemId === undefined ? {} : { systemId: scopedSystemId }) }));
         if (options.companyBranchId !== companyBranchId || options.userId !== userId || options.workerId !== workerId) throw new Error("CREATION_OPTIONS_CONTEXT_MISMATCH");
         result = options[resource];
         if (!result || result.page !== nextPage) throw new Error("CREATION_CATALOG_UNAVAILABLE");
@@ -66,7 +72,7 @@ export function CreationCatalogSelector({ resource, companyBranchId, userId, wor
     active.current = true;
     void load("", 0);
     return () => { active.current = false; request.current += 1; };
-  }, [resource, companyBranchId, userId, workerId]);
+  }, [resource, systemId, companyBranchId, userId, workerId]);
 
   const content = <>
     <Field label={resource === "equipment" ? "Buscar por número interno, identificación, tipo o modelo" : "Buscar en el catálogo"} value={search} maxLength={100} onChangeText={(value) => setSearch(value.replace(/[\x00-\x1f\x7f]/g, ""))}
@@ -84,7 +90,7 @@ export function CreationCatalogSelector({ resource, companyBranchId, userId, wor
     </View>
     {hasMore ? <Button title="Cargar más" variant="secondary" disabled={loading} onPress={() => void load(appliedSearch, page + 1)} /> : null}
   </>;
-  return embedded ? <View style={styles.content}>{content}</View> : <CreationModal title={resource === "equipment" ? "Seleccionar equipo" : "Seleccionar especialidad"} onClose={onClose}>{content}</CreationModal>;
+  return embedded ? <View style={styles.content}>{content}</View> : <CreationModal title={catalogTitles[resource]} onClose={onClose}>{content}</CreationModal>;
 }
 
 const styles = StyleSheet.create({

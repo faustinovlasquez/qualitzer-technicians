@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, creationPlannedMinutes } from "../../src/domain/creation";
+import { creationCatalogResourceSchema, creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, creationPlannedMinutes } from "../../src/domain/creation";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
@@ -8,9 +8,9 @@ import { emptySchema, positiveId } from "../validation";
 import { mobileActor } from "./authorization";
 
 const optionsQuery = z.object({
-  companyBranchId: positiveId.transform(Number), kind: z.enum(["equipment", "specialties"]).optional(),
+  companyBranchId: positiveId.transform(Number), kind: creationCatalogResourceSchema.optional(),
   search: z.string().optional(), page: z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).optional(),
-  internalNumber: z.string().optional(),
+  internalNumber: z.string().optional(), systemId: positiveId.transform(Number).optional(),
 }).strict().pipe(creationOptionsQuerySchema);
 
 export function createCreationRouter(upstream: Upstream): Router {
@@ -23,6 +23,7 @@ export function createCreationRouter(upstream: Upstream): Router {
     if (input.kind !== undefined) query.set("kind", input.kind);
     if (input.search !== undefined) query.set("search", input.search);
     if (input.internalNumber !== undefined) query.set("internalNumber", input.internalNumber);
+    if (input.systemId !== undefined) query.set("systemId", String(input.systemId));
     if (input.page !== undefined) query.set("page", String(input.page));
     const result = parseUpstream(creationOptionsSchema, await upstream.request("/technician-dashboard/mobile-creations/options", { token, query }));
     if (result.userId !== user.id || result.workerId !== user.workerId || result.companyBranchId !== input.companyBranchId) throw new GatewayError(403, "MOBILE_CREATION_IDENTITY_MISMATCH");

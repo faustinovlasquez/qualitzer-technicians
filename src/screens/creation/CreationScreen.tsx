@@ -2,7 +2,7 @@ import * as Crypto from "expo-crypto";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, BackHandler, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { creationOptionsSchema, creationResultSchema, type CreationInput, type CreationKind, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../../domain/creation";
+import { creationOptionsSchema, creationResultSchema, type CreationCatalogResource, type CreationInput, type CreationKind, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../../domain/creation";
 import { assignmentWorkCode } from "../../domain/assignmentCodes";
 import type { Assignments, Tenant, User } from "../../domain/models";
 import { isOfflineQueuedError, type OfflineQueuedOutcome, type OfflineSnapshot } from "../../domain/offline";
@@ -18,7 +18,7 @@ import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
 import { CreationFields, creationLabels, priorityLabels } from "./CreationFields";
 import { CreationModal } from "./CreationModal";
 import { creationDraftKey, openCreationDraftStore } from "./creationDrafts";
-import { creationConflictPreview, creationDuration, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
+import { applyCatalogSelection, catalogFormField, creationConflictPreview, creationDuration, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
 
 export { clearCreationDrafts } from "./creationDrafts";
 export type { CreationInput, CreationKind, CreationOptions, CreationOptionsQuery, CreationResult } from "../../domain/creation";
@@ -57,6 +57,8 @@ const serverMessages = new Map<string, string>([
   ["MOBILE_CREATION_REQUEST_CONFLICT", "Este identificador ya se usó para otra creación. Revisa tu agenda antes de crear otro registro."],
   ["MOBILE_CREATION_EQUIPMENT_NOT_FOUND", "El equipo ya no está disponible."],
   ["MOBILE_CREATION_SPECIALTY_NOT_FOUND", "La especialidad ya no está disponible."],
+  ["MOBILE_CREATION_SYSTEM_NOT_FOUND", "El sistema ya no está disponible. Selecciona otro."],
+  ["MOBILE_CREATION_COMPONENT_NOT_FOUND", "El subsistema ya no está disponible o no pertenece al sistema elegido."],
   ["MOBILE_CREATION_TIMEZONE_NOT_CONFIGURED", "La sucursal no tiene una zona horaria válida configurada."],
   ["MOBILE_CREATION_SCHEMA_NOT_READY", "La creación móvil aún no está habilitada en el servidor."],
   ["MOBILE_CREATION_ACTOR_NOT_AUTHORIZED", "Tu sesión no tiene acceso a esta creación."],
@@ -85,7 +87,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [dialog, setDialog] = useState<"back" | "new" | "invalid" | null>(null);
-  const [catalog, setCatalog] = useState<"equipment" | "specialties" | null>(null);
+  const [catalog, setCatalog] = useState<CreationCatalogResource | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
   const latest = useRef({ busy, offline, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked });
@@ -177,6 +179,14 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     changed.current = true;
     replaceDraft({ ...current.current, form: { ...current.current.form, [field]: value } });
     setErrors((previous) => ({ ...previous, [field]: undefined }));
+    setError("");
+  }
+
+  function selectCatalog(resource: CreationCatalogResource, item: CatalogItem): void {
+    if (lock.current || frozen || current.current.phase !== "editing") return;
+    changed.current = true;
+    replaceDraft({ ...current.current, form: applyCatalogSelection(current.current.form, resource, item) });
+    setErrors((previous) => ({ ...previous, [catalogFormField[resource]]: undefined }));
     setError("");
   }
 
@@ -342,7 +352,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Text accessibilityRole="alert" style={styles.warning}>No se ha confirmado si el registro se creó. Se conservan los datos para reintentar sin duplicarlo.</Text>
               <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar creación. Crear otro registro puede duplicar uno ya guardado.</Text>
             </Card> : null}
-            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
+            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={kind === "maintenance" || !!parentMaintenance} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
               equipmentLookup={parentMaintenance ? <View style={styles.card}><Text style={styles.heading}>Equipo del mantenimiento</Text><Text style={styles.body}>{parentMaintenance.equipment?.label ?? "No informado"}</Text><Text style={styles.hint}>{parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier}</Text></View> : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
                 required={kind === "maintenance"} disabled={frozen} selected={form.equipment} error={errors.equipment} cache={catalogCache}
                 onLoadOptions={onLoadOptions} onSelect={(item) => change("equipment", item)} />} /></Card> : null}
@@ -361,6 +371,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
                 <Text style={styles.body}>Prioridad: {priorityLabels[form.priority]}</Text>
                 <Text style={styles.body}>{parentMaintenance ? `Equipo del mantenimiento: ${parentMaintenance.equipment?.label ?? "No informado"}` : form.equipment ? `Equipo: ${form.equipment.label} · ID ${form.equipment.id}` : "Sin equipo asociado"}</Text>
                 {form.specialty ? <Text style={styles.body}>Especialidad: {form.specialty.label}</Text> : null}
+                {form.system && (kind === "maintenance" || parentMaintenance) ? <Text style={styles.body}>Sistema: {form.system.label}{form.component ? ` · Subsistema: ${form.component.label}` : ""}</Text> : null}
                 {kind === "maintenance" && form.damageType ? <Text style={styles.body}>Daño: {form.damageType === "desgaste" ? "Desgaste" : "Operacional"}</Text> : null}
               </> : <>
                 <Text style={styles.reviewTitle}>{options.nonProductiveReasons.find((item) => item.value === form.reason)?.label ?? form.reason}</Text>
@@ -387,9 +398,9 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
         {saveError ? <Text accessibilityRole="alert" style={styles.error}>{saveError}</Text> : null}
       </ScrollView>
     </KeyboardAvoidingView>
-    {catalog && !frozen ? <CreationCatalogSelector resource={catalog} companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId} cache={catalogCache}
-      selected={catalog === "equipment" ? form.equipment : form.specialty} onLoadOptions={onLoadOptions} onClose={() => setCatalog(null)}
-      onSelect={(item) => change(catalog === "equipment" ? "equipment" : "specialty", item)} /> : null}
+    {catalog && !frozen ? <CreationCatalogSelector resource={catalog} systemId={form.system?.id} companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId} cache={catalogCache}
+      selected={form[catalogFormField[catalog]]} onLoadOptions={onLoadOptions} onClose={() => setCatalog(null)}
+      onSelect={(item) => selectCatalog(catalog, item)} /> : null}
     {dialog ? <CreationModal title={dialog === "back" ? "Volver sin perder tus datos" : "Crear otro registro"} onClose={() => { if (!lock.current) setDialog(null); }}>
       <Text style={styles.body}>{dialog === "back" ? "Se conservará el borrador. Si ya intentaste crear el registro, podrás reintentar sin duplicarlo." : "El registro anterior podría haberse creado aunque no recibieras respuesta. Revisa tu agenda primero. Continuar prepara una creación distinta y podría generar un duplicado."}</Text>
       <Button title={dialog === "back" ? "Guardar borrador y volver" : "Entiendo: editar como nueva creación"} loading={sending} onPress={() => { if (dialog === "back") void leaveWithDraft(); else void editAsNew(dialog === "invalid"); }} />

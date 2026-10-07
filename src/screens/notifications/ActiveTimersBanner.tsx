@@ -3,37 +3,48 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { ActiveTimer } from "../../domain/notifications";
 import { palette, radius } from "../../ui/theme";
-import { activeTimerElapsed, activeTimerReference } from "../../notifications/runningTimers";
+import { activeTimerElapsed, activeTimerReference, type SnapshotActiveTimer } from "../../notifications/runningTimers";
+
+interface BannerRow { key: string; name: string; reference: string; startedAt: string; open: () => void; }
 
 /**
- * Alerta fija de cronómetros en curso. Viene del servidor, así que aparece aunque el trabajo esté planificado
- * en otra fecha y no se vea en la jornada cargada. Tocar "Ver" abre el trabajo para pausarlo o terminarlo.
+ * Alerta fija de cronómetros en curso. Usa el listado del servidor, que incluye trabajos planificados en otras fechas,
+ * y completa con los cronómetros de la jornada cargada que el servidor aún no informa. Tocar "Ver" abre el trabajo.
  */
-export function ActiveTimersBanner({ timers, disabled, onOpen }: { timers: ActiveTimer[]; disabled: boolean; onOpen: (timer: ActiveTimer) => void }) {
+export function ActiveTimersBanner({ timers, localTimers = [], disabled, onOpen, onOpenLocal }: {
+  timers: ActiveTimer[]; localTimers?: SnapshotActiveTimer[]; disabled: boolean;
+  onOpen: (timer: ActiveTimer) => void; onOpenLocal?: (timer: SnapshotActiveTimer) => void;
+}) {
   const [now, setNow] = useState(() => Date.now());
   const [expanded, setExpanded] = useState(false);
+  const rows: BannerRow[] = [
+    ...timers.map((timer) => ({ key: `${timer.groupType}:${timer.groupId}:${timer.workId}`, name: timer.title || activeTimerReference(timer),
+      reference: timer.title ? activeTimerReference(timer) : "", startedAt: timer.startedAt, open: () => onOpen(timer) })),
+    ...localTimers.map((timer) => ({ key: `local:${timer.groupId}:${timer.workId}`, name: timer.title || `Trabajo #${timer.workId}`,
+      reference: timer.title ? `Trabajo #${timer.workId}` : "", startedAt: timer.startedAt, open: () => onOpenLocal?.(timer) })),
+  ];
   useEffect(() => {
-    if (timers.length === 0) return;
+    if (rows.length === 0) return;
     const interval = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(interval);
-  }, [timers.length]);
-  if (timers.length === 0) return null;
-  const visible = expanded ? timers : timers.slice(0, 1);
+  }, [rows.length]);
+  if (rows.length === 0) return null;
+  const visible = expanded ? rows : rows.slice(0, 1);
   return <View accessibilityRole="alert" style={styles.banner}>
-    {visible.map((timer, index) => <View key={`${timer.groupType}:${timer.groupId}:${timer.workId}`} style={[styles.row, index > 0 && styles.divider]}>
+    {visible.map((row, index) => <View key={row.key} style={[styles.row, index > 0 && styles.divider]}>
       <View style={styles.icon}><Ionicons name="timer-outline" size={20} color={palette.white} accessible={false} /></View>
       <View style={styles.text}>
-        <Text style={styles.title} numberOfLines={1}>{timers.length > 1 && index === 0 && !expanded ? `${timers.length} cronómetros activos` : "Cronómetro activo"}</Text>
-        <Text style={styles.name} numberOfLines={1}>{timer.title || activeTimerReference(timer)}</Text>
-        <Text style={styles.meta} numberOfLines={1}>{`${timer.title ? `${activeTimerReference(timer)} · ` : ""}${activeTimerElapsed(timer.startedAt, now)}`}</Text>
+        <Text style={styles.title} numberOfLines={1}>{rows.length > 1 && index === 0 && !expanded ? `${rows.length} cronómetros activos` : "Cronómetro activo"}</Text>
+        <Text style={styles.name} numberOfLines={1}>{row.name}</Text>
+        <Text style={styles.meta} numberOfLines={1}>{`${row.reference ? `${row.reference} · ` : ""}${activeTimerElapsed(row.startedAt, now)}`}</Text>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Ver cronómetro de ${timer.title || activeTimerReference(timer)}`} disabled={disabled} onPress={() => onOpen(timer)}
+      <Pressable accessibilityRole="button" accessibilityLabel={`Ver cronómetro de ${row.name}`} disabled={disabled} onPress={row.open}
         style={({ pressed }) => [styles.action, disabled && styles.disabled, pressed && styles.pressed]}>
         <Text style={styles.actionText}>Ver</Text>
       </Pressable>
     </View>)}
-    {timers.length > 1 ? <Pressable accessibilityRole="button" onPress={() => setExpanded(value => !value)} style={styles.more}>
-      <Text style={styles.moreText}>{expanded ? "Ver menos" : `Ver los ${timers.length}`}</Text>
+    {rows.length > 1 ? <Pressable accessibilityRole="button" onPress={() => setExpanded(value => !value)} style={styles.more}>
+      <Text style={styles.moreText}>{expanded ? "Ver menos" : `Ver los ${rows.length}`}</Text>
       <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={14} color={palette.amber} accessible={false} />
     </Pressable> : null}
   </View>;

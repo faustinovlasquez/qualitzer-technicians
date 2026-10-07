@@ -1,17 +1,20 @@
 import { z } from "zod";
-import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, workEditInputSchema, type WorkEditDocument, type WorkEditInput, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
+import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, workEditInputSchema, type WorkEditDocument, type WorkEditInput, type CreationCatalogResource, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
 import type { Assignments } from "../../domain/models";
 import type { OfflineSnapshot } from "../../domain/offline";
 import { buildWeeklySchedule, scheduleTimeMinutes } from "../../domain/weeklySchedule";
 import { queuedCreationOutcomeSchema } from "../offline/offlineUi";
 
 const draftText = (max: number) => z.string().max(max).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/);
+const catalogReferenceSchema = z.object({ id: positiveCreationIdSchema, label: draftText(500) }).strict();
 export const creationFormSchema = z.object({
   maintenanceId: positiveCreationIdSchema.optional(),
   title: draftText(255), summary: draftText(5000), motive: draftText(5000),
   priority: creationPrioritySchema, maintenanceType: z.enum(["correctivo", "detencion"]),
   equipment: z.object({ id: positiveCreationIdSchema, label: draftText(500), internalNumber: draftText(500).nullish(), identifier: draftText(500).nullish(), equipmentType: draftText(500).nullish() }).strict().nullable(),
-  specialty: z.object({ id: positiveCreationIdSchema, label: draftText(500) }).strict().nullable(),
+  specialty: catalogReferenceSchema.nullable(),
+  system: catalogReferenceSchema.nullable().default(null),
+  component: catalogReferenceSchema.nullable().default(null),
   damageType: z.enum(["", "operacional", "desgaste"]), reason: nonProductiveReasonSchema,
   reasonText: draftText(500), initialComment: draftText(5000),
   date: z.string().max(10).regex(/^[0-9-]*$/), startTime: z.string().max(5).regex(/^[0-9:]*$/), endTime: z.string().max(5).regex(/^[0-9:]*$/),
@@ -19,22 +22,32 @@ export const creationFormSchema = z.object({
 export type CreationForm = z.infer<typeof creationFormSchema>;
 export type CatalogItem = NonNullable<CreationForm["equipment"]>;
 export type CreationFormErrors = Partial<{ [Key in keyof CreationForm]: string }>;
+export const catalogFormField = { equipment: "equipment", specialties: "specialty", systems: "system", components: "component" } as const satisfies { [Resource in CreationCatalogResource]: keyof CreationForm };
+
+export function applyCatalogSelection(form: CreationForm, resource: CreationCatalogResource, item: CatalogItem): CreationForm {
+  if (resource === "equipment") return { ...form, equipment: item };
+  const reference = { id: item.id, label: item.label };
+  if (resource === "systems") return { ...form, system: reference, component: form.system?.id === item.id ? form.component : null };
+  return { ...form, [catalogFormField[resource]]: reference };
+}
 
 export function emptyCreationForm(initialDate: string): CreationForm {
-  return { title: "", summary: "", motive: "", priority: "medium", maintenanceType: "correctivo", equipment: null, specialty: null,
+  return { title: "", summary: "", motive: "", priority: "medium", maintenanceType: "correctivo", equipment: null, specialty: null, system: null, component: null,
     damageType: "", reason: "waiting_parts", reasonText: "", initialComment: "", date: calendarDateSchema.safeParse(initialDate).success ? initialDate : "", startTime: "", endTime: "" };
 }
 
 export function creationPayload(kind: CreationKind, form: CreationForm, companyBranchId: number, clientRequestId: string): CreationInput {
   const base = { companyBranchId, clientRequestId, schedule: { date: form.date, startTime: form.startTime, endTime: form.endTime } };
   const specialty = form.specialty ? { specialtyId: form.specialty.id } : {};
+  const workSystem = form.system ? { systemId: form.system.id, ...(form.component ? { componentId: form.component.id } : {}) } : {};
   if (kind === "work") return creationInputSchema.parse({ ...base, kind, ...(form.maintenanceId ? { maintenanceId: form.maintenanceId } : {}), work: {
     title: form.title, summary: form.summary.trim(), priority: form.priority, ...specialty,
     ...(form.equipment && !form.maintenanceId ? { rentalEquipmentId: form.equipment.id } : {}),
+    ...(form.maintenanceId ? workSystem : {}),
   } });
   if (kind === "maintenance") return creationInputSchema.parse({ ...base, kind, maintenance: {
     type: form.maintenanceType, title: form.title, motive: form.motive, equipmentId: form.equipment?.id, priority: form.priority,
-    ...specialty, ...(form.damageType ? { damageType: form.damageType } : {}),
+    ...specialty, ...(form.damageType ? { damageType: form.damageType } : {}), ...workSystem,
   } });
   return creationInputSchema.parse({ ...base, kind, nonProductive: {
     reason: form.reason, ...(form.reasonText.trim() ? { reasonText: form.reasonText } : {}),
@@ -136,6 +149,7 @@ export function creationConflictPreview(data: Assignments | null, schedule: Crea
 export function workEditForm(document: WorkEditDocument): CreationForm {
   return { ...emptyCreationForm(document.fields.schedule.date), title: document.fields.title, summary: document.fields.summary,
     priority: document.fields.priority, equipment: document.equipment, specialty: document.specialty,
+    system: document.workSystem?.system ?? null, component: document.workSystem?.component ?? null,
     startTime: document.fields.schedule.startTime, endTime: document.fields.schedule.endTime };
 }
 
@@ -145,5 +159,5 @@ export function workEditPayload(document: WorkEditDocument, form: CreationForm):
     specialtyId: document.equipmentInherited ? document.fields.specialtyId : form.specialty?.id ?? null,
     rentalEquipmentId: document.equipmentInherited ? document.fields.rentalEquipmentId : form.equipment?.id ?? null,
     schedule: document.scheduleEditable ? { date: form.date, startTime: form.startTime, endTime: form.endTime, endDateOffset: 0 } : document.fields.schedule,
-  } });
+  }, ...(document.workSystem?.editable ? { workSystem: { systemId: form.system?.id ?? null, componentId: form.system && form.component ? form.component.id : null } } : {}) });
 }

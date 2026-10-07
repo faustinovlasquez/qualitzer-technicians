@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { creationOptionsSchema, workEditDocumentSchema, type CreationOptions, type CreationOptionsQuery, type WorkEditDocument, type WorkEditInput } from "../../domain/creation";
+import { creationOptionsSchema, workEditDocumentSchema, type CreationCatalogResource, type CreationOptions, type CreationOptionsQuery, type WorkEditDocument, type WorkEditInput } from "../../domain/creation";
 import type { Tenant, User } from "../../domain/models";
 import { ApiError } from "../../infrastructure/errors";
 import { useDeviceSecurity } from "../../security/DeviceSecurityContext";
@@ -12,7 +12,7 @@ import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
 import { CreationCatalogSelector, type CreationCatalogCache } from "./CreationCatalogSelector";
 import { CreationScheduleFields } from "./CreationScheduleFields";
 import { CreationModal } from "./CreationModal";
-import { validateCreationForm, workEditForm, workEditPayload, type CreationForm, type CreationFormErrors } from "./creationForm";
+import { applyCatalogSelection, catalogFormField, validateCreationForm, workEditForm, workEditPayload, type CatalogItem, type CreationForm, type CreationFormErrors } from "./creationForm";
 
 export interface WorkEditScreenProps {
   editing: WorkEditDocument; user: User; tenant: Tenant; storageKey: string; busy: boolean; online: boolean;
@@ -33,7 +33,7 @@ export function WorkEditScreen(props: WorkEditScreenProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<WorkEditDocument | null>(null);
   const confirmed = useRef<WorkEditDocument | null>(null);
-  const [catalog, setCatalog] = useState<"equipment" | "specialties" | null>(null);
+  const [catalog, setCatalog] = useState<CreationCatalogResource | null>(null);
   const [exit, setExit] = useState(false);
   const changed = useRef(false);
   const lock = useRef(false);
@@ -63,6 +63,10 @@ export function WorkEditScreen(props: WorkEditScreenProps) {
     if (disabled || confirmed.current || lock.current || latest.current.props.busy || !latest.current.props.online || !latest.current.security.isUnlocked()) return;
     changed.current = true; setForm(previous => ({ ...previous, [key]: value })); setErrors(previous => ({ ...previous, [key]: undefined }));
   }
+  function selectCatalog(resource: CreationCatalogResource, item: CatalogItem) {
+    if (disabled || confirmed.current || lock.current || latest.current.props.busy || !latest.current.props.online || !latest.current.security.isUnlocked()) return;
+    changed.current = true; setForm(previous => applyCatalogSelection(previous, resource, item)); setErrors(previous => ({ ...previous, [catalogFormField[resource]]: undefined }));
+  }
   function next() {
     const validation = validateCreationForm("work", form);
     if (step === 0) { delete validation.date; delete validation.startTime; delete validation.endTime; }
@@ -86,6 +90,7 @@ export function WorkEditScreen(props: WorkEditScreenProps) {
     } catch (caught) {
       if (mounted.current) setError(caught instanceof ApiError && caught.code === "WORK_EDIT_CONFLICT" ? "El trabajo cambió. Vuelve a abrir la ficha antes de guardar para no sobrescribir otros cambios."
         : caught instanceof ApiError && caught.code === "WORK_SCHEDULE_READ_ONLY" ? "El horario ya no se puede modificar porque cambió la planificación o comenzó su ejecución."
+        : caught instanceof ApiError && (caught.code === "MOBILE_CREATION_SYSTEM_NOT_FOUND" || caught.code === "MOBILE_CREATION_COMPONENT_NOT_FOUND") ? "El sistema o subsistema elegido ya no está disponible. Selecciona otro."
         : "No se pudo completar la actualización. Conserva este formulario y reintenta; no se creará otro trabajo.");
     } finally { lock.current = false; if (mounted.current) setSaving(false); }
   }
@@ -96,21 +101,21 @@ export function WorkEditScreen(props: WorkEditScreenProps) {
       <Text style={styles.label}>{["1. Datos", "2. Horario", "3. Revisar"][step]}</Text>
       {!options && !error ? <ActivityIndicator accessibilityLabel="Cargando opciones de edición" /> : null}
       {!options && error ? <Button title="Reintentar opciones" variant="secondary" onPress={() => setReload(value => value + 1)} /> : null}
-      {options && step === 0 ? <CreationFields kind="work" editing form={form} errors={errors} options={options} disabled={disabled} specialtyLocked={document.equipmentInherited} onChange={change} onSelectCatalog={setCatalog}
+      {options && step === 0 ? <CreationFields kind="work" editing form={form} errors={errors} options={options} disabled={disabled} specialtyLocked={document.equipmentInherited} showWorkSystem={document.workSystem?.editable === true} onChange={change} onSelectCatalog={setCatalog}
         equipmentLookup={document.equipmentInherited ? <View><Text style={styles.label}>Equipo heredado</Text><Text style={styles.body}>{document.equipment?.label ?? "Sin equipo informado en la asignación"}</Text></View> : <CreationEquipmentLookup editing companyBranchId={document.companyBranchId} userId={props.user.id} workerId={props.user.workerId} required={false} disabled={disabled} selected={form.equipment} error={errors.equipment} cache={cache} onLoadOptions={props.onLoadOptions} onSelect={item => change("equipment", item)} />} /> : null}
       {options && step === 1 ? <>
         {!document.scheduleEditable ? <Text style={styles.caption}>Horario de solo lectura: la planificación es compartida o el trabajo ya tiene ejecución.</Text> : null}
         <CreationScheduleFields form={form} errors={errors} disabled={disabled || !document.scheduleEditable} optionalTimes scopeKey={`${props.storageKey}:edit:${document.workId}:${form.date}`} onChange={change} />
         <Text style={styles.caption}>{options.timezone}</Text>
       </> : null}
-      {options && step === 2 ? <View style={styles.review}><Text style={styles.title}>{form.title}</Text><Text style={styles.body}>{form.summary}</Text><Text style={styles.body}>{form.date} · {form.startTime || "Sin inicio"} - {form.endTime || "Sin fin"}</Text><Text style={styles.body}>{priorityLabels[form.priority]}</Text><Text style={styles.body}>{form.equipment?.label ?? "Sin equipo asociado"}</Text></View> : null}
+      {options && step === 2 ? <View style={styles.review}><Text style={styles.title}>{form.title}</Text><Text style={styles.body}>{form.summary}</Text><Text style={styles.body}>{form.date} · {form.startTime || "Sin inicio"} - {form.endTime || "Sin fin"}</Text><Text style={styles.body}>{priorityLabels[form.priority]}</Text><Text style={styles.body}>{form.equipment?.label ?? "Sin equipo asociado"}</Text>{document.workSystem?.editable ? <Text style={styles.body}>{form.system ? `Sistema: ${form.system.label}${form.component ? ` · Subsistema: ${form.component.label}` : ""}` : "Sin sistema"}</Text> : null}</View> : null}
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       {!props.online ? <Text accessibilityRole="alert" style={styles.error}>Conecta para editar el trabajo.</Text> : null}
       {saved ? <Text accessibilityLiveRegion="polite" style={styles.label}>Cambios guardados</Text> : null}
       {options && step < 2 && !saved ? <Button title={step === 0 ? "Continuar a horario" : "Revisar cambios"} disabled={disabled} onPress={next} /> : options ? <Button title={saved ? "Volver al trabajo actualizado" : "Guardar cambios"} icon="save-outline" loading={saving} disabled={props.busy || !props.online} onPress={() => void save()} /> : null}
       {step > 0 && !saved ? <Button title="Paso anterior" variant="ghost" disabled={disabled} onPress={() => setStep(step - 1)} /> : null}
     </ScrollView>
-    {catalog && !disabled ? <CreationCatalogSelector resource={catalog} companyBranchId={document.companyBranchId} userId={props.user.id} workerId={props.user.workerId} cache={cache} selected={catalog === "equipment" ? form.equipment : form.specialty} onLoadOptions={props.onLoadOptions} onClose={() => setCatalog(null)} onSelect={item => change(catalog === "equipment" ? "equipment" : "specialty", item)} /> : null}
+    {catalog && !disabled ? <CreationCatalogSelector resource={catalog} systemId={form.system?.id} companyBranchId={document.companyBranchId} userId={props.user.id} workerId={props.user.workerId} cache={cache} selected={form[catalogFormField[catalog]]} onLoadOptions={props.onLoadOptions} onClose={() => setCatalog(null)} onSelect={item => selectCatalog(catalog, item)} /> : null}
     {exit ? <CreationModal title="Descartar cambios sin guardar" onClose={() => setExit(false)}><Button title="Descartar cambios" variant="danger" onPress={props.onBack} /><Button title="Seguir editando" variant="secondary" onPress={() => setExit(false)} /></CreationModal> : null}
   </SafeAreaView>;
 }

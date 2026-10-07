@@ -119,7 +119,9 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
       }
       // El código ayuda a soporte a distinguir conexión, sesión, permisos o un error del servidor sin exponer detalles internos.
       const code = failure instanceof ApiError ? failure.code : failure instanceof Error && /^[A-Z][A-Z0-9_]{2,60}$/.test(failure.message) ? failure.message : "";
-      if (sameScope()) setError(rejected ? "La entrega o la ubicación cambió. Revisa los materiales y confirma nuevamente."
+      if (sameScope()) setError(rejected ? `${failure instanceof ApiError && failure.code === "CONSUMPTION_RECEIPT_LOCATION_EXPIRED"
+        ? "La ubicación del teléfono no estaba actualizada. Vuelve a confirmar."
+        : "La entrega cambió. Revisa los materiales y confirma nuevamente."}${code ? ` (código: ${code})` : ""}`
         : `No se pudo confirmar. Reintenta la misma recepción cuando tengas conexión.${code ? ` (código: ${code})` : ""}`);
     } finally { if (lock.current === operation) { lock.current = null; if (sameScope()) setBusy(false); if (reload && valid()) void refresh(); } }
   }

@@ -1,4 +1,8 @@
-# Reporte de errores de la app: gateway 1.0.36 / APK 1.0.86
+# Sistema y subsistema en trabajos: gateway 1.0.37 / APK 1.0.89
+
+Sistema y subsistema al crear y editar trabajos de mantenimiento, avisos de materiales que abren la entrega y avisos de cronómetro que abren la tarea. Backend y gateway 1.0.37 deben desplegarse juntos. Ver [actualizacion 1.0.89](ACTUALIZACION-1.0.89.md).
+
+## Historial: reporte de errores de la app gateway 1.0.36 / APK 1.0.86
 
 Los errores de la app llegan al log del backend (`MOBILE_APP_ERROR`). Incluye permisos (1.0.85), cronómetros activos y Ajustes (1.0.84) y Materiales (1.0.83). Backend y gateway 1.0.36 deben desplegarse juntos. Ver [actualizacion 1.0.86](ACTUALIZACION-1.0.86.md).
 

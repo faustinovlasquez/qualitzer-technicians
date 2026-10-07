@@ -17,6 +17,17 @@ export function runningTimersFromSnapshot(data: Assignments | null): RunningTime
   return [...found.values()];
 }
 
+export interface SnapshotActiveTimer { groupId: string; workId: string; title: string; startedAt: string; }
+
+/** Cronómetros en curso de la jornada cargada que el servidor aún no informa en su listado de cronómetros activos. */
+export function snapshotActiveTimers(data: Assignments | null, excludedWorkIds: ReadonlySet<string>, now: number): SnapshotActiveTimer[] {
+  const generatedAt = Date.parse(data?.generatedAt ?? "");
+  const reference = Number.isFinite(generatedAt) ? generatedAt : now;
+  return runningTimersFromSnapshot(data)
+    .filter((timer) => !excludedWorkIds.has(timer.workId))
+    .map((timer) => ({ groupId: timer.groupId, workId: timer.workId, title: timer.title, startedAt: new Date(reference - timer.elapsedSeconds * 1000).toISOString() }));
+}
+
 /** "1 h 04 min" / "12 min" desde el inicio informado por el servidor. */
 export function activeTimerElapsed(startedAt: string, now: number): string {
   const minutes = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 60000));

@@ -362,7 +362,8 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     const parsed = creationOptionsQuerySchema.parse(query);
     this.branch(parsed.companyBranchId);
     const normalized = { companyBranchId: parsed.companyBranchId, ...(parsed.kind ? { kind: parsed.kind } : {}), search: parsed.search ?? "", page: parsed.page ?? 0,
-      ...(parsed.internalNumber === undefined ? {} : { internalNumber: parsed.internalNumber }) };
+      ...(parsed.internalNumber === undefined ? {} : { internalNumber: parsed.internalNumber }),
+      ...(parsed.systemId === undefined ? {} : { systemId: parsed.systemId }) };
     return this.read(`options:${JSON.stringify(normalized)}`, () => this.remote.creationOptions(normalized), (json) => {
       const options = creationOptionsSchema.parse(JSON.parse(json));
       if (options.companyBranchId !== parsed.companyBranchId || options.userId !== this.session.user.id || options.workerId !== this.session.user.workerId) throw new OfflineUnavailableError("OFFLINE_CACHE_IDENTITY_MISMATCH");
@@ -724,6 +725,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       await this.creationOptions({ companyBranchId: branchId });
       await this.creationOptions({ companyBranchId: branchId, kind: "equipment", page: 0 });
       await this.creationOptions({ companyBranchId: branchId, kind: "specialties", page: 0 });
+      await this.creationOptions({ companyBranchId: branchId, kind: "systems", page: 0 }).catch(() => undefined);
       const works = data.groups.flatMap((group) => group.works.map((work) => ({ group, work }))).slice(0, OFFLINE_LIMITS.prepareWorks);
       const downloads: Array<{ attachment: Attachment; scope: OfflineScope; stepId?: string }> = [];
       let cursor = 0;

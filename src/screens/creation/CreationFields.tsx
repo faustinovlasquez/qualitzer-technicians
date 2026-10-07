@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { CreationKind, CreationOptions } from "../../domain/creation";
+import type { CreationCatalogResource, CreationKind, CreationOptions } from "../../domain/creation";
 import { Button, Field } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { CreationForm, CreationFormErrors } from "./creationForm";
@@ -22,12 +22,25 @@ interface Props {
   disabled: boolean;
   editing?: boolean;
   specialtyLocked?: boolean;
+  showWorkSystem?: boolean;
   equipmentLookup: ReactNode;
   onChange: <Key extends keyof CreationForm>(field: Key, value: CreationForm[Key]) => void;
-  onSelectCatalog: (resource: "equipment" | "specialties") => void;
+  onSelectCatalog: (resource: CreationCatalogResource) => void;
 }
 
-export function CreationFields({ kind, form, errors, options, disabled, editing = false, specialtyLocked = false, equipmentLookup, onChange, onSelectCatalog }: Props) {
+function WorkSystemFields({ form, disabled, onChange, onSelectCatalog }: Pick<Props, "form" | "disabled" | "onChange" | "onSelectCatalog">) {
+  return <>
+    <Text style={styles.label}>Sistema (opcional)</Text>
+    <Button title={form.system?.label ?? "Seleccionar sistema"} variant="secondary" icon="git-network-outline" disabled={disabled} onPress={() => onSelectCatalog("systems")} />
+    {form.system ? <Button title="Quitar sistema" variant="ghost" disabled={disabled} onPress={() => { onChange("system", null); onChange("component", null); }} /> : null}
+    <Text style={styles.label}>Subsistema (opcional)</Text>
+    <Button title={form.component?.label ?? (form.system ? "Seleccionar subsistema" : "Selecciona primero un sistema")} variant="secondary" icon="layers-outline"
+      disabled={disabled || !form.system} onPress={() => onSelectCatalog("components")} />
+    {form.component ? <Button title="Quitar subsistema" variant="ghost" disabled={disabled} onPress={() => onChange("component", null)} /> : null}
+  </>;
+}
+
+export function CreationFields({ kind, form, errors, options, disabled, editing = false, specialtyLocked = false, showWorkSystem = false, equipmentLookup, onChange, onSelectCatalog }: Props) {
   return <View style={styles.fields}>
     {kind === "maintenance" ? <>
       <Text style={styles.label}>Tipo de mantenimiento *</Text>
@@ -52,6 +65,7 @@ export function CreationFields({ kind, form, errors, options, disabled, editing 
       <Text style={styles.label}>Especialidad (opcional)</Text>
       <Button title={form.specialty?.label ?? "Seleccionar especialidad"} variant="secondary" icon="construct-outline" disabled={disabled || specialtyLocked} onPress={() => onSelectCatalog("specialties")} />
       {form.specialty && !specialtyLocked ? <Button title="Quitar especialidad" variant="ghost" disabled={disabled} onPress={() => onChange("specialty", null)} /> : null}
+      {showWorkSystem ? <WorkSystemFields form={form} disabled={disabled} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
       {kind === "maintenance" ? <>
         <Text style={styles.label}>Tipo de daño (opcional)</Text>
         <View style={styles.choices} accessibilityRole="radiogroup">

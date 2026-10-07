@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Animated, Image, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Button, IconButton, type IconName } from "../ui/components";
 import { palette, radius, theme, typography } from "../ui/theme";
-import type { MaterialDisposition, MaterialReceipt } from "../domain/materialReceipts";
+import type { MaterialDisposition, MaterialReceipt, MaterialReceiptFocus } from "../domain/materialReceipts";
 import type { useMaterialReceipts } from "./useMaterialReceipts";
 import { dispositionDaysLeft, filterReceipts, productDispositionState, receiptDateTime, receiptMoney, receiptQuantity, receiptRelative, receiptSourceIcon,
   receiptWarehouses, type ProductDispositionState, type ReceiptSourceFilter } from "./receiptTimeline";
@@ -247,7 +247,7 @@ function ConfirmedCard({ item, expanded, busy, locked, onToggle, onDispose }: { 
   </View>;
 }
 
-export function MaterialReceiptsScreen({ receipt, onBack }: { receipt: ReceiptModel; onBack?: () => void }) {
+export function MaterialReceiptsScreen({ receipt, onBack, focus }: { receipt: ReceiptModel; onBack?: () => void; focus?: MaterialReceiptFocus | null }) {
   const [tab, setTab] = useState<Tab>("pending");
   const [refreshing, setRefreshing] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -257,14 +257,26 @@ export function MaterialReceiptsScreen({ receipt, onBack }: { receipt: ReceiptMo
   const [warehouse, setWarehouse] = useState<string | null>(null);
   const [warehousePicker, setWarehousePicker] = useState(false);
   const [expanded, setExpanded] = useState<Set<number> | null>(null);
+  const [focusIds, setFocusIds] = useState<Set<number> | null>(null);
   const open = useMemo(() => (receipt.data?.items ?? []).filter(item => item.receiptStatus !== "CONFIRMED"), [receipt.data]);
   const confirmed = receipt.confirmed;
-  const list = tab === "pending" ? open : confirmed;
+  const focusedOpen = useMemo(() => focusIds ? open.filter(item => focusIds.has(item.id)) : [], [open, focusIds]);
+  const focusActive = tab === "pending" && focusedOpen.length > 0;
+  const list = tab === "pending" ? focusActive ? focusedOpen : open : confirmed;
   const warehouses = useMemo(() => receiptWarehouses([...open, ...confirmed]), [open, confirmed]);
   const visible = useMemo(() => filterReceipts(list, { query, warehouse, source }), [list, query, warehouse, source]);
   const blocked = receipt.busy || Boolean(receipt.pending) || !receipt.ready;
   const incidents = open.filter(item => item.receiptStatus === "INCIDENT").length;
   const filtered = query.trim() !== "" || warehouse !== null || source !== "ALL";
+  const focusEventId = focus?.eventId;
+  useEffect(() => {
+    if (!focus) return;
+    const ids = focus.receiptIds;
+    setTab("pending"); setQuery(""); setWarehouse(null); setSource("ALL"); setSearching(false);
+    setFocusIds(ids.length > 0 ? new Set(ids) : null);
+    setExpanded(ids.length > 0 ? new Set(ids) : null);
+    void receipt.refresh();
+  }, [focusEventId]);
   // Primera entrega abierta por defecto; el resto plegadas para ver de un vistazo qué hay.
   const isExpanded = (id: number, index: number) => expanded ? expanded.has(id) : index === 0;
   const toggle = (id: number, index: number) => setExpanded(previous => {
@@ -272,7 +284,6 @@ export function MaterialReceiptsScreen({ receipt, onBack }: { receipt: ReceiptMo
     if (isExpanded(id, index)) next.delete(id); else next.add(id);
     return next;
   });
-  useEffect(() => { setExpanded(null); }, [tab]);
   useEffect(() => { if (warehouse && !warehouses.includes(warehouse)) setWarehouse(null); }, [warehouse, warehouses]);
   async function refresh() { setRefreshing(true); try { await receipt.refresh(); await receipt.refreshHistory(); } finally { setRefreshing(false); } }
 
@@ -309,12 +320,16 @@ export function MaterialReceiptsScreen({ receipt, onBack }: { receipt: ReceiptMo
 
       <View style={styles.tabs} accessibilityRole="tablist">
         {([["pending", `Por confirmar (${open.length})`], ["confirmed", `Confirmadas (${confirmed.length})`]] as const).map(([id, label]) =>
-          <Pressable key={id} accessibilityRole="tab" accessibilityState={{ selected: tab === id }} onPress={() => setTab(id)} style={[styles.tab, tab === id && styles.tabOn]}>
+          <Pressable key={id} accessibilityRole="tab" accessibilityState={{ selected: tab === id }} onPress={() => { if (tab !== id) { setTab(id); setExpanded(null); } }} style={[styles.tab, tab === id && styles.tabOn]}>
             <Text style={[styles.tabText, tab === id && styles.tabTextOn]}>{label}</Text>
           </Pressable>)}
       </View>
 
       {tab === "pending" ? <>
+        {focusActive ? <Alert tone="info" icon="notifications-outline"
+          title={focusedOpen.length === 1 ? "Entrega del aviso por confirmar" : `${focusedOpen.length} entregas del aviso por confirmar`}
+          message={open.length > focusedOpen.length ? `Tienes ${open.length - focusedOpen.length} entregas pendientes más.` : "Revisa los materiales y confirma la recepción."}
+          action={open.length > focusedOpen.length ? <Button title="Ver todas" variant="secondary" icon="list-outline" onPress={() => { setFocusIds(null); setExpanded(null); }} style={styles.alertButton} /> : undefined} /> : null}
         {receipt.error ? <Alert tone="danger" icon="cloud-offline-outline" title="No se completó la acción" message={receipt.error} /> : null}
         {receipt.pending ? <Alert tone="warning" icon="sync-outline" title="Hay una confirmación sin respuesta"
           message="Se guardó en el teléfono. Reintenta para terminarla; no se duplicará."

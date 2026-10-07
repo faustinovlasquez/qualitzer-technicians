@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { matchesAssignmentSearch, matchesOrderSearch } from "../domain/assignmentCodes";
 import { assignmentDay, assignmentDays, assignmentExecutedMinutes, assignmentIncludesDay, assignmentPlannedMinutes, assignmentWorkForDay, manHours, assignmentWorkQueryRange, dailyRange } from "../domain/assignmentSchedule";
 import { dateKey, isFinished, monthRange, shiftDate, shortDate, weekRange } from "../domain/format";
@@ -14,13 +14,10 @@ import { AssignmentWorkCard } from "./orders/AssignmentWorkCard";
 import { fullDate } from "./orders/assignmentPresentation";
 import { WeeklySchedule } from "./schedule/WeeklySchedule";
 import { AgendaTimeline } from "./schedule/AgendaTimeline";
-import { RunningTimersNotice } from "./notifications/RunningTimersNotice";
-import { runningTimersFromSnapshot, type RunningTimerNoticeItem } from "../notifications/runningTimers";
+import { runningTimersFromSnapshot } from "../notifications/runningTimers";
 import { isPendingLocalWork, unavailableCoverageDates } from "./offline/offlineDashboardUi";
 
 export interface DashboardScreenProps {
-  /** Trabajos con cronómetro que ya muestra la alerta fija superior. */
-  hiddenTimerWorkIds?: readonly string[];
   data: Assignments | null;
   user: User;
   range: DateRange;
@@ -33,7 +30,6 @@ export interface DashboardScreenProps {
   onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files" | "deliver") => void;
   onWorkStatus: (group: AssignmentGroup, work: AssignmentWork, input: StatusInput) => Promise<void>;
   busy?: boolean;
-  serverRemindersReady?: boolean;
   offline?: OfflineSnapshot | null;
   companyBranchId?: number;
   focusDate?: string | null;
@@ -53,6 +49,7 @@ interface WorkSection { key: string; date: string | null; entries: WorkEntry[]; 
 interface DaySelection { scope: string; date: string; }
 
 const listViewStorageKey = "@qualitzer/ui/assignment-list-view/v1";
+const hiddenJump = { up: false, down: false };
 const listViews: { value: AssignmentListView; label: string; icon: IconName }[] = [
   { value: "works", label: "Trabajos", icon: "construct-outline" },
   { value: "maintenances", label: "Mantenimientos", icon: "build-outline" },
@@ -119,7 +116,7 @@ function Kpi({ title, value, note, icon, tone, inline = false }: { title: string
   );
 }
 
-export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, serverRemindersReady = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange }: DashboardScreenProps) {
+export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange }: DashboardScreenProps) {
   const compact = useWindowDimensions().width < 600;
   const [agendaLayout, setAgendaLayout] = useState<"timeline" | "schedule" | "list">("timeline");
   const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");
@@ -133,6 +130,10 @@ export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading
   const [searchFocused, setSearchFocused] = useState(false);
   const [listView, setListView] = useState<AssignmentListView>("works");
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  const listRef = useRef<ScrollView>(null);
+  const [jump, setJump] = useState(hiddenJump);
+  const jumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (jumpTimer.current) clearTimeout(jumpTimer.current); }, []);
   const preferenceChanged = useRef(false);
   const preferenceWrites = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
@@ -289,6 +290,26 @@ export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading
     });
   }
 
+  /** Los atajos de inicio/fin solo aparecen en listas largas mientras se desplaza, y se ocultan solos. */
+  function handleListScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const viewport = layoutMeasurement.height;
+    const long = viewport > 0 && contentSize.height > viewport * 2;
+    const up = long && contentOffset.y > viewport;
+    const down = long && contentSize.height - (contentOffset.y + viewport) > viewport;
+    setJump((previous) => previous.up === up && previous.down === down ? previous : { up, down });
+    if (jumpTimer.current) clearTimeout(jumpTimer.current);
+    jumpTimer.current = up || down ? setTimeout(() => setJump(hiddenJump), 2500) : null;
+  }
+
+  function jumpTo(edge: "top" | "bottom"): void {
+    if (edge === "top") listRef.current?.scrollTo({ y: 0, animated: true });
+    else listRef.current?.scrollToEnd({ animated: true });
+    if (jumpTimer.current) clearTimeout(jumpTimer.current);
+    jumpTimer.current = null;
+    setJump(hiddenJump);
+  }
+
   function selectListView(value: AssignmentListView): void {
     preferenceChanged.current = true;
     setListView(value);
@@ -296,13 +317,6 @@ export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading
     preferenceWrites.current = preferenceWrites.current.then(() => AsyncStorage.setItem(listViewStorageKey, value)).catch(() => {
       if (mounted.current) setPreferenceError("La vista cambió, pero no se pudo guardar la preferencia en este dispositivo.");
     });
-  }
-
-  function openTimer(timer: RunningTimerNoticeItem): void {
-    if (busy || loading) return;
-    const group = data?.groups.find((item) => item.id === timer.groupId);
-    const work = group?.works.find((item) => item.id === timer.workId);
-    if (group && work) onOpenWork(group, work);
   }
 
   const layoutSelector = view === "agenda" ? <View testID="agenda-layout-selector" style={[styles.segmented, compact && styles.compactSegments]} accessibilityRole="tablist" accessibilityLabel="Presentación de agenda">
@@ -345,11 +359,15 @@ export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading
   }
 
   return (
+    <View style={styles.listContainer}>
     <ScrollView
+      ref={listRef}
       style={styles.screen}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
+      onScroll={handleListScroll}
+      scrollEventThrottle={100}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}
     >
       {view === "agenda" ? <Button title="Volver a la agenda" icon="arrow-back-outline" variant="ghost" disabled={busy} onPress={() => setAgendaLayout("timeline")} style={styles.agendaBack} /> : null}
@@ -380,8 +398,6 @@ export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading
         <Kpi inline title="HH asignadas" value={hasData && !coveragePending && (!partial || counts.minutes > 0) ? manHours(counts.minutes) : null} note={partial ? "Parcial" : null} icon="time-outline" tone="violet" />
         <Kpi inline title="HH reportadas" value={hasData && !coveragePending && (!partial || counts.executedMinutes > 0) ? manHours(counts.executedMinutes) : null} note={partial ? "Parcial" : null} icon="stats-chart" tone="info" />
       </View>
-
-      <RunningTimersNotice data={data} hidden={hiddenTimerWorkIds} selectedRangeLabel={rangeLabel} serverRemindersReady={serverRemindersReady} onOpen={openTimer} />
 
       <View testID="week-selector">
       <Card style={styles.weekCard}>
@@ -487,10 +503,22 @@ export function DashboardScreen({ hiddenTimerWorkIds, data, user, range, loading
       ) : null}
       <Text style={styles.footerNote}>Desliza hacia abajo para actualizar tu jornada</Text>
     </ScrollView>
+    {jump.up || jump.down ? <View style={styles.jumpButtons} pointerEvents="box-none">
+      {jump.up ? <Pressable accessibilityRole="button" accessibilityLabel="Ir al inicio de la lista" hitSlop={6} onPress={() => jumpTo("top")} style={({ pressed }) => [styles.jumpButton, pressed && styles.pressed]}>
+        <Ionicons name="chevron-up" size={20} color={palette.textSecondary} accessible={false} />
+      </Pressable> : null}
+      {jump.down ? <Pressable accessibilityRole="button" accessibilityLabel="Ir al final de la lista" hitSlop={6} onPress={() => jumpTo("bottom")} style={({ pressed }) => [styles.jumpButton, pressed && styles.pressed]}>
+        <Ionicons name="chevron-down" size={20} color={palette.textSecondary} accessible={false} />
+      </Pressable> : null}
+    </View> : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  listContainer: { flex: 1 },
+  jumpButtons: { position: "absolute", right: 10, bottom: 14, gap: 8 },
+  jumpButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, opacity: 0.88 },
   entityTabs: { flexGrow: 1, padding: 3, gap: 3, borderRadius: 6, backgroundColor: palette.surface },
   entityTab: { flexGrow: 1, minHeight: 44, flexDirection: "row", gap: 6, justifyContent: "center", alignItems: "center", paddingHorizontal: 7, paddingVertical: 8, borderRadius: 6 },
   entityTabText: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: palette.textSecondary, textAlign: "center" },

@@ -41,11 +41,20 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
     }
     return editDocument(value, scope);
   }
+  const legacyDocument = ({ workSystem: _workSystem, ...document }: Awaited<ReturnType<typeof editRequest>>) => document;
   router.get(`${base}/edit`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    res.json(legacyDocument(await editRequest(req)));
+  });
+  router.patch(`${base}/edit`, async (req, res) => {
+    const input = workEditInputSchema.parse(req.body);
+    res.json(legacyDocument(await editRequest(req, input)));
+  });
+  router.get(`${base}/edit/full`, async (req, res) => {
     emptySchema.parse(req.body ?? {});
     res.json(await editRequest(req));
   });
-  router.patch(`${base}/edit`, async (req, res) => {
+  router.patch(`${base}/edit/full`, async (req, res) => {
     const input = workEditInputSchema.parse(req.body);
     res.json(await editRequest(req, input));
   });

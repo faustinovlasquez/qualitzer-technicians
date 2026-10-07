@@ -5,6 +5,8 @@ import { demoUser } from "./demoData";
 const equipment = [{ id: 15, internalNumber: "15", identifier: "EQ-15", equipmentType: "Excavadora", label: "N.º interno 15 · EQ-15 · Excavadora de demostración" },
   { id: 16, internalNumber: "16", identifier: "EQ-16", equipmentType: "Generador", label: "N.º interno 16 · EQ-16 · Generador de demostración" }];
 const specialties = [{ id: 2, label: "Mecánica" }, { id: 3, label: "Electricidad" }];
+const systems = [{ id: 1, label: "Motor" }, { id: 2, label: "Sistema hidráulico" }];
+const components = [{ id: 11, systemId: 1, label: "Inyección" }, { id: 12, systemId: 1, label: "Refrigeración" }, { id: 21, systemId: 2, label: "Bomba hidráulica" }];
 const reasons = ["Espera de repuesto", "Espera de autorización", "Espera de equipo", "Traslado", "Detención por seguridad", "Clima", "Sin acceso", "Administrativo", "Capacitación", "Otro"];
 
 function branch(id: number): void {
@@ -32,7 +34,10 @@ export function demoCreationOptions(query: CreationOptionsQuery): CreationOption
     priorities: ["low", "medium", "high"], nonProductiveReasons: nonProductiveReasonSchema.options.map((value, index) => ({ value, label: reasons[index] })),
     maintenanceTypes: ["correctivo", "detencion", "preventivo", "rutinario", "checklist"].map((value) => ({ value, enabled: ["correctivo", "detencion"].includes(value), instruction: ["correctivo", "detencion"].includes(value) ? null : "MOBILE_CREATION_MAINTENANCE_WEB_WIZARD_REQUIRED" })),
     schedule: { sameDayOnly: true, conflictPolicy: "warning" },
-    ...(input.kind !== "specialties" ? { equipment: catalog(equipment) } : {}), ...(input.kind !== "equipment" ? { specialties: catalog(specialties) } : {}),
+    ...(input.kind === undefined || input.kind === "equipment" ? { equipment: catalog(equipment) } : {}),
+    ...(input.kind === undefined || input.kind === "specialties" ? { specialties: catalog(specialties) } : {}),
+    ...(input.kind === "systems" ? { systems: catalog(systems) } : {}),
+    ...(input.kind === "components" ? { components: catalog(components.filter((item) => item.systemId === input.systemId).map(({ id, label }) => ({ id, label }))) } : {}),
   });
 }
 

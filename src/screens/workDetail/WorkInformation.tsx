@@ -18,12 +18,14 @@ export function WorkDescription({ work, disabled = false }: { work: AssignmentWo
   const [open, setOpen] = useState(false);
   const description = plainText(work.summary);
   const schedule = [work.scheduledStartTime ? `Desde ${work.scheduledStartTime.slice(0, 5)}` : "", work.scheduledEndTime ? `Hasta ${work.scheduledEndTime.slice(0, 5)}${work.endDateOffset === 1 ? " (+1 día)" : ""}` : ""].filter(Boolean).join(" · ");
+  const workSystem = [work.systemName ? `Sistema: ${work.systemName}` : "", work.componentName ? `Subsistema: ${work.componentName}` : ""].filter(Boolean).join(" · ");
   return <>
     {description ? <Pressable accessibilityRole="button" accessibilityLabel="Ver descripción completa del trabajo" accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={() => setOpen(true)} style={({ pressed }) => [styles.descriptionPreview, pressed && styles.descriptionPressed]} testID="work-description-preview">
       <View style={styles.descriptionHeading}><Text style={styles.heroText}>Descripción</Text><Ionicons name="expand-outline" size={20} color={palette.onDark} accessible={false} /></View>
       <Text numberOfLines={3} ellipsizeMode="tail" style={styles.heroText} testID="work-description-excerpt">{description}</Text>
     </Pressable> : <Text style={styles.heroText}>Sin descripción informada</Text>}
     {schedule ? <Text style={styles.heroText}>{schedule}</Text> : null}
+    {workSystem ? <Text style={styles.heroText} testID="work-system-summary">{workSystem}</Text> : null}
     {open ? <PrivateModal visible animationType="slide" onRequestClose={() => setOpen(false)}>
       <SafeAreaView style={styles.safe} testID="work-description-dialog" accessibilityViewIsModal onAccessibilityEscape={() => setOpen(false)}>
         <View style={styles.descriptionHeader}><Text accessibilityRole="header" style={[styles.heading, styles.grow]}>Detalle del trabajo</Text><IconButton name="close-outline" label="Cerrar detalle del trabajo" onPress={() => setOpen(false)} /></View>
@@ -33,6 +35,10 @@ export function WorkDescription({ work, disabled = false }: { work: AssignmentWo
             <View style={styles.column}><Fact label="Fecha programada" value={work.scheduledDate.slice(0, 10) || "Sin fecha"} /><Fact label="Horario" value={schedule || "No informado"} /></View>
             <View style={styles.column}><Fact label="Tiempo asignado" value={duration(work.plannedMinutes)} /><Fact label="Prioridad" value={work.priority === "high" ? "Alta" : work.priority === "medium" ? "Media" : "Baja"} /></View>
           </View>
+          {work.systemName || work.componentName ? <View style={styles.columns}>
+            <View style={styles.column}><Fact label="Sistema" value={work.systemName} /></View>
+            <View style={styles.column}><Fact label="Subsistema" value={work.componentName} /></View>
+          </View> : null}
           <Text style={styles.label}>Descripción</Text>
           <Text selectable style={styles.descriptionFull} testID="work-description-full">{description}</Text>
         </ScrollView>
@@ -156,7 +162,7 @@ export function EquipmentTab({ group, work, locationPort, identity = "", disable
       <SectionTitle title="Ubicación y contexto" />
       <View style={styles.columns}>
         <View style={styles.column}><Fact label="Cliente" value={work.workCustomerName ?? group.customerName} /><Fact label="Ubicación" value={group.locationName} /><Fact label="Sucursal" value="No informada en esta ficha" /></View>
-        <View style={styles.column}><Fact label="Sistema" value={work.systemName} /><Fact label="Componente" value={work.componentName} /></View>
+        <View style={styles.column}><Fact label="Sistema" value={work.systemName} /><Fact label="Subsistema" value={work.componentName} /></View>
       </View>
       {group.locationAddress?.trim() ? <View style={styles.tight}><Text style={styles.caption}>Dirección · toca para buscar en Maps</Text><HttpLink label={group.locationAddress} url={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(group.locationAddress)}`} onError={setLinkError} /></View> : <BodyText>No se recibió una dirección para abrir en Maps.</BodyText>}
       {linkError ? <Notice message={linkError} tone="error" onDismiss={() => setLinkError(null)} /> : null}
