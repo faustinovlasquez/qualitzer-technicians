@@ -41,6 +41,14 @@ const formSchema = z.object({ activity: z.string().max(240), hours: z.string().o
   .transform(value => ({ activity: value.activity, minutes: value.hours === undefined ? value.minutes : String(Number(value.hours) * 60 + Number(value.minutes)), createdId: value.createdId, operationId: value.operationId, queued: value.queued }));
 const emptyForm: z.infer<typeof formSchema> = { activity: "", minutes: "0", createdId: undefined, operationId: undefined, queued: undefined };
 
+/** Lectura que falló porque no hay red, servidor o copia guardada: no es un error de una acción del técnico. */
+function isUnavailableRead(failure: unknown): boolean {
+  if (!(failure instanceof Error)) return false;
+  if (failure.name === "NetworkError" || failure.name === "OfflineUnavailableError") return true;
+  const status = "status" in failure && typeof failure.status === "number" ? failure.status : 0;
+  return status >= 500 || status === 429;
+}
+
 export function WorkActivities(props: Props) {
   const draft = useWorkspaceDraft(`${props.scopeKey}:activity-form`, props.mode);
   const [activities, setActivities] = useState(props.activities.filter(isWorkActivity));
@@ -51,6 +59,7 @@ export function WorkActivities(props: Props) {
   const [editing, setEditing] = useState<Activity | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [readUnavailable, setReadUnavailable] = useState(false);
   const [readOperationIds, setReadOperationIds] = useState<string[]>([]);
   const readRevision = useRef(0);
   const mounted = useRef(true);
@@ -97,12 +106,19 @@ export function WorkActivities(props: Props) {
     const revision = ++readRevision.current;
     const result = await current.actions.load();
     if (mounted.current && revision === readRevision.current && current.scopeKey === latest.current.scopeKey && current.readKey === latest.current.readKey) {
-      setActivities(result.filter(isWorkActivity)); setReadOperationIds(result.appliedOperationIds ?? []); setError(null);
+      setActivities(result.filter(isWorkActivity)); setReadOperationIds(result.appliedOperationIds ?? []); setError(null); setReadUnavailable(false);
+    }
+  }
+  async function refresh(): Promise<void> {
+    try { await load(); }
+    catch (failure) {
+      if (!isUnavailableRead(failure)) throw failure;
+      if (mounted.current) setReadUnavailable(true);
     }
   }
   useEffect(() => {
     mounted.current = true;
-    void load().catch(failure => { if (mounted.current) setError(errorMessage(failure)); });
+    void refresh().catch(failure => { if (mounted.current) setError(errorMessage(failure)); });
     return () => { mounted.current = false; readRevision.current++; };
   }, [props.scopeKey, props.readKey, operationRevision]);
   async function change(value: Partial<z.infer<typeof formSchema>>): Promise<void> {
@@ -176,9 +192,10 @@ export function WorkActivities(props: Props) {
   function closeFiles(): void { if (!filesBack.current?.(true) && !lock.current) setSelected(null); }
   return <View style={styles.stack} testID="work-activities">
     <View style={styles.sectionHeading}><Ionicons name="construct-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Actividades</Text><Badge label={String(activities.length + pending.length)} />
-      <IconButton label="Actualizar actividades" name="refresh-outline" disabled={busy} onPress={() => void run(load, false)} />
+      <IconButton label="Actualizar actividades" name="refresh-outline" disabled={busy} onPress={() => void run(refresh, false)} />
       {!props.readOnly ? <IconButton label="Agregar actividad" name="add-outline" disabled={createDisabled || !draft.hydrated} onPress={() => void openForm()} /> : null}
     </View>
+    {readUnavailable && !error ? <Notice message="Sin conexión con el servidor: se muestran las actividades de la última carga. Se actualizarán cuando vuelva la conexión." tone="warning" /> : null}
     {error || draft.error || !parsed.success ? <Notice message={error ?? draft.error ?? "No se pudo leer el borrador de actividad."} tone="error" /> : null}
     {pending.map(operation => <View key={operation.id} style={styles.activityCard} testID={`pending-activity-${operation.id}`}>
       <View style={styles.activityHeading}><Text style={styles.activityTitle}>{plainText(operation.payload.activity)}</Text><Text style={styles.activityMinutes}>{operation.payload.executionTime} min</Text></View>
