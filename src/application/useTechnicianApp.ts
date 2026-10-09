@@ -157,6 +157,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   // Cronómetros pausados desde el aviso: no se vuelven a mostrar hasta que el servidor deje de informarlos (la pausa puede
   // estar aún en la cola de envío) o pasen 10 minutos.
   const locallyPaused = useRef(new Map<string, number>());
+  // Una sección de "Mi perfil" abierta (datos, firmas, ajustes de avisos) puede tener cambios sin guardar.
+  const profileEditing = useRef(false);
   const offline: OfflineSnapshot | null = useSyncExternalStore(offlineController?.subscribe ?? subscribeNothing, offlineController?.getSnapshot ?? emptyOfflineSnapshot, offlineController?.getSnapshot ?? emptyOfflineSnapshot);
   const repository = useRef<TechnicianRepository | null>(null);
   const gatewayBlock = useRef<string | null>(gatewayConfiguration.error);
@@ -576,8 +578,9 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     }
     // Los avisos de materiales solo cambian de pestaña: se pueden abrir también desde Mi perfil.
     const materialNotice = payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER";
-    if (state.current.tab === "profile" && !materialNotice) {
-      setNoticeError("Vuelve a la bandeja de avisos para abrir la notificación. Se conservan los cambios de configuración sin guardar.");
+    // Desde "Mi perfil" se abre el destino del aviso; solo se espera si hay una sección del perfil abierta (posibles cambios sin guardar).
+    if (state.current.tab === "profile" && !materialNotice && profileEditing.current) {
+      setNoticeError("Cierra la sección del perfil que estás editando y vuelve a tocar el aviso. Así no se pierden cambios sin guardar.");
       return false;
     }
     if (payload.kind === "MOBILE_PUSH_TEST" || payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER") {
@@ -1796,7 +1799,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     receiptPort: remoteRepository(repository.current),
     diagnosticsPort: remoteRepository(repository.current) as (TechnicianRepository & Partial<import("../domain/diagnostics").AppErrorPort>) | null,
     materialReceiptFocus,
-    noticeError, dismissNoticeError: () => setNoticeError(null), activeTimers, openActiveTimer, pauseActiveTimer, pauseLoadedWork,
+    noticeError, dismissNoticeError: () => setNoticeError(null),
+    setProfileEditing: (open: boolean) => { profileEditing.current = open; }, activeTimers, openActiveTimer, pauseActiveTimer, pauseLoadedWork,
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,
     consumeOrderDeliveryIntent,
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,
