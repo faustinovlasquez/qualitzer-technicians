@@ -72,6 +72,9 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   // Con un detalle de Ajustes abierto, el botón atrás lo maneja ProfileScreen y vuelve al menú.
   const [profileDetail, setProfileDetail] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [timerBannerCompact, setTimerBannerCompact] = useState(false);
+  // Al tocar el buscador se agranda y el botón de recargar se oculta.
+  const [searchFocused, setSearchFocused] = useState(false);
   const security = useDeviceSecurity();
   const locationConsentPending = Boolean(locationTracking.available && locationTracking.state && !locationTracking.state.actionConsentPrompted);
   useNotificationPermissionPrompt(app.notifications, !app.restoring && !app.busy && !security.blocked && !locationConsentPending, security.isUnlocked);
@@ -258,10 +261,13 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       {searchable ? <View style={styles.headerSearch}>
         <Ionicons name="search-outline" size={18} color={palette.textMuted} />
         <TextInput accessibilityLabel="Buscar tareas" accessibilityHint="Busca por tarea, código, equipo, ubicación o cliente." placeholder="Buscar OT" placeholderTextColor={palette.textMuted}
-          value={searchQuery} onChangeText={setSearchQuery} autoCapitalize="none" autoCorrect={false} returnKeyType="search" selectionColor={palette.primary} style={styles.headerSearchInput} />
+          value={searchQuery} onChangeText={setSearchQuery} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType="search" selectionColor={palette.primary} style={styles.headerSearchInput} />
         {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={8} onPress={() => setSearchQuery("")}><Ionicons name="close-circle" size={18} color={palette.textMuted} /></Pressable> : null}
       </View> : <View style={styles.brandSlot} />}
       <View style={styles.headerActions}>
+        {searchable && !searchFocused && !searchQuery ? <Pressable testID="header-refresh" accessibilityRole="button" accessibilityLabel="Recargar mi jornada" accessibilityState={{ disabled: app.busy || app.loading, busy: app.loading }} disabled={app.busy || app.loading} hitSlop={4} onPress={() => void app.refresh().catch(() => undefined)} style={[styles.headerToggle, app.loading && styles.headerToggleBusy]}>
+          <Ionicons name="sync-outline" size={22} color={palette.textSecondary} />
+        </Pressable> : null}
         <Pressable testID="header-notifications" accessibilityRole="button" accessibilityLabel={unreadNotifications > 0 ? `Avisos, ${unreadNotifications} sin leer` : "Avisos"} accessibilityState={{ selected: app.tab === "notifications", disabled: app.busy }} disabled={app.busy} hitSlop={4} onPress={() => app.setTab("notifications")} style={[styles.headerToggle, app.tab === "notifications" && styles.headerToggleActive]}>
           <Ionicons name={app.tab === "notifications" ? "notifications" : "notifications-outline"} size={23} color={app.tab === "notifications" ? palette.primary : palette.textSecondary} />
           {unreadNotifications > 0 ? <View style={styles.unreadBadge}><Text style={styles.unreadText}>{unreadNotifications > 99 ? "99+" : unreadNotifications}</Text></View> : null}
@@ -287,14 +293,15 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
       </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "profile" ? <ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
-        <ActiveTimersBanner timers={app.activeTimers ?? []} disabled={app.busy} onOpen={(timer) => void app.openActiveTimer(timer)}
+        <ActiveTimersBanner timers={app.activeTimers ?? []} disabled={app.busy} compact={timerBannerCompact} onOpen={(timer) => app.openActiveTimer(timer)}
+          onPause={(timer) => app.pauseActiveTimer(timer)} onPauseLocal={(timer) => app.pauseLoadedWork(timer.groupId, timer.workId)}
           localTimers={snapshotActiveTimers(app.data, new Set((app.activeTimers ?? []).map((timer) => String(timer.workId))), Date.now())}
           onOpenLocal={(timer) => {
             const group = app.data?.groups.find((item) => item.id === timer.groupId);
             const work = group?.works.find((item) => item.id === timer.workId);
             if (group && work) app.openWork(group, work);
           }} />
-        <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} view={app.tab} />
+        <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} view={app.tab} onScrolledChange={setTimerBannerCompact} />
       </>}
     </View>
     <View style={styles.nav}>
@@ -356,6 +363,7 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
   brandSlot: { flex: 1, minWidth: 0 },
   headerSearch: { flex: 1, minWidth: 0, height: 40, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, borderRadius: 20, backgroundColor: palette.background, borderWidth: 1, borderColor: palette.border },
+  headerToggleBusy: { opacity: 0.45 },
   headerSearchInput: { flex: 1, minWidth: 0, height: 38, paddingVertical: 0, fontSize: 14, color: palette.text },
   headerToggle: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   headerToggleActive: { backgroundColor: palette.track },

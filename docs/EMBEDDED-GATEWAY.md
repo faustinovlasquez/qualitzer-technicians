@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.37
+# @qualitzer/mobile-gateway 1.0.39
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,11 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.37. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.39. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.39 agrega el tipo de falla a la entrega técnica de mantenimiento. `POST /api/assignments/maintenance-:id/deliver` con `acknowledgeDelivery: true` acepta `faultType` (`operative | wear | undetermined`) y lo reenvía a `/maintenances/:id/technician-delivery` solo cuando no es null; receptor y firma del cliente siguen rechazados. El contexto de entrega informa `technicianFaultTypeSupported: true`. **Requiere el backend de la misma entrega** (la validación de la entrega técnica acepta `faultType` y guarda `damageType`). Incluye también lo de 1.0.38, que no se publicó por separado.
+
+1.0.38 evita volver a descargar la agenda que no cambió. `GET /api/assignments` agrega `revision` (SHA-256 hexadecimal del contenido sin `generatedAt`). Si la petición trae el encabezado `X-Qualitzer-Known-Revision` con esa misma huella, responde solo `{ unchanged: true, revision }`. Una huella malformada o distinta devuelve la agenda completa. El encabezado está permitido en CORS. Las APK anteriores no envían el encabezado e ignoran `revision`. El backend no cambia y no hay migraciones.
 
 1.0.37 agrega sistema y subsistema a los trabajos de mantenimiento y filtra los avisos de materiales. `POST /api/creation` acepta `systemId`/`componentId` opcionales en `work` (solo con `maintenanceId`) y en `maintenance`. `GET /api/creation/options` acepta `kind=systems` y `kind=components&systemId=N`. Nueva ruta `GET`/`PATCH /api/assignments/:groupId/works/:workId/edit/full`, que incluye el bloque `workSystem`; `/edit` lo omite para que las APK anteriores sigan funcionando. Los avisos `MATERIAL_RECEIPT_*` pueden traer `materialReceiptIds`. Requiere el backend de la misma entrega (mobile-creations, PanelWorkEdit y mobileNotifications). **Desplegar backend y gateway juntos.** Sin migraciones.
 

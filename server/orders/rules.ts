@@ -67,7 +67,8 @@ function requiresClient(scope: OrderScope): boolean { return scope.detail.type =
 export function assertDelivery(scope: OrderScope, input: OrderDeliveryInput): void {
   if (isFinal(scope)) throw new GatewayError(409, "ORDER_READ_ONLY");
   if (input.acknowledgeDelivery === true) {
-    if (input.clientSignature !== null || input.receivedByName !== null || input.faultType !== null) throw new GatewayError(400, "CLIENT_DELIVERY_FIELDS_NOT_APPLICABLE");
+    // El técnico puede informar el tipo de falla; el receptor y su firma siguen siendo del cierre con cliente.
+    if (input.clientSignature !== null || input.receivedByName !== null) throw new GatewayError(400, "CLIENT_DELIVERY_FIELDS_NOT_APPLICABLE");
     return;
   }
   const incomplete = incompleteChecklists(scope);
@@ -95,7 +96,7 @@ export function deliveryContext(scope: OrderScope): OrderDeliveryContext {
     finalizationNote: scope.detail.finalizationNote, damageType: scope.detail.damageType,
     durationMinutes: scope.detail.durationMinutes, startedAt: scope.detail.startedAt ?? null, finalizedAt: scope.detail.finalizedAt,
     incompleteChecklists: incomplete, suggestedDurationMinutes: Math.round(seconds / 60),
-    technicianDeliverySupported: true, canTechnicianDeliver: !isFinal(scope),
+    technicianDeliverySupported: true, technicianFaultTypeSupported: true, canTechnicianDeliver: !isFinal(scope),
     totalWorks: scope.detail.works.filter(work => !productContainers.has(work.title.trim())).length,
     pendingWorkNames: scope.detail.works.filter(work => !productContainers.has(work.title.trim()) && (work.status !== undefined
       ? work.status !== "entrega_tecnico" : scope.group.works.find(candidate => Number(candidate.id) === work.id)?.status !== "delivered")).map(work => work.title),

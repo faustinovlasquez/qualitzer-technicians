@@ -5,7 +5,7 @@ import { rateLimit } from "express-rate-limit";
 import { authRouter } from "./auth";
 import type { ResolvedConfig } from "./config";
 import { errorHandler, GatewayError } from "./errors";
-import { assignmentRouter } from "./assignments/routes";
+import { assignmentRouter, KNOWN_REVISION_HEADER } from "./assignments/routes";
 import { createPanelRouter } from "./panel/routes";
 import { createChecklistRouter } from "./checklists/routes";
 import { createOrderRouter } from "./orders/routes";
@@ -39,7 +39,7 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
     if (origin !== undefined && !config.corsOrigins.includes(origin)) throw new GatewayError(403, "ORIGIN_FORBIDDEN");
     next();
   });
-  app.use(cors({ origin: config.corsOrigins, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["Authorization", "Content-Type", "X-Qualitzer-Tenant", WEB_SESSION_HEADER], credentials: true, maxAge: 600 }));
+  app.use(cors({ origin: config.corsOrigins, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["Authorization", "Content-Type", "X-Qualitzer-Tenant", WEB_SESSION_HEADER, KNOWN_REVISION_HEADER], credentials: true, maxAge: 600 }));
   // Solo cuentan los intentos fallidos (credenciales o desafío inválidos): iniciar y cerrar sesión varias veces no bloquea al técnico.
   const credentialsLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, skipSuccessfulRequests: true, standardHeaders: "draft-8", legacyHeaders: false, message: { error: "AUTH_RATE_LIMITED" } });
   const authLimiter = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false, message: { error: "AUTH_RATE_LIMITED" } });

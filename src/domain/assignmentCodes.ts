@@ -93,3 +93,12 @@ export function matchesOrderSearch(group: AssignmentGroup, query: string): boole
     group.equipment?.label, group.equipment?.identifier, group.equipment?.internalNumber,
   ].filter(Boolean).join(" ")).includes(normalize(query));
 }
+/**
+ * Al iniciar un trabajo de un mantenimiento todavía pendiente, el servidor inicia también el mantenimiento.
+ * Devuelve el aviso que explica ese doble inicio, o null si el mantenimiento ya estaba iniciado.
+ */
+export function maintenanceStartNotice(group: AssignmentGroup, status: string): string | null {
+  if (status !== "in_progress" || group.type !== "internal_maintenance" || group.status !== "pending") return null;
+  const code = assignmentWorkOrderCode(group);
+  return `Se inició el trabajo y también el mantenimiento${code ? ` ${code}` : ""}, que estaba pendiente: al iniciar su primer trabajo el mantenimiento queda en curso.`;
+}

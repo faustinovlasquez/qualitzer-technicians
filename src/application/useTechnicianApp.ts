@@ -14,7 +14,7 @@ import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
 import { dateKey, monthRange, shiftDate, weekRange } from "../domain/format";
-import { assignmentDay, assignmentDays, assignmentWorkForDay, assignmentWorkForQueryDate, assignmentWorkQueryRange, assignmentWorkSnapshotForQueryDate, dailyRange, locateNotice, noticeDayInRange, noticeSearchRange, type NoticeTarget } from "../domain/assignmentSchedule";
+import { assignmentDay, assignmentDays, assignmentWorkForDay, assignmentWorkForQueryDate, assignmentWorkQueryRange, assignmentWorkSnapshotForQueryDate, dailyRange, locateNotice, noticeDayInRange, noticeSearchRange, type NoticeTarget, activeTimerKey, withoutLocallyPaused } from "../domain/assignmentSchedule";
 import type { ActiveTimer } from "../domain/notifications";
 import type { MaterialReceiptFocus } from "../domain/materialReceipts";
 import { normalizeAssignmentsChecklistProgress } from "../domain/assignmentChecklistProgress";
@@ -154,6 +154,9 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const [noticeError, setNoticeError] = useState<string | null>(null);
   // Cronómetros en curso según el servidor, sin importar el rango de fechas cargado.
   const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
+  // Cronómetros pausados desde el aviso: no se vuelven a mostrar hasta que el servidor deje de informarlos (la pausa puede
+  // estar aún en la cola de envío) o pasen 10 minutos.
+  const locallyPaused = useRef(new Map<string, number>());
   const offline: OfflineSnapshot | null = useSyncExternalStore(offlineController?.subscribe ?? subscribeNothing, offlineController?.getSnapshot ?? emptyOfflineSnapshot, offlineController?.getSnapshot ?? emptyOfflineSnapshot);
   const repository = useRef<TechnicianRepository | null>(null);
   const gatewayBlock = useRef<string | null>(gatewayConfiguration.error);
@@ -167,6 +170,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const actionLock = useRef<symbol | null>(null);
   const logoutInProgress = useRef(false);
   const notificationClient = useRef<MobileNotificationClient | null>(null);
+  const pauseQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const pausesPending = useRef(0);
   const manualRefresh = useRef<{ session: Session; range: DateRange } | null>(null);
   const appliedRefresh = useRef<{ repo: OfflineTechnicianRepository; revision: string } | null>(null);
   const baselinePrepared = useRef<OfflineTechnicianRepository | null>(null);
@@ -591,14 +596,155 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   async function openActiveTimer(timer: ActiveTimer): Promise<boolean> {
     const current = state.current.session;
     if (!current || actionLock.current || state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) return false;
+    // Si el trabajo ya está en la jornada cargada se abre al instante, sin consultar la agenda.
+    const loaded = loadedTimerWork(timer);
+    if (loaded && (state.current.tab === "today" || state.current.tab === "agenda")) {
+      const next = workSelection(loaded.group, loaded.work);
+      state.current = { ...state.current, selected: next };
+      setSelected(next); setError(null); setNoticeError(null);
+      return true;
+    }
     return await openAssignmentTarget({ groupType: timer.groupType, groupId: timer.groupId, workId: timer.workId }, timer.date,
       () => isAccessAllowed() && state.current.session === current);
   }
 
   /**
-   * Lleva al detalle de un trabajo u orden de un aviso. El servidor informa la primera fecha planificada, pero un cronómetro
+   * Busca el trabajo u orden de un aviso o cronómetro. El servidor informa la primera fecha planificada, pero un cronómetro
    * puede seguir abierto días después: si no está en esa fecha se busca hoy y luego en el rango entre esa fecha y hoy.
    */
+  async function findAssignmentTarget(repo: TechnicianRepository, current: Session, target: NoticeTarget, noticeDate: string | null, still: () => boolean, stale: Error, preferCache = false) {
+    const today = scheduleClock(current.user.system.timezone)?.day;
+    const firstDay = noticeDate ?? today;
+    if (!firstDay || current.branchId === null) throw new Error("La sucursal no tiene una fecha o zona horaria válida para abrir el aviso.");
+    if (target.workId === null && target.groupType === "work") throw new Error("La notificación no identifica un trabajo disponible.");
+    const branchId = current.branchId;
+    const read = async (range: DateRange) => {
+      const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(range, branchId, preferCache ? { maxAgeMs: ASSIGNMENT_CACHE_FRESH_MS } : undefined));
+      if (!still()) throw stale;
+      if (fresh.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
+      return fresh;
+    };
+    let day = firstDay;
+    let fresh = await read(dailyRange(day));
+    let located = locateNotice(fresh, target, day);
+    if (!located && target.workId !== null && today) {
+      if (today !== day) {
+        const todayData = await read(dailyRange(today));
+        const found = locateNotice(todayData, target, today);
+        if (found) { fresh = todayData; located = found; day = today; }
+      }
+      if (!located) {
+        // Un cronómetro que sigue abierto puede venir de un trabajo planificado días antes: si el aviso es de hoy, se busca hacia atrás.
+        const range = noticeSearchRange(firstDay === today ? shiftDate(today, -30) : firstDay, today);
+        const found = noticeDayInRange(await read(range), target, range, today);
+        if (found && found !== firstDay && found !== today) {
+          const foundData = await read(dailyRange(found));
+          const match = locateNotice(foundData, target, found);
+          if (match) { fresh = foundData; located = match; day = found; }
+        }
+      }
+    }
+    if (!located) throw new Error(target.workId === null ? "La orden ya no está disponible para este trabajador en la fecha del aviso."
+      : "No encontramos ese trabajo en tu agenda del último mes. Puede que ya no esté asignado a ti o que se haya cerrado.");
+    return { fresh, located, day };
+  }
+
+  /**
+   * Pausas desde el aviso de cronómetros: se encolan para poder tocar varias seguidas sin esperar. Cada una pausa en el
+   * servidor y la jornada se recarga una sola vez al terminar la cola.
+   */
+  function queuePause(pause: () => Promise<boolean>): Promise<boolean> {
+    pausesPending.current += 1;
+    const run = pauseQueue.current.then(async () => {
+      if (!await waitForActionUnlock(15000)) { setNoticeError("La app está terminando otra acción. Vuelve a pausar en unos segundos."); return false; }
+      return await pause();
+    }).finally(() => {
+      pausesPending.current -= 1;
+      if (pausesPending.current === 0) void refreshAssignments(true, false).catch(() => undefined);
+    });
+    pauseQueue.current = run.catch(() => undefined);
+    return run;
+  }
+
+  async function pauseScope(value: WorkScope, previousStatus: string, still: () => boolean): Promise<boolean> {
+    try {
+      await performMutation(value, async (target, scope) => {
+        await target.status(scope, { status: "paused", executionDates: [scope.startDate] });
+      }, false, statusLocationAction({ status: "paused" }, previousStatus));
+    } catch (caught) {
+      if (!isOfflineQueuedError(caught)) { if (still()) setNoticeError(errorText(caught)); return false; }
+    }
+    return true;
+  }
+
+  /** Trabajo del cronómetro en la jornada ya cargada: evita consultar la agenda antes de pausar. */
+  function loadedTimerWork(timer: ActiveTimer): { group: AssignmentGroup; work: AssignmentWork } | null {
+    const groupIds = timer.groupType === "maintenance" ? [`maintenance-${timer.groupId}`] : timer.groupType === "negotiation" ? [`external-${timer.groupId}`] : [`direct-${timer.groupId}`, `direct-np-${timer.groupId}`];
+    for (const group of state.current.data?.groups ?? []) {
+      if (!groupIds.includes(group.id)) continue;
+      const work = group.works.find((item) => item.id === String(timer.workId));
+      if (work) return { group, work };
+    }
+    return null;
+  }
+
+  /** Pausa un cronómetro en curso desde el aviso, sin abrir el trabajo. */
+  function pauseActiveTimer(timer: ActiveTimer): Promise<boolean> {
+    return queuePause(async () => {
+      const current = state.current.session;
+      const repo = repository.current;
+      if (!current || current.branchId === null || !repo || state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) return false;
+      const branchId = current.branchId;
+      const version = sessionVersion.current;
+      const stale = new Error("NOTICE_CONTEXT_CHANGED");
+      const still = () => version === sessionVersion.current && repository.current === repo && isAccessAllowed() && state.current.session === current;
+      let value: WorkScope;
+      let previousStatus: string;
+      const loaded = loadedTimerWork(timer);
+      if (loaded) {
+        value = { ...dailyRange(workSelection(loaded.group, loaded.work).queryDate), groupId: loaded.group.id, workId: loaded.work.id, companyBranchId: branchId };
+        previousStatus = loaded.work.status;
+      } else {
+        let found: Awaited<ReturnType<typeof findAssignmentTarget>>;
+        try { found = await findAssignmentTarget(repo, current, { groupType: timer.groupType, groupId: timer.groupId, workId: timer.workId }, timer.date, still, stale, true); }
+        catch (caught) { if (caught !== stale && still()) setNoticeError(errorText(caught)); return false; }
+        const work = found.located.work;
+        if (!work || !still()) return false;
+        value = { ...dailyRange(found.day), groupId: found.located.group.id, workId: work.id, companyBranchId: branchId };
+        previousStatus = work.status;
+      }
+      const removeFromNotice = () => {
+        locallyPaused.current.set(activeTimerKey(timer), Date.now());
+        setActiveTimers(previous => previous.filter(item => !(item.groupType === timer.groupType && item.groupId === timer.groupId && item.workId === timer.workId)));
+      };
+      // Si en la jornada el trabajo no está en curso no hay cronómetro que pausar: se quita del aviso y se explica, sin fallar.
+      if (previousStatus !== "in_progress") {
+        removeFromNotice();
+        if (still()) setNoticeError("Ese trabajo no está en curso en tu jornada, así que no había un cronómetro que pausar. Se quitó del aviso.");
+        return true;
+      }
+      if (!await pauseScope(value, previousStatus, still)) return false;
+      removeFromNotice();
+      setNoticeError(null);
+      return true;
+    });
+  }
+
+  /** Pausa desde el aviso un cronómetro de la jornada cargada que el servidor aún no informa. */
+  function pauseLoadedWork(groupId: string, workId: string): Promise<boolean> {
+    return queuePause(async () => {
+      const current = state.current.session;
+      const group = state.current.data?.groups.find((item) => item.id === groupId);
+      const work = group?.works.find((item) => item.id === workId);
+      if (!current || current.branchId === null || !group || !work || state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) return false;
+      const value: WorkScope = { ...dailyRange(workSelection(group, work).queryDate), groupId: group.id, workId: work.id, companyBranchId: current.branchId };
+      if (!await pauseScope(value, work.status, () => isAccessAllowed() && state.current.session === current)) return false;
+      setNoticeError(null);
+      return true;
+    });
+  }
+
+  /** Lleva al detalle de un trabajo u orden de un aviso o cronómetro. */
   async function openAssignmentTarget(target: NoticeTarget, noticeDate: string | null, isCurrent: () => boolean): Promise<boolean> {
     const current = state.current.session;
     const repo = repository.current;
@@ -610,39 +756,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const stale = new Error("NOTICE_CONTEXT_CHANGED");
     const still = () => version === sessionVersion.current && repository.current === repo && isCurrent();
     try {
-      const today = scheduleClock(current.user.system.timezone)?.day;
-      const firstDay = noticeDate ?? today;
-      if (!firstDay || current.branchId === null) throw new Error("La sucursal no tiene una fecha o zona horaria válida para abrir el aviso.");
-      if (target.workId === null && target.groupType === "work") throw new Error("La notificación no identifica un trabajo disponible.");
-      const branchId = current.branchId;
-      const read = async (range: DateRange) => {
-        const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(range, branchId));
-        if (!still()) throw stale;
-        if (fresh.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
-        return fresh;
-      };
-      let day = firstDay;
-      let fresh = await read(dailyRange(day));
-      let located = locateNotice(fresh, target, day);
-      if (!located && target.workId !== null && today) {
-        if (today !== day) {
-          const todayData = await read(dailyRange(today));
-          const found = locateNotice(todayData, target, today);
-          if (found) { fresh = todayData; located = found; day = today; }
-        }
-        if (!located) {
-          // Un cronómetro que sigue abierto puede venir de un trabajo planificado días antes: si el aviso es de hoy, se busca hacia atrás.
-          const range = noticeSearchRange(firstDay === today ? shiftDate(today, -30) : firstDay, today);
-          const found = noticeDayInRange(await read(range), target, range, today);
-          if (found && found !== firstDay && found !== today) {
-            const foundData = await read(dailyRange(found));
-            const match = locateNotice(foundData, target, found);
-            if (match) { fresh = foundData; located = match; day = found; }
-          }
-        }
-      }
-      if (!located) throw new Error(target.workId === null ? "La orden ya no está disponible para este trabajador en la fecha del aviso."
-        : "No encontramos ese trabajo en tu agenda del último mes. Puede que ya no esté asignado a ti o que se haya cerrado.");
+      const { fresh, located, day } = await findAssignmentTarget(repo, current, target, noticeDate, still, stale);
       const nextRange = dailyRange(day);
       const nextWork: SelectedWork | null = located.work ? { groupId: located.group.id, workId: located.work.id, queryDate: day, scheduledDate: located.scheduledDate ?? day, initialTab: "work" } : null;
       const nextOrder: SelectedOrder = { id: located.group.id, queryDate: day, initialTab: "works" };
@@ -1604,7 +1718,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const remote = remoteRepository(repository.current) as (TechnicianRepository & { activeTimers?: (branch: number) => Promise<ActiveTimer[]> }) | null;
     if (timersBranch === null || !remote?.activeTimers) { setActiveTimers([]); return; }
     let active = true;
-    const load = () => { void remote.activeTimers!(timersBranch).then(items => { if (active) setActiveTimers(items); }, () => undefined); };
+    const load = () => { void remote.activeTimers!(timersBranch).then(items => { if (active) setActiveTimers(withoutLocallyPaused(items, locallyPaused.current, Date.now())); }, () => undefined); };
     load();
     const interval = setInterval(load, 120000);
     return () => { active = false; clearInterval(interval); };
@@ -1660,7 +1774,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     receiptPort: remoteRepository(repository.current),
     diagnosticsPort: remoteRepository(repository.current) as (TechnicianRepository & Partial<import("../domain/diagnostics").AppErrorPort>) | null,
     materialReceiptFocus,
-    noticeError, dismissNoticeError: () => setNoticeError(null), activeTimers, openActiveTimer,
+    noticeError, dismissNoticeError: () => setNoticeError(null), activeTimers, openActiveTimer, pauseActiveTimer, pauseLoadedWork,
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,
     consumeOrderDeliveryIntent,
     gatewayUrl, setGatewayUrl: changeGatewayUrl, challenge, selectedTenant, selectTenant, cancelLoginChallenge,

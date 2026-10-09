@@ -17,7 +17,7 @@ import { cachedAssignmentsSchema, cachedAttachmentSchema, cachedCommentsSchema, 
 import { checklistAssignmentInputSchema, checklistCatalogPageSchema, checklistCatalogQuerySchema, type ChecklistAssignmentPort } from "../domain/checklistAssignment";
 import { assignmentsWithTimerRead, canonicalIntentionScopeSchema, checklistCatalogCacheKey } from "./queueIntentions";
 import { isServiceFailure, requiresDeployment } from "./connection";
-import type { AssignmentReadOptions } from "../domain/assignmentRead";
+import { ASSIGNMENTS_REVISION_PATTERN, AssignmentsUnchangedError, type AssignmentReadOptions } from "../domain/assignmentRead";
 import { withAssignmentReadBatch, type AssignmentReadBatch } from "../infrastructure/assignmentReadBatch";
 import { workActions, workActivitySchema, workActivityInputSchema, type WorkActivitiesPort } from "../domain/workActivities";
 import { conflictedTimerScopes, isStatusConflict, rebaseTimerChain, type ServerWorkStatus } from "./timerConflicts";
@@ -290,7 +290,14 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
             batch.check();
             timerReadOperationIds = beforeRead.operations.filter((operation) => (operation.kind === "timer" || operation.kind === "completion") && operation.status === "applied"
               && operation.scope.companyBranchId === branchId && operation.scope.startDate === date && operation.scope.endDate === date).map((operation) => operation.id);
-            const value = await this.remote.assignments(dailyRange(date), branchId, { signal: batch.signal });
+            // Con copia local del día se envía su huella: si el servidor confirma que no cambió se reutiliza sin descargarla.
+            const known = this.revisionCopy(beforeRead.cache, date, branchId);
+            let value: Assignments;
+            try { value = await this.remote.assignments(dailyRange(date), branchId, { signal: batch.signal, ...(known ? { knownRevision: known.revision } : {}) }); }
+            catch (error) {
+              if (!known || !(error instanceof AssignmentsUnchangedError) || error.revision !== known.revision) throw error;
+              value = known.value;
+            }
             batch.check();
             if (!cachedAssignmentsSchema.safeParse(value).success) throw new ApiError(502, "UPSTREAM_INVALID_RESPONSE", "La API devolvió un formato inesperado.");
             if (value.technician.id !== this.session.user.workerId) throw new ApiError(401, "OFFLINE_WORKER_CHANGED", "La identidad cambió.");
@@ -323,6 +330,19 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       if (!snapshots.length) throw new OfflineUnavailableError("OFFLINE_CACHE_MISS");
       return mergeDailyAssignments(snapshots, range.startDate);
     });
+  }
+  /** Copia local del día con la huella que entregó el gateway, para preguntar si cambió antes de volver a descargarla. */
+  private revisionCopy(cache: readonly CacheEntry[], date: string, branchId: number): { revision: string; value: Assignments } | null {
+    const key = `assignments:${date}`;
+    const entry = cache.filter((item) => item.key === key).sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
+    if (!entry || entry.coverage?.branchId !== branchId || entry.coverage.date !== date) return null;
+    let json: unknown;
+    try { json = JSON.parse(entry.json); } catch { return null; }
+    const revision = typeof json === "object" && json !== null && "revision" in json && typeof json.revision === "string" && ASSIGNMENTS_REVISION_PATTERN.test(json.revision) ? json.revision : null;
+    if (!revision || !cachedAssignmentsSchema.safeParse(json).success) return null;
+    const value = json as Assignments;
+    if (value.technician.id !== this.session.user.workerId) return null;
+    return { revision, value };
   }
   /** Copia local del día si se descargó hace menos de `maxAgeMs`; así volver a la agenda no repite la descarga. */
   private async freshAssignments(date: string, branchId: number, maxAgeMs: number, batch: { wait<T>(operation: () => Promise<T>): Promise<T> }): Promise<Assignments | null> {

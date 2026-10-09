@@ -67,3 +67,28 @@ test("native transport keeps its network-only cache eligibility", async () => {
   await assert.rejects(f.client.assignments(range, 1), (error: unknown) => error instanceof NetworkError && canUseCache(error));
   assert.equal(f.requests(), 1);
 });
+test("a one-day read sends the saved revision and an unchanged answer ends without a new agenda", async () => {
+  const revision = "c".repeat(64);
+  const sent: (string | null)[] = [];
+  let unchanged = true;
+  const path = resolve(__dirname, "../../infrastructure/HttpTechnicianRepository.ts");
+  const requireSource = createRequire(path);
+  const exports: { HttpTechnicianRepository?: new (baseUrl: string) => HttpTechnicianRepository } = {};
+  const module = { exports };
+  runInNewContext(ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+    module, exports, FormData, Blob, AbortController, Error, TypeError, setTimeout, clearTimeout, URLSearchParams,
+    require: (id: string): unknown => id === "react-native" ? { Platform: { OS: "android" } }
+      : id === "./photos" ? { uploadFetch: async (_url: string, init: { headers: { [name: string]: string } }) => {
+        sent.push(init.headers["X-Qualitzer-Known-Revision"] ?? null);
+        return Response.json(unchanged ? { unchanged: true, revision } : { ...assignmentsWithStep(), revision: "d".repeat(64) });
+      } } : requireSource(id),
+  });
+  const client = new module.exports.HttpTechnicianRepository!("https://fixture.invalid"); client.tenant = user.tenant;
+  await assert.rejects(client.assignments(range, 1, { knownRevision: revision }), (error: unknown) => error instanceof Error && error.name === "AssignmentsUnchangedError");
+  assert.deepEqual(sent, [revision]);
+  unchanged = false;
+  const fresh = await client.assignments(range, 1, { knownRevision: revision });
+  assert.equal(fresh.revision, "d".repeat(64), "a changed day keeps its new revision for the next visit");
+  await client.assignments({ startDate: "2026-09-08", endDate: "2026-09-09" }, 1, { knownRevision: revision });
+  assert.deepEqual(sent.slice(2), [null, null], "multi-day reads never send a single day's revision");
+});

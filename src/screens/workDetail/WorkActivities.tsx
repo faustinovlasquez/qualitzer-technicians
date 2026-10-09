@@ -191,9 +191,9 @@ export function WorkActivities(props: Props) {
   const orderedActivities = [...activities].sort((left, right) => Number(right.id === recentId) - Number(left.id === recentId));
   function closeFiles(): void { if (!filesBack.current?.(true) && !lock.current) setSelected(null); }
   return <View style={styles.stack} testID="work-activities">
-    <View style={styles.sectionHeading}><Ionicons name="construct-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Actividades</Text><Badge label={String(activities.length + pending.length)} />
+    <View style={styles.sectionHeading}><Ionicons name="construct-outline" size={20} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitleInline}>Actividades</Text><View style={styles.headingBadge}><Badge label={String(activities.length + pending.length)} /></View><View style={styles.headingSpacer} /><View style={styles.headingTools}>
       <IconButton label="Actualizar actividades" name="refresh-outline" disabled={busy} onPress={() => void run(refresh, false)} />
-      {!props.readOnly ? <IconButton label="Agregar actividad" name="add-outline" disabled={createDisabled || !draft.hydrated} onPress={() => void openForm()} /> : null}
+      {!props.readOnly ? <IconButton label="Agregar actividad" name="add-outline" disabled={createDisabled || !draft.hydrated} onPress={() => void openForm()} /> : null}</View>
     </View>
     {readUnavailable && !error ? <Notice message="Sin conexión con el servidor: se muestran las actividades de la última carga. Se actualizarán cuando vuelva la conexión." tone="warning" /> : null}
     {error || draft.error || !parsed.success ? <Notice message={error ?? draft.error ?? "No se pudo leer el borrador de actividad."} tone="error" /> : null}

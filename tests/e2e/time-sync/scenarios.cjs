@@ -163,7 +163,7 @@
         const preview = page.getByTestId("work-description-excerpt");
         await preview.waitFor();
         const layout = await preview.evaluate(element => ({ height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight), scrollHeight: element.scrollHeight }));
-        assert(layout.height <= layout.lineHeight * 3 + 1 && layout.scrollHeight > layout.height, "long description is clamped to three lines");
+        assert(layout.height <= layout.lineHeight + 1, "long description is clamped to one line");
         await screenshot(`work-description-preview-${width}-${scale}`);
         const before = await metrics();
         await button("Ver descripción completa del trabajo").click();

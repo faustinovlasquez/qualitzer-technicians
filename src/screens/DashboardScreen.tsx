@@ -40,6 +40,8 @@ export interface DashboardScreenProps {
   /** Búsqueda controlada desde la cabecera: si se entrega, la pantalla no muestra su propio buscador. */
   query?: string;
   onQueryChange?: (query: string) => void;
+  /** Avisa si la lista de la jornada se desplazó hacia abajo (para compactar el aviso de cronómetros). */
+  onScrolledChange?: (scrolled: boolean) => void;
 }
 
 type StatusFilter = "all" | "pending" | "in_progress" | "completed";
@@ -62,6 +64,12 @@ const filters: { value: StatusFilter; label: string }[] = [
   { value: "in_progress", label: "En curso" },
   { value: "completed", label: "Completados" },
 ];
+// Punto de color de cada estado en el filtro: ámbar pendientes, verde en curso, gris completados.
+const filterDots: { [key in Exclude<StatusFilter, "all">]: { dot: string; soft: string } } = {
+  pending: { dot: palette.amber, soft: palette.amberSoft },
+  in_progress: { dot: palette.primary, soft: palette.primarySoft },
+  completed: { dot: palette.textMuted, soft: palette.track },
+};
 
 function scheduledDay(work: AssignmentWork): string {
   return assignmentDay(work.scheduledDate);
@@ -116,7 +124,7 @@ function Kpi({ title, value, note, icon, tone, inline = false }: { title: string
   );
 }
 
-export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange }: DashboardScreenProps) {
+export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange, onScrolledChange }: DashboardScreenProps) {
   const compact = useWindowDimensions().width < 600;
   const [agendaLayout, setAgendaLayout] = useState<"timeline" | "schedule" | "list">("timeline");
   const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");
@@ -250,9 +258,9 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       accessibilityLabel={`${item.label}${hasDataCount() ? `, ${viewCounts[item.value]} coincidencias` : ""}`}
       accessibilityHint={countHint(viewCounts[item.value])}
       accessibilityState={{ selected: listView === item.value, disabled: busy }} disabled={busy}
-      onPress={() => selectListView(item.value)} style={[styles.entityTab, listView === item.value && styles.segmentSelected]}>
-      <Text style={[styles.entityTabText, listView === item.value && styles.segmentTextSelected]}>{item.label}</Text>
-      <Text testID={`assignment-type-count-${item.value}`} style={[styles.countBadge, listView === item.value && styles.countBadgeSelected]}>{countLabel(viewCounts[item.value])}</Text>
+      onPress={() => selectListView(item.value)} style={[styles.entityTab, listView === item.value && styles.entityTabSelected]}>
+      <Text style={[styles.entityTabText, listView === item.value && styles.entityTabTextSelected]}>{item.label}</Text>
+      <Text testID={`assignment-type-count-${item.value}`} style={[styles.countBadge, listView === item.value && styles.entityCountSelected]}>{countLabel(viewCounts[item.value])}</Text>
     </Pressable>)}
   </ScrollView>;
   function hasDataCount(): boolean { return data !== null && !coveragePending && !partial; }
@@ -309,6 +317,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
   /** Los atajos de inicio/fin solo aparecen en listas largas mientras se desplaza, y se ocultan solos. */
   function handleListScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    onScrolledChange?.(contentOffset.y > 48);
     const viewport = layoutMeasurement.height;
     const long = viewport > 0 && contentSize.height > viewport * 2;
     const up = long && contentOffset.y > viewport;
@@ -467,12 +476,20 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       {preferenceError ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.preferenceError}>{preferenceError}</Text> : null}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.filters}>
-        {filters.map((item) => (
-          <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityHint={countHint(statusCounts[item.value])} accessibilityState={{ selected: filter.includes(item.value), disabled: busy }} aria-pressed={filter.includes(item.value)} disabled={busy} onPress={() => toggleFilter(item.value)} style={({ pressed }) => [styles.filter, filter.includes(item.value) && styles.filterSelected, pressed && styles.pressed]}>
-            <Text style={[styles.filterText, filter.includes(item.value) && styles.filterTextSelected]}>{item.label}</Text>
-            <Text testID={`assignment-status-count-${item.value}`} style={[styles.countBadge, filter.includes(item.value) && styles.countBadgeSelected]}>{countLabel(statusCounts[item.value])}</Text>
-          </Pressable>
-        ))}
+        {filters.map((item) => {
+          const selected = filter.includes(item.value);
+          if (item.value === "all") return <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityHint={`Muestra todos los estados. ${countHint(statusCounts.all)}`} accessibilityState={{ selected, disabled: busy }} aria-pressed={selected} disabled={busy} onPress={() => toggleFilter(item.value)} hitSlop={6} style={({ pressed }) => [styles.filterAll, pressed && styles.pressed]}>
+            <Ionicons name="funnel-outline" size={14} color={selected ? palette.primary : palette.textMuted} accessible={false} />
+            <Text style={[styles.filterAllText, selected && styles.filterAllTextSelected]}>{item.label}</Text>
+            <Text testID={`assignment-status-count-${item.value}`} style={[styles.filterCount, selected && styles.filterAllTextSelected]}>{countLabel(statusCounts[item.value])}</Text>
+          </Pressable>;
+          const colors = filterDots[item.value];
+          return <Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityHint={countHint(statusCounts[item.value])} accessibilityState={{ selected, disabled: busy }} aria-pressed={selected} disabled={busy} onPress={() => toggleFilter(item.value)} hitSlop={{ top: 7, bottom: 7 }} style={({ pressed }) => [styles.filter, selected && { borderColor: colors.dot, backgroundColor: colors.soft }, pressed && styles.pressed]}>
+            <View style={[styles.filterDot, { backgroundColor: colors.dot }]} />
+            <Text style={[styles.filterText, selected && styles.filterTextSelected]}>{item.label}</Text>
+            <Text testID={`assignment-status-count-${item.value}`} style={[styles.filterCount, selected && styles.filterTextSelected]}>{countLabel(statusCounts[item.value])}</Text>
+          </Pressable>;
+        })}
       </ScrollView>
       {filter.length === 1 && filter.includes("in_progress") ? <Text style={styles.filterNote}>Incluye tareas en pausa; cada tarjeta muestra su estado real.</Text> : filter.length === 1 && filter.includes("completed") ? <Text style={styles.filterNote}>Incluye tareas completadas y entregadas.</Text> : null}
 
@@ -535,9 +552,13 @@ const styles = StyleSheet.create({
   listContainer: { flex: 1 },
   jumpButtons: { position: "absolute", right: 10, bottom: 14, gap: 8 },
   jumpButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, opacity: 0.88 },
-  entityTabs: { flexGrow: 1, padding: 3, gap: 3, borderRadius: 6, backgroundColor: palette.surface },
-  entityTab: { flexGrow: 1, minHeight: 44, flexDirection: "row", gap: 6, justifyContent: "center", alignItems: "center", paddingHorizontal: 7, paddingVertical: 8, borderRadius: 6 },
-  entityTabText: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: palette.textSecondary, textAlign: "center" },
+  // Pestañas de tipo con línea inferior (navegación); el filtro de estados usa chips con punto para no confundirse.
+  entityTabs: { flexGrow: 1, borderBottomWidth: 1, borderBottomColor: palette.border },
+  entityTab: { flexGrow: 1, minHeight: 40, flexDirection: "row", gap: 6, justifyContent: "center", alignItems: "center", paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 2, borderBottomColor: "transparent", marginBottom: -1 },
+  entityTabSelected: { borderBottomColor: palette.primary },
+  entityTabText: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: palette.textSecondary, textAlign: "center" },
+  entityTabTextSelected: { color: palette.primary, fontWeight: "800" },
+  entityCountSelected: { color: palette.white, backgroundColor: palette.primary },
   countBadge: { minWidth: 24, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, fontSize: 12, lineHeight: 18, fontWeight: "700", fontVariant: ["tabular-nums"], color: palette.primary, backgroundColor: palette.primarySoft, textAlign: "center", flexShrink: 0 },
   countBadgeSelected: { color: palette.navy, backgroundColor: palette.white },
   mobileSchedule: { padding: 12, gap: 8 },
@@ -600,12 +621,16 @@ const styles = StyleSheet.create({
   search: { minHeight: 56, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, borderRadius: radius.md, flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 4, gap: 10 },
   searchFocused: { borderColor: palette.primary },
   searchInput: { flex: 1, minWidth: 0, minHeight: 54, paddingVertical: 14, fontSize: 15, color: palette.text },
-  filters: { gap: 8, paddingVertical: 2 },
-  filter: { minHeight: 44, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingHorizontal: 12, paddingVertical: 10, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },
-  filterSelected: { borderColor: palette.navy, backgroundColor: palette.navy },
-  filterText: { ...typography.label, fontSize: 13, color: palette.textSecondary },
-  filterTextSelected: { color: palette.white },
-  filterNote: { ...typography.caption, color: palette.textSecondary, marginTop: -10 },
+  filters: { gap: 4, paddingVertical: 2, alignItems: "center" },
+  filter: { minHeight: 30, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingHorizontal: 8, paddingVertical: 4, flexDirection: "row", gap: 4, alignItems: "center", justifyContent: "center" },
+  filterDot: { width: 8, height: 8, borderRadius: 4 },
+  filterText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: palette.textSecondary },
+  filterTextSelected: { color: palette.heading, fontWeight: "800" },
+  filterCount: { fontSize: 12, lineHeight: 16, fontWeight: "700", color: palette.textMuted, fontVariant: ["tabular-nums"] },
+  filterAll: { minHeight: 30, flexDirection: "row", gap: 3, alignItems: "center", paddingRight: 2 },
+  filterAllText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: palette.textMuted },
+  filterAllTextSelected: { color: palette.primary, fontWeight: "800" },
+  filterNote: { ...typography.caption, color: palette.textSecondary, marginTop: -6 },
   section: { gap: 20 },
   agendaDate: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 10, paddingTop: 8 },
   agendaDateIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: palette.primarySoft, alignItems: "center", justifyContent: "center" },

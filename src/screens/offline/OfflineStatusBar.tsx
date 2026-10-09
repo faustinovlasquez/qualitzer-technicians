@@ -39,6 +39,7 @@ export function OfflineStatusBar({ snapshot, onOpen, onSync, embedded = false }:
   // Una sola línea: el detalle de pendientes, conflictos y espacio se consulta al tocar la barra (centro offline).
   const status = snapshot?.authBlocked ? "auth_required" : snapshot ? snapshotConnection(snapshot).status : null;
   const title = feedback ? [feedback.title, feedback.detail].filter(Boolean).join(" · ") : (status === "ready" ? "Conectado" : status === "offline" || status === "unreachable" ? "Offline" : compact.title);
+  const quiet = status === "ready" && !feedback && !syncing && (snapshot?.pending ?? 0) === 0 && (snapshot?.conflicts ?? 0) === 0;
   async function sync(): Promise<void> {
     if (lock.current || disabled) return;
     lock.current = true;
@@ -50,6 +51,7 @@ export function OfflineStatusBar({ snapshot, onOpen, onSync, embedded = false }:
     catch (error) { setAttempt({ before, failure: { error } }); }
     finally { lock.current = false; setWorking(false); }
   }
+  if (quiet) return null;
   return <View testID="connection-status-bar" style={[styles.bar, embedded && styles.embedded, { backgroundColor }]}>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityHint={`${compact.detail}. ${presentation.secondary} Abre el centro offline: cobertura, pendientes y detalles de sincronización.`} onPress={() => { setResult(null); onOpen(); }} style={styles.summary}>
       <Ionicons name={presentation.ready ? "cloud-done-outline" : presentation.tone === "error" ? "cloud-offline-outline" : "cloud-outline"} size={18} color={color} accessible={false} />

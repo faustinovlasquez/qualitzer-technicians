@@ -66,8 +66,10 @@ export function deliveryWarnings(group: AssignmentGroup, context?: MaintenanceDe
   return { pendingWorks, pendingChecklists, allWorksDelivered: (context?.totalWorks ?? works.length) > 0 && pendingWorks.length === 0 };
 }
 
-export function technicianDeliveryInput(draft: DeliveryDraft, technicianSignature: string): MaintenanceDeliveryInput {
-  return { ...deliveryInput(draft, false, technicianSignature, null), acknowledgeDelivery: true };
+/** Entrega del técnico. Con un servidor que lo admite, incluye el tipo de falla elegido. */
+export function technicianDeliveryInput(draft: DeliveryDraft, technicianSignature: string, faultTypeSupported = false): MaintenanceDeliveryInput {
+  const input = deliveryInput(draft, false, technicianSignature, null);
+  return { ...input, faultType: faultTypeSupported && (draft.faultType === "operative" || draft.faultType === "wear") ? draft.faultType : null, acknowledgeDelivery: true };
 }
 
 export function initialDeliveryDraft(group: AssignmentGroup, context: MaintenanceDeliveryContext): DeliveryDraft {
@@ -85,8 +87,9 @@ export function initialDeliveryDraft(group: AssignmentGroup, context: Maintenanc
   };
 }
 
-export function deliveryDraftErrors(draft: DeliveryDraft, clientRequired: boolean): DeliveryErrors {
+export function deliveryDraftErrors(draft: DeliveryDraft, clientRequired: boolean, faultTypeRequired = false): DeliveryErrors {
   const errors: DeliveryErrors = {};
+  if (faultTypeRequired && draft.faultType !== "operative" && draft.faultType !== "wear") errors.faultType = "Selecciona el tipo de falla.";
   if (draft.note.length > DELIVERY_NOTE_LIMIT) errors.note = "Las observaciones admiten hasta 10.000 caracteres.";
   if (!/^\d{0,2}$/.test(draft.hours) || !/^\d{0,2}$/.test(draft.minutes) || Number(draft.minutes) > 59) errors.duration = "Ingresa de 0 a 99 horas y de 0 a 59 minutos, sin decimales.";
   if (draft.technicianProfileSignature) {

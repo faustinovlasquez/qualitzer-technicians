@@ -1,12 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { BackHandler, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { BackHandler, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { localTimerElapsedSeconds } from "../offline/queueIntentions";
 import { completionForWork, completionStatusLabel, locallySavedWork, pendingDocumentAttachment } from "./offline/offlineUi";
 import type { OfflineOperation } from "../domain/offline";
-import { assignmentCodes } from "../domain/assignmentCodes";
+import { assignmentCodes, maintenanceStartNotice } from "../domain/assignmentCodes";
 import { answerFromStep, clock, duration, plainText, shortDate, STATUS_LABELS } from "../domain/format";
 import type { AssignmentGroup, AssignmentWork, Attachment, ChecklistStep, CommentPage, DateRange, LocalPhoto, StatusInput, StepAnswer, Tenant, WorkDetailTab, WorkStatus } from "../domain/models";
 import { Badge, BodyText, Button, Card, IconButton, SectionTitle, type BadgeTone, type IconName } from "../ui/components";
@@ -103,6 +103,16 @@ const tabs: { id: Tab; label: string; icon: IconName }[] = [
   { id: "equipment", label: "Equipo", icon: "hardware-chip-outline" },
 ];
 const statusTones: { [key in WorkStatus]: BadgeTone } = { pending: "warning", in_progress: "teal", paused: "warning", completed: "success", delivered: "info" };
+const statusColors: { [key in WorkStatus]: { soft: string; text: string } } = {
+  pending: { soft: palette.amberSoft, text: palette.amber }, in_progress: { soft: palette.primarySoft, text: palette.primary }, paused: { soft: palette.amberSoft, text: palette.amber },
+  completed: { soft: palette.successSoft, text: palette.success }, delivered: { soft: palette.infoSoft, text: palette.info },
+};
+const priorityLabels: { [key in AssignmentWork["priority"]]: string } = { high: "Alta", medium: "Media", low: "Baja" };
+// Semáforo de prioridad: rojo alta, amarillo media, verde baja.
+const priorityColors: { [key in AssignmentWork["priority"]]: string } = { high: palette.danger, medium: palette.amber, low: palette.success };
+function initialsOf(name: string): string {
+  return plainText(name).split(/\s+/).filter(Boolean).slice(0, 2).map(part => part.charAt(0).toUpperCase()).join("") || "?";
+}
 
 function ElapsedTimer({ work, generatedAt, online = true, pending = false, localTimer, completion }: Pick<WorkDetailScreenProps, "work" | "generatedAt"> & { online?: boolean; pending?: boolean; localTimer?: Extract<OfflineOperation, { kind: "timer" }> | null; completion?: Extract<OfflineOperation, { kind: "completion" }> }) {
   const [now, setNow] = useState(Date.now);
@@ -118,7 +128,7 @@ function ElapsedTimer({ work, generatedAt, online = true, pending = false, local
   const localElapsed = localTimer ? localTimerElapsedSeconds(localTimer, now) : null;
   const elapsed = completion?.localClock.elapsedSeconds ?? localElapsed ?? baseline + extra;
   return <View style={styles.timerBox}>
-    <Text style={styles.heroOverline}>TIEMPO DE EJECUCIÓN</Text>
+    <Text style={styles.heroFactLabel}>Tiempo de ejecución</Text>
     <Text style={styles.timer} accessibilityLabel={`Tiempo de ejecución: ${clock(elapsed)}`}>{clock(elapsed)}</Text>
     {pending || !online ? <Text style={styles.heroText}>{localElapsed !== null || !pending ? "Tiempo local · pendiente de confirmar" : "Último tiempo recibido"}</Text> : null}
   </View>;
@@ -189,6 +199,13 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const hasPendingOperations = timerPending || pendingDeliveryCount > 0;
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "work");
   const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [heroCollapsed, setHeroCollapsed] = useState(false);
+  // Al bajar la tarjeta se comprime a una línea con el título; al volver arriba se expande. Entre medio el técnico puede abrirla o cerrarla.
+  const heroScrolled = useRef(false);
+  function heroOnScroll(y: number): void {
+    if (!heroScrolled.current && y > 60) { heroScrolled.current = true; setHeroCollapsed(true); }
+    else if (heroScrolled.current && y <= 4) { heroScrolled.current = false; setHeroCollapsed(false); }
+  }
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [target, setTarget] = useState<string | undefined>();
   const viewHistory = useRef<Array<{ tab: Tab; target?: string; checklistId?: number }>>([]);
@@ -412,6 +429,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       if (!mounted.current || callbacks.current.offline === null || callbacks.current.offline?.authBlocked || callbacks.current.staleReadOnly || readOnlyWork(callbacks.current.group, callbacks.current.work)) return;
       if (!finalizing && executionGates.current.timerNeedsAttention) return;
       if (finalizing && !deliveryInputAllowed(input)) return;
+      const startNotice = maintenanceStartNotice(callbacks.current.group, input.status);
       try { await onStatus(input); }
       catch (error) {
         if (finalizing && isOfflineQueuedError(error) && error.kind === "completion") {
@@ -429,7 +447,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         setAwaitingStatus(input.status);
         setCompleting(false);
         if (finalizing) setDeliverySucceeded(true);
-        setMessage(mode === "demo" ? "Estado guardado localmente en demostración." : "Cambio de estado confirmado por Qualitzer.");
+        setMessage(startNotice ?? (mode === "demo" ? "Estado guardado localmente en demostración." : "Cambio de estado confirmado por Qualitzer."));
       }
     });
   }
@@ -587,6 +605,14 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     });
   }
 
+  // Datos de la tarjeta superior: equipo, ubicación, fotos y el mismo inicio/pausa del pie (con sus mismas condiciones).
+  const heroEquipment = maintenance ? group.equipment : work.workEquipment ?? group.equipment;
+  const heroLocation = plainText(group.locationName || group.locationAddress || "");
+  const heroPhotos = (savedFiles ?? []).filter(file => /^image\//i.test(file.type ?? "") || /\.(jpe?g|png|webp|heic)$/i.test(file.name)).filter(file => Boolean(file.thumbnailUrl || file.url)).slice(0, 3);
+  const heroExecution: { label: string; icon: IconName; disabled: boolean; onPress: () => void } | null = readOnly ? null
+    : desiredStatus === "in_progress" ? { label: "Pausar trabajo desde la tarjeta", icon: "pause", disabled: disabled || timerNeedsAttention || !withinRange(selectedDate, range), onPress: () => updateStatus({ status: "paused", executionDates: [selectedDate] }) }
+      : desiredStatus === "pending" || desiredStatus === "paused" ? { label: desiredStatus === "paused" ? "Reanudar trabajo desde la tarjeta" : "Iniciar trabajo desde la tarjeta", icon: "play",
+        disabled: disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range), onPress: () => updateStatus({ status: "in_progress", executionDates: [selectedDate] }) } : null;
   const snapshotDate = new Date(generatedAt);
   const loadedAt = Number.isFinite(snapshotDate.getTime()) ? snapshotDate.toLocaleString("es-CL") : "Fecha de actualización no disponible";
   const storageMessage = !draft.hydrated ? "Recuperando borrador de este trabajo…" : draft.saving ? "Protegiendo borrador en dispositivo…" : "Borrador en dispositivo · los envíos a Qualitzer son explícitos";
@@ -640,6 +666,71 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     listFooter={draft.data.photos.length > 0 ? <Card style={styles.stack}><SectionTitle title="Fotos pendientes anteriores" subtitle="Conservamos las fotos que preparaste antes de esta actualización." /><EvidenceTab work={work} maintenance={maintenance} mode={mode} files={files.files} loading={files.loading} filesError={files.error} photos={draft.data.photos} target={target} disabled={disabled} readOnly={false} preparing={action === "photos"} uploading={action === "upload"} onTarget={setTarget} onPick={choosePhotos} onCancelPick={cancelWebPicker} onRemove={removePhoto} onUpload={uploadPhotos} onCleanup={() => { void runAction("cleanup", cleanUploadedPhotos); }} onLoad={() => { void runAction("files", files.load); }} /></Card> : undefined}
   />;
 
+  // Tarjeta superior compacta, fija arriba de las pestañas (diseño de referencia).
+  const heroCard = <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+    <View style={styles.heroTop}>
+      {/* Fecha, tiempo asignado, prioridad (semáforo), especialidad y estado en una fila; si no caben pasan a la siguiente. */}
+      <View style={[styles.heroFactsLine, styles.grow]} testID="work-hero-facts">
+      {heroCollapsed ? null : <>
+      <View style={styles.heroChip}><Ionicons name="calendar-outline" size={13} color={palette.onDark} accessible={false} /><Text style={styles.heroChipText} numberOfLines={1}>{shortDate(work.scheduledDate)}{work.scheduledStartTime ? ` · ${work.scheduledStartTime.slice(0, 5)}` : ""}</Text></View>
+      <View style={styles.heroChip}><Ionicons name="time-outline" size={13} color={palette.onDark} accessible={false} /><Text style={styles.heroChipText} numberOfLines={1}>{duration(work.plannedMinutes)} asignado</Text></View>
+      <View style={styles.heroChip} accessible accessibilityLabel={`Prioridad ${priorityLabels[work.priority]}`}><View style={[styles.priorityDot, { backgroundColor: priorityColors[work.priority] }]} /><Text style={styles.heroChipText}>{priorityLabels[work.priority]}</Text></View>
+      </>}
+      {plainText(work.specialty) ? <View style={styles.heroBadge}><Text style={styles.heroBadgeText} numberOfLines={1}>{plainText(work.specialty)}</Text></View> : null}
+      <View style={[styles.heroStatus, { backgroundColor: statusColors[desiredStatus].soft }]}><Text style={[styles.heroStatusText, { color: statusColors[desiredStatus].text }]}>{statusLabel}</Text></View>
+      </View>
+      <Pressable accessibilityRole="button" accessibilityLabel={heroCollapsed ? "Expandir tarjeta del trabajo" : "Minimizar tarjeta del trabajo"} accessibilityState={{ expanded: !heroCollapsed }} hitSlop={10} onPress={() => setHeroCollapsed(value => !value)} style={({ pressed }) => [styles.heroToggle, pressed && styles.heroCellPressed]} testID="work-hero-toggle">
+        <Ionicons name={heroCollapsed ? "chevron-down" : "chevron-up"} size={16} color={palette.white} accessible={false} />
+      </Pressable>
+    </View>
+    {heroCollapsed ? <View style={styles.heroCollapsedRow}>
+      <View style={[styles.priorityDot, { backgroundColor: priorityColors[work.priority] }]} accessible accessibilityLabel={`Prioridad ${priorityLabels[work.priority]}`} />
+      <Text accessibilityRole="header" style={[styles.heroTitle, styles.grow]} numberOfLines={1}>{plainText(work.title) || "Trabajo sin título"}</Text>
+      {heroExecution ? <Pressable accessibilityRole="button" accessibilityLabel={heroExecution.label} accessibilityState={{ disabled: heroExecution.disabled }} disabled={heroExecution.disabled} onPress={heroExecution.onPress}
+        style={({ pressed }) => [styles.heroPlaySmall, heroExecution.disabled && styles.heroPlayDisabled, pressed && styles.heroCellPressed]}>
+        <Ionicons name={heroExecution.icon} size={16} color={palette.navy} accessible={false} />
+      </Pressable> : null}
+    </View> : <>
+    <View style={styles.heroDescription}>
+      <View style={styles.grow}>
+        <Text accessibilityRole="header" style={styles.heroTitle} numberOfLines={2}>{plainText(work.title) || "Trabajo sin título"}</Text>
+        <WorkDescription key={resourceKey} work={work} disabled={locked} />
+      </View>
+      {props.workEditor && !readOnly ? <Pressable accessibilityRole="button" accessibilityLabel="Editar trabajo" accessibilityState={{ disabled: locked || !online || hasPendingOperations }} disabled={locked || !online || hasPendingOperations}
+        onPress={() => void openEditor()} hitSlop={8} style={({ pressed }) => [styles.heroEdit, (locked || !online || hasPendingOperations) && styles.heroPlayDisabled, pressed && styles.heroCellPressed]}>
+        <Ionicons name="create-outline" size={22} color={palette.white} accessible={false} />
+      </Pressable> : null}
+    </View>
+    <View style={styles.heroGrid}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Equipo: ${heroEquipment?.label ?? "Sin equipo"}. Ver ficha del equipo`} disabled={locked} onPress={() => navigateTab("equipment")} style={({ pressed }) => [styles.heroCell, pressed && styles.heroCellPressed]}>
+        <View style={styles.heroFactText}><Text style={styles.heroFactLabel}>Equipo</Text><Text style={styles.heroCellValue} numberOfLines={2}>{heroEquipment ? plainText(heroEquipment.label) : "Sin equipo"}</Text>
+          {heroEquipment?.identifier ? <Text style={styles.heroCellCaption} numberOfLines={1}>{heroEquipment.identifier}</Text> : null}</View>
+      </Pressable>
+      <View style={styles.heroDivider} />
+      <Pressable accessibilityRole="button" accessibilityLabel={`Ubicación: ${heroLocation || "Sin ubicación"}. Ver ubicación y contexto`} disabled={locked} onPress={() => navigateTab("equipment")} style={({ pressed }) => [styles.heroCell, pressed && styles.heroCellPressed]}>
+        <View style={styles.heroFactText}><Text style={styles.heroFactLabel}>Ubicación</Text><Text style={styles.heroCellValue} numberOfLines={2}>{heroLocation || "Sin ubicación"}</Text></View>
+      </Pressable>
+    </View>
+    <View style={styles.heroBottom}>
+      <View style={styles.heroResponsibles}>
+        <View style={styles.avatarStack}>{work.responsibles.slice(0, 3).map((responsible, index) => <View key={responsible.id} style={[styles.avatar, index > 0 && styles.avatarOverlap]}>
+          {responsible.avatarThumbnail ? <Image source={{ uri: responsible.avatarThumbnail }} style={styles.avatarImage} accessible={false} />
+            : <Text style={styles.avatarText}>{initialsOf(responsible.name)}</Text>}
+        </View>)}{work.responsibles.length === 0 ? <View style={styles.avatar}><Ionicons name="person-outline" size={16} color={palette.onDark} accessible={false} /></View> : null}</View>
+        <View style={styles.heroFactText}><Text style={styles.heroFactLabel}>Responsables</Text>
+          <Text style={styles.heroCellValue} numberOfLines={1}>{work.responsibles.length === 0 ? "Sin responsables" : work.responsibles.length === 1 ? work.responsibles[0]!.name : `${work.responsibles[0]!.name} +${work.responsibles.length - 1}`}</Text></View>
+      </View>
+      <View style={styles.heroTimer}>
+        <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending || Boolean(queuedCompletion)} localTimer={pendingTimer} completion={queuedCompletion} />
+        {heroExecution ? <Pressable accessibilityRole="button" accessibilityLabel={heroExecution.label} accessibilityState={{ disabled: heroExecution.disabled }} disabled={heroExecution.disabled} onPress={heroExecution.onPress}
+          style={({ pressed }) => [styles.heroPlay, heroExecution.disabled && styles.heroPlayDisabled, pressed && styles.heroCellPressed]}>
+          <Ionicons name={heroExecution.icon} size={22} color={palette.navy} accessible={false} />
+        </Pressable> : null}
+      </View>
+    </View>
+    </>}
+  </LinearGradient>;
+
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={insets.top}>
@@ -669,14 +760,14 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
       </View>
       </>}
+      {!compactDetail ? heroCard : null}
       <View style={styles.detailNavigation}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones del trabajo">
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.grow} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones del trabajo">
           {tabs.map(item => <Pressable key={item.id} accessibilityRole="tab" accessibilityState={{ selected: tab === item.id, disabled: locked }} accessibilityLabel={item.label} disabled={locked} onPress={() => navigateTab(item.id)} style={[styles.tab, tab === item.id && styles.activeTab]}>
-            <Ionicons name={item.icon} size={17} color={tab === item.id ? palette.primary : palette.textSecondary} accessible={false} /><Text style={[styles.tabText, tab === item.id && styles.activeTabText]}>{item.label}</Text>
+            <Ionicons name={item.icon} size={18} color={tab === item.id ? palette.primary : palette.textSecondary} accessible={false} /><Text style={[styles.tabText, tab === item.id && styles.activeTabText]} numberOfLines={1}>{item.label}</Text>
           </Pressable>)}
         </ScrollView>
         <IconButton name="ellipsis-horizontal" label="Más secciones del trabajo" disabled={locked} onPress={() => setSectionsOpen(true)} />
-        {props.onLocationHistory ? <IconButton name="location-outline" label="Mi historial de ubicación" disabled={locked} onPress={props.onLocationHistory} /> : null}
       </View>
       {work.status === "delivered" || work.status === "completed" ? <View style={styles.closedBanner} testID="work-closed-banner">
         <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
@@ -685,9 +776,9 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => navigateTab("evidence", id)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /></View> : null}
-      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : <ScrollView key={tab} ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
+      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : <ScrollView key={tab} ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; heroOnScroll(event.nativeEvent.contentOffset.y); }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
           {mode === "demo" ? <Notice message="Modo demostración · los cambios y confirmaciones son locales, no se envían a Qualitzer." /> : null}
-          {props.workEditor && !readOnly ? <Button title="Editar trabajo" icon="create-outline" variant="secondary" disabled={locked || !online || hasPendingOperations} onPress={() => void openEditor()} /> : null}
+          {props.workEditor && !readOnly && tab !== "work" ? <Button title="Editar trabajo" icon="create-outline" variant="secondary" disabled={locked || !online || hasPendingOperations} onPress={() => void openEditor()} /> : null}
           {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
           {exitWarning ? <Card style={styles.stack}>
             <Notice message="No se pudo proteger el borrador en el almacenamiento. Si vuelves ahora, los cambios quedarán solo en esta sesión y podrían perderse al cerrar la aplicación." tone="warning" />
@@ -698,42 +789,42 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
           {readOnly ? <Notice message={queuedCompletion ? queuedCompletion.status === "applied" ? "Entrega confirmada. Actualizando ficha." : "Entrega guardada en este dispositivo · pendiente de sincronización." : localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o completado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
           {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
           {!compactDetail ? <>
-          <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-            <Text style={styles.heroOverline}>{maintenance ? "MANTENIMIENTO INTERNO" : group.type === "external_ot" ? "ORDEN DE TRABAJO" : "ASIGNACIÓN DIRECTA"}</Text>
-            <Text accessibilityRole="header" style={styles.heroTitle}>{plainText(work.title)}</Text>
-            {tab === "work" ? <WorkDescription key={resourceKey} work={work} disabled={locked} /> : null}
-            <View style={styles.row}><Ionicons name="construct-outline" size={18} color={palette.onDark} accessible={false} /><Text style={styles.heroText}>{plainText(work.specialty) || "Especialidad no informada"}</Text></View>
-            <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending || Boolean(queuedCompletion)} localTimer={pendingTimer} completion={queuedCompletion} />
-            <View style={styles.heroMetrics}>
-              <View style={styles.metric}><Text style={styles.heroText}>Programado</Text><Text style={styles.metricValue}>{shortDate(work.scheduledDate)}</Text></View>
-              <View style={styles.metric}><Text style={styles.heroText}>Tiempo asignado</Text><Text style={styles.metricValue}>{duration(work.plannedMinutes)}</Text></View>
-              <View style={styles.metric}><Text style={styles.heroText}>Prioridad</Text><Text style={styles.metricValue}>{work.priority === "high" ? "Alta" : work.priority === "medium" ? "Media" : "Baja"}</Text></View>
-            </View>
-          </LinearGradient>
+          {tab === "work" ? <View style={[styles.detailSection, styles.filesSection]} testID="work-files-section">
+          <View style={styles.sectionHeading}><Ionicons name="folder-open-outline" size={20} color={palette.primary} accessible={false} /><Text accessibilityRole="header" style={styles.sectionTitleInline}>Archivos</Text><View style={styles.headingBadge}><Badge label={String(savedFiles?.length ?? 0)} /></View></View>
+          <View style={styles.photoStrip} testID="work-photo-strip">
+            {heroPhotos.map(file => <Pressable key={String(file.id)} accessibilityRole="imagebutton" accessibilityLabel={`Foto ${file.name}`} disabled={locked} onPress={() => navigateTab("evidence")} style={styles.photoThumb}>
+              <Image source={{ uri: file.thumbnailUrl || file.url }} style={styles.photoImage} accessible={false} />
+            </Pressable>)}
+            <Pressable accessibilityRole="button" accessibilityLabel={`Archivos del trabajo, ${savedFiles?.length ?? 0}`} disabled={locked} onPress={() => navigateTab("evidence")} style={({ pressed }) => [styles.photoAdd, pressed && styles.checklistLinkPressed]}>
+              <Ionicons name="camera-outline" size={18} color={palette.text} accessible={false} />
+              <Text style={styles.photoAddText}>{`+ Lista (${savedFiles?.length ?? 0})`}</Text>
+            </Pressable>
+          </View>
+          </View> : null}
             {!work.canExecute ? <Notice message="La ejecución no está habilitada por Qualitzer. Puedes revisar los requisitos y guardar la información pendiente." tone="warning" /> : null}
             {work.missingRequiredInfo.length > 0 ? <BodyText>Revisa la información requerida en la ficha antes de confirmar la entrega.</BodyText> : null}
-          <View style={styles.tight}>
-            <Text accessibilityLiveRegion="polite" style={styles.caption}>{draft.error ? "El borrador aún no está protegido" : storageMessage}</Text>
+          {draft.error || !draft.hydrated || draft.saving ? <View style={styles.tight}>
+            {draft.error || !draft.hydrated || draft.saving ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{draft.error ? "El borrador aún no está protegido" : storageMessage}</Text> : null}
             {draft.error ? <View style={styles.tight}><Notice message={userErrorText(draft.error)} tone="error" /><Button title="Reintentar almacenamiento local" variant="secondary" disabled={locked} onPress={() => { void runAction("draft", draft.store.retry); }} /></View> : null}
-            <Text style={styles.caption}>Última carga: {loadedAt}</Text>
-          </View>
+          </View> : null}
           </> : null}
           {tab === "work" && work.workedDates?.length ? <View style={styles.tight}>
             <Text style={styles.label}>Días trabajados registrados</Text>
             <BodyText>{work.workedDates.map(day => new Intl.DateTimeFormat("es", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`))).join(" · ")}</BodyText>
           </View> : null}
-          {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={reportOperation?.status === "applied" ? draft.data.report.trim() : draft.data.savedReport} pendingReport={Boolean(reportOperation && reportOperation.status !== "applied")} disabled={disabled || !offlineReady || localWork || staleReadOnly} readOnly={readOnly} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities
+          {tab === "work" ? <View onLayout={event => { workTabOffset.current = event.nativeEvent.layout.y; }}><WorkTab group={group} work={work} report={draft.data.report} savedReport={reportOperation?.status === "applied" ? draft.data.report.trim() : draft.data.savedReport} pendingReport={Boolean(reportOperation && reportOperation.status !== "applied")} disabled={disabled || !offlineReady || localWork || staleReadOnly} readOnly={readOnly} submitting={action === "report"} mode={mode} onReportChange={draft.store.setReport} onReportSubmit={saveReport} onAttachments={readOnly ? undefined : () => navigateTab("evidence")} onChecklist={id => navigateTab("checklist", undefined, id)} activitiesPanel={<WorkActivities
             canContinueWrite={() => executionGates.current.online && !executionGates.current.readOnly && callbacks.current.offline?.connection?.foreground !== false}
             onPanelChange={setActivityPanelOpen}
             onCreated={() => { scrollPositions.current.work = workTabOffset.current; detailScroll.current?.scrollTo({ y: workTabOffset.current, animated: true }); }} backHandler={childBack} key={activityDraftKey} scopeKey={`${storageKey}:${activityDraftKey}`} readKey={resourceKey} mode={mode} activities={work.activities ?? []} operations={props.offline == null ? undefined : scopedOperations.filter(operation => operation.kind === "activity")} actions={props.activityActions} disabled={disabled || !online || localWork || staleReadOnly} createDisabled={locked || !draft.hydrated || !offlineReady || staleReadOnly || Boolean(queuedCompletion) || props.offline?.connection?.foreground === false} readOnly={readOnlyWork(group, work)} />} /></View> : null}
             {tab === "comments" ? <CommentsTab scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:comments`} resourceKey={resourceKey} mode={mode} busy={locked || staleReadOnly} pending={props.offline !== undefined ? pendingComments : undefined} offlineReady={offlineReady} onLoad={props.onLoadComments} onSubmit={props.onAddComment} /> : null}
           {tab === "equipment" ? <EquipmentTab group={group} work={work} locationPort={props.equipmentLocation} identity={identity} disabled={locked || readOnly || hasPendingOperations} online={online} onAssociate={props.workEditor && !readOnly ? () => void openEditor() : undefined} /> : null}
+          {!compactDetail ? <Text style={styles.lastLoaded}>Última carga: {loadedAt}</Text> : null}
         </ScrollView>}
         {tab !== "checklist" && tab !== "evidence" && !activityPanelOpen ? <View style={styles.executionFooter} testID="work-execution-footer">
           <View style={styles.executionButtons}>
-            {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
-            <Button title={queuedCompletion ? "Entrega pendiente" : work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" style={styles.executionButton} disabled={!canReviewDelivery} onPress={openDeliveryReview} />
-            {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" style={styles.executionButton} disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
+            {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
+            <Button title={queuedCompletion ? "Entrega pendiente" : work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={!canReviewDelivery} onPress={openDeliveryReview} />
+            {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
           </View>
           {busy || action === "status" || timerPending ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{timerPending ? timerPendingLabel(pendingTimer) : "Guardando cambio…"}</Text> : null}
         </View> : null}

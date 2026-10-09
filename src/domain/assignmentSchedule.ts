@@ -241,3 +241,17 @@ export function noticeDayInRange(data: Assignments, target: NoticeTarget, range:
   const past = candidates.filter((day) => day < today);
   return past.at(-1) ?? candidates[0] ?? null;
 }
+
+// --- Cronómetros pausados desde el aviso ---
+type ActiveTimerRef = { groupType: string; groupId: number; workId: number };
+export function activeTimerKey(timer: ActiveTimerRef): string { return `${timer.groupType}:${timer.groupId}:${timer.workId}`; }
+
+/**
+ * Quita del aviso los cronómetros pausados en este teléfono hace menos de 10 minutos. Se olvidan cuando el servidor ya no
+ * los informa (la pausa llegó) o al vencer el plazo, para no ocultar uno que se volvió a iniciar.
+ */
+export function withoutLocallyPaused<T extends ActiveTimerRef>(timers: readonly T[], paused: Map<string, number>, now: number): T[] {
+  const reported = new Set(timers.map(activeTimerKey));
+  for (const [key, at] of paused) if (!reported.has(key) || now - at > 600_000) paused.delete(key);
+  return timers.filter((timer) => !paused.has(activeTimerKey(timer)));
+}

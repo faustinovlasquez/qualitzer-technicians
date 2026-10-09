@@ -418,8 +418,10 @@ for (const type of ["internal_maintenance", "external_ot"] as const) test(`${typ
   const filesPanel = elements<{ compact: boolean; autoSave: boolean }>(render(), "FileWorkspace")[0];
   assert.equal(filesPanel.props.compact, true);
   assert.equal(filesPanel.props.autoSave, true);
-  action(render(), "Opciones de la orden").onPress();
-  action(render(), "Volver a mis asignaciones").onPress();
+  // El menú ya no tiene "Volver a mis asignaciones": se sale con la flecha, primero vuelve a Trabajos y luego sale.
+  action(render(), "Volver al paso anterior").onPress();
+  assert.equal(exits, 0);
+  action(render(), "Volver al paso anterior").onPress();
   assert.equal(exits, 1);
   hooks.unmount();
 });

@@ -128,6 +128,8 @@ export interface Assignments {
   technician: { id: number | null; name: string; allowEditExecutionTime: boolean; supportsWorkedDates?: boolean; supportsRecordedTimer?: boolean; supportsOfflineCompletion?: boolean; supportsOfflineActivities?: boolean; avatarThumbnail?: string | null };
   summary: { totalGroups: number; totalWorks: number; activeWorks: number; overdueWorks: number; plannedMinutes: number };
   groups: AssignmentGroup[];
+  /** Huella del contenido de un día que entrega el gateway; permite preguntar después si cambió sin descargarlo de nuevo. */
+  revision?: string;
 }
 export interface Branch { id: number; name: string; main: boolean; isEnabled?: boolean; isDeleted?: boolean; /** URL pública del logo de la sucursal, si el backend la informa. */ logoUrl?: string | null; }
 export interface Tenant {

@@ -14,6 +14,7 @@ import { answerFromStep } from "../../domain/format";
 import { resourceCacheKey } from "../cacheSchemas";
 import { OFFLINE_LIMITS } from "../contracts";
 import type { WorkActivitiesPort } from "../../domain/workActivities";
+import { AssignmentsUnchangedError } from "../../domain/assignmentRead";
 
 const scope: WorkScope = { groupId: "direct-80", workId: "80", companyBranchId: 1, startDate: "2026-09-08", endDate: "2026-09-08" };
 const draftPhoto: LocalPhoto = { id: "persisted-draft-photo", uri: "source:photo", name: "proof.png", mimeType: "image/png", size: 10 };
@@ -97,6 +98,35 @@ test("agenda reuses days downloaded recently and only asks the server for missin
   current.dates.length = 0;
   await current.repository.assignments(week, 1);
   assert.equal(current.dates.length, 7, "an explicit refresh always asks the server");
+});
+
+test("agenda sends each saved day's revision and reuses the local copy when the server says it did not change", async () => {
+  const current = repositoryFixture();
+  const day = { startDate: "2026-09-14", endDate: "2026-09-14" };
+  const revision = "a".repeat(64);
+  const known: (string | undefined)[] = [];
+  let changed = false;
+  current.remote.assignments = async (_range, _branch, options) => {
+    known.push(options?.knownRevision);
+    if (options?.knownRevision === revision && !changed) throw new AssignmentsUnchangedError(revision);
+    const data = assignmentsWithStep();
+    data.groups[0].works[0].title = changed ? "Trabajo actualizado" : "Trabajo original";
+    return { ...data, revision: changed ? "b".repeat(64) : revision };
+  };
+  const first = await current.repository.assignments(day, 1);
+  assert.equal(first.groups[0].works[0].title, "Trabajo original");
+  assert.deepEqual(known, [undefined], "the first read has nothing to compare");
+
+  const again = await current.repository.assignments(day, 1);
+  assert.deepEqual(known, [undefined, revision], "the next read sends the saved revision");
+  assert.equal(again.groups[0].works[0].title, "Trabajo original", "an unchanged day keeps the saved copy");
+  current.dates.length = 0;
+  await current.repository.assignments(day, 1, { maxAgeMs: 60_000 });
+  assert.equal(known.length, 2, "an unchanged answer renews the copy, so a visit right after makes no request");
+
+  changed = true;
+  const updated = await current.repository.assignments(day, 1);
+  assert.equal(updated.groups[0].works[0].title, "Trabajo actualizado", "a changed day is downloaded again");
 });
 
 test("confirmed activity file deletion invalidates cache and rejects late listings without deleting drafts or queue", async () => {

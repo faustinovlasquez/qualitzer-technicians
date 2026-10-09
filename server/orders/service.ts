@@ -40,7 +40,8 @@ export class OrderService {
       if (input.acknowledgeDelivery === true) {
         parseUpstream(orderMutationResultSchema, await this.upstream.request(`/maintenances/${scope.maintenanceId}/technician-delivery`, {
           method: "POST", token: scope.token, query: new URLSearchParams({ companyBranchId: String(scope.range.companyBranchId) }),
-          json: { note: input.note, durationMinutes: input.durationMinutes === 0 ? null : input.durationMinutes, technicianSignature: input.technicianSignature, acknowledgeDelivery: true },
+          json: { note: input.note, durationMinutes: input.durationMinutes === 0 ? null : input.durationMinutes, technicianSignature: input.technicianSignature, acknowledgeDelivery: true,
+            ...(input.faultType !== null ? { faultType: input.faultType } : {}) },
         }));
         return;
       }

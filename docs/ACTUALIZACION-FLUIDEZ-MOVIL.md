@@ -1,4 +1,12 @@
-# Sistema y subsistema en trabajos: gateway 1.0.37 / APK 1.0.89
+# Agenda sin descargas repetidas y entrega de mantenimiento con tipo de falla: gateway 1.0.39 / APK 1.0.104
+
+- Al volver a la agenda, la app pregunta por cada día guardado si cambió (huella `revision`) y solo descarga los días con cambios.
+- La entrega técnica de mantenimiento guarda el tipo de falla; la ventana se abre sola al entregar el último trabajo.
+- Al iniciar el primer trabajo de un mantenimiento pendiente la app avisa que también se inició el mantenimiento (el servidor ya lo hacía).
+
+Desplegar backend y gateway 1.0.39 juntos. Sin migraciones. Ver [actualizacion 1.0.104](ACTUALIZACION-1.0.104.md).
+
+## Historial: sistema y subsistema en trabajos gateway 1.0.37 / APK 1.0.89
 
 Sistema y subsistema al crear y editar trabajos de mantenimiento, avisos de materiales que abren la entrega y avisos de cronómetro que abren la tarea. Backend y gateway 1.0.37 deben desplegarse juntos. Ver [actualizacion 1.0.89](ACTUALIZACION-1.0.89.md).
 

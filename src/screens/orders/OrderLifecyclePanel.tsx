@@ -60,6 +60,7 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
   const [draft, setDraft] = useState<DeliveryDraft | null>(() => props.storageKey.trim() ? readLifecycleDraft(scope) : null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [readyMessage, setReadyMessage] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<"start" | "deliver" | null>(null);
   const effectiveStatus = finished(group.status) ? group.status : confirmed === "deliver" ? "delivered" : context?.status ?? group.status;
   const readOnly = finished(effectiveStatus);
@@ -109,7 +110,13 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       if (finished(loaded.status) || loaded.canTechnicianDeliver === false || latest.current.allow === false) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
       if (!loaded.technicianDeliverySupported) throw new Error("Actualiza el servidor para habilitar la entrega técnica simplificada.");
       if (!draft) saveDraft(initialDeliveryDraft(latest.current.group, loaded));
-      if (!ready || deliveryWarnings(latest.current.group, loaded).allWorksDelivered) setDialog(ready ? "ready" : "preflight");
+      // Tras entregar el último trabajo se abre directo la entrega del mantenimiento, avisando que los trabajos quedaron listos.
+      if (ready) {
+        if (deliveryWarnings(latest.current.group, loaded).allWorksDelivered) {
+          setReadyMessage("¡Listo! Entregaste todos los trabajos. Falta entregar el mantenimiento para cerrarlo.");
+          setDialog("deliver");
+        }
+      } else { setReadyMessage(null); setDialog("preflight"); }
       latest.current.onDeliveryIntentConsumed?.();
     }).catch(() => {});
   }
@@ -213,7 +220,8 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       draft={draft}
       busy={locked}
       unavailable={!canDeliver}
-      reasons={[]}
+      reasons={readyMessage ? warnings.pendingChecklists : []}
+      readyMessage={readyMessage}
       error={error}
       onChange={saveDraft}
       onClose={() => setDialog(null)}

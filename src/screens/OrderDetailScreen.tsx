@@ -4,7 +4,7 @@ import { BackHandler, Platform, Pressable, RefreshControl, ScrollView, StyleShee
 import { SafeAreaView } from "react-native-safe-area-context";
 import { assignmentWorkOrderCode } from "../domain/assignmentCodes";
 import { assignmentWorkQueryRange } from "../domain/assignmentSchedule";
-import { plainText } from "../domain/format";
+import { plainText, STATUS_LABELS } from "../domain/format";
 import type { AssignmentGroup, AssignmentWork, Attachment, DateRange, LocalPhoto, StatusInput, Tenant, WorkOpenOptions } from "../domain/models";
 import type { OfflineController, OfflineSnapshot } from "../domain/offline";
 import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconName } from "../ui/components";
@@ -78,6 +78,13 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const { group, tenant, branchName, mode, busy, initialTab = "works", onBack, onOpenWork, onWorkStatus, onRefresh } = props;
   const [tab, setTab] = useState<OrderTab>(initialTab);
   const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [heroCollapsed, setHeroCollapsed] = useState(false);
+  // Igual que en el detalle del trabajo: al bajar la tarjeta se comprime y al volver arriba se expande.
+  const heroScrolled = useRef(false);
+  function heroOnScroll(y: number): void {
+    if (!heroScrolled.current && y > 60) { heroScrolled.current = true; setHeroCollapsed(true); }
+    else if (heroScrolled.current && y <= 4) { heroScrolled.current = false; setHeroCollapsed(false); }
+  }
   const [creating, setCreating] = useState(false);
   const history = useRef<OrderTab[]>(initialTab === "works" ? [] : ["works"]);
   const childBack = useRef<((home?: boolean) => boolean) | null>(null);
@@ -215,15 +222,17 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           {localGroup ? <Badge label="Pendiente de sincronizar" tone="warning" /> : null}
           {localGroup && group.code.trim() ? <Badge label={plainText(group.code)} /> : null}
           {workOrderCode ? <Text numberOfLines={1} style={styles.orderCode}>{workOrderCode}</Text> : null}
+          {!localGroup && group.code.trim() && !workOrderCode ? <Text numberOfLines={1} style={styles.orderCode}>{plainText(group.code)}</Text> : null}
+          <Text numberOfLines={1} style={styles.headerStatus}>{STATUS_LABELS[group.status]}</Text>
         </ScrollView>
       </View>
       <IconButton name="home-outline" label="Ir a mi jornada" disabled={locked} onPress={() => leaveDetails(true)} />
       <IconButton name="refresh-outline" label="Actualizar orden y trabajos" disabled={locked} onPress={refresh} />
       </View>
-      <Text numberOfLines={1} style={styles.headerSubtitle}>{plainText(group.title)}</Text>
     </View>
+    <AssignmentOrderSummary group={group} collapsed={heroCollapsed} onToggle={() => setHeroCollapsed(value => !value)} />
     <View style={styles.tabsContainer}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones de la orden">
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones de la orden">
         {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map((item) => <Pressable
           key={item.id}
           accessibilityRole="tab"
@@ -233,17 +242,18 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           onPress={() => selectTab(item.id)}
           style={({ pressed }) => [styles.tab, tab === item.id && styles.tabSelected, pressed && styles.pressed]}
         >
-          <Ionicons name={item.icon} size={18} color={tab === item.id ? palette.white : palette.textSecondary} accessible={false} />
-          <Text style={[styles.tabText, tab === item.id && styles.tabTextSelected]}>{item.label}{item.id === "works" ? ` (${group.works.length})` : item.id === "materials" ? ` (${group.products.length})` : ""}</Text>
+          <Ionicons name={item.icon} size={18} color={tab === item.id ? palette.primary : palette.textSecondary} accessible={false} />
+          <Text numberOfLines={1} style={[styles.tabText, tab === item.id && styles.tabTextSelected]}>{item.label}{item.id === "works" ? ` (${group.works.length})` : item.id === "materials" ? ` (${group.products.length})` : ""}</Text>
         </Pressable>)}
       </ScrollView>
       <IconButton name="ellipsis-horizontal" label="Opciones de la orden" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) setSectionsOpen(true); }} />
-      {props.onLocationHistory ? <IconButton name="location-outline" label="Mi historial de ubicación" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) props.onLocationHistory?.(); }} /> : null}
     </View>
     <View style={[styles.screen, tab === "files" && styles.hidden]} testID="order-details-scroll-container">
     <ScrollView
       ref={scroll}
       style={styles.screen}
+      onScroll={event => heroOnScroll(event.nativeEvent.contentOffset.y)}
+      scrollEventThrottle={100}
       contentContainerStyle={[styles.content, showCreateWork && styles.createSpace]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
@@ -254,8 +264,10 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       {!online ? <Notice message={props.offline === null ? "Recuperando la cola local. Espera antes de guardar cambios." : props.offline?.authBlocked ? "La sesión requiere verificación. Los cambios locales se conservan; no se pueden guardar nuevas operaciones." : "Sin conexión verificada. Puedes guardar archivos, comentarios y cambios del cronómetro en la cola local. Eliminar y entregar requieren conexión; el cronómetro no avanza en esta vista."} tone="warning" /> : null}
       {props.staleReadOnly ? <Notice message="La ficha actual aún no está verificada. Actualiza los datos y permisos antes de ejecutar. Los borradores se conservan; esto no indica que la OT esté cerrada." tone="warning" /> : null}
       {tab === "works" ? <View style={styles.stack}>
-        {group.type !== "internal_maintenance" ? <Card><AssignmentOrderSummary group={group} /></Card> : null}
-        <SectionTitle title={`Trabajos asignados (${group.works.length})`} />
+        <View style={styles.worksHeading}>
+          <Text accessibilityRole="header" style={styles.worksTitle}>{group.type === "internal_maintenance" ? "Trabajos del mantenimiento" : direct ? "Trabajos de la asignación" : "Trabajos de la OT"}</Text>
+          <Text style={styles.worksCount}>{group.works.length} {group.works.length === 1 ? "trabajo asignado" : "trabajos asignados"}</Text>
+        </View>
         {group.works.length === 0 ? <Card><EmptyState title="Sin trabajos asignados" message="No se recibieron trabajos para esta orden. Actualiza la información para consultar cambios." icon="construct-outline" /></Card> : group.works.map((work) => <AssignmentWorkCard
           key={JSON.stringify([group.type, group.id, work.workType, work.id])}
           group={group}
@@ -311,8 +323,6 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
         <SectionTitle title="Secciones de la orden" />
         {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); selectTab(item.id); }} />)}
         {props.onLocationHistory ? <Button title="Mi historial de ubicación" icon="location-outline" variant="secondary" disabled={locked} onPress={() => { setSectionsOpen(false); props.onLocationHistory?.(); }} /> : null}
-        <Button title="Ir a mi jornada" icon="home-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(true); }} />
-        <Button title="Volver a mis asignaciones" icon="list-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(); }} />
         <Button title="Cerrar menu" icon="close-outline" variant="ghost" onPress={() => setSectionsOpen(false)} />
       </ScrollView></View>
     </Modal> : null}
@@ -326,24 +336,30 @@ const styles = StyleSheet.create({
   menuOverlay: { flex: 1, justifyContent: "center", padding: 16, backgroundColor: "rgba(18,44,58,0.65)" },
   menu: { width: "100%", maxWidth: 440, maxHeight: "90%", flexGrow: 0, alignSelf: "center", borderRadius: 8, backgroundColor: palette.surface },
   menuContent: { padding: 20, gap: 12 },
-  header: { gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: palette.surface },
+  header: { gap: 4, paddingHorizontal: 6, paddingVertical: 4, backgroundColor: palette.background },
   headerControls: { flexDirection: "row", alignItems: "center", gap: 4 },
   headerCopy: { flex: 1, minWidth: 0 },
-  orderCode: { ...typography.label, color: palette.primary, backgroundColor: palette.primarySoft, padding: 8 },
+  orderCode: { fontSize: 11, lineHeight: 17, fontWeight: "700", color: palette.primary, backgroundColor: palette.primarySoft, paddingHorizontal: 4, paddingVertical: 5, borderRadius: 4 },
+  headerStatus: { fontSize: 11, lineHeight: 17, fontWeight: "600", color: palette.textSecondary },
+  worksHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 8 },
+  worksTitle: { fontSize: 16, lineHeight: 22, fontWeight: "700", color: palette.heading, flexShrink: 1 },
+  worksCount: { ...typography.caption, color: palette.textSecondary, fontStyle: "italic" },
   actionDock: { flexShrink: 0, padding: 12, borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
   createDock: { position: "absolute", top: -72, right: 16, zIndex: 900 },
   createSpace: { paddingBottom: 88 },
   headerTitle: { ...typography.label, color: palette.heading, fontWeight: "700" },
   headerSubtitle: { ...typography.caption, color: palette.textSecondary, flexShrink: 1 },
   codes: { flexDirection: "row", alignItems: "center", gap: 6 },
-  tabsContainer: { flexDirection: "row", alignItems: "center", backgroundColor: palette.surface, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: palette.border },
-  tabs: { flexGrow: 1, gap: 6, paddingHorizontal: 16 },
-  tab: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 12, paddingVertical: 12, borderRadius: radius.sm, backgroundColor: palette.track },
-  tabSelected: { backgroundColor: palette.navy },
-  tabText: { ...typography.label, fontSize: 13, fontWeight: "700", color: palette.textSecondary },
-  tabTextSelected: { color: palette.white },
-  content: { width: "100%", maxWidth: theme.contentWidth, alignSelf: "center", padding: 20, paddingBottom: 32, gap: 20 },
-  stack: { gap: 16 },
+  // Mismas pestañas que el detalle del trabajo: ícono sobre el texto, repartidas, la seleccionada en verde suave con línea inferior.
+  tabsContainer: { flexDirection: "row", alignItems: "center", backgroundColor: palette.surface, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: palette.border },
+  tabsScroll: { flex: 1, minWidth: 0 },
+  tabs: { flexGrow: 1, flexDirection: "row" },
+  tab: { flexGrow: 1, minHeight: 48, minWidth: 68, alignItems: "center", justifyContent: "center", gap: 2, paddingHorizontal: 6, paddingTop: 6, paddingBottom: 4, borderBottomWidth: 3, borderBottomColor: "transparent" },
+  tabSelected: { backgroundColor: palette.primarySoft, borderBottomColor: palette.primary, borderTopLeftRadius: 6, borderTopRightRadius: 6 },
+  tabText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: palette.textSecondary },
+  tabTextSelected: { color: palette.primary, fontWeight: "800" },
+  content: { width: "100%", maxWidth: theme.contentWidth, alignSelf: "center", padding: 12, paddingBottom: 32, gap: 12 },
+  stack: { gap: 12 },
   hidden: { display: "none" },
   pressed: { opacity: 0.72 },
   footerNote: { ...typography.caption, color: palette.textMuted, textAlign: "center", paddingTop: 8 },

@@ -36,9 +36,15 @@ const messages: { [code: string]: string } = {
   WORK_FILES_REQUIRED: "Debes adjuntar las evidencias obligatorias antes de completar.",
   ORIGIN_FORBIDDEN: "Esta dirección web no está habilitada en la pasarela móvil.",
   INVALID_TRANSITION: "El estado cambió. Actualiza la ficha antes de continuar.",
+  OFFLINE_TIMER_INVALID_TRANSITION: "Ese trabajo no está en curso en tu jornada, así que no hay un cronómetro que pausar. Actualiza la jornada.",
+  OFFLINE_WORK_NOT_EXECUTABLE: "Ese trabajo ya está terminado o entregado y no admite cambios.",
+  OFFLINE_TIMER_CLOCK_CHANGED: "La hora del teléfono cambió. Revisa la fecha y hora del teléfono y vuelve a intentarlo.",
 };
 export function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : "No se pudo completar la operación.";
+  if (!(error instanceof Error)) return "No se pudo completar la operación.";
+  // Los errores de la cola sin conexión llevan solo el código: se muestra el texto en español si lo hay.
+  const translated = /^OFFLINE_[A-Z_]+$/.test(error.message) ? messages[error.message] : undefined;
+  return translated ?? error.message;
 }
 export function apiMessage(code: string, fallback?: string): string {
   return messages[code] ?? fallback ?? `No se pudo completar la operación (${code}).`;

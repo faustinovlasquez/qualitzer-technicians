@@ -197,7 +197,8 @@ test("AST inventory: all four input locations use selectors and automatic time r
     { path: "screens/workDetail/CompletionDialog.tsx", times: ["start", "end"], numbers: ["offset"] },
     { path: "screens/creation/CreationScheduleFields.tsx", times: ["form.startTime", "form.endTime"], numbers: [] },
     { path: "screens/notifications/NotificationSettingsScreen.tsx", times: ["preferences.quietHoursStart", "preferences.quietHoursEnd"], numbers: [] },
-    { path: "screens/orders/lifecycle/MaintenanceDeliveryDialog.tsx", times: [], numbers: ["draft.hours", "draft.minutes"] },
+    // La entrega de mantenimiento ya no pide la duración: se envía sola desde los cronómetros de los trabajos.
+    { path: "screens/orders/lifecycle/MaintenanceDeliveryDialog.tsx", times: [], numbers: [] },
   ];
   // CreationScreen delegates its schedule inputs to CreationScheduleFields; the selector guarantees live there.
   assert.match(source("screens/creation/CreationScreen.tsx").text, /<CreationScheduleFields form=\{form\}/);

@@ -27,6 +27,8 @@ export interface MaintenanceDeliveryContext {
   canDeliver?: boolean;
   canTechnicianDeliver?: boolean;
   technicianDeliverySupported?: boolean;
+  /** El servidor guarda el tipo de falla en la entrega técnica (gateway 1.0.38 o superior). */
+  technicianFaultTypeSupported?: boolean;
   pendingWorkNames?: string[];
   pendingDeliveryChecklists?: string[];
   totalWorks?: number;

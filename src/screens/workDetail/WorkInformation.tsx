@@ -18,14 +18,11 @@ export function WorkDescription({ work, disabled = false }: { work: AssignmentWo
   const [open, setOpen] = useState(false);
   const description = plainText(work.summary);
   const schedule = [work.scheduledStartTime ? `Desde ${work.scheduledStartTime.slice(0, 5)}` : "", work.scheduledEndTime ? `Hasta ${work.scheduledEndTime.slice(0, 5)}${work.endDateOffset === 1 ? " (+1 día)" : ""}` : ""].filter(Boolean).join(" · ");
-  const workSystem = [work.systemName ? `Sistema: ${work.systemName}` : "", work.componentName ? `Subsistema: ${work.componentName}` : ""].filter(Boolean).join(" · ");
   return <>
     {description ? <Pressable accessibilityRole="button" accessibilityLabel="Ver descripción completa del trabajo" accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={() => setOpen(true)} style={({ pressed }) => [styles.descriptionPreview, pressed && styles.descriptionPressed]} testID="work-description-preview">
-      <View style={styles.descriptionHeading}><Text style={styles.heroText}>Descripción</Text><Ionicons name="expand-outline" size={20} color={palette.onDark} accessible={false} /></View>
-      <Text numberOfLines={3} ellipsizeMode="tail" style={styles.heroText} testID="work-description-excerpt">{description}</Text>
-    </Pressable> : <Text style={styles.heroText}>Sin descripción informada</Text>}
-    {schedule ? <Text style={styles.heroText}>{schedule}</Text> : null}
-    {workSystem ? <Text style={styles.heroText} testID="work-system-summary">{workSystem}</Text> : null}
+      {/* Una sola línea en la tarjeta; el horario, el sistema y el texto completo se ven al tocarla. */}
+      <View style={styles.descriptionHeading}><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.heroSmall, styles.grow]} testID="work-description-excerpt">{description}</Text><Ionicons name="expand-outline" size={14} color={palette.onDark} accessible={false} /></View>
+    </Pressable> : <Text style={styles.heroSmall}>Sin descripción informada</Text>}
     {open ? <PrivateModal visible animationType="slide" onRequestClose={() => setOpen(false)}>
       <SafeAreaView style={styles.safe} testID="work-description-dialog" accessibilityViewIsModal onAccessibilityEscape={() => setOpen(false)}>
         <View style={styles.descriptionHeader}><Text accessibilityRole="header" style={[styles.heading, styles.grow]}>Detalle del trabajo</Text><IconButton name="close-outline" label="Cerrar detalle del trabajo" onPress={() => setOpen(false)} /></View>
@@ -36,7 +33,7 @@ export function WorkDescription({ work, disabled = false }: { work: AssignmentWo
             <View style={styles.column}><Fact label="Tiempo asignado" value={duration(work.plannedMinutes)} /><Fact label="Prioridad" value={work.priority === "high" ? "Alta" : work.priority === "medium" ? "Media" : "Baja"} /></View>
           </View>
           {work.systemName || work.componentName ? <View style={styles.columns}>
-            <View style={styles.column}><Fact label="Sistema" value={work.systemName} /></View>
+            <View style={styles.column} testID="work-system-summary"><Fact label="Sistema" value={work.systemName} /></View>
             <View style={styles.column}><Fact label="Subsistema" value={work.componentName} /></View>
           </View> : null}
           <Text style={styles.label}>Descripción</Text>
@@ -70,6 +67,8 @@ export function Activities({ activities, documents = false }: { activities: Acti
 interface WorkTabProps {
   activitiesPanel?: ReactNode;
   onChecklist?: (id: number) => void;
+  /** Fotos y archivos del reporte: llevan a los archivos del trabajo, donde se toman, eligen o adjuntan. */
+  onAttachments?: () => void;
   group: AssignmentGroup;
   work: AssignmentWork;
   report: string;
@@ -83,15 +82,15 @@ interface WorkTabProps {
   onReportSubmit: () => void;
 }
 
-export function WorkTab({ group, work, report, savedReport, pendingReport = false, disabled, readOnly, submitting, mode, onReportChange, onReportSubmit, activitiesPanel, onChecklist }: WorkTabProps) {
+export function WorkTab({ group, work, report, savedReport, pendingReport = false, disabled, readOnly, submitting, mode, onReportChange, onReportSubmit, activitiesPanel, onChecklist, onAttachments }: WorkTabProps) {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(report.trim().length > 0);
   const saved = savedReport !== null && savedReport === report.trim();
   return (
     <View style={styles.workSections}>
-      {activitiesPanel ?? <View style={styles.detailSection}><SectionTitle title="Actividades" /><Activities activities={(work.activities ?? []).filter(isWorkActivity)} documents /></View>}
+      {activitiesPanel ? <View style={styles.detailSection}>{activitiesPanel}</View> : <View style={styles.detailSection}><SectionTitle title="Actividades" /><Activities activities={(work.activities ?? []).filter(isWorkActivity)} documents /></View>}
       {work.checklists.length > 0 ? <View style={styles.checklistSection} testID="work-checklist-section">
-        <View style={styles.checklistSectionHeading}><Ionicons name="checkbox-outline" size={20} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Checklists</Text><Badge label={String(work.checklists.length)} /></View>
+        <View style={styles.checklistSectionHeading}><Ionicons name="checkbox-outline" size={20} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitleInline}>Checklists</Text><View style={styles.headingBadge}><Badge label={String(work.checklists.length)} /></View></View>
         {work.checklists.map(checklist => {
           const progress = workChecklistProgress({ checklists: [checklist] });
           const summary = progress.total > 0
@@ -110,16 +109,21 @@ export function WorkTab({ group, work, report, savedReport, pendingReport = fals
           </Pressable>;
         })}
       </View> : null}
-      {work.materials.length > 0 ? <View style={styles.detailSection} testID="work-materials-section"><View style={styles.sectionHeading}><Ionicons name="cube-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Materiales</Text><Badge label={String(work.materials.length)} /></View><Materials materials={work.materials} /></View> : null}
+      {work.materials.length > 0 ? <View style={styles.detailSection} testID="work-materials-section"><View style={styles.sectionHeading}><Ionicons name="cube-outline" size={20} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitleInline}>Materiales</Text><View style={styles.headingBadge}><Badge label={String(work.materials.length)} /></View></View><Materials materials={work.materials} /></View> : null}
       {group.products.length > 0 ? <View style={styles.detailSection} testID="shared-materials-section"><View style={styles.sectionHeading}><Ionicons name="layers-outline" size={22} color={palette.primary} /><Text accessibilityRole="header" style={styles.sectionTitle}>Materiales compartidos</Text></View><Materials materials={group.products} /></View> : null}
-      {work.responsibles.length > 0 ? <View style={styles.detailSection}><Text style={styles.caption}>Responsables</Text><Text style={styles.label}>{work.responsibles.map(responsible => responsible.name).join(", ")}</Text></View> : null}
       <View style={styles.detailSection}>
         <Pressable accessibilityRole="button" accessibilityLabel="Reporte técnico" accessibilityState={{ expanded: reportOpen }} onPress={() => setReportOpen(!reportOpen)} style={styles.sectionHeading}>
-          <Ionicons name="document-text-outline" size={22} color={palette.primary} /><Text style={styles.sectionTitle}>Reporte técnico</Text><Ionicons name={reportOpen ? "chevron-up-outline" : "chevron-down-outline"} size={22} color={palette.primary} />
+          <Ionicons name="document-text-outline" size={20} color={palette.primary} /><Text style={styles.sectionTitle}>Reporte técnico</Text><Ionicons name={reportOpen ? "chevron-up-outline" : "chevron-down-outline"} size={22} color={palette.primary} />
         </Pressable>
         {reportOpen ? <View style={styles.stack}>
         {pendingReport ? <Badge label="Reporte guardado · pendiente de sincronizar" tone="warning" /> : saved ? <Badge label={mode === "demo" ? "Guardado localmente · demo" : "Guardado en Qualitzer"} tone="info" /> : report.length > 0 ? <Badge label="Borrador en dispositivo" tone="warning" /> : null}
         <Field label="Nota del reporte (obligatoria)" value={report} onChangeText={onReportChange} editable={!disabled && !readOnly} multiline maxLength={10000} style={styles.multiline} placeholder="Trabajo realizado, condiciones del equipo y observaciones…" error={reportError} hint={`${report.length}/10000 caracteres. El texto se guarda como borrador mientras escribes; solo se envía al pulsar Guardar reporte.`} />
+        {onAttachments ? <View style={styles.reportTools} testID="report-attachment-tools">
+          {([["camera-outline", "Tomar foto para el reporte"], ["image-outline", "Agregar imagen al reporte"], ["attach-outline", "Adjuntar archivo al reporte"]] as const).map(([icon, label]) =>
+            <Pressable key={icon} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onAttachments} hitSlop={6} style={({ pressed }) => [styles.reportTool, pressed && styles.checklistLinkPressed]}>
+              <Ionicons name={icon} size={22} color={palette.textSecondary} accessible={false} />
+            </Pressable>)}
+        </View> : null}
         {group.type === "internal_maintenance" ? <BodyText>El reporte de mantenimiento se envía para guardarlo como un archivo de texto adjunto al trabajo.</BodyText> : null}
         {!readOnly ? <Button title={mode === "demo" ? "Guardar reporte en demo" : "Guardar reporte"} icon="document-text-outline" disabled={disabled || saved || pendingReport} loading={submitting} onPress={() => {
           if (!report.trim()) { setReportError("Escribe una nota antes de guardar el reporte."); return; }

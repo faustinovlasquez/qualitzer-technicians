@@ -241,7 +241,8 @@ export class DemoTechnicianRepository implements TechnicianRepository {
     this.updateClock();
     const { group, work } = this.find(scope);
     work.status = input.status;
-    if (group.works.every((item) => item.status === "completed" || item.status === "delivered")) group.status = "completed";
+    // Como en el servidor: un mantenimiento no se cierra al entregar sus trabajos; falta su propia entrega.
+    if (group.type !== "internal_maintenance" && group.works.every((item) => item.status === "completed" || item.status === "delivered")) group.status = "completed";
     else if (input.status === "in_progress") group.status = "in_progress";
   }
   async answer(scope: WorkScope, stepId: string, answer: StepAnswer) {
@@ -324,7 +325,7 @@ export class DemoTechnicianRepository implements TechnicianRepository {
       incompleteChecklists: group.works.flatMap((work) => work.checklists.filter((list) => list.required && !list.steps.every(isChecklistStepSatisfied)).map((list) => `${work.title} — ${list.name}`)),
       suggestedDurationMinutes: Math.round(group.works.reduce((total, work) => total + Math.max(work.executedMinutes, work.elapsedSeconds / 60), 0)),
       canStart: group.status === "pending", canDeliver: group.status !== "completed" && group.status !== "delivered",
-      technicianDeliverySupported: true, canTechnicianDeliver: group.status !== "completed" && group.status !== "delivered",
+      technicianDeliverySupported: true, technicianFaultTypeSupported: true, canTechnicianDeliver: group.status !== "completed" && group.status !== "delivered",
       totalWorks: group.works.length, pendingWorkNames: group.works.filter(work => work.status !== "delivered").map(work => work.title),
       pendingDeliveryChecklists: group.works.flatMap(work => work.checklists.filter(list => !list.steps.every(isChecklistStepSatisfied)).map(list => `${work.title} — ${list.name}`)),
     };

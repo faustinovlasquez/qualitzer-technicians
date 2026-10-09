@@ -19,7 +19,7 @@ import { requireSessionTenant } from "../domain/tenantSession";
 import { loginStartSchema, tenantListSchema, tenantLoginSchema, tenantSchema } from "./tenantSchemas";
 import { registerTenantChallengeClock, tenantChallengeMonotonicNow, type TenantChallengeResponseTiming } from "./tenantChallengeClock";
 import { assignmentDays, dailyRange, mergeDailyAssignments } from "../domain/assignmentSchedule";
-import { AssignmentReadCancelledError, type AssignmentReadOptions } from "../domain/assignmentRead";
+import { ASSIGNMENTS_REVISION_PATTERN, AssignmentReadCancelledError, AssignmentsUnchangedError, type AssignmentReadOptions } from "../domain/assignmentRead";
 import { withAssignmentReadBatch } from "./assignmentReadBatch";
 import { workActivityInputSchema, workActivityResultSchema, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
 import { cachedAttachmentSchema } from "../offline/cacheSchemas";
@@ -202,7 +202,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async testNotification(branch: number) { return notificationTestResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, "test"), "POST")); }
 
-  private async request<T>(path: string, method = "GET", body?: object | FormData, receiptOperationId?: string, onResponseHeaders?: (timing: TenantChallengeResponseTiming) => void, signal?: AbortSignal): Promise<T> {
+  private async request<T>(path: string, method = "GET", body?: object | FormData, receiptOperationId?: string, onResponseHeaders?: (timing: TenantChallengeResponseTiming) => void, signal?: AbortSignal, extraHeaders?: { [name: string]: string }): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), body instanceof FormData ? 150_000 : 45_000);
     const cancel = () => { clearTimeout(timeout); controller.abort(); };
@@ -214,6 +214,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
       else if (this.token) headers.Authorization = `Bearer ${this.token}`;
       if (this.tenant) headers["X-Qualitzer-Tenant"] = this.tenant.id;
       if (body && !(body instanceof FormData)) headers["Content-Type"] = "application/json";
+      if (extraHeaders) Object.assign(headers, extraHeaders);
       const requestBody = body instanceof FormData ? body : body ? JSON.stringify(body) : undefined;
       const requestStartedAt = onResponseHeaders ? tenantChallengeMonotonicNow() : 0;
       const response = await uploadFetch(`${this.baseUrl}${path}`, {
@@ -303,16 +304,23 @@ export class HttpTechnicianRepository implements TechnicianRepository {
       const days = assignmentDays(range);
       const requestedDays = options?.priorityDate && days.includes(options.priorityDate) ? [options.priorityDate, ...days.filter(date => date !== options.priorityDate)] : days;
       const completed: Array<{ date: string; data: Assignments }> = [];
+      // La huella conocida solo sirve para consultar un día: es la copia local de ese día la que se compara.
+      const knownRevision = days.length === 1 && options?.knownRevision && ASSIGNMENTS_REVISION_PATTERN.test(options.knownRevision) ? options.knownRevision : undefined;
+      let revision: string | undefined;
       const snapshots = await batch.map(requestedDays, async (date) => {
-        const data = await batch.wait(() => this.request<Assignments>(`/api/assignments?${new URLSearchParams({ ...dailyRange(date), companyBranchId: String(branchId) })}`, "GET", undefined, undefined, undefined, batch.signal));
+        const data = await batch.wait(() => this.request<Assignments & { unchanged?: unknown }>(`/api/assignments?${new URLSearchParams({ ...dailyRange(date), companyBranchId: String(branchId) })}`, "GET", undefined, undefined, undefined, batch.signal,
+          knownRevision ? { "X-Qualitzer-Known-Revision": knownRevision } : undefined));
+        if (knownRevision && data?.unchanged === true && data.revision === knownRevision) throw new AssignmentsUnchangedError(knownRevision);
         if (!cachedAssignmentsSchema.safeParse(data).success) throw new ApiError(502, "UPSTREAM_INVALID_RESPONSE", apiMessage("UPSTREAM_INVALID_RESPONSE"));
+        if (days.length === 1 && typeof data.revision === "string" && ASSIGNMENTS_REVISION_PATTERN.test(data.revision)) revision = data.revision;
         const snapshot = { date, data };
         completed.push(snapshot);
         batch.check();
         options?.onProgress?.(mergeDailyAssignments(completed, range.startDate), completed.map(item => item.date));
         return snapshot;
       }, options?.getPriorityDate);
-      return mergeDailyAssignments(snapshots, range.startDate);
+      const merged = mergeDailyAssignments(snapshots, range.startDate);
+      return revision ? { ...merged, revision } : merged;
     });
   }
   status(scope: WorkScope, input: StatusInput) { return this.request<void>(this.scopePath(scope, "/status"), "POST", input); }

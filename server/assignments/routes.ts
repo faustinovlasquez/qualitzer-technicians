@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { Router, type RequestHandler } from "express";
+import type { Assignments } from "../../src/domain/models";
 import { bearer } from "../auth";
 import { GatewayError } from "../errors";
 import { readPhotos } from "../files/uploads";
@@ -10,12 +12,28 @@ import { registerWorkActions } from "./workActions";
 
 export interface UploadConcurrency { active: number; }
 
+export const KNOWN_REVISION_HEADER = "X-Qualitzer-Known-Revision";
+const REVISION_PATTERN = /^[a-f0-9]{64}$/;
+
+/** Huella del contenido de la agenda sin la hora de generación, que cambia en cada consulta aunque nada haya cambiado. */
+export function assignmentsRevision(data: Assignments): string {
+  const { generatedAt: _generatedAt, ...content } = data;
+  return createHash("sha256").update(JSON.stringify(content)).digest("hex");
+}
+
 export function assignmentRouter(upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency = { active: 0 }): Router {
   const router = Router();
   const service = new AssignmentService(upstream);
   router.use((req, _res, next) => { bearer(req); next(); });
   registerWorkActions(router, upstream, uploadLimiter, uploads);
-  router.get("/", async (req, res) => { res.json(await service.authorization.list(req)); });
+  router.get("/", async (req, res) => {
+    const known = req.get(KNOWN_REVISION_HEADER);
+    const data = await service.authorization.list(req);
+    const revision = assignmentsRevision(data);
+    // El teléfono envía la huella de su copia: si no cambió nada se responde solo eso, sin repetir la agenda completa.
+    if (known !== undefined && REVISION_PATTERN.test(known) && known === revision) { res.json({ unchanged: true, revision }); return; }
+    res.json({ ...data, revision });
+  });
   const base = "/:groupId/works/:workId";
   router.get(`${base}/files`, async (req, res) => { res.json(await service.files(req)); });
   router.post(`${base}/status`, async (req, res) => {

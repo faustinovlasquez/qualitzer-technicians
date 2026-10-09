@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { assignmentCodes } from "../../domain/assignmentCodes";
+import { assignmentCodes, maintenanceStartNotice } from "../../domain/assignmentCodes";
 import { assignmentDay, assignmentProgress, assignmentWorkForQueryDate, assignmentWorkSnapshotForQueryDate } from "../../domain/assignmentSchedule";
 import { clock, duration, isFinished, plainText, shortDate, STATUS_LABELS } from "../../domain/format";
 import type { AssignmentGroup, AssignmentWork, StatusInput, WorkOpenOptions } from "../../domain/models";
@@ -138,6 +138,7 @@ export function AssignmentWorkCard(props: AssignmentWorkCardProps) {
 function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy = false, generatedAt, online = true, staleReadOnly = false, offline, queryDate, companyBranchId, pendingTimer: suppliedTimer, currentWorkerId }: AssignmentWorkCardProps) {
   const [acting, setActing] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [startNotice, setStartNotice] = useState<string | null>(null);
   const [queuedTimer, setQueuedTimer] = useState<QueuedTimerMarker | null>(null);
   const queuedTimerRef = useRef(queuedTimer);
   const actionRef = useRef(false);
@@ -199,8 +200,11 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     actionRef.current = true;
     setActing(true);
     setOperationError(null);
+    setStartNotice(null);
+    const notice = maintenanceStartNotice(group, status);
     try {
       await onWorkStatus(group, work, { status });
+      if (notice && mounted.current) setStartNotice(notice);
     } catch (error) {
       if (isOfflineQueuedError(error) && error.kind === "timer") {
         queuedTimerRef.current = { operationId: error.operationId, status };
@@ -271,6 +275,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       <Button stacked title="Comentarios" badge={safeCount(work.commentsCount)} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbox-ellipses-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "comments" })} style={[styles.cell, styles.cellLast]} textStyle={styles.cellText} />
     </View>
     {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
+    {startNotice ? <Notice message={startNotice} tone="success" onDismiss={() => setStartNotice(null)} /> : null}
   </Card>;
 }
 
