@@ -11,7 +11,8 @@ import { Badge, BodyText, Button, Card, SectionTitle } from "../../ui/components
 import { palette } from "../../ui/theme";
 import { Notice } from "../workDetail/DetailUi";
 import { deleteLifecycleDraft, readLifecycleDraft, saveLifecycleDraft } from "./lifecycle/lifecycleDrafts";
-import { deliveryWarnings, initialDeliveryDraft, lifecycleError, type DeliveryDraft } from "./lifecycle/lifecycleRules";
+import { deliveryWarnings, initialDeliveryDraft, lifecycleError, visibleMaintenanceWorks, type DeliveryDraft } from "./lifecycle/lifecycleRules";
+import { AllWorksDeliveredDialog } from "./lifecycle/AllWorksDeliveredDialog";
 import { styles } from "./lifecycle/lifecycleStyles";
 import { MaintenanceDeliveryDialog } from "./lifecycle/MaintenanceDeliveryDialog";
 import { StartMaintenanceDialog } from "./lifecycle/StartMaintenanceDialog";
@@ -110,12 +111,9 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       if (finished(loaded.status) || loaded.canTechnicianDeliver === false || latest.current.allow === false) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
       if (!loaded.technicianDeliverySupported) throw new Error("Actualiza el servidor para habilitar la entrega técnica simplificada.");
       if (!draft) saveDraft(initialDeliveryDraft(latest.current.group, loaded));
-      // Tras entregar el último trabajo se abre directo la entrega del mantenimiento, avisando que los trabajos quedaron listos.
+      // Tras entregar el último trabajo se celebra que todo quedó listo; desde ahí se pasa a la entrega de la OT o se sale.
       if (ready) {
-        if (deliveryWarnings(latest.current.group, loaded).allWorksDelivered) {
-          setReadyMessage("¡Listo! Entregaste todos los trabajos. Falta entregar el mantenimiento para cerrarlo.");
-          setDialog("deliver");
-        }
+        if (deliveryWarnings(latest.current.group, loaded).allWorksDelivered) setDialog("ready");
       } else { setReadyMessage(null); setDialog("preflight"); }
       latest.current.onDeliveryIntentConsumed?.();
     }).catch(() => {});
@@ -191,22 +189,31 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     </View> : null}
     {!props.dock ? <Button title="Actualizar estado de OT" icon="refresh-outline" variant="ghost" loading={action === "load"} disabled={locked} onPress={reload} /> : null}
     {dialog === "start" ? <StartMaintenanceDialog orderLabel={orderLabel} busy={locked} allowed={canStart} mode={mode} error={error} onClose={() => setDialog(null)} onStart={() => { void start().catch(() => {}); }} /> : null}
-    {dialog === "preflight" || dialog === "ready" ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setDialog(null); }}>
+    {dialog === "ready" ? <AllWorksDeliveredDialog
+      orderLabel={orderLabel}
+      works={visibleMaintenanceWorks(group).map(work => work.title)}
+      pendingChecklists={warnings.pendingChecklists}
+      busy={locked}
+      canDeliver={canDeliver}
+      onDeliver={() => { setReadyMessage("Todos los trabajos están entregados. Completa la entrega del mantenimiento para cerrarlo."); setDialog("deliver"); }}
+      onClose={() => setDialog(null)}
+    /> : null}
+    {dialog === "preflight" ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setDialog(null); }}>
       <SafeAreaView style={styles.overlay}><View style={styles.modal}>
         <View style={styles.header}>
-          <Ionicons name={dialog === "ready" ? "checkmark-circle-outline" : "alert-circle-outline"} size={44} color={dialog === "ready" ? palette.success : palette.orange} accessible={false} />
-          <SectionTitle title={dialog === "ready" ? "Tus trabajos ya están entregados" : "Antes de entregar la OT"} subtitle={orderLabel} />
+          <Ionicons name="alert-circle-outline" size={44} color={palette.orange} accessible={false} />
+          <SectionTitle title="Antes de entregar la OT" subtitle={orderLabel} />
         </View>
         <ScrollView contentContainerStyle={styles.content}>
-          {dialog === "ready" ? <BodyText>Ya tienes todo listo para entregar la OT. ¿Quieres hacerlo ahora?</BodyText> : <View style={styles.stack}>
+          <View style={styles.stack}>
             {warnings.pendingWorks.length > 0 ? <View style={styles.tight}><Text style={styles.label}>{warnings.pendingWorks.length} trabajo(s) sin entregar</Text>{warnings.pendingWorks.slice(0, 3).map((name, index) => <BodyText key={`${index}:${name}`}>{name}</BodyText>)}{warnings.pendingWorks.length > 3 ? <BodyText>Y {warnings.pendingWorks.length - 3} más.</BodyText> : null}</View> : null}
             {warnings.pendingChecklists.length > 0 ? <View style={styles.tight}><Text style={styles.label}>{warnings.pendingChecklists.length} checklist(s) incompleto(s)</Text>{warnings.pendingChecklists.slice(0, 3).map(name => <BodyText key={name}>{name}</BodyText>)}{warnings.pendingChecklists.length > 3 ? <BodyText>Y {warnings.pendingChecklists.length - 3} más.</BodyText> : null}</View> : null}
             <Notice tone="warning" message="La OT y todos sus trabajos pasarán a entregados, aunque haya checklists incompletos. Sus respuestas y evidencias se conservarán tal como están." />
-          </View>}
+          </View>
         </ScrollView>
         <View style={styles.footer}>
-          <Button title={dialog === "ready" ? "Sí, entregar OT" : "Entendido, continuar"} icon="arrow-forward-outline" disabled={locked || !canDeliver} onPress={() => setDialog(dialog === "ready" ? "preflight" : "deliver")} style={{ backgroundColor: palette.orange, borderColor: palette.orange }} />
-          <Button title={dialog === "ready" ? "Más tarde" : "Cancelar"} variant="ghost" disabled={locked} onPress={() => setDialog(null)} />
+          <Button title="Entendido, continuar" icon="arrow-forward-outline" disabled={locked || !canDeliver} onPress={() => setDialog("deliver")} style={{ backgroundColor: palette.orange, borderColor: palette.orange }} />
+          <Button title="Cancelar" variant="ghost" disabled={locked} onPress={() => setDialog(null)} />
         </View>
       </View></SafeAreaView>
     </Modal> : null}
