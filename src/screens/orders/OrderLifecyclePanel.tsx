@@ -111,10 +111,10 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       if (finished(loaded.status) || loaded.canTechnicianDeliver === false || latest.current.allow === false) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
       if (!loaded.technicianDeliverySupported) throw new Error("Actualiza el servidor para habilitar la entrega técnica simplificada.");
       if (!draft) saveDraft(initialDeliveryDraft(latest.current.group, loaded));
-      // Tras entregar el último trabajo se celebra que todo quedó listo; desde ahí se pasa a la entrega de la OT o se sale.
-      if (ready) {
-        if (deliveryWarnings(latest.current.group, loaded).allWorksDelivered) setDialog("ready");
-      } else { setReadyMessage(null); setDialog("preflight"); }
+      // Tras entregar el último trabajo se celebra que todo quedó listo, aunque su entrega aún se esté sincronizando;
+      // la app ya comprobó que los demás trabajos estaban entregados. Desde ahí se pasa a la entrega de la OT o se sale.
+      if (ready) setDialog("ready");
+      else { setReadyMessage(null); setDialog("preflight"); }
       latest.current.onDeliveryIntentConsumed?.();
     }).catch(() => {});
   }
@@ -161,6 +161,25 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
     });
   }
 
+  /** Desde la celebración: espera a que Qualitzer confirme la entrega del último trabajo y abre el formulario de la OT. */
+  function continueToDelivery(): void {
+    if (locked) return;
+    void run("load", async () => {
+      let loaded = await loadContext();
+      for (let attempt = 0; attempt < 6 && !deliveryWarnings(latest.current.group, loaded).allWorksDelivered; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        if (!mounted.current) return;
+        loaded = await loadContext();
+      }
+      if (!mounted.current) return;
+      if (finished(loaded.status) || loaded.canTechnicianDeliver === false) throw new Error("La OT ya no permite entrega. Se actualizó su estado.");
+      if (!deliveryWarnings(latest.current.group, loaded).allWorksDelivered) throw new Error("La entrega de tu último trabajo todavía se está enviando a Qualitzer. Espera unos segundos con conexión y vuelve a pulsar Entregar OT.");
+      if (!draft) saveDraft(initialDeliveryDraft(latest.current.group, loaded));
+      setReadyMessage("Todos los trabajos están entregados. Completa la entrega del mantenimiento para cerrarlo.");
+      setDialog("deliver");
+    }).catch(() => {});
+  }
+
   function discardDraft(): void {
     if (locked) return;
     deleteLifecycleDraft(scope);
@@ -195,8 +214,9 @@ function OrderLifecycleContent(props: OrderLifecyclePanelProps & { scope: string
       pendingChecklists={warnings.pendingChecklists}
       busy={locked}
       canDeliver={canDeliver}
-      onDeliver={() => { setReadyMessage("Todos los trabajos están entregados. Completa la entrega del mantenimiento para cerrarlo."); setDialog("deliver"); }}
-      onClose={() => setDialog(null)}
+      error={error}
+      onDeliver={continueToDelivery}
+      onClose={() => { setError(null); setDialog(null); }}
     /> : null}
     {dialog === "preflight" ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (!locked) setDialog(null); }}>
       <SafeAreaView style={styles.overlay}><View style={styles.modal}>

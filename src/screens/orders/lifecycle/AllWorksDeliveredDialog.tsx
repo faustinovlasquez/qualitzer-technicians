@@ -12,6 +12,7 @@ export interface AllWorksDeliveredDialogProps {
   pendingChecklists: string[];
   busy: boolean;
   canDeliver: boolean;
+  error?: string | null;
   onDeliver: () => void;
   onClose: () => void;
 }
@@ -83,7 +84,8 @@ export function AllWorksDeliveredDialog(props: AllWorksDeliveredDialogProps) {
           </View> : null}
         </ScrollView>
         <View style={styles.actions}>
-          <Button title="Entregar OT" icon="paper-plane-outline" disabled={props.busy || !props.canDeliver} onPress={props.onDeliver} style={styles.deliver} />
+          {props.error ? <View accessibilityRole="alert" style={styles.error}><Ionicons name="time-outline" size={18} color={palette.danger} accessible={false} /><Text style={styles.errorText}>{props.error}</Text></View> : null}
+          <Button title={props.busy ? "Confirmando entrega…" : "Entregar OT"} icon="paper-plane-outline" loading={props.busy} disabled={props.busy || !props.canDeliver} onPress={props.onDeliver} style={styles.deliver} />
           <Button title="Salir" icon="close-outline" variant="ghost" disabled={props.busy} onPress={props.onClose} />
         </View>
       </Animated.View>
@@ -111,4 +113,6 @@ const styles = StyleSheet.create({
   warningText: { flex: 1, fontSize: 12, lineHeight: 17, color: palette.amber },
   actions: { padding: 16, paddingTop: 4, gap: 4, borderTopWidth: 1, borderTopColor: palette.border },
   deliver: { backgroundColor: palette.orange, borderColor: palette.orange },
+  error: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: radius.md, backgroundColor: palette.dangerSoft },
+  errorText: { flex: 1, fontSize: 12, lineHeight: 17, color: palette.danger },
 });

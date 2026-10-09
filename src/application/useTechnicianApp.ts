@@ -1621,7 +1621,11 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const selection = workSelection(group, work);
     const value: WorkScope = { ...dailyRange(selection.queryDate), groupId: selection.groupId, workId: selection.workId, companyBranchId: session.branchId };
     await performMutation(value, async (repo, scope) => {
-      await repo.status(scope, { ...input, executionDates: input.executionDates ?? [scope.startDate] });
+      try { await repo.status(scope, { ...input, executionDates: input.executionDates ?? [scope.startDate] }); }
+      catch (error) {
+        if (input.status === "delivered" && work.status !== "delivered" && isOfflineQueuedError(error) && error.kind === "completion") guideQueuedOrderDelivery(scope);
+        throw error;
+      }
       if (input.status === "delivered" && work.status !== "delivered") await guideOrderDelivery(repo, scope);
     }, true, statusLocationAction(input, work.status));
   }
@@ -1644,11 +1648,29 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     } catch {}
   }
 
+  /**
+   * La entrega del trabajo quedó guardada en el teléfono y se enviará al sincronizar. Si era el último trabajo del
+   * mantenimiento (los demás ya están entregados), se abre el mantenimiento para celebrar y ofrecer su entrega.
+   */
+  function guideQueuedOrderDelivery(value: WorkScope): void {
+    const group = state.current.data?.groups.find(item => item.id === value.groupId);
+    if (group?.type !== "internal_maintenance" || group.status === "completed" || group.status === "delivered") return;
+    const others = group.works.filter(work => work.id !== value.workId && !["Productos (supervisor)", "Productos utilizados"].includes(work.title.trim()));
+    if (!others.every(work => work.status === "delivered" || work.status === "completed")) return;
+    const next: SelectedOrder = { id: value.groupId, queryDate: value.startDate, initialTab: "works", deliveryIntent: "ready" };
+    state.current = { ...state.current, selected: null, selectedOrder: next };
+    setSelected(null); setSelectedOrder(next);
+  }
+
   function changeStatus(input: StatusInput): Promise<void> {
     const value = scope();
     const previousStatus = selectedWorkDetails(state.current.data, state.current.selected).work?.status;
     return performMutation(value, async (repo, scope) => {
-      await repo.status(scope, input);
+      try { await repo.status(scope, input); }
+      catch (error) {
+        if (input.status === "delivered" && previousStatus !== "delivered" && isOfflineQueuedError(error) && error.kind === "completion") guideQueuedOrderDelivery(scope);
+        throw error;
+      }
       if (input.status === "delivered" && previousStatus !== "delivered") await guideOrderDelivery(repo, scope);
     }, true, statusLocationAction(input, previousStatus));
   }
