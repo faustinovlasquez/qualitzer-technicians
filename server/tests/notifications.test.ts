@@ -86,7 +86,7 @@ test("inbox rejects invalid additive metadata instead of inventing counts or cap
   }
 });
 
-test("filtered inbox still rejects foreign tenant, foreign branch, wrong page and mismatched event IDs", async (t) => {
+test("filtered inbox omits foreign tenant and branch items, and rejects wrong page and mismatched event IDs", async (t) => {
   const { state, baseUrl } = await harness(t);
   state.failures.set(`${prefix}/inbox`, { status: 200, body: legacyInbox });
   await jsonRequest(baseUrl, `${prefix}/inbox?companyBranchId=1`);
@@ -94,6 +94,13 @@ test("filtered inbox still rejects foreign tenant, foreign branch, wrong page an
   for (const body of [
     { ...legacyInbox, items: [{ ...item, data: { ...item.data, tenantOrigin: "https://other.invalid" } }] },
     { ...legacyInbox, items: [{ ...item, data: { ...item.data, companyBranchId: 2 } }] },
+  ]) {
+    state.failures.set(`${prefix}/inbox`, { status: 200, body });
+    const response = await jsonRequest(baseUrl, `${prefix}/inbox?companyBranchId=1&unreadOnly=true`);
+    assert.equal(response.response.status, 200);
+    assert.deepEqual((response.data as { items: unknown[] }).items, []);
+  }
+  for (const body of [
     { ...legacyInbox, page: 2 },
     { ...legacyInbox, items: [{ ...item, data: { ...item.data, eventId: otherId } }] },
   ]) {

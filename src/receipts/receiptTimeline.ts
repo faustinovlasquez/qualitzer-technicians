@@ -104,12 +104,31 @@ export function dispositionDaysLeft(deadline: string | null | undefined, now: Da
   return end ? Math.max(0, Math.ceil((end.getTime() - now.getTime()) / DAY_MS)) : null;
 }
 
-export type ProductDispositionState = "USED" | "RETURN_REQUESTED" | "RETURNED" | "AUTO_USED" | "OPEN";
-/** Estado visible de un material confirmado: devuelto por bodega, marcado por el técnico, utilizado al vencer el plazo o aún abierto. */
+export type ProductDispositionState = "USED" | "RETURN_REQUESTED" | "RETURNED" | "AUTO_USED" | "REJECTED" | "OPEN";
+/**
+ * Estado visible de un material confirmado: devuelto por bodega, marcado por el técnico, devolución rechazada (vuelve a
+ * decidir mientras el plazo siga abierto), utilizado al vencer el plazo o aún abierto.
+ */
 export function productDispositionState(product: MaterialReceiptItem["products"][number], closed: boolean): ProductDispositionState {
   if ((product.returnedQuantity ?? 0) > 0) return "RETURNED";
   if (product.disposition) return product.disposition;
+  if (product.returnRequest?.status === "REJECTED" && !closed) return "REJECTED";
   return closed ? "AUTO_USED" : "OPEN";
+}
+
+/** Cantidad escrita por el técnico ("2", "1,5"): positiva, con hasta 4 decimales y sin superar lo recibido. */
+export function parseReturnQuantity(text: string, max: number): number | null {
+  const normalized = text.trim().replace(",", ".");
+  if (!/^\d+(\.\d{1,4})?$/.test(normalized)) return null;
+  const value = Number(normalized);
+  return Number.isFinite(value) && value > 0 && value <= max + 1e-9 ? value : null;
+}
+
+/** Botones − / +: avanzan de a una unidad sin salir de 1 (o lo recibido, si es menor) y el total recibido. */
+export function stepReturnQuantity(current: number, delta: 1 | -1, max: number): number {
+  const minimum = Math.min(1, max);
+  const next = Math.round((current + delta) * 10000) / 10000;
+  return Math.min(max, Math.max(minimum, next));
 }
 
 export function receiptWarehouses(items: MaterialReceiptItem[]): string[] {

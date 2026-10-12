@@ -7,6 +7,9 @@ import { emptySchema } from "../validation";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
 
+/** El backend agrega la solicitud de devolución (cantidad, estado y motivo) solo a clientes que la declaran. */
+const RETURN_REQUESTS = { "x-qualitzer-return-requests": "1" } as const;
+
 export function createMaterialReceiptRouter(upstream: Upstream): Router {
   const router = Router();
   router.get("/", async (req, res) => {
@@ -19,7 +22,7 @@ export function createMaterialReceiptRouter(upstream: Upstream): Router {
     // Sin status se mantiene la llamada original para backends que aún no conocen el historial.
     const params = new URLSearchParams({ companyBranchId: String(query.companyBranchId) });
     if (query.status === "CONFIRMED") params.set("status", "CONFIRMED");
-    const result = materialReceiptsSchema.safeParse(await upstream.request("/inventory_consumptions_v2/my-receipts", { token, query: params }));
+    const result = materialReceiptsSchema.safeParse(await upstream.request("/inventory_consumptions_v2/my-receipts", { token, query: params, capabilities: RETURN_REQUESTS }));
     if (!result.success) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.json(result.data);
   });
@@ -48,7 +51,7 @@ export function createMaterialReceiptRouter(upstream: Upstream): Router {
     assertBranch(user, input.companyBranchId);
     if (!user.workerId) throw new GatewayError(403, "WORKER_REQUIRED");
     const result = materialReceiptSchema.safeParse(await upstream.request(`/inventory_consumptions_v2/my-receipts/${input.id}/dispositions`, { token, method: "POST",
-      json: { companyBranchId: input.companyBranchId, version: input.version, lines: input.lines } }));
+      json: { companyBranchId: input.companyBranchId, version: input.version, lines: input.lines }, capabilities: RETURN_REQUESTS }));
     if (!result.success) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     try { verifyMaterialDispositionResult(input, result.data); }
     catch { throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE"); }

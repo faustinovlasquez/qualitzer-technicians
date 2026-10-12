@@ -4,7 +4,7 @@ import {
   type NotificationData, type NotificationInboxItem, type NotificationPreferences, type NotificationStatus,
 } from "../domain/notifications";
 import type { NativeNotificationResponse, NativePushToken, NotificationClientOptions, NotificationPermission } from "./contracts";
-import { DEFAULT_NOTIFICATION_PREFERENCES, NotificationEventDeduper, notificationFailure, notificationForSession, permissionAllowsPush, sameNotification } from "./notificationSafety";
+import { DEFAULT_NOTIFICATION_PREFERENCES, NotificationEventDeduper, notificationFailure, notificationForSession, notificationSessionMismatch, permissionAllowsPush, sameNotification, traceNotificationTap } from "./notificationSafety";
 
 export async function notificationReadWithTimeout<T>(pending: Promise<T>, milliseconds = 20_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -145,7 +145,7 @@ export class MobileNotificationClient {
         const data = notificationForSession(notification.data, session);
         return data !== null && !this.events.has(data.eventId) && (data.recipient !== undefined || this.state.inbox.some(item => sameNotification(item.data, data)));
       },
-      response: (response) => { void this.handleResponse(response); },
+      response: (response) => { traceNotificationTap(`toque recibido del teléfono (principal=${response.defaultAction})`); void this.handleResponse(response); },
       received: (notification) => {
         const payload = notificationForSession(notification.data, session);
         if (!this.isCurrent() || this.revocationRequired || !payload || !this.receivedEvents.begin(payload.eventId)) return;
@@ -170,7 +170,10 @@ export class MobileNotificationClient {
       foreground: () => { void this.refresh(); },
     });
     void this.refresh();
-    return () => { this.active = false; this.detach?.(); this.detach = null; this.expoToken = null; this.lastNativeToken = null; };
+    return () => {
+      this.active = false; this.detach?.(); this.detach = null; this.expoToken = null; this.lastNativeToken = null;
+      if (this.deferredRetry !== null) { clearTimeout(this.deferredRetry); this.deferredRetry = null; }
+    };
   }
 
   private loadStatus(): Promise<NotificationStatus> {
@@ -273,7 +276,7 @@ export class MobileNotificationClient {
         finally { this.update({ ready: true }); }
         const response = await notificationReadWithTimeout(this.options.adapter.lastResponse(), 2_000);
         this.requireCurrent();
-        if (response) await this.handleResponse(response);
+        if (response) { traceNotificationTap("al actualizar: hay un toque pendiente"); await this.handleResponse(response); }
       }).finally(() => { if (this.refreshPending === pending) this.refreshPending = null; });
       this.refreshPending = pending;
     }
@@ -288,6 +291,36 @@ export class MobileNotificationClient {
     await this.synchronize(true);
     if (this.state.registered) this.update({ notice: "Notificaciones activadas para esta sesión." });
   });
+
+  /**
+   * Muestra la ventana del teléfono para permitir notificaciones y deja "Recibir avisos" activado, sin depender del
+   * servidor: el registro del dispositivo se completa después, cuando el servicio de avisos esté disponible.
+   * Devuelve el permiso resultante ("blocked" si el teléfono ya no deja preguntar).
+   */
+  requestDevicePermission = async (): Promise<NotificationPermission> => {
+    let permission: NotificationPermission = this.state.permission;
+    await this.run(async () => {
+      this.requireInteraction();
+      const { adapter, storageKey } = this.options;
+      if (adapter.platform === "unsupported") return;
+      permission = await notificationReadWithTimeout(adapter.getPermission());
+      this.requireCurrent();
+      if (permission !== "blocked" && !permissionAllowsPush(permission)) {
+        await adapter.prepareChannel();
+        this.requireCurrent();
+        this.requireInteraction();
+        permission = await adapter.requestPermission();
+        this.requireCurrent();
+      }
+      this.update({ permission });
+      if (!permissionAllowsPush(permission)) return;
+      await adapter.writeConsent(storageKey, true);
+      this.requireCurrent();
+      this.consentLoaded = true;
+      this.update({ optedIn: true });
+    });
+    return permission;
+  };
 
   savePreferences = (preferences: NotificationPreferences): Promise<boolean> => this.run(async () => {
     this.requireInteraction();
@@ -484,12 +517,32 @@ export class MobileNotificationClient {
   }
 
   // Un toque que llega con la app bloqueada (p. ej. al abrirla desde el aviso) se guarda y se abre al desbloquear.
-  private deferredResponse: NativeNotificationResponse | null = null;
+  private deferredValue: NativeNotificationResponse | null = null;
+  private deferredRetry: ReturnType<typeof setTimeout> | null = null;
+
+  private get deferredResponse(): NativeNotificationResponse | null { return this.deferredValue; }
+  // Android entrega el toque un instante antes de que la app vuelva al frente: el aviso guardado se reintenta
+  // hasta que la app esté desbloqueada, sin depender de que el estado de bloqueo cambie después del toque.
+  private set deferredResponse(value: NativeNotificationResponse | null) {
+    this.deferredValue = value;
+    if (value) this.scheduleDeferredRetry();
+  }
+
+  private scheduleDeferredRetry(attempt = 0): void {
+    if (this.deferredRetry !== null) return;
+    this.deferredRetry = setTimeout(() => {
+      this.deferredRetry = null;
+      if (!this.deferredValue || !this.isCurrent()) return;
+      if (this.interactionAllowed()) { traceNotificationTap(`reintento ${attempt + 1}: app lista, abriendo`); void this.resumeDeferredResponse().catch(() => undefined); return; }
+      if (attempt < 60) this.scheduleDeferredRetry(attempt + 1);
+      else traceNotificationTap("reintentos agotados: la app siguió bloqueada");
+    }, 250);
+  }
 
   private resumeDeferredResponse = async (): Promise<void> => {
-    const response = this.deferredResponse;
+    const response = this.deferredValue;
     if (!response || !this.isCurrent() || !this.interactionAllowed()) return;
-    this.deferredResponse = null;
+    this.deferredValue = null;
     await this.handleResponse(response);
   };
 
@@ -497,21 +550,31 @@ export class MobileNotificationClient {
   resumeDeferred = (): Promise<void> => this.resumeDeferredResponse();
 
   private async openResponse(response: NativeNotificationResponse): Promise<void> {
+    if (!this.isCurrent()) traceNotificationTap("descartado: la sesión de avisos ya no es la actual");
     this.requireCurrent();
-    if (!response.defaultAction) return;
-    if (!this.interactionAllowed()) { this.deferredResponse = response; return; }
+    if (!response.defaultAction) { traceNotificationTap("descartado: no fue el toque principal"); return; }
+    if (!this.interactionAllowed()) { traceNotificationTap("app aún bloqueada: se guarda y se reintenta"); this.deferredResponse = response; return; }
     const payload = notificationForSession(response.data, this.options.session);
-    if (!payload) return;
-    if (this.events.has(payload.eventId)) { await notificationReadWithTimeout(this.options.adapter.clearResponse(response.identifier), 2_000).catch(() => {}); return; }
-    if (!this.events.begin(payload.eventId)) return;
+    if (!payload) { traceNotificationTap(`descartado: ${notificationSessionMismatch(response.data, this.options.session) ?? "no corresponde"}`); return; }
+    if (this.events.has(payload.eventId)) { traceNotificationTap("descartado: el aviso ya se había abierto"); await notificationReadWithTimeout(this.options.adapter.clearResponse(response.identifier), 2_000).catch(() => {}); return; }
+    if (!this.events.begin(payload.eventId)) { traceNotificationTap("descartado: el aviso ya se está abriendo"); return; }
+    traceNotificationTap(`aviso válido: ${payload.kind} grupo=${payload.groupType ?? "-"}:${payload.groupId ?? "-"} trabajo=${payload.workId ?? "-"}`);
     let accepted = false;
     try {
-      const owned = await this.findOwnedEvent(payload);
+      // Si la bandeja no responde, se abre igual un aviso dirigido explícitamente a este usuario y técnico de la sesión
+      // (destinatario ya validado): el destino se vuelve a consultar al servidor con la sesión al navegar.
+      const owned = await this.findOwnedEvent(payload).catch((error: unknown) => {
+        traceNotificationTap(`error al buscar el aviso en la bandeja: ${error instanceof Error ? error.message : String(error)}`);
+        if (error instanceof Error && error.message === "MOBILE_PUSH_SESSION_CHANGED" || !payload.recipient) throw error;
+        traceNotificationTap("se abre con los datos del aviso (destinatario verificado)");
+        return payload;
+      });
       this.requireCurrent();
-      if (!this.interactionAllowed()) this.deferredResponse = response;
+      if (!this.interactionAllowed()) { traceNotificationTap("app bloqueada tras buscar el aviso: se reintenta"); this.deferredResponse = response; }
       this.requireInteraction();
-      if (!owned) return;
+      if (!owned) { traceNotificationTap("descartado: el aviso no está en tu bandeja del servidor"); return; }
       accepted = await this.options.onOpen(owned, { session: this.options.session, storageKey: this.options.storageKey, isCurrent: this.isCurrent });
+      traceNotificationTap(accepted ? "abierto: la app navegó al destino" : "la app no navegó (ver motivo arriba)");
       this.requireCurrent();
       if (!accepted && !this.interactionAllowed()) this.deferredResponse = response;
       if (accepted) {

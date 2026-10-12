@@ -31,7 +31,7 @@ import { creationInputSchema, creationKindSchema, creationOptionsQuerySchema, cr
 import { clearCreationDrafts } from "../screens/creation/creationDrafts";
 import { scheduleClock } from "../domain/weeklySchedule";
 import { bindNotificationApi, useMobileNotifications, type MobileNotificationClient, type NotificationData, type NotificationOpenContext } from "../notifications";
-import { notificationForSession, sameNotification, sameNotificationSession } from "../notifications/notificationSafety";
+import { notificationForSession, sameNotification, sameNotificationSession, traceNotificationTap } from "../notifications/notificationSafety";
 import { createOfflineRepository, disableOfflineProfile, establishVerifiedOfflineSession, hasPendingChanges, OfflineTechnicianRepository, restoreOfflineProfile, saveOfflineProfile } from "../offline";
 import { createDurableStore } from "../offline/DurableStore";
 import { createConnectivity } from "../offline/connectivity";
@@ -559,11 +559,16 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   async function openNotification(payload: NotificationData, context: NotificationOpenContext): Promise<boolean> {
     const current = state.current.session;
     const repo = repository.current;
-    if (!notificationContextIsCurrent(context) || !current || !repo || !notificationForSession(payload, current)) return false;
+    if (!notificationContextIsCurrent(context) || !current || !repo || !notificationForSession(payload, current)) {
+      traceNotificationTap(`app no navega: acceso=${isAccessAllowed()} avisos=${context.isCurrent()} misma sesión=${current === context.session} sesión=${Boolean(current)} datos=${Boolean(repo)} clave=${current ? context.storageKey === tenantStorageNamespace(current, state.current.gatewayUrl, current.branchId) : "-"}`);
+      return false;
+    }
+    traceNotificationTap(`app recibe el aviso en pestaña=${state.current.tab} detalle=${Boolean(state.current.selected || state.current.selectedOrder || state.current.selectedCreationKind)}`);
     // Materiales y prueba solo cambian de pestaña: no esperan la actualización inicial (al abrir la app desde el aviso
     // puede tardar más que la espera y el toque se perdía en la vista principal).
     const tabOnlyNotice = payload.kind === "MOBILE_PUSH_TEST" || payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER";
     if (!tabOnlyNotice && (!await waitForActionUnlock(8000) || !notificationContextIsCurrent(context))) {
+      traceNotificationTap("app no navega: actualización en curso");
       setNoticeError("La app está terminando una actualización. Vuelve a tocar el aviso en unos segundos.");
       return false;
     }
@@ -573,6 +578,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       const groupIds = payload.groupType === "maintenance" ? [`maintenance-${payload.groupId}`] : payload.groupType === "negotiation" ? [`external-${payload.groupId}`] : [`direct-${payload.groupId}`, `direct-np-${payload.groupId}`];
       if (selectedWork && groupIds.includes(selectedWork.groupId) && selectedWork.workId === String(payload.workId)) { setNoticeError(null); return true; }
     } else if (state.current.selectedCreationKind || state.current.selected || state.current.selectedOrder) {
+      traceNotificationTap("app no navega: hay un detalle abierto");
       setNoticeError("Vuelve al listado antes de abrir la notificación. Se conservará tu selección y cualquier borrador.");
       return false;
     }
@@ -580,6 +586,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const materialNotice = payload.kind === "MATERIAL_RECEIPT_AVAILABLE" || payload.kind === "MATERIAL_RECEIPT_REMINDER";
     // Desde "Mi perfil" se abre el destino del aviso; solo se espera si hay una sección del perfil abierta (posibles cambios sin guardar).
     if (state.current.tab === "profile" && !materialNotice && profileEditing.current) {
+      traceNotificationTap("app no navega: sección del perfil abierta");
       setNoticeError("Cierra la sección del perfil que estás editando y vuelve a tocar el aviso. Así no se pierden cambios sin guardar.");
       return false;
     }
@@ -589,10 +596,13 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       if (payload.kind !== "MOBILE_PUSH_TEST") setMaterialReceiptFocus({ eventId: payload.eventId, receiptIds: payload.materialReceiptIds ?? [] });
       state.current = { ...state.current, tab: target };
       setTab(target); setError(null); setNoticeError(null);
+      traceNotificationTap(`app cambia a la pestaña ${target}`);
       return true;
     }
     if (payload.groupType === null || payload.groupId === null) { setNoticeError("La notificación no identifica un trabajo disponible."); return false; }
-    return await openAssignmentTarget({ groupType: payload.groupType, groupId: payload.groupId, workId: payload.workId }, payload.date, () => notificationContextIsCurrent(context));
+    const opened = await openAssignmentTarget({ groupType: payload.groupType, groupId: payload.groupId, workId: payload.workId }, payload.date, () => notificationContextIsCurrent(context));
+    traceNotificationTap(opened ? "app abre la OT o el trabajo" : "app no encontró la OT o el trabajo del aviso");
+    return opened;
   }
 
   /** Abre el cronómetro activo informado por el servidor, aunque el trabajo esté planificado en otra fecha. */

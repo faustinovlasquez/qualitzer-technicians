@@ -10,11 +10,18 @@ export const materialReceiptInputSchema = z.object({ companyBranchId: id, reques
   location: materialReceiptLocationSchema, client: z.enum(["WEB", "MOBILE"]) }).strict().refine(input => new Set(input.deliveries.map(delivery => delivery.id)).size === input.deliveries.length);
 export const materialReceiptResultSchema = z.object({ companyBranchId: id, requestId: z.uuid(), receipts: z.array(z.object({ id, version: id, acknowledgement: materialAcknowledgementSchema }).strict()).min(1).max(200) }).strict();
 export const materialDispositionSchema = z.enum(["USED", "RETURN_REQUESTED"]);
+/** Cantidad con hasta 4 decimales, como la registra bodega. */
+const materialQuantity = z.number().positive().max(999999999).refine(value => Math.abs(Math.round(value * 10000) - value * 10000) < 1e-6);
+/** Solicitud de devolución con cantidad y la resolución de bodega (confirmada, rechazada con motivo o cancelada). */
+export const materialReturnRequestSchema = z.object({ quantity: z.number().positive(), note: z.string().max(1000).nullable(),
+  status: z.enum(["PENDING", "CONFIRMED", "REJECTED", "CANCELLED"]), requestedAt: z.string().max(40), resolvedAt: z.string().max(40).nullable(),
+  resolutionNote: z.string().max(2000).nullable(), confirmedQuantity: z.number().nonnegative().nullable() }).strict();
 export const materialReceiptProductSchema = z.object({ id, productId: id, name: z.string(), code: z.string(), quantity: z.number().positive(), unit: z.string(),
   // Ficha opcional: descripción, foto, precio unitario y uso informado (Utilizado/Devolver).
   description: z.string().max(1000).nullable().optional(), imageUrl: z.string().max(4000).nullable().optional(),
   unitCost: z.number().nonnegative().nullable().optional(), currencyIso: z.string().max(10).nullable().optional(),
-  returnedQuantity: z.number().nonnegative().optional(), disposition: materialDispositionSchema.nullable().optional(), dispositionAt: z.string().max(40).nullable().optional() }).strict();
+  returnedQuantity: z.number().nonnegative().optional(), disposition: materialDispositionSchema.nullable().optional(), dispositionAt: z.string().max(40).nullable().optional(),
+  returnRequest: materialReturnRequestSchema.nullable().optional() }).strict();
 export const materialReceiptSchema = z.object({ id, version: id, code: z.string(), sourceLabel: z.string(), destination: z.string(),
   deliveredAt: z.string().nullable(), receiptStatus: z.enum(["PENDING", "CONFIRMED", "INCIDENT"]), products: z.array(materialReceiptProductSchema), acknowledgement: materialAcknowledgementSchema.optional(),
   // Contexto opcional para la línea de tiempo: quién solicitó la confirmación, cuándo, origen, bodega, motivo y notas.
@@ -26,7 +33,10 @@ export const materialReceiptSchema = z.object({ id, version: id, code: z.string(
 export const materialReceiptsSchema = z.object({ hasMore: z.boolean(), items: z.array(materialReceiptSchema).max(200) }).strict();
 export const materialReceiptStatusSchema = z.enum(["PENDING", "CONFIRMED"]);
 export const materialDispositionInputSchema = z.object({ companyBranchId: id, id, version: id,
-  lines: z.array(z.object({ lineId: id, disposition: materialDispositionSchema }).strict()).min(1).max(200) }).strict()
+  lines: z.array(z.object({ lineId: id, disposition: materialDispositionSchema,
+    // Solo con Devolver: cuánto vuelve a bodega (sin cantidad, todo lo recibido) y una nota opcional.
+    quantity: materialQuantity.optional(), note: z.string().trim().min(1).max(1000).optional() }).strict()
+    .refine(line => line.disposition === "RETURN_REQUESTED" || (line.quantity === undefined && line.note === undefined))).min(1).max(200) }).strict()
   .refine(input => new Set(input.lines.map(line => line.lineId)).size === input.lines.length);
 export type MaterialReceiptInput = z.infer<typeof materialReceiptInputSchema>;
 export type MaterialReceiptResult = z.infer<typeof materialReceiptResultSchema>;
@@ -36,6 +46,9 @@ export type MaterialReceiptProduct = z.infer<typeof materialReceiptProductSchema
 export type MaterialReceiptStatus = z.infer<typeof materialReceiptStatusSchema>;
 export type MaterialDisposition = z.infer<typeof materialDispositionSchema>;
 export type MaterialDispositionInput = z.infer<typeof materialDispositionInputSchema>;
+export type MaterialReturnRequest = z.infer<typeof materialReturnRequestSchema>;
+/** Cambio de uso de un material: con Devolver se puede indicar cantidad y nota. */
+export interface MaterialDispositionChange { lineId: number; disposition: MaterialDisposition; quantity?: number; note?: string }
 export type MaterialReceiptLocation = z.infer<typeof materialReceiptLocationSchema>;
 /** Entregas que originaron un aviso: al abrirlo, la vista de Materiales se filtra por ellas. */
 export interface MaterialReceiptFocus { eventId: string; receiptIds: number[]; }
@@ -48,7 +61,13 @@ export interface MaterialReceiptPort {
 /** La respuesta debe ser la misma entrega, ya confirmada, con una versión igual o posterior y las marcas pedidas aplicadas. */
 export function verifyMaterialDispositionResult(input: MaterialDispositionInput, result: MaterialReceipt): void {
   if (result.id !== input.id || result.receiptStatus !== "CONFIRMED" || result.version < input.version ||
-    input.lines.some(line => result.products.find(product => product.id === line.lineId)?.disposition !== line.disposition)) throw new Error("MATERIAL_DISPOSITION_RESPONSE_MISMATCH");
+    input.lines.some(line => {
+      const product = result.products.find(entry => entry.id === line.lineId);
+      if (product?.disposition !== line.disposition) return true;
+      // Con el detalle de la solicitud disponible, la cantidad pendiente debe ser la pedida.
+      return line.disposition === "RETURN_REQUESTED" && line.quantity !== undefined && product.returnRequest != null
+        && (product.returnRequest.status !== "PENDING" || Math.abs(product.returnRequest.quantity - line.quantity) > 1e-9);
+    })) throw new Error("MATERIAL_DISPOSITION_RESPONSE_MISMATCH");
 }
 
 export function verifyMaterialReceiptResult(input: MaterialReceiptInput, result: MaterialReceiptResult, userId: number): void {

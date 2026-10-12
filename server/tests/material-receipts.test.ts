@@ -48,3 +48,23 @@ test("gateway preserves explicit conflicts and rejects acknowledgements for anot
   state.failures.set(backend, { status: 200, body: { items: [], hasMore: false, netCost: 100 } });
   assert.equal((await jsonRequest(baseUrl, `${endpoint}?companyBranchId=1`)).response.status, 502);
 });
+test("gateway reenvía la cantidad y la nota de la devolución y declara que entiende la solicitud", async context => {
+  const { state, baseUrl } = await harness(context);
+  const request = { quantity: 2, note: "Sobró", status: "PENDING", requestedAt: "2026-10-12T10:00:00.000Z", resolvedAt: null, resolutionNote: null, confirmedQuantity: null };
+  const receipt = { id: 5, version: 4, code: "CE-5", sourceLabel: "OT-1", destination: "", deliveredAt: null, receiptStatus: "CONFIRMED",
+    products: [{ id: 10, productId: 88, name: "Kit", code: "K", quantity: 3, unit: "UN", disposition: "RETURN_REQUESTED", returnRequest: request }] };
+  state.failures.set(`${backend}/5/dispositions`, { status: 200, body: receipt });
+  const body = { companyBranchId: 1, version: 3, lines: [{ lineId: 10, disposition: "RETURN_REQUESTED", quantity: 2, note: "Sobró" }] };
+  const answered = await jsonRequest(baseUrl, `${endpoint}/5/dispositions`, "POST", body);
+  assert.equal(answered.response.status, 200);
+  assert.deepEqual(answered.data, receipt);
+  const forwarded = state.calls.filter(call => call.path === `${backend}/5/dispositions`).at(-1);
+  assert.deepEqual(forwarded?.json, body);
+  assert.equal(forwarded?.headers["x-qualitzer-return-requests"], "1");
+  state.failures.set(backend, { status: 200, body: { items: [], hasMore: false } });
+  await jsonRequest(baseUrl, `${endpoint}?companyBranchId=1&status=CONFIRMED`);
+  assert.equal(state.calls.filter(call => call.path === backend).at(-1)?.headers["x-qualitzer-return-requests"], "1");
+  // Cantidad u otra nota con Utilizado no llegan al servidor.
+  const invalid = await jsonRequest(baseUrl, `${endpoint}/5/dispositions`, "POST", { ...body, lines: [{ lineId: 10, disposition: "USED", quantity: 1 }] });
+  assert.equal(invalid.response.status, 400);
+});

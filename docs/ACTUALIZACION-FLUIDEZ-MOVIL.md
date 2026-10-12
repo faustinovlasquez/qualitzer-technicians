@@ -1,3 +1,11 @@
+# Devoluciones con cantidad: gateway 1.0.41 / APK 1.0.113
+
+El técnico elige cuánto devuelve y agrega una nota; ve si bodega confirmó o rechazó (con motivo). Bodega recibe notificación y correo. Desplegar backend y gateway 1.0.41 juntos. Sin migraciones. Ver [actualizacion 1.0.113](ACTUALIZACION-1.0.113.md).
+
+# Avisos que abren su destino: gateway 1.0.40 / APK 1.0.112
+
+La bandeja de avisos ya no se rechaza completa si contiene avisos de otra empresa que comparte la base de datos: el backend filtra por empresa y el gateway omite los ajenos. Tocar un aviso vuelve a abrir la OT, el trabajo o Materiales. Desplegar backend y gateway 1.0.40 juntos. Sin migraciones. Ver [actualizacion 1.0.112](ACTUALIZACION-1.0.112.md).
+
 # Agenda sin descargas repetidas y entrega de mantenimiento con tipo de falla: gateway 1.0.39 / APK 1.0.104
 
 - Al volver a la agenda, la app pregunta por cada día guardado si cambió (huella `revision`) y solo descarga los días con cambios.

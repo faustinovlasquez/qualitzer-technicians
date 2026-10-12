@@ -3,7 +3,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { notificationPreferencesSchema, type NotificationPreferences } from "../../domain/notifications";
-import { DEFAULT_NOTIFICATION_PREFERENCES } from "../../notifications/notificationSafety";
+import { DEFAULT_NOTIFICATION_PREFERENCES, notificationTapTrace, subscribeNotificationTapTrace } from "../../notifications/notificationSafety";
 import type { MobileNotificationsModel } from "../../notifications/useMobileNotifications";
 import { DeviceSecurityContext, PrivateModal } from "../../security/DeviceSecurityContext";
 import { BodyText, Button, Card, IconButton, SectionTitle, type IconName } from "../../ui/components";
@@ -48,6 +48,8 @@ function NotificationSettingsContent({ notifications, onBack }: NotificationSett
     && client.options.adapter.projectId === state.status.projectId && state.permission !== "blocked" && !state.busy && !saving);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const [tapTrace, setTapTrace] = useState<string[]>(() => notificationTapTrace());
+  useEffect(() => subscribeNotificationTapTrace(() => { if (mounted.current) setTapTrace(notificationTapTrace()); }), []);
   useEffect(() => {
     if (!state?.ready || !notificationPreferencesSchema.safeParse(state.preferences).success || dirtyRef.current) return;
     baseline.current = state.preferences;
@@ -201,6 +203,11 @@ function NotificationSettingsContent({ notifications, onBack }: NotificationSett
           <Text style={styles.caption}>Máximo 5 pruebas por hora. La prueba usa tus preferencias guardadas y respeta el horario silencioso; puede vencer antes de enviarse. Solicitarla no confirma su entrega.</Text>
         </Card>
       </> : null}
+      <Card style={styles.stack}>
+        <SectionTitle title="Diagnóstico de avisos tocados" subtitle="Pasos de los últimos avisos que abriste desde la barra del teléfono" />
+        {tapTrace.length ? tapTrace.map((line, index) => <Text key={`${index}:${line}`} selectable style={styles.trace}>{line}</Text>)
+          : <Text style={styles.caption}>Aún no se registra ningún toque en esta apertura de la app.</Text>}
+      </Card>
     </ScrollView>
     <PrivateModal visible={confirm !== null} transparent animationType="fade" onRequestClose={dismiss}>
       <View style={[styles.backdrop, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
@@ -244,6 +251,6 @@ const styles = StyleSheet.create({
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, chip: { minHeight: 48, minWidth: 72, borderWidth: 1, borderColor: palette.border, borderRadius: radius.md, paddingHorizontal: 16, paddingVertical: 12, justifyContent: "center", alignItems: "center", flexGrow: 1 },
   chipSelected: { backgroundColor: palette.primarySoft, borderColor: palette.primary }, chipText: { ...typography.label, color: palette.textSecondary }, chipTextSelected: { color: palette.primary, fontWeight: "800" }, disabled: { opacity: 0.55 },
   hours: { flexDirection: "row", flexWrap: "wrap", gap: 12 }, hourField: { flexGrow: 1, flexBasis: 110 }, saveArea: { gap: 8 }, saveHint: { ...typography.caption, color: palette.textSecondary, textAlign: "center" },
-  error: { ...typography.label, color: palette.danger }, notice: { ...typography.label, color: palette.primary },
+  error: { ...typography.label, color: palette.danger }, trace: { ...typography.caption, color: palette.text, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }, notice: { ...typography.label, color: palette.primary },
   backdrop: { flex: 1, backgroundColor: "rgba(18,44,58,0.55)", paddingHorizontal: 20 }, modalScroll: { flexGrow: 1, justifyContent: "center", alignItems: "center" }, modalCard: { width: "100%", maxWidth: 480, gap: 16 },
 });

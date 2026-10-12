@@ -190,8 +190,10 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   async notificationInbox(branch: number, page: number, unreadOnly?: boolean) {
     if (!Number.isInteger(page) || page < 1 || page > 1000) throw new Error("MOBILE_PUSH_INVALID_PAGE");
     const result = notificationInboxSchema.parse(await this.request<unknown>(`${this.notificationPath(branch, "inbox")}&page=${page}${unreadOnly === true ? "&unreadOnly=true" : ""}`));
-    if (result.page !== page || result.items.some((item) => item.data.companyBranchId !== branch || item.data.tenantOrigin !== this.selectedTenant().portalOrigin)) throw new Error("MOBILE_PUSH_IDENTITY_MISMATCH");
-    return result;
+    if (result.page !== page) throw new Error("MOBILE_PUSH_IDENTITY_MISMATCH");
+    // Un aviso de otra empresa o sucursal (base de datos compartida) se omite en vez de invalidar toda la bandeja.
+    const origin = this.selectedTenant().portalOrigin;
+    return { ...result, items: result.items.filter((item) => item.data.companyBranchId === branch && item.data.tenantOrigin === origin) };
   }
   async readNotification(branch: number, id: string) { return notificationReadResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, `inbox/${mobileUuidSchema.parse(id)}/read`), "PATCH")); }
   async deleteNotification(branch: number, id: string) {

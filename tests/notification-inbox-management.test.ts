@@ -643,6 +643,27 @@ test("a notification tapped while the app is locked opens once the app unlocks",
   await f.client.resumeDeferred(); assert.equal(f.calls.filter(call => call === "open").length, 1);
 });
 
+test("un aviso tocado justo antes de que la app vuelva al frente se abre solo, sin esperar otro cambio de bloqueo", async t => {
+  const f = fixture(); const stop = f.client.start(); t.after(stop); await f.client.refresh();
+  f.setAllowed(false);
+  await f.client.handleResponse({ identifier: "tapped-before-foreground", data: row(1).data, defaultAction: true });
+  assert.equal(f.calls.includes("open"), false);
+  f.setAllowed(true);
+  for (let wait = 0; wait < 20 && !f.calls.includes("open"); wait++) await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(f.calls.filter(call => call === "open").length, 1, "el reintento abre el destino al quedar desbloqueada");
+  assert.deepEqual(f.cleared, ["tapped-before-foreground"]);
+});
+
+test("si la bandeja del servidor falla, abre igual un aviso dirigido a este usuario; sin destinatario no lo abre", async t => {
+  const f = fixture(); t.after(f.client.start()); await f.client.refresh();
+  f.setFailInbox(true);
+  const recipient = { userId: session.user.id, workerId: session.user.workerId! };
+  await f.client.handleResponse({ identifier: "with-recipient", data: { ...row(1).data, recipient }, defaultAction: true });
+  assert.equal(f.calls.filter(call => call === "open").length, 1);
+  await f.client.handleResponse({ identifier: "without-recipient", data: row(2).data, defaultAction: true });
+  assert.equal(f.calls.filter(call => call === "open").length, 1, "sin destinatario explícito se exige encontrarlo en la bandeja");
+});
+
 test("queued delete rechecks interaction without undoing the preceding read acknowledgement", async t => {
   const f = fixture([row(1), row(2)]); t.after(f.client.start()); await f.client.refresh();
   const original = f.api.notificationRead; const entered = deferred<void>(); const release = deferred<void>();

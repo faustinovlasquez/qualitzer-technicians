@@ -8,6 +8,7 @@ import { gatewayToken, harness, jsonRequest, writeCalls } from "./mock-upstream"
 const prefix = "/api/mobile-notifications";
 const id = "22222222-2222-4222-8222-222222222222";
 const eventId = "33333333-3333-4333-8333-333333333333";
+const otherEventId = "44444444-4444-4444-8444-444444444444";
 const projectId = "11111111-1111-4111-8111-111111111111";
 const preferences = { assignments: true, timers: true, remindAfterMinutes: 30, repeatEveryMinutes: 120, quietHoursStart: "22:00", quietHoursEnd: "07:00" } as const;
 const registration: NotificationDeviceInput = { installationId: id, projectId, expoPushToken: "ExpoPushToken[valid_test_token_1234]", platform: "android", companyBranchId: 1, preferences };
@@ -77,7 +78,14 @@ test("notification inbox validates source IDs, nullable test payload, dates and 
   assert.equal(response.response.status, 200);
   assert.equal(notificationInboxSchema.parse(response.data).items[0]!.data.workId, 71);
   assert.doesNotMatch(JSON.stringify(response.data), /private|netCost|token/);
-  for (const changed of [{ tenantOrigin: "https://other.invalid" }, { companyBranchId: 2 }, { date: "2026-02-30" }, { workId: 0 }, { groupType: "internal_maintenance" }]) {
+  // Un aviso de otra empresa o sucursal (base compartida) se omite sin invalidar los avisos propios.
+  for (const changed of [{ tenantOrigin: "https://other.invalid" }, { companyBranchId: 2 }]) {
+    state.failures.set(`${prefix}/inbox`, { status: 200, body: { items: [{ ...item, id: otherEventId, data: { ...data, eventId: otherEventId, ...changed } }, item], page: 1, pageSize: 25 } });
+    const filtered = await jsonRequest(baseUrl, path("inbox"));
+    assert.equal(filtered.response.status, 200);
+    assert.deepEqual(notificationInboxSchema.parse(filtered.data).items.map(entry => entry.id), [eventId]);
+  }
+  for (const changed of [{ date: "2026-02-30" }, { workId: 0 }, { groupType: "internal_maintenance" }]) {
     state.failures.set(`${prefix}/inbox`, { status: 200, body: { items: [{ ...item, data: { ...data, ...changed } }], page: 1, pageSize: 25 } });
     assert.equal((await jsonRequest(baseUrl, path("inbox"))).response.status, 502);
   }

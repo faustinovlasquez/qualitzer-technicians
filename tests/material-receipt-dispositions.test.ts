@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { materialDispositionInputSchema, materialReceiptSchema, materialReceiptsSchema, verifyMaterialDispositionResult, type MaterialReceipt } from "../src/domain/materialReceipts";
-import { dispositionDaysLeft, filterReceipts, productDispositionState, receiptDateTime, receiptMoney, receiptWarehouses } from "../src/receipts/receiptTimeline";
+import { dispositionDaysLeft, filterReceipts, parseReturnQuantity, productDispositionState, receiptDateTime, receiptMoney, receiptWarehouses, stepReturnQuantity } from "../src/receipts/receiptTimeline";
 import { createDemoMaterialReceiptPort } from "../src/receipts/demoReceipts";
 
 const confirmed: MaterialReceipt = materialReceiptSchema.parse({ id: 7, version: 3, code: "CE-00000007", sourceLabel: "OT-00456 · Cambio filtro", destination: "Santiago", deliveredAt: "2026-10-01T10:00:00.000Z",
@@ -71,4 +71,49 @@ test("demo: confirmar mueve la entrega al historial con plazo y permite marcar U
   assert.ok(materialReceiptsSchema.safeParse(history).success);
   const closed = history.items.find(item => item.dispositionClosed)!;
   await assert.rejects(port.materialDispositions({ companyBranchId: 1, id: closed.id, version: closed.version, lines: [{ lineId: closed.products[0].id, disposition: "USED" }] }));
+});
+
+test("Devolver acepta cantidad y nota solo con la solicitud; Utilizado no las lleva", () => {
+  const base = { companyBranchId: 1, id: 7, version: 3 };
+  assert.equal(materialDispositionInputSchema.safeParse({ ...base, lines: [{ lineId: 2, disposition: "RETURN_REQUESTED", quantity: 1.5, note: "Sobró" }] }).success, true);
+  assert.equal(materialDispositionInputSchema.safeParse({ ...base, lines: [{ lineId: 2, disposition: "USED", quantity: 1 }] }).success, false);
+  assert.equal(materialDispositionInputSchema.safeParse({ ...base, lines: [{ lineId: 2, disposition: "RETURN_REQUESTED", quantity: 0 }] }).success, false);
+  assert.equal(materialDispositionInputSchema.safeParse({ ...base, lines: [{ lineId: 2, disposition: "RETURN_REQUESTED", quantity: 1.00001 }] }).success, false);
+  assert.equal(materialDispositionInputSchema.safeParse({ ...base, lines: [{ lineId: 2, disposition: "RETURN_REQUESTED", note: "  " }] }).success, false);
+});
+
+test("la respuesta con solicitud debe traer la cantidad pedida pendiente", () => {
+  const input = materialDispositionInputSchema.parse({ companyBranchId: 1, id: 7, version: 3, lines: [{ lineId: 2, disposition: "RETURN_REQUESTED", quantity: 2 }] });
+  const request = { quantity: 2, note: null, status: "PENDING" as const, requestedAt: "2026-10-12T10:00:00.000Z", resolvedAt: null, resolutionNote: null, confirmedQuantity: null };
+  const answer = (value: typeof request) => materialReceiptSchema.parse({ ...confirmed, version: 4, products: confirmed.products.map(product => product.id === 2
+    ? { ...product, disposition: "RETURN_REQUESTED", returnRequest: value } : product) });
+  verifyMaterialDispositionResult(input, answer(request));
+  assert.throws(() => verifyMaterialDispositionResult(input, answer({ ...request, quantity: 3 })));
+  // Servidor sin el detalle de la solicitud: basta la marca.
+  verifyMaterialDispositionResult(input, { ...confirmed, version: 4, products: confirmed.products.map(product => product.id === 2 ? { ...product, disposition: "RETURN_REQUESTED" as const } : product) });
+});
+
+test("cantidad escrita, botones − / + y devolución rechazada", () => {
+  assert.equal(parseReturnQuantity("2", 3), 2);
+  assert.equal(parseReturnQuantity(" 1,5 ", 3), 1.5);
+  for (const text of ["0", "4", "1.23456", "-1", "abc", ""]) assert.equal(parseReturnQuantity(text, 3), null, text);
+  assert.equal(stepReturnQuantity(2, 1, 3), 3);
+  assert.equal(stepReturnQuantity(3, 1, 3), 3);
+  assert.equal(stepReturnQuantity(1, -1, 3), 1);
+  assert.equal(stepReturnQuantity(0.5, -1, 0.5), 0.5);
+  const rejected = { ...confirmed.products[0], returnRequest: { quantity: 1, note: null, status: "REJECTED" as const, requestedAt: "2026-10-02T10:00:00.000Z",
+    resolvedAt: "2026-10-03T10:00:00.000Z", resolutionNote: "No llegó", confirmedQuantity: null } };
+  assert.equal(productDispositionState(rejected, false), "REJECTED");
+  assert.equal(productDispositionState(rejected, true), "AUTO_USED");
+});
+
+test("demo: Devolver con cantidad crea la solicitud pendiente y Utilizado la cancela", async () => {
+  const port = createDemoMaterialReceiptPort(9, new Date());
+  const history = await port.materialReceipts(1, "CONFIRMED");
+  const open = history.items.find(item => !item.dispositionClosed)!;
+  const line = open.products[0];
+  const requested = await port.materialDispositions({ companyBranchId: 1, id: open.id, version: open.version, lines: [{ lineId: line.id, disposition: "RETURN_REQUESTED", quantity: line.quantity, note: "Sobró" }] });
+  assert.deepEqual([requested.products[0].returnRequest?.status, requested.products[0].returnRequest?.note], ["PENDING", "Sobró"]);
+  const used = await port.materialDispositions({ companyBranchId: 1, id: open.id, version: requested.version, lines: [{ lineId: line.id, disposition: "USED" }] });
+  assert.equal(used.products[0].returnRequest?.status, "CANCELLED");
 });

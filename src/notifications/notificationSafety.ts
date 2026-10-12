@@ -20,6 +20,39 @@ export function notificationForSession(value: unknown, session: Session): Notifi
   return parsed.data;
 }
 
+/** Explica en español por qué un aviso no corresponde a la sesión (para el diagnóstico); null si corresponde. */
+export function notificationSessionMismatch(value: unknown, session: Session): string | null {
+  const parsed = notificationDataSchema.safeParse(value);
+  if (!parsed.success) {
+    const keys = value !== null && typeof value === "object" ? Object.keys(value).join(",") : typeof value;
+    return `datos no válidos [${parsed.error.issues.slice(0, 3).map(issue => `${issue.path.join(".")}: ${issue.message}`).join("; ")}] campos=${keys}`;
+  }
+  if (session.mode !== "live" || session.user.workerId === null || session.branchId === null) return "sesión sin técnico o sucursal";
+  if (parsed.data.tenantOrigin !== session.tenant.portalOrigin) return `empresa distinta: aviso=${parsed.data.tenantOrigin} sesión=${session.tenant.portalOrigin}`;
+  if (parsed.data.companyBranchId !== session.branchId) return `sucursal distinta: aviso=${parsed.data.companyBranchId} sesión=${session.branchId}`;
+  if (parsed.data.recipient && (parsed.data.recipient.userId !== session.user.id || parsed.data.recipient.workerId !== session.user.workerId)) return "destinatario distinto";
+  return null;
+}
+
+// Diagnóstico del toque de avisos: últimos pasos en memoria, visibles en "Tus avisos" para soporte.
+const tapTrace: string[] = [];
+const tapTraceListeners = new Set<() => void>();
+
+export function traceNotificationTap(step: string): void {
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+  tapTrace.unshift(`${time} ${step}`);
+  if (tapTrace.length > 40) tapTrace.length = 40;
+  tapTraceListeners.forEach(listener => { try { listener(); } catch {} });
+}
+
+export function notificationTapTrace(): string[] { return [...tapTrace]; }
+
+export function subscribeNotificationTapTrace(listener: () => void): () => void {
+  tapTraceListeners.add(listener);
+  return () => { tapTraceListeners.delete(listener); };
+}
+
 export function sameNotification(left: NotificationData, right: NotificationData): boolean {
   return left.eventId === right.eventId && left.tenantOrigin === right.tenantOrigin && left.companyBranchId === right.companyBranchId
     && left.kind === right.kind && left.groupType === right.groupType && left.groupId === right.groupId

@@ -60,8 +60,9 @@ export function createNotificationsRouter(upstream: Upstream, tenantOrigin: stri
     query.set("page", String(page));
     if (unreadOnly === "true") query.set("unreadOnly", "true");
     const result = parseUpstream(notificationInboxSchema, await upstream.request("/mobile-notifications/inbox", { token, query }));
-    if (result.page !== page || result.items.some((item) => item.data.tenantOrigin !== tenantOrigin || item.data.companyBranchId !== companyBranchId)) throw new GatewayError(502, "MOBILE_PUSH_IDENTITY_MISMATCH");
-    res.json(result);
+    if (result.page !== page) throw new GatewayError(502, "MOBILE_PUSH_IDENTITY_MISMATCH");
+    // Si la base de datos es compartida por varias empresas, un aviso ajeno se omite en vez de invalidar toda la bandeja.
+    res.json({ ...result, items: result.items.filter((item) => item.data.tenantOrigin === tenantOrigin && item.data.companyBranchId === companyBranchId) });
   });
   router.patch("/inbox/:id/read", async (req, res) => {
     if (req.body !== undefined) throw new GatewayError(400, "INVALID_INPUT");

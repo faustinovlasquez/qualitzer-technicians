@@ -121,6 +121,8 @@ function fixture() {
     "screens/offline/QueuedNotice": { QueuedNotice: "QueuedNotice" }, "screens/offline/OfflineFileCard": { OfflineFileCard: "OfflineFileCard" },
     "screens/offline/OfflineStatusBar": { OfflineStatusBar: "OfflineStatusBar" }, "screens/offline/OfflineCenterScreen": { OfflineCenterScreen: "OfflineCenterScreen" },
     "screens/creation": {}, "notifications": {}, "screens/notifications/NotificationSettingsScreen": {},
+    // Los permisos al iniciar sesión tienen su propia prueba; aquí no deben consultar la cámara ni la ubicación reales.
+    "notifications/useNotificationPermissionPrompt": { useNotificationPermissionPrompt: () => {} },
     "screens/workDetail/WorkActivities": { WorkActivities: "WorkActivities" }, "screens/creation/CreationScreen": { CreationScreen: "CreationScreen" },
     "screens/creation/CreationSuccess": { CreationSuccess: "CreationSuccess" }, "screens/creation/CreationModal": { CreationModal: "CreationModal" },
     "location/useLocationTracking": { useLocationTracking: () => locationTracking },

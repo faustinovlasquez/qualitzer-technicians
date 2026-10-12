@@ -68,7 +68,12 @@ export function createDemoMaterialReceiptPort(userId: number, now: Date = new Da
       const recordedAt = new Date().toISOString();
       const updated: MaterialReceipt = { ...target, version: target.version + 1, products: target.products.map(product => {
         const change = input.lines.find(line => line.lineId === product.id);
-        return change ? { ...product, disposition: change.disposition, dispositionAt: recordedAt } : { ...product };
+        if (!change) return { ...product };
+        // Igual que el servidor: Devolver crea una solicitud pendiente (por defecto todo lo recibido); Utilizado la cancela.
+        const returnRequest = change.disposition === "RETURN_REQUESTED"
+          ? { quantity: change.quantity ?? product.quantity, note: change.note ?? null, status: "PENDING" as const, requestedAt: recordedAt, resolvedAt: null, resolutionNote: null, confirmedQuantity: null }
+          : product.returnRequest?.status === "PENDING" ? { ...product.returnRequest, status: "CANCELLED" as const, resolvedAt: recordedAt } : product.returnRequest;
+        return { ...product, disposition: change.disposition, dispositionAt: recordedAt, ...(returnRequest ? { returnRequest } : {}) };
       }) };
       confirmed = confirmed.map(item => item.id === updated.id ? updated : item);
       return copy([updated])[0];

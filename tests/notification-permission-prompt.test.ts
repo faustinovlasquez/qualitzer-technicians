@@ -7,56 +7,94 @@ import * as dedupe from "../src/notifications/notificationPresentationDedupe";
 import { loadSource, reactFixture } from "./helpers/tenant-challenge";
 
 type Button = { text: string; onPress?: () => void };
+type Device = { granted: boolean; canAskAgain?: boolean };
+
+const settle = () => new Promise<void>(resolve => setImmediate(resolve));
 
 function fixture() {
   const hooks = reactFixture();
   const alerts: Array<{ title: string; buttons: Button[] }> = [];
-  const native = { Alert: { alert: (title: string, _message: string, buttons: Button[]) => { alerts.push({ title, buttons }); } }, AppState: { currentState: "active" } };
+  const asked: string[] = [];
+  const device: { camera: Device; location: Device } = { camera: { granted: false, canAskAgain: true }, location: { granted: false, canAskAgain: true } };
+  const native = { Alert: { alert: (title: string, _message: string, buttons: Button[]) => { alerts.push({ title, buttons }); } }, AppState: { currentState: "active" }, Platform: { OS: "android" } };
   const module = loadSource<typeof import("../src/notifications/useNotificationPermissionPrompt")>("notifications/useNotificationPermissionPrompt.ts", id => {
     if (id === "react") return hooks.react;
     if (id === "react-native") return native;
+    if (id === "expo-image-picker") return { getCameraPermissionsAsync: async () => device.camera, requestCameraPermissionsAsync: async () => { asked.push("camera"); return device.camera; } };
+    if (id === "expo-location") return { getForegroundPermissionsAsync: async () => device.location, requestForegroundPermissionsAsync: async () => { asked.push("location"); return device.location; } };
     throw new Error(`UNEXPECTED_IMPORT:${id}`);
   });
   const calls = { enable: 0, settings: 0 };
-  const client = { isCurrent: () => true, retryEnable: async () => { calls.enable++; return true; }, openSettings: async () => { calls.settings++; return true; } };
+  // Lo que responde el teléfono al mostrar su ventana de notificaciones.
+  const push = { answer: "granted" as string };
+  const client = {
+    isCurrent: () => true,
+    requestDevicePermission: async () => { asked.push("notifications"); return push.answer; },
+    retryEnable: async () => { calls.enable++; return true; },
+    openSettings: async () => { calls.settings++; return true; },
+  };
   const state = { ready: true, busy: false, optedIn: true, registered: false, permission: "undetermined", status: { enabled: true } } as MobileNotificationState;
   const model = (value: Partial<MobileNotificationState> = {}, storageKey = "tenant-a") => ({ client, state: { ...state, ...value }, storageKey }) as unknown as MobileNotificationsModel;
-  const render = (value: MobileNotificationsModel, allow = true, unlocked = true) => { hooks.render(() => module.useNotificationPermissionPrompt(value, allow, () => unlocked)); hooks.flush(); };
+  const render = async (value: MobileNotificationsModel, allow = true, unlocked = true) => { hooks.render(() => module.useNotificationPermissionPrompt(value, allow, () => unlocked)); hooks.flush(); await settle(); await settle(); await settle(); };
   const press = (label: string) => alerts.at(-1)?.buttons.find(button => button.text === label)?.onPress?.();
-  return { alerts, calls, model, render, press, native };
+  return { alerts, asked, device, push, calls, model, render, press, native };
 }
 
-test("missing permission shows the explanation once and Permitir opens the system dialog through the client", () => {
+test("al iniciar sesión pide, una tras otra, notificaciones, cámara y ubicación con la ventana del teléfono", async () => {
   const current = fixture();
-  current.render(current.model());
-  assert.deepEqual(current.alerts.map(alert => alert.title), ["Activa las notificaciones"]);
-  current.press("Permitir");
-  assert.equal(current.calls.enable, 1);
-  current.render(current.model({ busy: true }));
-  current.render(current.model({ permission: "denied" }));
-  assert.equal(current.alerts.length, 1, "no se repite en la misma sesión");
-  current.render(current.model({ permission: "denied" }, "tenant-b"));
-  assert.equal(current.alerts.length, 2, "una sesión distinta vuelve a avisar");
+  await current.render(current.model());
+  assert.deepEqual(current.asked, ["notifications", "camera", "location"]);
+  assert.equal(current.calls.enable, 1, "con el permiso concedido registra el teléfono en el servidor");
+  assert.equal(current.alerts.length, 0, "no hay un aviso previo: aparece directo la ventana del teléfono");
+  await current.render(current.model({ permission: "denied" }));
+  assert.equal(current.asked.length, 3, "no se repite en la misma sesión");
+  await current.render(current.model({ permission: "denied" }, "tenant-b"));
+  assert.equal(current.asked.length, 6, "una sesión distinta vuelve a pedir");
 });
 
-test("blocked permission offers Ajustes instead of a system dialog", () => {
+test("la ventana de notificaciones aparece aunque el servidor no tenga listo el servicio de avisos", async () => {
   const current = fixture();
-  current.render(current.model({ permission: "blocked" }));
+  await current.render(current.model({ status: { enabled: false } } as Partial<MobileNotificationState>));
+  assert.deepEqual(current.asked, ["notifications", "camera", "location"]);
+  assert.equal(current.calls.enable, 0, "sin servicio en el servidor no intenta registrar el teléfono");
+  const offline = fixture();
+  await offline.render(offline.model({ status: null } as unknown as Partial<MobileNotificationState>));
+  assert.equal(offline.asked[0], "notifications");
+});
+
+test("activa Recibir avisos aunque estuviera desactivado y no vuelve a pedir permisos ya concedidos o bloqueados", async () => {
+  const current = fixture();
+  current.device.camera = { granted: true };
+  current.device.location = { granted: false, canAskAgain: false };
+  await current.render(current.model({ optedIn: false, registered: true, permission: "granted" }));
+  assert.deepEqual(current.asked, ["notifications"]);
+});
+
+test("notificaciones bloqueadas ofrecen Ajustes y se siguen pidiendo cámara y ubicación", async () => {
+  const current = fixture();
+  current.push.answer = "blocked";
+  await current.render(current.model({ permission: "blocked" }));
   assert.equal(JSON.stringify(current.alerts.at(-1)?.buttons.map(button => button.text)), JSON.stringify(["Ahora no", "Abrir ajustes"]));
   current.press("Abrir ajustes");
   assert.deepEqual(current.calls, { enable: 0, settings: 1 });
+  assert.deepEqual(current.asked, ["notifications", "camera", "location"]);
 });
 
-test("no prompt when granted, registered, explicitly disabled, server disabled, locked, busy or in background", () => {
+test("si el teléfono ya está registrado no vuelve a pedir notificaciones; nada si no está listo, bloqueada o en segundo plano", async () => {
   const current = fixture();
-  for (const value of [{ permission: "granted" }, { registered: true }, { optedIn: false }, { status: { enabled: false } }, { ready: false }] as Array<Partial<MobileNotificationState>>) {
-    current.render(current.model(value));
-  }
-  current.render(current.model(), false);
-  current.render(current.model(), true, false);
-  current.native.AppState.currentState = "background";
-  current.render(current.model());
-  assert.equal(current.alerts.length, 0);
+  current.device.camera = { granted: true };
+  current.device.location = { granted: true };
+  await current.render(current.model({ registered: true, permission: "granted" }), true);
+  assert.deepEqual(current.asked, []);
+  assert.equal(current.calls.enable, 0);
+  const idle = fixture();
+  for (const value of [{ ready: false }, { busy: true }] as Array<Partial<MobileNotificationState>>) await idle.render(idle.model(value));
+  await idle.render(idle.model(), false);
+  await idle.render(idle.model(), true, false);
+  idle.native.AppState.currentState = "background";
+  await idle.render(idle.model());
+  assert.deepEqual(idle.asked, []);
+  assert.equal(idle.alerts.length, 0);
 });
 
 test("notifications are enabled by default unless the technician explicitly disabled them", async () => {

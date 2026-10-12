@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import { AppState } from "react-native";
-import { materialDispositionInputSchema, materialReceiptInputSchema, verifyMaterialDispositionResult, verifyMaterialReceiptResult, type MaterialDispositionInput, type MaterialReceipt,
+import { materialDispositionInputSchema, materialReceiptInputSchema, verifyMaterialDispositionResult, verifyMaterialReceiptResult, type MaterialDispositionChange, type MaterialReceipt,
   type MaterialReceiptInput, type MaterialReceiptLocation, type MaterialReceiptPort, type MaterialReceipts } from "../domain/materialReceipts";
 import { captureMaterialReceiptLocation, waitForActiveApp } from "./receiptLocation";
 import { ApiError } from "../infrastructure/errors";
@@ -156,7 +156,7 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
     }
   }
   /** Utilizado / Devolver por material. Requiere conexión: la respuesta del servidor reemplaza la entrega en el historial. */
-  async function dispose(item: MaterialReceipt, lines: MaterialDispositionInput["lines"]): Promise<boolean> {
+  async function dispose(item: MaterialReceipt, lines: MaterialDispositionChange[]): Promise<boolean> {
     if (!ready || disposing.current || !port?.materialDispositions || lines.length === 0) return false;
     if (!sameScope() || !current.current.isAllowed()) return false;
     const operation = Symbol();
@@ -172,6 +172,10 @@ export function useMaterialReceipts(port: Partial<MaterialReceiptPort> | null, u
       if (sameScope()) setHistoryError(code === "CONSUMPTION_DISPOSITION_CLOSED" ? "El plazo de 7 días terminó: los materiales quedaron como utilizados."
         : code === "CONSUMPTION_DISPOSITION_RETURN_PROCESSED" ? "Bodega ya registró la devolución de ese material."
           : code === "CONSUMPTION_VERSION_CONFLICT" ? "La entrega cambió. Actualizamos la lista; vuelve a marcar el material."
+          : code === "CONSUMPTION_RETURN_QUANTITY_EXCEEDED" ? "La cantidad supera lo que recibiste. Revisa la cantidad a devolver."
+          // Un servidor sin la actualización de devoluciones no acepta cantidad parcial ni nota.
+          : code === "INVALID_INPUT" && lines.some(line => line.quantity !== undefined || line.note !== undefined)
+            ? "El servidor todavía no acepta devoluciones parciales ni notas. Pide a soporte actualizarlo o devuelve todo sin nota."
             : `No se pudo guardar. Revisa tu conexión y vuelve a intentarlo.${code ? ` (código: ${code})` : ""}`);
       return false;
     } finally {

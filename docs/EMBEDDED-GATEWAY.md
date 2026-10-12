@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.39
+# @qualitzer/mobile-gateway 1.0.41
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,11 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.39. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.41. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.41 agrega la solicitud de devolución con cantidad: `POST /api/material-receipts/:id/dispositions` acepta en cada línea con `RETURN_REQUESTED` una `quantity` (positiva, hasta 4 decimales) y una `note` opcional; con `USED` se rechazan. Las recepciones incluyen `returnRequest` (cantidad, nota, estado PENDING/CONFIRMED/REJECTED/CANCELLED, motivo y cantidad confirmada). El gateway declara la capacidad al backend con la cabecera `x-qualitzer-return-requests: 1`; sin ella el backend no envía el campo nuevo. **Requiere el backend de la misma entrega.** Sin migraciones.
+
+1.0.40 corrige la bandeja de avisos cuando varias empresas comparten base de datos: `GET /api/notifications/inbox` omite los avisos de otra empresa o sucursal en vez de responder 502 `MOBILE_PUSH_IDENTITY_MISMATCH` para la página completa (una página con número distinto sigue rechazándose). Sin ese cambio, tocar un aviso no abría su destino. El backend de la misma entrega además filtra la bandeja por empresa. Sin migraciones.
 
 1.0.39 agrega el tipo de falla a la entrega técnica de mantenimiento. `POST /api/assignments/maintenance-:id/deliver` con `acknowledgeDelivery: true` acepta `faultType` (`operative | wear | undetermined`) y lo reenvía a `/maintenances/:id/technician-delivery` solo cuando no es null; receptor y firma del cliente siguen rechazados. El contexto de entrega informa `technicianFaultTypeSupported: true`. **Requiere el backend de la misma entrega** (la validación de la entrega técnica acepta `faultType` y guarda `damageType`). Incluye también lo de 1.0.38, que no se publicó por separado.
 

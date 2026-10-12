@@ -3,7 +3,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Animated, Image, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Button, IconButton, type IconName } from "../ui/components";
 import { palette, radius, theme, typography } from "../ui/theme";
-import type { MaterialDisposition, MaterialReceipt, MaterialReceiptFocus } from "../domain/materialReceipts";
+import type { MaterialDispositionChange, MaterialReceipt, MaterialReceiptFocus } from "../domain/materialReceipts";
+import { ReturnRequestDialog } from "./ReturnRequestDialog";
 import type { useMaterialReceipts } from "./useMaterialReceipts";
 import { dispositionDaysLeft, filterReceipts, productDispositionState, receiptDateTime, receiptMoney, receiptQuantity, receiptRelative, receiptSourceIcon,
   receiptWarehouses, type ProductDispositionState, type ReceiptSourceFilter } from "./receiptTimeline";
@@ -21,6 +22,7 @@ const dispositionLook: { [K in ProductDispositionState]: { label: string; icon: 
   AUTO_USED: { label: "Utilizado (automático)", icon: "time", color: palette.success, soft: palette.successSoft },
   RETURN_REQUESTED: { label: "Devolución solicitada", icon: "return-down-back", color: palette.orange, soft: palette.orangeSoft },
   RETURNED: { label: "Devuelto a bodega", icon: "archive", color: palette.info, soft: palette.infoSoft },
+  REJECTED: { label: "Devolución rechazada", icon: "close-circle", color: palette.danger, soft: palette.dangerSoft },
   OPEN: { label: "Sin marcar", icon: "ellipse-outline", color: palette.textMuted, soft: palette.track },
 };
 
@@ -187,9 +189,41 @@ function PendingCard({ item, expanded, disabled, busy, onToggle, onConfirm }: { 
   </View>;
 }
 
+/** Estado de la solicitud de devolución bajo el material: pendiente con su cantidad o rechazada con el motivo. */
+function ReturnStatus({ product, state }: { product: Product; state: ProductDispositionState }) {
+  const request = product.returnRequest;
+  if (state === "RETURN_REQUESTED" && request?.status === "PENDING") {
+    return <View style={[styles.returnStatus, { backgroundColor: palette.orangeSoft }]}>
+      <Ionicons name="time-outline" size={16} color={palette.orange} accessible={false} />
+      <View style={styles.returnStatusText}>
+        <Text style={[styles.returnStatusTitle, { color: palette.orange }]}>{`Pendiente en bodega: ${receiptQuantity(request.quantity, product.unit)}${request.quantity < product.quantity ? ` de ${receiptQuantity(product.quantity, product.unit)}` : ""}`}</Text>
+        {request.note ? <Text style={styles.returnStatusNote}>{`Tu nota: ${request.note}`}</Text> : null}
+      </View>
+    </View>;
+  }
+  if (state === "REJECTED" && request) {
+    return <View style={[styles.returnStatus, { backgroundColor: palette.dangerSoft }]}>
+      <Ionicons name="close-circle-outline" size={16} color={palette.danger} accessible={false} />
+      <View style={styles.returnStatusText}>
+        <Text style={[styles.returnStatusTitle, { color: palette.danger }]}>Bodega rechazó la devolución</Text>
+        {request.resolutionNote ? <Text style={styles.returnStatusNote}>{`Motivo: ${request.resolutionNote}`}</Text> : null}
+        <Text style={styles.returnStatusNote}>Marca el material como utilizado o vuelve a solicitar la devolución.</Text>
+      </View>
+    </View>;
+  }
+  return null;
+}
+
 function ConfirmedCard({ item, expanded, busy, locked, onToggle, onDispose }: { item: MaterialReceipt; expanded: boolean; busy: boolean; locked: boolean; onToggle: () => void;
-  onDispose: (lines: Array<{ lineId: number; disposition: MaterialDisposition }>) => void }) {
+  onDispose: (lines: MaterialDispositionChange[]) => Promise<boolean> }) {
   const [showAll, setShowAll] = useState(false);
+  const [returning, setReturning] = useState<Product | null>(null);
+  // Devolver abre la ventana de cantidad; todo lo recibido y sin nota viaja sin datos extra (compatible con servidores anteriores).
+  const submitReturn = async (product: Product, value: { quantity: number; note: string }) => {
+    const change: MaterialDispositionChange = { lineId: product.id, disposition: "RETURN_REQUESTED",
+      ...(value.quantity < product.quantity ? { quantity: value.quantity } : {}), ...(value.note ? { note: value.note } : {}) };
+    if (await onDispose([change])) setReturning(null);
+  };
   const closed = item.dispositionClosed === true;
   const supported = item.dispositionDeadline !== undefined;
   const days = dispositionDaysLeft(item.dispositionDeadline);
@@ -222,24 +256,35 @@ function ConfirmedCard({ item, expanded, busy, locked, onToggle, onDispose }: { 
           const state = productDispositionState(product, closed);
           const look = dispositionLook[state];
           const actionable = editable && state !== "RETURNED";
-          return <ProductRow key={product.id} product={product} divider={index > 0} footer={actionable ? <View style={styles.dispositions}>
-            {(["USED", "RETURN_REQUESTED"] as const).map(value => {
-              const active = state === value;
-              const color = value === "USED" ? palette.success : palette.orange;
-              return <Pressable key={value} accessibilityRole="button" accessibilityLabel={`${value === "USED" ? "Utilizado" : "Devolver"} ${product.name}`}
-                accessibilityState={{ selected: active, disabled: locked || active }} disabled={locked || active}
-                onPress={() => onDispose([{ lineId: product.id, disposition: value }])}
-                style={({ pressed }) => [styles.dispositionButton, { borderColor: color }, active && { backgroundColor: color }, locked && !active && styles.dim, pressed && styles.pressed]}>
-                <Ionicons name={value === "USED" ? (active ? "checkmark-circle" : "checkmark-circle-outline") : (active ? "return-down-back" : "return-down-back-outline")} size={16}
-                  color={active ? palette.white : color} accessible={false} />
-                <Text style={[styles.dispositionText, { color: active ? palette.white : color }]}>{value === "USED" ? "Utilizado" : "Devolver"}</Text>
-              </Pressable>;
-            })}
-          </View> : supported ? <View style={styles.dispositionState}><Pill icon={look.icon} label={look.label} color={look.color} soft={look.soft} /></View> : null} />;
+          const returned = state === "RETURNED" ? product.returnRequest?.confirmedQuantity ?? product.returnedQuantity ?? 0 : 0;
+          return <ProductRow key={product.id} product={product} divider={index > 0} footer={actionable ? <>
+            <ReturnStatus product={product} state={state} />
+            <View style={styles.dispositions}>
+              {(["USED", "RETURN_REQUESTED"] as const).map(value => {
+                const active = state === value;
+                // Con la solicitud pendiente, Devolver permite cambiar la cantidad o la nota.
+                const editing = value === "RETURN_REQUESTED" && active && product.returnRequest?.status === "PENDING";
+                const color = value === "USED" ? palette.success : palette.orange;
+                const label = value === "USED" ? "Utilizado" : editing ? "Cambiar" : "Devolver";
+                return <Pressable key={value} accessibilityRole="button" accessibilityLabel={`${label} ${product.name}`}
+                  accessibilityState={{ selected: active, disabled: locked || (active && !editing) }} disabled={locked || (active && !editing)}
+                  onPress={() => { if (value === "USED") void onDispose([{ lineId: product.id, disposition: "USED" }]); else setReturning(product); }}
+                  style={({ pressed }) => [styles.dispositionButton, { borderColor: color }, active && { backgroundColor: color }, locked && !active && styles.dim, pressed && styles.pressed]}>
+                  <Ionicons name={value === "USED" ? (active ? "checkmark-circle" : "checkmark-circle-outline") : editing ? "create-outline" : (active ? "return-down-back" : "return-down-back-outline")} size={16}
+                    color={active ? palette.white : color} accessible={false} />
+                  <Text style={[styles.dispositionText, { color: active ? palette.white : color }]}>{label}</Text>
+                </Pressable>;
+              })}
+            </View>
+          </> : supported ? <View style={styles.dispositionState}><Pill icon={look.icon}
+            label={state === "RETURNED" && returned > 0 ? `${look.label} · ${receiptQuantity(returned, product.unit)}` : look.label} color={look.color} soft={look.soft} /></View> : null} />;
         })}
         <MoreProducts hidden={item.products.length - VISIBLE_PRODUCTS} showAll={showAll} onPress={() => setShowAll(value => !value)} />
       </View>
-      {busy ? <Text style={styles.saving}>Guardando…</Text> : requested > 0 && !closed ? <Text style={styles.saving}>Bodega verá la solicitud de devolución y la registrará al recibir el material.</Text> : null}
+      {busy ? <Text style={styles.saving}>Guardando…</Text> : requested > 0 && !closed ? <Text style={styles.saving}>Bodega recibió tu solicitud y la confirmará al recibir el material.</Text> : null}
+      <ReturnRequestDialog product={returning} busy={busy}
+        initial={returning?.returnRequest?.status === "PENDING" ? { quantity: returning.returnRequest.quantity, note: returning.returnRequest.note } : null}
+        onCancel={() => setReturning(null)} onSubmit={value => { if (returning) void submitReturn(returning, value); }} />
     </View></FadeIn> : <View style={styles.collapsedFoot}>
       <Text style={styles.collapsedText}>{supported && !closed && open.length > 0 ? `${open.length} sin marcar · ${days ?? 7} ${days === 1 ? "día" : "días"} de plazo` : `${item.products.length} ${item.products.length === 1 ? "material" : "materiales"}`}</Text>
       <Ionicons name="chevron-forward" size={15} color={palette.textMuted} accessible={false} />
@@ -356,7 +401,7 @@ export function MaterialReceiptsScreen({ receipt, onBack, focus }: { receipt: Re
         {tab === "pending"
           ? <PendingCard item={item} expanded={isExpanded(item.id, index)} disabled={blocked} busy={receipt.busy} onToggle={() => toggle(item.id, index)} onConfirm={() => void receipt.confirm([item])} />
           : <ConfirmedCard item={item} expanded={isExpanded(item.id, index)} busy={receipt.disposingId === item.id} locked={receipt.disposingId !== null}
-            onToggle={() => toggle(item.id, index)} onDispose={lines => void receipt.dispose(item, lines)} />}
+            onToggle={() => toggle(item.id, index)} onDispose={lines => receipt.dispose(item, lines)} />}
       </FadeIn>)}
       {tab === "pending" && open.length > 0 ? <View style={styles.hint}><Ionicons name="location-outline" size={15} color={palette.textSecondary} accessible={false} />
         <Text style={styles.hintText}>Al confirmar se registra tu ubicación. Si no está disponible, se guarda el motivo.</Text></View> : null}
@@ -447,6 +492,8 @@ const styles = StyleSheet.create({
   dispositionButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 38, borderRadius: radius.sm, borderWidth: 1.5 },
   dispositionText: { fontSize: 13, fontWeight: "800" },
   dispositionState: { flexDirection: "row", paddingLeft: 58 },
+  returnStatus: { flexDirection: "row", gap: 8, marginLeft: 58, padding: 9, borderRadius: radius.sm },
+  returnStatusText: { flex: 1, gap: 2 }, returnStatusTitle: { fontSize: 13, fontWeight: "800" }, returnStatusNote: { ...typography.caption, color: palette.textSecondary },
   saving: { ...typography.caption, color: palette.textSecondary },
   backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.45)" },
   sheet: { gap: 4, padding: 16, paddingBottom: 28, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, backgroundColor: palette.surface },

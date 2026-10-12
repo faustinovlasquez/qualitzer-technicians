@@ -40,6 +40,8 @@ interface RequestOptions {
   query?: URLSearchParams;
   json?: unknown;
   form?: FormData;
+  /** Capacidades que el gateway declara al backend (por ejemplo, entender solicitudes de devolución con cantidad). */
+  capabilities?: Record<`x-qualitzer-${string}`, string>;
 }
 
 async function readBody(response: Response): Promise<string> {
@@ -91,6 +93,7 @@ export class Upstream {
     const headers = new Headers({ Origin: this.config.tenantOrigin, "User-Agent": MOBILE_USER_AGENT, Accept: "application/json", "Cache-Control": "no-cache" });
     if (options.token) headers.set("Authorization", options.token);
     if (options.json !== undefined) headers.set("Content-Type", "application/json");
+    for (const [name, value] of Object.entries(options.capabilities ?? {})) headers.set(name, value);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), path === "/companies/branding" || /^\/branches\/[1-9]\d*$/.test(path) ? 2_500 : options.form ? 120_000 : 25_000);
     timeout.unref();
