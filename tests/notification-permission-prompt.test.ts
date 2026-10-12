@@ -13,10 +13,12 @@ const settle = () => new Promise<void>(resolve => setImmediate(resolve));
 
 function fixture() {
   const hooks = reactFixture();
-  const alerts: Array<{ title: string; buttons: Button[] }> = [];
+  const alerts: Array<{ title: string; message: string; buttons: Button[] }> = [];
+  const appListeners: Array<(state: string) => void> = [];
   const asked: string[] = [];
   const device: { camera: Device; location: Device } = { camera: { granted: false, canAskAgain: true }, location: { granted: false, canAskAgain: true } };
-  const native = { Alert: { alert: (title: string, _message: string, buttons: Button[]) => { alerts.push({ title, buttons }); } }, AppState: { currentState: "active" }, Platform: { OS: "android" } };
+  const native = { Alert: { alert: (title: string, message: string, buttons: Button[]) => { alerts.push({ title, message, buttons }); } }, Platform: { OS: "android" },
+    AppState: { currentState: "active", addEventListener: (_event: string, listener: (state: string) => void) => { appListeners.push(listener); return { remove: () => undefined }; } } };
   const module = loadSource<typeof import("../src/notifications/useNotificationPermissionPrompt")>("notifications/useNotificationPermissionPrompt.ts", id => {
     if (id === "react") return hooks.react;
     if (id === "react-native") return native;
@@ -26,10 +28,11 @@ function fixture() {
   });
   const calls = { enable: 0, settings: 0 };
   // Lo que responde el teléfono al mostrar su ventana de notificaciones.
-  const push = { answer: "granted" as string };
+  const push = { answer: "granted" as string, optedOut: false };
   const client = {
     isCurrent: () => true,
-    requestDevicePermission: async () => { asked.push("notifications"); return push.answer; },
+    // Con "Recibir avisos" apagado a propósito el cliente no muestra la ventana del teléfono.
+    requestDevicePermission: async () => { if (!push.optedOut) asked.push("notifications"); return { permission: push.answer, optedOut: push.optedOut }; },
     retryEnable: async () => { calls.enable++; return true; },
     openSettings: async () => { calls.settings++; return true; },
   };
@@ -37,7 +40,9 @@ function fixture() {
   const model = (value: Partial<MobileNotificationState> = {}, storageKey = "tenant-a") => ({ client, state: { ...state, ...value }, storageKey }) as unknown as MobileNotificationsModel;
   const render = async (value: MobileNotificationsModel, allow = true, unlocked = true) => { hooks.render(() => module.useNotificationPermissionPrompt(value, allow, () => unlocked)); hooks.flush(); await settle(); await settle(); await settle(); };
   const press = (label: string) => alerts.at(-1)?.buttons.find(button => button.text === label)?.onPress?.();
-  return { alerts, asked, device, push, calls, model, render, press, native };
+  /** La app vuelve al frente: avisa a los oyentes como lo haría el teléfono. */
+  const foreground = () => { for (const listener of appListeners) listener("active"); };
+  return { alerts, asked, device, push, calls, model, render, press, native, foreground };
 }
 
 test("al iniciar sesión pide, una tras otra, notificaciones, cámara y ubicación con la ventana del teléfono", async () => {
@@ -95,6 +100,55 @@ test("si el teléfono ya está registrado no vuelve a pedir notificaciones; nada
   await idle.render(idle.model());
   assert.deepEqual(idle.asked, []);
   assert.equal(idle.alerts.length, 0);
+});
+
+test("cámara y ubicación bloqueadas: un solo aviso con la lista y acceso a Ajustes", async () => {
+  const current = fixture();
+  current.device.camera = { granted: false, canAskAgain: false };
+  current.device.location = { granted: false, canAskAgain: false };
+  await current.render(current.model({ registered: true, permission: "granted" }));
+  assert.deepEqual(current.asked, [], "el teléfono ya no deja mostrar su ventana");
+  assert.equal(current.alerts.length, 1);
+  assert.match(current.alerts[0].message, /^Cámara y Ubicación están bloqueados/);
+  current.press("Abrir ajustes");
+  assert.equal(current.calls.settings, 1);
+});
+
+test("al volver a la app revisa de nuevo los permisos, como máximo cada 5 minutos", async () => {
+  const current = fixture();
+  const realNow = Date.now;
+  try {
+    await current.render(current.model());
+    assert.deepEqual(current.asked, ["notifications", "camera", "location"]);
+    current.device.camera = { granted: false, canAskAgain: true };
+    current.foreground();
+    await current.render(current.model());
+    assert.equal(current.asked.length, 3, "recién revisado: no vuelve a preguntar");
+    const later = realNow() + 6 * 60_000;
+    Date.now = () => later;
+    current.foreground();
+    await current.render(current.model());
+    assert.deepEqual(current.asked.slice(3), ["notifications", "camera", "location"], "el técnico desactivó la cámara en Ajustes: se vuelve a pedir");
+  } finally { Date.now = realNow; }
+});
+
+test("permissionList arma la lista en español", async () => {
+  const { permissionList } = loadSource<typeof import("../src/notifications/useNotificationPermissionPrompt")>("notifications/useNotificationPermissionPrompt.ts", id => {
+    if (id === "react") return reactFixture().react;
+    return {};
+  });
+  assert.equal(permissionList(["Cámara"]), "Cámara");
+  assert.equal(permissionList(["Notificaciones", "Cámara", "Ubicación"]), "Notificaciones, Cámara y Ubicación");
+});
+
+test("si el técnico apagó Recibir avisos no se reactiva ni se avisa como bloqueado; cámara y ubicación se revisan igual", async () => {
+  const current = fixture();
+  current.push.optedOut = true;
+  current.push.answer = "blocked";
+  await current.render(current.model({ optedIn: false, registered: false }));
+  assert.deepEqual(current.asked, ["camera", "location"]);
+  assert.equal(current.calls.enable, 0, "no vuelve a registrar el teléfono");
+  assert.equal(current.alerts.length, 0, "no insiste con las notificaciones");
 });
 
 test("notifications are enabled by default unless the technician explicitly disabled them", async () => {

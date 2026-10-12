@@ -295,16 +295,26 @@ export class MobileNotificationClient {
   /**
    * Muestra la ventana del teléfono para permitir notificaciones y deja "Recibir avisos" activado, sin depender del
    * servidor: el registro del dispositivo se completa después, cuando el servicio de avisos esté disponible.
+   * Si el técnico apagó "Recibir avisos" a propósito, se respeta: no se pregunta ni se vuelve a encender (optedOut).
    * Devuelve el permiso resultante ("blocked" si el teléfono ya no deja preguntar).
    */
-  requestDevicePermission = async (): Promise<NotificationPermission> => {
+  requestDevicePermission = async (): Promise<{ permission: NotificationPermission; optedOut: boolean }> => {
     let permission: NotificationPermission = this.state.permission;
+    let optedOut = false;
     await this.run(async () => {
       this.requireInteraction();
       const { adapter, storageKey } = this.options;
       if (adapter.platform === "unsupported") return;
+      if (!this.consentLoaded) {
+        const optedIn = await notificationReadWithTimeout(adapter.readConsent(storageKey));
+        this.requireCurrent();
+        this.consentLoaded = true;
+        this.update({ optedIn });
+      }
       permission = await notificationReadWithTimeout(adapter.getPermission());
       this.requireCurrent();
+      this.update({ permission });
+      if (!this.state.optedIn) { optedOut = true; return; }
       if (permission !== "blocked" && !permissionAllowsPush(permission)) {
         await adapter.prepareChannel();
         this.requireCurrent();
@@ -319,7 +329,7 @@ export class MobileNotificationClient {
       this.consentLoaded = true;
       this.update({ optedIn: true });
     });
-    return permission;
+    return { permission, optedOut };
   };
 
   savePreferences = (preferences: NotificationPreferences): Promise<boolean> => this.run(async () => {

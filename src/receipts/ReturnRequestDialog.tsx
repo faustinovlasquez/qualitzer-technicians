@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Animated, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, type IconName } from "../ui/components";
 import { palette, radius, typography } from "../ui/theme";
 import type { MaterialReceipt } from "../domain/materialReceipts";
@@ -30,6 +31,8 @@ function Consequence({ icon, color, soft, text }: { icon: IconName; color: strin
  */
 export function ReturnRequestDialog({ product, initial, busy, onCancel, onSubmit }: { product: Product | null; initial?: { quantity: number; note: string | null } | null;
   busy: boolean; onCancel: () => void; onSubmit: (value: { quantity: number; note: string }) => void }) {
+  // Ventana centrada que respeta la barra de estado y los botones del teléfono.
+  const insets = useSafeAreaInsets();
   const max = product?.quantity ?? 0;
   const [step, setStep] = useState<"quantity" | "confirm">("quantity");
   const [text, setText] = useState("");
@@ -46,7 +49,8 @@ export function ReturnRequestDialog({ product, initial, busy, onCancel, onSubmit
   const step1 = (delta: 1 | -1) => setText(quantityText(stepReturnQuantity(quantity ?? (delta === 1 ? 0 : max), delta, max)));
   const partial = quantity !== null && quantity < max;
   return <Modal visible={product !== null} transparent animationType="fade" onRequestClose={() => { if (!busy) onCancel(); }}>
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.backdrop}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={[styles.backdrop, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
       <View style={styles.sheet} accessibilityViewIsModal>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.head}>
@@ -118,9 +122,9 @@ export function ReturnRequestDialog({ product, initial, busy, onCancel, onSubmit
 
 const styles = StyleSheet.create({
   flex: { flex: 1 }, pressed: { opacity: 0.7 },
-  backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.45)" },
-  sheet: { maxHeight: "92%", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, backgroundColor: palette.surface },
-  content: { padding: 18, paddingBottom: 28, gap: 14 },
+  backdrop: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 16, backgroundColor: "rgba(0,0,0,0.45)" },
+  sheet: { width: "100%", maxWidth: 480, maxHeight: "100%", borderRadius: radius.lg, backgroundColor: palette.surface, overflow: "hidden" },
+  content: { padding: 18, gap: 14 },
   head: { flexDirection: "row", alignItems: "center", gap: 12 },
   headIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: palette.orangeSoft },
   headText: { flex: 1, minWidth: 0 }, title: { ...typography.label, fontSize: 17, color: palette.heading }, subtitle: { ...typography.caption, color: palette.textSecondary },
