@@ -55,6 +55,12 @@ test("checklist and evidence routes are separate from parent scroll and inside k
         assertHosted(node);
         let fallback = node.whenFalse;
         while (ts.isConditionalExpression(fallback)) fallback = fallback.whenFalse;
+        // La pestaña entra con la transición común (FadeIn), que envuelve directamente al ScrollView.
+        if (ts.isJsxElement(fallback) && fallback.openingElement.tagName.getText(ast) === "FadeIn") {
+          const inner = fallback.children.find(ts.isJsxElement);
+          assert.ok(inner !== undefined);
+          fallback = inner;
+        }
         assert.ok(ts.isJsxElement(fallback) && fallback.openingElement.tagName.getText(ast) === "ScrollView");
       }
     }

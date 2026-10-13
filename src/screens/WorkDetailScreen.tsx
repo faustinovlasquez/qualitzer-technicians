@@ -42,6 +42,8 @@ import { WorkActivities, type WorkActivityActions } from "./workDetail/WorkActiv
 import { PrivateModal } from "../security/DeviceSecurityContext";
 import { CreationScreen } from "./creation/CreationScreen";
 import { workEditDocumentSchema, type WorkEditDocument, type WorkEditInput, type CreationOptionsQuery, type CreationOptions } from "../domain/creation";
+import { FadeIn } from "../ui/motion";
+import { useHeroCollapsed } from "../ui/heroPreference";
 
 export { clearWorkDetailDrafts, workDetailDraftKey } from "./workDetail/useWorkDraft";
 
@@ -199,13 +201,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const hasPendingOperations = timerPending || pendingDeliveryCount > 0;
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "work");
   const [sectionsOpen, setSectionsOpen] = useState(false);
-  const [heroCollapsed, setHeroCollapsed] = useState(false);
-  // Al bajar la tarjeta se comprime a una línea con el título; al volver arriba se expande. Entre medio el técnico puede abrirla o cerrarla.
-  const heroScrolled = useRef(false);
-  function heroOnScroll(y: number): void {
-    if (!heroScrolled.current && y > 60) { heroScrolled.current = true; setHeroCollapsed(true); }
-    else if (heroScrolled.current && y <= 4) { heroScrolled.current = false; setHeroCollapsed(false); }
-  }
+  // El técnico decide si minimiza la tarjeta; la decisión se conserva al salir y volver a entrar.
+  const [heroCollapsed, toggleHero] = useHeroCollapsed("work");
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [target, setTarget] = useState<string | undefined>();
   const viewHistory = useRef<Array<{ tab: Tab; target?: string; checklistId?: number }>>([]);
@@ -679,7 +676,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       {plainText(work.specialty) ? <View style={styles.heroBadge}><Text style={styles.heroBadgeText} numberOfLines={1}>{plainText(work.specialty)}</Text></View> : null}
       <View style={[styles.heroStatus, { backgroundColor: statusColors[desiredStatus].soft }]}><Text style={[styles.heroStatusText, { color: statusColors[desiredStatus].text }]}>{statusLabel}</Text></View>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={heroCollapsed ? "Expandir tarjeta del trabajo" : "Minimizar tarjeta del trabajo"} accessibilityState={{ expanded: !heroCollapsed }} hitSlop={10} onPress={() => setHeroCollapsed(value => !value)} style={({ pressed }) => [styles.heroToggle, pressed && styles.heroCellPressed]} testID="work-hero-toggle">
+      <Pressable accessibilityRole="button" accessibilityLabel={heroCollapsed ? "Expandir tarjeta del trabajo" : "Minimizar tarjeta del trabajo"} accessibilityState={{ expanded: !heroCollapsed }} hitSlop={10} onPress={toggleHero} style={({ pressed }) => [styles.heroToggle, pressed && styles.heroCellPressed]} testID="work-hero-toggle">
         <Ionicons name={heroCollapsed ? "chevron-down" : "chevron-up"} size={16} color={palette.white} accessible={false} />
       </Pressable>
     </View>
@@ -776,7 +773,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => navigateTab("evidence", id)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /></View> : null}
-      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : <ScrollView key={tab} ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; heroOnScroll(event.nativeEvent.contentOffset.y); }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
+      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : <FadeIn key={tab} style={styles.screen}><ScrollView ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
           {mode === "demo" ? <Notice message="Modo demostración · los cambios y confirmaciones son locales, no se envían a Qualitzer." /> : null}
           {props.workEditor && !readOnly && tab !== "work" ? <Button title="Editar trabajo" icon="create-outline" variant="secondary" disabled={locked || !online || hasPendingOperations} onPress={() => void openEditor()} /> : null}
           {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
@@ -819,7 +816,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             {tab === "comments" ? <CommentsTab scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:comments`} resourceKey={resourceKey} mode={mode} busy={locked || staleReadOnly} pending={props.offline !== undefined ? pendingComments : undefined} offlineReady={offlineReady} onLoad={props.onLoadComments} onSubmit={props.onAddComment} /> : null}
           {tab === "equipment" ? <EquipmentTab group={group} work={work} locationPort={props.equipmentLocation} identity={identity} disabled={locked || readOnly || hasPendingOperations} online={online} onAssociate={props.workEditor && !readOnly ? () => void openEditor() : undefined} /> : null}
           {!compactDetail ? <Text style={styles.lastLoaded}>Última carga: {loadedAt}</Text> : null}
-        </ScrollView>}
+        </ScrollView></FadeIn>}
         {tab !== "checklist" && tab !== "evidence" && !activityPanelOpen ? <View style={styles.executionFooter} testID="work-execution-footer">
           <View style={styles.executionButtons}>
             {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}

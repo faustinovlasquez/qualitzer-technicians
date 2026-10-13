@@ -54,7 +54,7 @@ export function AssignmentOrderSummary({ group, collapsed = false, onToggle }: {
       <Text accessibilityRole="header" style={styles.heroTitle} numberOfLines={collapsed ? 1 : 2}>{title}</Text>
       {collapsed ? <Text style={styles.heroCollapsedProgress}>{completed}/{total} · {progress}%</Text> : null}
     </View>
-    {collapsed ? null : <View style={styles.heroBody}>
+    {collapsed ? null : <><View style={styles.heroBody}>
       <View style={styles.heroColumn}>
         <HeroFact label="Equipo" value={equipmentLabel(group.equipment)} />
         <HeroFact label="Cliente" value={group.customerName?.trim() ? group.customerName : "Cliente no informado"} />
@@ -75,11 +75,11 @@ export function AssignmentOrderSummary({ group, collapsed = false, onToggle }: {
           </View>
         </View>
       </View>
-    </View>}
-    {!collapsed && closed && remaining > 0 ? <View style={styles.heroWarning}>
+    </View>
+    {closed && remaining > 0 ? <View style={styles.heroWarning}>
       <Ionicons name="information-circle-outline" size={16} color={palette.amber} accessible={false} />
       <Text style={styles.heroWarningText}>{direct ? "Asignación cerrada" : maintenance ? "Mantenimiento cerrado" : "OT cerrada"} con {remaining} {remaining === 1 ? "trabajo sin finalizar" : "trabajos sin finalizar"}. El estado de la orden no equivale al avance de sus trabajos.</Text>
-    </View> : null}
+    </View> : null}</>}
   </LinearGradient>;
 }
 
@@ -188,15 +188,15 @@ const styles = StyleSheet.create({
   heroFill: { height: "100%", backgroundColor: palette.teal, borderRadius: radius.pill },
   heroPercent: { fontSize: 11, fontWeight: "800", color: palette.white, fontVariant: ["tabular-nums"] },
   heroWarning: { flexDirection: "row", alignItems: "flex-start", gap: 6, padding: 8, borderRadius: radius.sm, backgroundColor: palette.amberSoft },
-  heroWarningText: { fontSize: 11, lineHeight: 15, color: palette.amber, flex: 1 },
-  codes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
-  caption: { ...typography.caption, color: palette.textSecondary },
+  heroWarningText: { fontSize: 11, lineHeight: 15, color: palette.amber, flex: 1 },
+  codes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  caption: { ...typography.caption, color: palette.textSecondary },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
   progressCount: { ...typography.caption, color: palette.primary, fontWeight: "700" },
   progressTrack: { height: 7, borderRadius: radius.pill, backgroundColor: palette.track, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: palette.teal, borderRadius: radius.pill },
   warning: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, borderRadius: radius.sm, backgroundColor: palette.amberSoft },
-  warningText: { ...typography.caption, color: palette.amber, flex: 1 },
+  warningText: { ...typography.caption, color: palette.amber, flex: 1 },
   orderCard: { gap: 10, padding: 12, borderRadius: 12, overflow: "hidden" },
   code: { ...typography.caption, fontWeight: "800", color: palette.primary, letterSpacing: 0.5, backgroundColor: palette.primarySoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, overflow: "hidden" },
   typeLine: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: -4 },

@@ -152,6 +152,9 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const [materialReceiptFocus, setMaterialReceiptFocus] = useState<MaterialReceiptFocus | null>(null);
   // Error al abrir un aviso: se muestra aparte del estado de la jornada.
   const [noticeError, setNoticeError] = useState<string | null>(null);
+  // Mientras se abre el destino de un aviso tocado se muestra una capa de carga.
+  const [notificationOpening, setNotificationOpening] = useState(false);
+  const notificationOpenings = useRef(0);
   // Cronómetros en curso según el servidor, sin importar el rango de fechas cargado.
   const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
   // Cronómetros pausados desde el aviso: no se vuelven a mostrar hasta que el servidor deje de informarlos (la pausa puede
@@ -557,6 +560,17 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   }
 
   async function openNotification(payload: NotificationData, context: NotificationOpenContext): Promise<boolean> {
+    if (!notificationContextIsCurrent(context)) return await openNotificationTarget(payload, context);
+    notificationOpenings.current += 1;
+    setNotificationOpening(true);
+    try { return await openNotificationTarget(payload, context); }
+    finally {
+      notificationOpenings.current -= 1;
+      if (notificationOpenings.current === 0) setNotificationOpening(false);
+    }
+  }
+
+  async function openNotificationTarget(payload: NotificationData, context: NotificationOpenContext): Promise<boolean> {
     const current = state.current.session;
     const repo = repository.current;
     if (!notificationContextIsCurrent(context) || !current || !repo || !notificationForSession(payload, current)) {
@@ -1809,7 +1823,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     receiptPort: remoteRepository(repository.current),
     diagnosticsPort: remoteRepository(repository.current) as (TechnicianRepository & Partial<import("../domain/diagnostics").AppErrorPort>) | null,
     materialReceiptFocus,
-    noticeError, dismissNoticeError: () => setNoticeError(null),
+    noticeError, dismissNoticeError: () => setNoticeError(null), notificationOpening,
     setProfileEditing: (open: boolean) => { profileEditing.current = open; }, activeTimers, openActiveTimer, pauseActiveTimer, pauseLoadedWork,
     agendaPendingDates: agendaRead?.scope === `${sessionVersion.current}:${session?.branchId}:${range.startDate}:${range.endDate}` ? agendaRead.pendingDates : undefined,
     consumeOrderDeliveryIntent,

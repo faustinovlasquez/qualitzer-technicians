@@ -17,6 +17,7 @@ import { InfoBlock, infoStyles } from "./AssignmentInfoBlock";
 import { equipmentLabel, fullDate, safeCount, scheduleTime, statusTones } from "./assignmentPresentation";
 import { localTimerElapsedSeconds } from "../../offline/queueIntentions";
 import { completionForWork, completionStatusLabel } from "../offline/offlineUi";
+import { animateNextLayout } from "../../ui/motion";
 
 export interface AssignmentWorkCardProps {
   group: AssignmentGroup;
@@ -89,7 +90,7 @@ function Description({ text }: { text: string }) {
   const long = text.length > 90 || text.includes("\n");
   return <View style={styles.description}>
     <Text style={styles.descriptionText} numberOfLines={expanded ? undefined : 2}>{text}</Text>
-    {long ? <Pressable accessibilityRole="button" accessibilityLabel={expanded ? "Leer menos de la descripción" : "Leer más de la descripción"} hitSlop={8} onPress={() => setExpanded(value => !value)}>
+    {long ? <Pressable accessibilityRole="button" accessibilityLabel={expanded ? "Leer menos de la descripción" : "Leer más de la descripción"} hitSlop={8} onPress={() => { animateNextLayout(); setExpanded(value => !value); }}>
       <Text style={styles.readMore}>{expanded ? "Leer menos" : "Leer más"}</Text>
     </Pressable> : null}
   </View>;

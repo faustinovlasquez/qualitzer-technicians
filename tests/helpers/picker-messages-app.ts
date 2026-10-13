@@ -26,6 +26,7 @@ export function pickerAppRootFixture(security: () => DeviceSecurityUi) {
     ["./src/application/useTechnicianApp", { useTechnicianApp: (access: { allowed: boolean; isAllowed(): boolean }) => { accessCalls.push(access); return model; } }],
     ["./src/security/DeviceSecurityContext", { useDeviceSecurity: security, PrivateModal: "Modal" }],
     ["./src/ui/theme", { palette: {} }], ["./src/ui/components", { EmptyState: "EmptyState", Button: "Button" }],
+    ["./src/ui/motion", { FadeIn: "FadeIn", animateNextLayout: () => {} }],
     ["./src/infrastructure/gatewayConfig", { gatewayConfiguration: { locked: true } }],
     ["./src/receipts/receiptTimeline", { pendingMaterialCount: () => 0 }], ["./src/ui/BranchSwitcher", { BranchSwitcher: "BranchSwitcher" }], ["./src/receipts/demoReceipts", { createDemoMaterialReceiptPort: () => ({}) }],
     ["./src/notifications/runningTimers", { snapshotActiveTimers: () => [] }],

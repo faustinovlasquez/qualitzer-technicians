@@ -8,6 +8,10 @@ import { OfflineQueuedError } from "../../src/domain/offline";
 import { loadSource } from "./tenant-challenge";
 import { agendaReactFixture } from "./agenda-load-lifecycle";
 
+/** Movimiento de la app (ui/motion) en pruebas: sin animación; FadeIn queda como elemento observable. */
+export const motionStub = { MOTION: { fast: 0, base: 0, slow: 0 }, FadeIn: "FadeIn", animateNextLayout: () => {} };
+/** Preferencia de la tarjeta minimizada (ui/heroPreference) en pruebas: expandida y sin almacenamiento. */
+export const heroPreferenceStub = { useHeroCollapsed: () => [false, () => {}] };
 export const uiScope = { groupId: "direct-11", workId: "11", companyBranchId: 1, startDate: "2026-09-01", endDate: "2026-09-01" };
 export const uiOperation = { id: "00000000-0000-4000-8000-000000000001", createdAt: 1000, attempts: 0, nextAttemptAt: 0, status: "pending" as const, scope: uiScope };
 export function uiSnapshot(operations: OfflineOperation[] = []): OfflineSnapshot {
@@ -65,6 +69,8 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id === "expo-linear-gradient") return { LinearGradient: "LinearGradient" };
     if (id === "react-native-safe-area-context") return { SafeAreaView: "SafeAreaView", useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
     if (id.endsWith("/ui/components")) return { Badge: "Badge", BodyText: "BodyText", Button: "Button", Card: "Card", Field: "Field", IconButton: "IconButton", SectionTitle: "SectionTitle" };
+    if (id.endsWith("/ui/motion")) return motionStub;
+    if (id.endsWith("/ui/heroPreference")) return heroPreferenceStub;
     if (id.endsWith("/ui/time/TimeField")) return { TimeField: "TimeField" };
     if (id.endsWith("/ui/time/NumericSelectField")) return { NumericSelectField: "NumericSelectField", DayOffsetField: "DayOffsetField" };
     if (id.endsWith("/creation/CreationDatePicker")) return { CreationDatePicker: "CreationDatePicker" };

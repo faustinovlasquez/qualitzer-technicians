@@ -11,6 +11,8 @@ import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconNam
 import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
 import { SessionContextBar } from "../ui/SessionContextBar";
 import { palette, radius, theme, typography } from "../ui/theme";
+import { FadeIn } from "../ui/motion";
+import { useHeroCollapsed } from "../ui/heroPreference";
 import { AssignmentOrderSummary } from "./orders/AssignmentOrderCard";
 import { AssignmentWorkCard } from "./orders/AssignmentWorkCard";
 import { OrderMaterialsTab } from "./orders/OrderMaterialsTab";
@@ -78,13 +80,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const { group, tenant, branchName, mode, busy, initialTab = "works", onBack, onOpenWork, onWorkStatus, onRefresh } = props;
   const [tab, setTab] = useState<OrderTab>(initialTab);
   const [sectionsOpen, setSectionsOpen] = useState(false);
-  const [heroCollapsed, setHeroCollapsed] = useState(false);
-  // Igual que en el detalle del trabajo: al bajar la tarjeta se comprime y al volver arriba se expande.
-  const heroScrolled = useRef(false);
-  function heroOnScroll(y: number): void {
-    if (!heroScrolled.current && y > 60) { heroScrolled.current = true; setHeroCollapsed(true); }
-    else if (heroScrolled.current && y <= 4) { heroScrolled.current = false; setHeroCollapsed(false); }
-  }
+  // El usuario decide si minimiza la tarjeta; la decisión se conserva al salir y volver a entrar.
+  const [heroCollapsed, toggleHero] = useHeroCollapsed("order");
   const [creating, setCreating] = useState(false);
   const history = useRef<OrderTab[]>(initialTab === "works" ? [] : ["works"]);
   const childBack = useRef<((home?: boolean) => boolean) | null>(null);
@@ -230,7 +227,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       <IconButton name="refresh-outline" label="Actualizar orden y trabajos" disabled={locked} onPress={refresh} />
       </View>
     </View>
-    <AssignmentOrderSummary group={group} collapsed={heroCollapsed} onToggle={() => setHeroCollapsed(value => !value)} />
+    <AssignmentOrderSummary group={group} collapsed={heroCollapsed} onToggle={toggleHero} />
     <View style={styles.tabsContainer}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones de la orden">
         {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map((item) => <Pressable
@@ -252,8 +249,6 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     <ScrollView
       ref={scroll}
       style={styles.screen}
-      onScroll={event => heroOnScroll(event.nativeEvent.contentOffset.y)}
-      scrollEventThrottle={100}
       contentContainerStyle={[styles.content, showCreateWork && styles.createSpace]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
@@ -263,7 +258,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
       {!online ? <Notice message={props.offline === null ? "Recuperando la cola local. Espera antes de guardar cambios." : props.offline?.authBlocked ? "La sesión requiere verificación. Los cambios locales se conservan; no se pueden guardar nuevas operaciones." : "Sin conexión verificada. Puedes guardar archivos, comentarios y cambios del cronómetro en la cola local. Eliminar y entregar requieren conexión; el cronómetro no avanza en esta vista."} tone="warning" /> : null}
       {props.staleReadOnly ? <Notice message="La ficha actual aún no está verificada. Actualiza los datos y permisos antes de ejecutar. Los borradores se conservan; esto no indica que la OT esté cerrada." tone="warning" /> : null}
-      {tab === "works" ? <View style={styles.stack}>
+      {tab === "works" ? <FadeIn key="works"><View style={styles.stack}>
         <View style={styles.worksHeading}>
           <Text accessibilityRole="header" style={styles.worksTitle}>{group.type === "internal_maintenance" ? "Trabajos del mantenimiento" : direct ? "Trabajos de la asignación" : "Trabajos de la OT"}</Text>
           <Text style={styles.worksCount}>{group.works.length} {group.works.length === 1 ? "trabajo asignado" : "trabajos asignados"}</Text>
@@ -281,8 +276,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           onOpenWork={openWork}
           onWorkStatus={(selectedGroup, selectedWork, input) => runOperation(input.status === "in_progress" || input.status === "paused" ? "timer" : "status", () => onWorkStatus(selectedGroup, selectedWork, input))}
         />)}
-      </View> : null}
-      {tab === "materials" ? <OrderMaterialsTab group={group} onShowWorks={() => selectTab("works")} /> : null}
+      </View></FadeIn> : null}
+      {tab === "materials" ? <FadeIn key="materials"><OrderMaterialsTab group={group} onShowWorks={() => selectTab("works")} /></FadeIn> : null}
       <Text style={styles.footerNote}>Los estados, cantidades y asignaciones corresponden a la información recibida de Qualitzer.</Text>
     </ScrollView>
     </View>

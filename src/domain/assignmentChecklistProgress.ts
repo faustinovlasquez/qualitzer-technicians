@@ -1,5 +1,6 @@
 import { checklistFillProgress, type ChecklistFillProgress } from "./checklistProgress";
 import type { Assignments, AssignmentWork, Attachment } from "./models";
+import { withoutProductContainers } from "./productContainers";
 
 function confirmedAttachment(file: Attachment): boolean {
   if ("offline" in file && file.offline && typeof file.offline === "object" && "confirmed" in file.offline) {
@@ -22,6 +23,7 @@ export function normalizeWorkChecklistProgress(work: AssignmentWork): Assignment
   };
 }
 
+/** Normaliza el avance de checklists y quita los trabajos internos de repuestos, que la web tampoco muestra al técnico. */
 export function normalizeAssignmentsChecklistProgress(data: Assignments): Assignments {
-  return { ...data, groups: data.groups.map((group) => ({ ...group, works: group.works.map(normalizeWorkChecklistProgress) })) };
+  return { ...data, groups: data.groups.map((group) => ({ ...group, works: withoutProductContainers(group.works).map(normalizeWorkChecklistProgress) })) };
 }

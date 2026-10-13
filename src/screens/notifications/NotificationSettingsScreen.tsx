@@ -90,7 +90,8 @@ function NotificationSettingsContent({ notifications, onBack }: NotificationSett
       update({ quietHoursStart: "00:00", quietHoursEnd: "00:00" });
     } else {
       const saved = quietWindow.current;
-      update({ quietHoursStart: saved.start !== saved.end ? saved.start : "22:00", quietHoursEnd: saved.start !== saved.end ? saved.end : "07:00" });
+      update({ quietHoursStart: saved.start !== saved.end ? saved.start : DEFAULT_NOTIFICATION_PREFERENCES.quietHoursStart,
+        quietHoursEnd: saved.start !== saved.end ? saved.end : DEFAULT_NOTIFICATION_PREFERENCES.quietHoursEnd });
     }
     setQuietEnabled(enabled);
   }

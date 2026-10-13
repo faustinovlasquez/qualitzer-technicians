@@ -4,8 +4,8 @@ import type { NotificationPermission } from "./contracts";
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   materialReceipts: true,
-  assignments: true, timers: true, remindAfterMinutes: 30, repeatEveryMinutes: 120,
-  quietHoursStart: "22:00", quietHoursEnd: "07:00",
+  assignments: true, timers: true, remindAfterMinutes: 60, repeatEveryMinutes: 120,
+  quietHoursStart: "18:00", quietHoursEnd: "07:00",
 };
 
 export function permissionAllowsPush(permission: NotificationPermission): boolean {

@@ -16,6 +16,7 @@ import { OfflineFileCard } from "./OfflineFileCard";
 import { canRetryOperation, coverageDates, dependencyInfo, operationErrorReason, operationStatusLabels, operationTitle, pendingDocumentAttachment } from "./offlineUi";
 import { PENDING_CHANGES_MESSAGE, syncUserError, userErrorText } from "./syncUserPresentation";
 import { captureSyncAttempt, deploymentPendingCount, requestManualSync, syncAttemptMessage, syncAttemptPresentation, syncSnapshotKey, type SyncAttempt } from "./syncAttemptPresentation";
+import { animateNextLayout } from "../../ui/motion";
 
 export interface OfflineCenterScreenProps {
   controller: OfflineController;
@@ -30,7 +31,7 @@ export interface OfflineCenterScreenProps {
 function OperationDetails({ operation, title = "Ver detalles técnicos" }: { operation: OfflineOperation; title?: string }) {
   const [expanded, setExpanded] = useState(false);
   return <View style={styles.tight}>
-    <Button title={expanded ? "Ocultar detalles" : title} variant="ghost" onPress={() => setExpanded(!expanded)} />
+    <Button title={expanded ? "Ocultar detalles" : title} variant="ghost" onPress={() => { animateNextLayout(); setExpanded(!expanded); }} />
     {expanded ? <>
     <Text selectable style={styles.caption}>Operación: {operation.id}</Text>
     {operation.lastError ? <Text selectable style={styles.caption}>{operation.lastError} · {operationErrorReason(operation.lastError)}</Text> : null}

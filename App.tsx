@@ -17,6 +17,7 @@ import { ForcedPasswordScreen } from "./src/screens/ForcedPasswordScreen";
 import { SessionSetupScreen } from "./src/screens/SessionSetupScreen";
 import { BodyText, Brand, Button, Card, CompanyMark, EmptyState, IconButton, SectionTitle, type IconName } from "./src/ui/components";
 import { activeColorScheme, palette } from "./src/ui/theme";
+import { FadeIn } from "./src/ui/motion";
 import { SessionContextBar } from "./src/ui/SessionContextBar";
 import { BranchSwitcher } from "./src/ui/BranchSwitcher";
 import { DevelopmentQrPanel } from "./src/ui/DevelopmentQrPanel";
@@ -141,7 +142,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   </>;
   if (app.selectedCreationKind) {
     if (!app.session.branchId || !app.session.user.workerId) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Creación no disponible" message="Necesitas un trabajador y una sucursal habilitada en tu sesión." /><Button title="Volver" disabled={app.busy} onPress={app.closeCreate} /></SafeAreaView>;
-    return <CreationScreen
+    return <FadeIn key="creation" style={styles.app}><CreationScreen
       kind={app.selectedCreationKind}
       user={app.session.user}
       tenant={app.session.tenant}
@@ -158,11 +159,11 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       offline={app.offlineController ? app.offline : undefined}
       onCreated={app.onCreated}
       onQueued={app.onOfflineQueuedCreate}
-    />;
+    /></FadeIn>;
   }
   if (app.selected) {
     if (!app.canonicalDetailGroup || !app.canonicalDetailWork || !app.data) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Asignación no disponible" message="Puede haber cambiado de responsable, estado o período. Vuelve al listado y actualiza las asignaciones." /><Button title={app.selectedOrder ? "Volver a la orden" : "Volver a mi jornada"} disabled={app.busy} onPress={app.closeWork} /></SafeAreaView>;
-    return <View style={styles.app}><WorkDetailScreen
+    return <FadeIn key={`work:${app.canonicalDetailGroup.id}:${app.canonicalDetailWork.id}`} style={styles.app}><WorkDetailScreen
       timezone={app.session.user.system.timezone}
       equipmentLocation={app.equipmentLocation}
       workEditor={app.session.mode === "live" ? { ...app.workEditor, user: app.session.user } : undefined}
@@ -204,11 +205,11 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       readLocalFile={app.offlineController?.readLocalFile}
     />
       {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
-    </View>;
+    </FadeIn>;
   }
   if (app.selectedOrder) {
     if (!app.orderGroup) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Orden no disponible" message="Puede haber cambiado de responsable o período. Vuelve a tu jornada y actualiza las asignaciones." /><Button title="Volver a mi jornada" disabled={app.busy} onPress={app.closeOrder} /></SafeAreaView>;
-    return <View style={styles.app}>
+    return <FadeIn key={`order:${app.orderGroup.id}`} style={styles.app}>
       <OrderDetailScreen
         creation={app.session.mode === "live" ? { ...app.orderCreation, user: app.session.user } : undefined}
         group={app.orderGroup}
@@ -243,7 +244,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       />
       {app.error ? <View style={styles.orderError}><Notice message={app.error} tone="warning" /></View> : null}
       {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
-    </View>;
+    </FadeIn>;
   }
   const navigation: { id: "today" | "agenda" | "materials"; label: string; icon: IconName }[] = [{ id: "today", label: "Mi jornada", icon: "grid-outline" }, { id: "agenda", label: "Agenda", icon: "calendar-outline" }, { id: "materials", label: "Materiales", icon: "cube-outline" }];
   const navBusy = app.busy || materialReceipts.busy;
@@ -287,7 +288,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <Ionicons name="log-out-outline" size={14} color={palette.amber} /><Text style={styles.demoExitText}>Salir</Text>
       </Pressable>
     </View>}
-    <View style={styles.body}>
+    <FadeIn key={app.tab === "agenda" ? "today" : app.tab} style={styles.body}>
       {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
       {app.tab === "notifications" ? <>
         {app.error ? <View style={styles.orderError}><Notice message={app.error} tone="warning" /></View> : null}
@@ -305,7 +306,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
           }} />
         <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} view={app.tab} onScrolledChange={setTimerBannerCompact} />
       </>}
-    </View>
+    </FadeIn>
     <View style={styles.nav}>
       <View style={styles.navSide}>{navigation.slice(0, 2).map(navTab)}</View>
       {canCreate ? <View style={styles.navCreate}><CreationQuickMenu inline onCreate={app.openCreate} disabled={navBusy} /></View> : null}
@@ -337,6 +338,13 @@ function ApplicationRoot() {
   const branchName = app.session?.user.accessBranchs.find((branch) => branch.id === app.session?.branchId)?.name;
   return <View style={[styles.app, reserveQrSpace && { paddingRight: 184 }]}>
     <View style={styles.body}><Application app={app} allowAutomaticPin={securityConsidered === app.session?.token} /></View>
+    {app.notificationOpening ? <View style={styles.openingOverlay} pointerEvents="auto" accessibilityViewIsModal accessibilityLiveRegion="polite">
+      <FadeIn style={styles.openingCard}>
+        <ActivityIndicator size="large" color={palette.primary} />
+        <Text style={styles.openingTitle}>Abriendo aviso…</Text>
+        <Text style={styles.openingText}>Cargando la información para llevarte a su destino.</Text>
+      </FadeIn>
+    </View> : null}
     {app.creationNotice && app.session && !app.busy ? <CreationSuccess {...app.creationNotice} demo={app.session.mode === "demo"} onContinue={app.dismissCreationNotice} /> : null}
     <Modal visible={Boolean(app.session && app.selectedOffline)} animationType="slide" onRequestClose={app.closeOffline}>
       <View style={styles.app}>
@@ -358,6 +366,10 @@ function ApplicationRoot() {
 }
 export default function App() { return <SafeAreaProvider><StatusBar style={activeColorScheme === "dark" ? "light" : "dark"} /><DeviceSecurityProvider><AppErrorBoundary><ApplicationRoot /></AppErrorBoundary></DeviceSecurityProvider></SafeAreaProvider>; }
 const styles = StyleSheet.create({
+  openingOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 50, elevation: 50, backgroundColor: "rgba(15, 31, 46, 0.45)", alignItems: "center", justifyContent: "center", padding: 24 },
+  openingCard: { minWidth: 240, maxWidth: 320, alignItems: "center", gap: 10, paddingVertical: 24, paddingHorizontal: 22, borderRadius: 20, backgroundColor: palette.surface },
+  openingTitle: { fontSize: 17, fontWeight: "800", color: palette.heading, textAlign: "center" },
+  openingText: { fontSize: 14, color: palette.textSecondary, textAlign: "center" },
   app: { flex: 1, minHeight: 0, backgroundColor: palette.background }, body: { flex: 1, minHeight: 0, position: "relative" }, hidden: { display: "none" }, center: { flex: 1, backgroundColor: palette.background, padding: 24, justifyContent: "center", alignItems: "center", gap: 24 },
   orderError: { paddingHorizontal: 16, paddingBottom: 16 },
   offlineContext: { paddingHorizontal: 16, paddingTop: 12, gap: 6 }, offlineContextText: { color: palette.textSecondary, fontSize: 12, lineHeight: 17 },

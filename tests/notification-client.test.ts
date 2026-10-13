@@ -207,9 +207,9 @@ test("revoke waits for in-flight registration and dismisses only server-owned no
 test("failed PUT never reports saved preferences and test sends no arbitrary token", async () => {
   const f = fixture(); const stop = f.client.start(); await f.client.retryEnable();
   f.api.notificationRegister = async () => { throw new Error("MOBILE_PUSH_DATABASE_UNAVAILABLE"); };
-  assert.equal(await f.client.savePreferences({ ...DEFAULT_NOTIFICATION_PREFERENCES, remindAfterMinutes: 60 }), false);
+  assert.equal(await f.client.savePreferences({ ...DEFAULT_NOTIFICATION_PREFERENCES, remindAfterMinutes: 120 }), false);
   assert.equal(f.client.getSnapshot().notice, null);
-  assert.equal(f.client.getSnapshot().preferences.remindAfterMinutes, 30);
+  assert.equal(f.client.getSnapshot().preferences.remindAfterMinutes, DEFAULT_NOTIFICATION_PREFERENCES.remindAfterMinutes);
   await f.client.sendTest(); assert.equal(f.tests, 1);
   assert.match(f.client.getSnapshot().notice ?? "", /pendiente/); stop();
 });

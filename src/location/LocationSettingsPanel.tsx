@@ -6,6 +6,7 @@ import { LocationHistoryPanel } from "./LocationHistoryPanel";
 import type { LocationTrackingUi } from "./useLocationTracking";
 import { BodyText, Button, SectionTitle } from "../ui/components";
 import { palette } from "../ui/theme";
+import { animateNextLayout } from "../ui/motion";
 
 export function LocationSettingsPanel({ tracking, disabled = false }: { tracking: LocationTrackingUi; disabled?: boolean }) {
   const schedule = tracking.state?.settings.schedule ?? defaultLocationSchedule(tracking.timezone);
@@ -34,7 +35,7 @@ export function LocationSettingsPanel({ tracking, disabled = false }: { tracking
         <Text style={styles.label}>{new Date(point.capturedAt).toLocaleTimeString("es-CL")} · {locationEventLabel(point)}</Text>
         <BodyText>{point.outcome === "located" ? `${point.latitude?.toFixed(5)}, ${point.longitude?.toFixed(5)} · precisión ${Math.round(point.accuracy ?? 0)} m` : "Sin ubicación disponible"}</BodyText>
       </View>)}
-      <Button title={historyOpen ? "Cerrar historial" : "Mi historial de ubicación"} icon="time-outline" variant="secondary" disabled={frozen} onPress={() => setHistoryOpen(value => !value)} />
+      <Button title={historyOpen ? "Cerrar historial" : "Mi historial de ubicación"} icon="time-outline" variant="secondary" disabled={frozen} onPress={() => { animateNextLayout(); setHistoryOpen(value => !value); }} />
       {historyOpen ? <LocationHistoryPanel key={tracking.state?.generation} tracking={tracking} initialDate={new Intl.DateTimeFormat("en-CA", { timeZone: tracking.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())} /> : null}
       {tracking.error ? <Text accessibilityRole="alert" style={styles.error}>{tracking.error}</Text> : null}
     </>}

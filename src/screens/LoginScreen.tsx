@@ -10,6 +10,7 @@ import { uploadFetch } from "../infrastructure/photos";
 import { apiMessage, NetworkError } from "../infrastructure/errors";
 import { gatewayConfiguration } from "../infrastructure/gatewayConfig";
 import { openPrivacyPolicy } from "../infrastructure/privacyPolicy";
+import { animateNextLayout } from "../ui/motion";
 
 const loginFailure = "No se pudo iniciar sesión. Revisa tus credenciales y tu conexión e inténtalo de nuevo.";
 const connectionFailure = "No se pudo conectar con Qualitzer. Revisa tu conexión a internet e inténtalo de nuevo. Si el problema continúa, contacta a tu administrador.";
@@ -205,7 +206,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                   accessibilityRole="button"
                   accessibilityLabel="Conexión avanzada. Configurar pasarela móvil"
                   accessibilityState={{ expanded: showConnection, disabled: isBusy }}
-                  onPress={() => setShowConnection((value) => !value)}
+                  onPress={() => { animateNextLayout(); setShowConnection((value) => !value); }}
                   disabled={isBusy}
                   style={({ pressed }) => [styles.connectionToggle, pressed && styles.pressed]}
                 >

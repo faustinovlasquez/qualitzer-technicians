@@ -8,6 +8,7 @@ import { ReturnRequestDialog } from "./ReturnRequestDialog";
 import type { useMaterialReceipts } from "./useMaterialReceipts";
 import { dispositionDaysLeft, filterReceipts, productDispositionState, receiptDateTime, receiptMoney, receiptQuantity, receiptRelative, receiptSourceIcon,
   receiptWarehouses, type ProductDispositionState, type ReceiptSourceFilter } from "./receiptTimeline";
+import { animateNextLayout } from "../ui/motion";
 
 type ReceiptModel = ReturnType<typeof useMaterialReceipts>;
 type Product = MaterialReceipt["products"][number];
@@ -74,7 +75,7 @@ function ProductRow({ product, divider, leading, footer }: { product: Product; d
         {product.code ? <Text style={styles.productCode}>{product.code}</Text> : null}
         <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
         {product.description ? <Text style={styles.productDescription} numberOfLines={expanded ? undefined : 2}>{product.description}</Text> : null}
-        {long ? <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setExpanded(value => !value)}>
+        {long ? <Pressable accessibilityRole="button" hitSlop={8} onPress={() => { animateNextLayout(); setExpanded(value => !value); }}>
           <Text style={styles.readMore}>{expanded ? "Leer menos" : "Leer más"}</Text>
         </Pressable> : null}
         {price ? <Text style={styles.price}>{`${price} c/u`}</Text> : null}
@@ -170,7 +171,7 @@ function PendingCard({ item, expanded, disabled, busy, onToggle, onConfirm }: { 
         </Pressable> : null} />
         {visible.map((product, index) => <ProductRow key={product.id} product={product} divider={index > 0}
           leading={<Checkbox checked={selected.has(product.id)} label={`Revisado ${product.name}`} disabled={disabled} onPress={() => toggle(product.id)} />} />)}
-        <MoreProducts hidden={total - VISIBLE_PRODUCTS} showAll={showAll} onPress={() => setShowAll(value => !value)} />
+        <MoreProducts hidden={total - VISIBLE_PRODUCTS} showAll={showAll} onPress={() => { animateNextLayout(); setShowAll(value => !value); }} />
       </View>
       {asking ? <FadeIn index={0}><View style={styles.ask}>
         <View style={styles.askHead}><Ionicons name="help-circle-outline" size={22} color={palette.primary} accessible={false} />
@@ -279,7 +280,7 @@ function ConfirmedCard({ item, expanded, busy, locked, onToggle, onDispose }: { 
           </> : supported ? <View style={styles.dispositionState}><Pill icon={look.icon}
             label={state === "RETURNED" && returned > 0 ? `${look.label} · ${receiptQuantity(returned, product.unit)}` : look.label} color={look.color} soft={look.soft} /></View> : null} />;
         })}
-        <MoreProducts hidden={item.products.length - VISIBLE_PRODUCTS} showAll={showAll} onPress={() => setShowAll(value => !value)} />
+        <MoreProducts hidden={item.products.length - VISIBLE_PRODUCTS} showAll={showAll} onPress={() => { animateNextLayout(); setShowAll(value => !value); }} />
       </View>
       {busy ? <Text style={styles.saving}>Guardando…</Text> : requested > 0 && !closed ? <Text style={styles.saving}>Bodega recibió tu solicitud y la confirmará al recibir el material.</Text> : null}
       <ReturnRequestDialog product={returning} busy={busy}
@@ -324,11 +325,14 @@ export function MaterialReceiptsScreen({ receipt, onBack, focus }: { receipt: Re
   }, [focusEventId]);
   // Primera entrega abierta por defecto; el resto plegadas para ver de un vistazo qué hay.
   const isExpanded = (id: number, index: number) => expanded ? expanded.has(id) : index === 0;
-  const toggle = (id: number, index: number) => setExpanded(previous => {
-    const next = new Set(previous ?? (visible[0] ? [visible[0].id] : []));
-    if (isExpanded(id, index)) next.delete(id); else next.add(id);
-    return next;
-  });
+  const toggle = (id: number, index: number) => {
+    animateNextLayout();
+    setExpanded(previous => {
+      const next = new Set(previous ?? (visible[0] ? [visible[0].id] : []));
+      if (isExpanded(id, index)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
   useEffect(() => { if (warehouse && !warehouses.includes(warehouse)) setWarehouse(null); }, [warehouse, warehouses]);
   async function refresh() { setRefreshing(true); try { await receipt.refresh(); await receipt.refreshHistory(); } finally { setRefreshing(false); } }
 
@@ -338,9 +342,9 @@ export function MaterialReceiptsScreen({ receipt, onBack, focus }: { receipt: Re
       <View style={styles.header}>
         {onBack ? <IconButton name="arrow-back-outline" label="Volver" disabled={receipt.busy} onPress={onBack} /> : null}
         <View style={styles.headerText}><Text accessibilityRole="header" style={styles.title}>Materiales</Text><Text style={styles.subtitle}>Entregas de inventario asignadas a ti</Text></View>
-        <IconButton name={searching ? "close-outline" : "search-outline"} label={searching ? "Cerrar búsqueda" : "Buscar"} onPress={() => { if (searching) setQuery(""); setSearching(value => !value); }} />
+        <IconButton name={searching ? "close-outline" : "search-outline"} label={searching ? "Cerrar búsqueda" : "Buscar"} onPress={() => { animateNextLayout(); if (searching) setQuery(""); setSearching(value => !value); }} />
         <View>
-          <IconButton name="options-outline" label="Filtros" onPress={() => setFiltering(value => !value)} />
+          <IconButton name="options-outline" label="Filtros" onPress={() => { animateNextLayout(); setFiltering(value => !value); }} />
           {source !== "ALL" ? <View style={styles.filterDot} /> : null}
         </View>
       </View>

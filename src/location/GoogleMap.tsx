@@ -6,6 +6,7 @@ import { googlePlaces, type GooglePlaceSuggestion } from "./googlePlaces";
 import { palette } from "../ui/theme";
 import { BodyText, Button, Field, IconButton } from "../ui/components";
 import { GoogleMapConfiguration } from "./GoogleMapConfiguration";
+import { animateNextLayout } from "../ui/motion";
 
 export function GoogleMap(props: GoogleMapProps) {
   const map = useRef<MapView>(null);
@@ -100,7 +101,7 @@ export function GoogleMap(props: GoogleMapProps) {
     </View>
     {busy ? <BodyText>Consultando dirección…</BodyText> : null}
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-    <Button title={configurationOpen ? "Ocultar configuración de Google" : "Ver configuración de Google"} icon="settings-outline" variant="secondary" onPress={() => setConfigurationOpen(value => !value)} />
+    <Button title={configurationOpen ? "Ocultar configuración de Google" : "Ver configuración de Google"} icon="settings-outline" variant="secondary" onPress={() => { animateNextLayout(); setConfigurationOpen(value => !value); }} />
     {configurationOpen || mapError ? <GoogleMapConfiguration configuration={googlePlaces.configuration?.() ?? null} loaded={loaded} placesError={placesError} /> : null}
   </View>;
 }
