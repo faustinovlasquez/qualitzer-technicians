@@ -3,6 +3,8 @@ import { GatewayError } from "./errors";
 import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, syncReceiptSchema, type SyncReceipt } from "../src/domain/offlineProtocol";
 
 export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
+/** Rechazos 401 del backend que son falta de permiso, no sesión inválida. */
+const NOT_SESSION_401 = ["PERMISSION_REQUIRED", "MAINTENANCE_REOPEN_UNAUTHORIZED", "MAINTENANCE_REOPEN_FORBIDDEN", "TENANT_TYPE_NOT_ALLOWED"] as const;
 type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_password" |
   `/technician-dashboard/panel/${string}/works/${number}/edit` |
   "/user_signatures/me" | `/user_signatures/me/${number}` |
@@ -168,8 +170,16 @@ export class Upstream {
           const parsed = z.object({ error: z.string().regex(/^(?:MOBILE_PUSH_[A-Z_]+|MOBILE_CREATION_[A-Z_]+|USER_SIGNATURE_[A-Z_]+|OWN_PROFILE_[A-Z_]+|NON_PRODUCTIVE_REASON_TEXT_REQUIRED|UNAUTHORIZED)$/) }).safeParse(failure);
           if (parsed.success) throw new GatewayError(response.status, parsed.data.error, mobileErrorMessage(parsed.data.error));
         }
+        if (response.status === 401) {
+          // El backend también responde 401 cuando falta un permiso; eso no invalida la sesión y no debe cerrarla en el teléfono.
+          const text = await readBody(response);
+          let failure: unknown;
+          try { failure = JSON.parse(text); } catch { failure = null; }
+          const denied = z.object({ error: z.enum(NOT_SESSION_401) }).safeParse(failure);
+          if (denied.success) throw new GatewayError(403, "FORBIDDEN", "No tienes permiso para realizar esta acción.");
+          throw new GatewayError(401, "UNAUTHORIZED");
+        }
         await response.body?.cancel();
-        if (response.status === 401) throw new GatewayError(401, "UNAUTHORIZED");
         if (response.status === 403) throw new GatewayError(403, "FORBIDDEN");
         if (response.status === 404) throw new GatewayError(404, "RESOURCE_NOT_FOUND");
         if ([400, 409, 413, 422, 429].includes(response.status)) throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó la operación.");

@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.42
+# @qualitzer/mobile-gateway 1.0.43
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.42. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.43. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.43 evita cierres de sesión que no corresponden: el backend responde 401 también cuando falta un permiso (`PERMISSION_REQUIRED`, `MAINTENANCE_REOPEN_UNAUTHORIZED`, `MAINTENANCE_REOPEN_FORBIDDEN`, `TENANT_TYPE_NOT_ALLOWED`); el gateway ahora los devuelve como 403 `FORBIDDEN` y conserva la sesión. Cualquier otro 401 sigue cerrando la sesión. El backend de la misma entrega además separa la sesión de la app (`mobile`) de la web abierta en el navegador del teléfono (`mobile_web`), así entrar a la web desde el teléfono ya no cierra la app. Sin migraciones.
 
 1.0.42 agrega `PATCH /api/notifications/inbox/read-all?companyBranchId=` (sin body): marca como leídos todos los avisos visibles sin leer de la empresa y sucursal de la sesión y responde `{ read: true, updated }`. **Requiere el backend de la misma entrega** (`PATCH /mobile-notifications/inbox/read-all`). Sin migraciones.
 

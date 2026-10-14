@@ -1,3 +1,7 @@
+# Sesión de la app que no se cierra sola: gateway 1.0.43 / APK 1.0.125
+
+Entrar a la web desde el navegador del teléfono ya no cierra la sesión de la app, y una acción sin permiso ya no la cierra. Desplegar backend y gateway 1.0.43 juntos. Sin migraciones. No requiere APK nueva.
+
 # Marcar todas las notificaciones como leídas: gateway 1.0.42 / APK 1.0.125
 
 La bandeja de avisos tiene el botón "Marcar todas como leídas". Desplegar backend y gateway 1.0.42 juntos. Sin migraciones. Ver [actualizacion 1.0.125](ACTUALIZACION-1.0.125.md).
