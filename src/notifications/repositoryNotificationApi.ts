@@ -3,7 +3,7 @@ import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import type { NotificationApi } from "./contracts";
 import { sameNotificationSession } from "./notificationSafety";
 
-export type NotificationRepository = Pick<TechnicianRepository, "notificationStatus" | "registerNotificationDevice" | "unregisterNotificationDevice" | "notificationInbox" | "readNotification" | "deleteNotification" | "testNotification">;
+export type NotificationRepository = Pick<TechnicianRepository, "notificationStatus" | "registerNotificationDevice" | "unregisterNotificationDevice" | "notificationInbox" | "readNotification" | "readAllNotifications" | "deleteNotification" | "testNotification">;
 
 export function bindNotificationApi(capturedSession: Session, repository: NotificationRepository): NotificationApi {
   function branch(session: Session): number {
@@ -12,6 +12,7 @@ export function bindNotificationApi(capturedSession: Session, repository: Notifi
     }
     return session.branchId;
   }
+  const readAll = repository.readAllNotifications?.bind(repository);
   return {
     notificationStatus: (session) => repository.notificationStatus(branch(session)),
     notificationRegister: (session, input) => {
@@ -21,6 +22,7 @@ export function bindNotificationApi(capturedSession: Session, repository: Notifi
     notificationUnregister: (session, installationId) => repository.unregisterNotificationDevice(branch(session), installationId),
     notificationInbox: (session, page, unreadOnly) => repository.notificationInbox(branch(session), page, unreadOnly),
     notificationRead: (session, eventId) => repository.readNotification(branch(session), eventId),
+    ...(readAll ? { notificationReadAll: (session: Session) => readAll(branch(session)) } : {}),
     notificationDelete: (session, eventId) => repository.deleteNotification(branch(session), eventId),
     notificationTest: (session) => repository.testNotification(branch(session)),
   };

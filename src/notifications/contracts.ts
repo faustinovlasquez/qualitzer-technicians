@@ -7,6 +7,7 @@ export interface NotificationApi {
   notificationUnregister(session: Session, installationId: string): Promise<void>;
   notificationInbox(session: Session, page: number, unreadOnly?: boolean): Promise<NotificationInbox>;
   notificationRead(session: Session, eventId: string): Promise<NotificationReadResult>;
+  notificationReadAll?(session: Session): Promise<import("../domain/notifications").NotificationReadAllResult>;
   notificationDelete(session: Session, eventId: string): Promise<NotificationDeleteResult>;
   notificationTest(session: Session): Promise<NotificationTestResult>;
 }

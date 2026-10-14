@@ -747,6 +747,13 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   registerNotificationDevice: TechnicianRepository["registerNotificationDevice"] = (input) => this.onlineOnly(() => this.remote.registerNotificationDevice(input));
   unregisterNotificationDevice: TechnicianRepository["unregisterNotificationDevice"] = (branch, installation) => { this.branch(branch); return this.onlineOnly(() => this.remote.unregisterNotificationDevice(branch, installation)); };
   readNotification: TechnicianRepository["readNotification"] = (branch, id) => { this.branch(branch); return this.onlineOnly(() => this.remote.readNotification(branch, id)); };
+  readAllNotifications: TechnicianRepository["readAllNotifications"] = (branch) => {
+    this.branch(branch);
+    return this.onlineOnly(() => {
+      if (!this.remote.readAllNotifications) throw new Error("MOBILE_PUSH_INBOX_UPDATE_REQUIRED");
+      return this.remote.readAllNotifications(branch);
+    });
+  };
   deleteNotification: TechnicianRepository["deleteNotification"] = (branch, id) => { this.branch(branch); return this.onlineOnly(() => this.remote.deleteNotification(branch, id)); };
   testNotification: TechnicianRepository["testNotification"] = (branch) => { this.branch(branch); return this.onlineOnly(() => this.remote.testNotification(branch)); };
   async prepareWeek(range: DateRange, branchId: number, options?: OfflinePreparationOptions): Promise<void> {

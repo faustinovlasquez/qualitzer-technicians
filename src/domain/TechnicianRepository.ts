@@ -26,6 +26,8 @@ export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<
   unregisterNotificationDevice(branch: number, installation: string): Promise<void>;
   notificationInbox(branch: number, page: number, unreadOnly?: boolean): Promise<NotificationInbox>;
   readNotification(branch: number, id: string): Promise<NotificationReadResult>;
+  /** Marca como leídos todos los avisos sin leer de la bandeja. */
+  readAllNotifications?(branch: number): Promise<import("./notifications").NotificationReadAllResult>;
   deleteNotification(branch: number, id: string): Promise<NotificationDeleteResult>;
   testNotification(branch: number): Promise<NotificationTestResult>;
   health(): Promise<Health>;

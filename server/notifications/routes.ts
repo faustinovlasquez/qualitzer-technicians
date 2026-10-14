@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { mobileUuidSchema } from "../../src/domain/creation";
-import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, activeTimersSchema } from "../../src/domain/notifications";
+import { notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadAllResultSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, activeTimersSchema } from "../../src/domain/notifications";
 import { mobileActor } from "../creation/authorization";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
@@ -63,6 +63,12 @@ export function createNotificationsRouter(upstream: Upstream, tenantOrigin: stri
     if (result.page !== page) throw new GatewayError(502, "MOBILE_PUSH_IDENTITY_MISMATCH");
     // Si la base de datos es compartida por varias empresas, un aviso ajeno se omite en vez de invalidar toda la bandeja.
     res.json({ ...result, items: result.items.filter((item) => item.data.tenantOrigin === tenantOrigin && item.data.companyBranchId === companyBranchId) });
+  });
+  router.patch("/inbox/read-all", async (req, res) => {
+    if (req.body !== undefined) throw new GatewayError(400, "INVALID_INPUT");
+    const { companyBranchId } = branchQuery.parse(req.query);
+    const { token } = await mobileActor(upstream, req, companyBranchId);
+    res.json(parseUpstream(notificationReadAllResultSchema, await upstream.request("/mobile-notifications/inbox/read-all", { method: "PATCH", token, query: queryFor(companyBranchId) })));
   });
   router.patch("/inbox/:id/read", async (req, res) => {
     if (req.body !== undefined) throw new GatewayError(400, "INVALID_INPUT");

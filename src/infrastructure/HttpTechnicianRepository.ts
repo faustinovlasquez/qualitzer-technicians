@@ -24,7 +24,7 @@ import { withAssignmentReadBatch } from "./assignmentReadBatch";
 import { workActivityInputSchema, workActivityResultSchema, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
 import { cachedAttachmentSchema } from "../offline/cacheSchemas";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, mobileUuidSchema, positiveCreationIdSchema, type CreationInput, type CreationOptionsQuery } from "../domain/creation";
-import { activeTimersSchema, notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
+import { activeTimersSchema, notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadAllResultSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
 
 
 export class HttpTechnicianRepository implements TechnicianRepository {
@@ -196,6 +196,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     return { ...result, items: result.items.filter((item) => item.data.companyBranchId === branch && item.data.tenantOrigin === origin) };
   }
   async readNotification(branch: number, id: string) { return notificationReadResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, `inbox/${mobileUuidSchema.parse(id)}/read`), "PATCH")); }
+  async readAllNotifications(branch: number) { return notificationReadAllResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, "inbox/read-all"), "PATCH")); }
   async deleteNotification(branch: number, id: string) {
     const eventId = mobileUuidSchema.parse(id);
     const result = notificationDeleteResultSchema.parse(await this.request<unknown>(this.notificationPath(branch, `inbox/${encodeURIComponent(eventId)}`), "DELETE"));

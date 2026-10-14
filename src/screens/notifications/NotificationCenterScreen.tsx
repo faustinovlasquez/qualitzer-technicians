@@ -32,12 +32,13 @@ function NotificationCenterContent({ notifications, onBack }: { notifications: M
   const [deleteTarget, setDeleteTarget] = useState<NotificationInboxItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const [support, setSupport] = useState(false);
   const [localError, setLocalError] = useState(false);
   const requestPending = useRef(false);
   const actionPending = useRef(false);
   const unreadOnly = state?.unreadOnly ?? false;
-  const busy = !client || !state || Boolean(state.inboxBusy || loading || deletingId);
+  const busy = !client || !state || Boolean(state.inboxBusy || loading || deletingId || markingAll);
   const canAct = () => Boolean(client?.isCurrent() && (security?.isUnlocked() ?? true));
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -61,6 +62,22 @@ function NotificationCenterContent({ notifications, onBack }: { notifications: M
     } finally {
       requestPending.current = false;
       if (mounted.current) setLoading(false);
+    }
+  }
+
+  async function markAll() {
+    if (!client || !canAct() || busy || actionPending.current) return;
+    actionPending.current = true;
+    setMarkingAll(true);
+    setLocalError(false);
+    try {
+      const done = await client.markAllRead();
+      if (mounted.current && currentClient.current === client && client.isCurrent()) setLocalError(!done);
+    } catch {
+      if (mounted.current && currentClient.current === client && client.isCurrent()) setLocalError(true);
+    } finally {
+      actionPending.current = false;
+      if (mounted.current) setMarkingAll(false);
     }
   }
 
@@ -106,6 +123,8 @@ function NotificationCenterContent({ notifications, onBack }: { notifications: M
           <Text style={[styles.filterText, unreadOnly === filter.value && styles.filterTextSelected]}>{filter.label}</Text>
         </Pressable>)}
       </View>
+      {client?.canMarkAllRead && (state?.unreadCount ?? 0) > 0 ? <Button title="Marcar todas como leídas" variant="secondary" icon="checkmark-done-outline"
+        loading={markingAll} disabled={busy} onPress={() => { void markAll(); }} /> : null}
       {state?.inboxBusy ? <Text accessibilityLiveRegion="polite" style={styles.caption}>Actualizando avisos…</Text> : null}
       {unreadOnly && state?.filterLocal ? <Text style={styles.caption}>Filtro sobre avisos cargados. Carga más para buscar otros avisos sin leer; el total global no está disponible.</Text> : null}
       {hasError ? <Card style={styles.feedback}>

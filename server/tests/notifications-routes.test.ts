@@ -97,6 +97,12 @@ test("notification read/test have no target body, preserve rate limits and route
   state.failures.set(`${prefix}/inbox/${eventId}/read`, { status: 200, body: { id: eventId, read: true, token: "private" } });
   assert.equal((await jsonRequest(baseUrl, path(`inbox/${eventId}/read`), "PATCH", {})).response.status, 400);
   assert.deepEqual((await jsonRequest(baseUrl, path(`inbox/${eventId}/read`), "PATCH")).data, { id: eventId, read: true });
+  // Marcar todas como leídas: sin body y solo el resultado público (cuántas cambió).
+  state.failures.set(`${prefix}/inbox/read-all`, { status: 200, body: { read: true, updated: 5, token: "private" } });
+  assert.equal((await jsonRequest(baseUrl, path("inbox/read-all"), "PATCH", {})).response.status, 400);
+  assert.deepEqual((await jsonRequest(baseUrl, path("inbox/read-all"), "PATCH")).data, { read: true, updated: 5 });
+  state.failures.set(`${prefix}/inbox/read-all`, { status: 200, body: { read: true, updated: -1 } });
+  assert.equal((await jsonRequest(baseUrl, path("inbox/read-all"), "PATCH")).response.status, 502);
   assert.equal((await jsonRequest(baseUrl, path("test"), "POST", { expoPushToken: registration.expoPushToken })).response.status, 400);
   state.failures.set(`${prefix}/test`, { status: 201, body: { eventId, state: "pending" } });
   assert.equal((await jsonRequest(baseUrl, path("test"), "POST", {})).response.status, 201);

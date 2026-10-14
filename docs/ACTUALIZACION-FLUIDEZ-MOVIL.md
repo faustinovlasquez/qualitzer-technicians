@@ -1,3 +1,7 @@
+# Marcar todas las notificaciones como leídas: gateway 1.0.42 / APK 1.0.125
+
+La bandeja de avisos tiene el botón "Marcar todas como leídas". Desplegar backend y gateway 1.0.42 juntos. Sin migraciones. Ver [actualizacion 1.0.125](ACTUALIZACION-1.0.125.md).
+
 # Devoluciones con cantidad: gateway 1.0.41 / APK 1.0.113
 
 El técnico elige cuánto devuelve y agrega una nota; ve si bodega confirmó o rechazó (con motivo). Bodega recibe notificación y correo. Desplegar backend y gateway 1.0.41 juntos. Sin migraciones. Ver [actualizacion 1.0.113](ACTUALIZACION-1.0.113.md).

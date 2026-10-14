@@ -28,7 +28,8 @@ export const notificationDeviceResultSchema = z.object({ installationId: mobileU
 export const notificationInboxItemSchema = z.object({ id: mobileUuidSchema, kind: notificationKindSchema, state: notificationStateSchema, data: notificationDataSchema, lastFailure: reason.nullable(), readAt: isoDate.nullable(), createdAt: isoDate }).refine((value) => value.id === value.data.eventId && value.kind === value.data.kind, "MOBILE_PUSH_INVALID_EVENT");
 export const notificationInboxSchema = z.object({ items: z.array(notificationInboxItemSchema).max(25), page: z.number().int().min(1).max(1000), pageSize: z.literal(25), unreadCount: z.number().int().nonnegative().optional(), total: z.number().int().nonnegative().optional(), canDelete: z.boolean().optional() });
 export const notificationReadResultSchema = z.object({ id: mobileUuidSchema, read: z.literal(true) });
-export const notificationDeleteResultSchema = z.object({ id: mobileUuidSchema, deleted: z.literal(true) });
+export const notificationReadAllResultSchema = z.object({ read: z.literal(true), updated: z.number().int().nonnegative() });
+export const notificationDeleteResultSchema =z.object({ id: mobileUuidSchema, deleted: z.literal(true) });
 export const notificationTestResultSchema = z.object({ eventId: mobileUuidSchema, state: z.literal("pending") });
 /** Cronómetros en curso del técnico sin importar la fecha planificada del trabajo (misma fuente que el aviso de cronómetro). */
 export const activeTimerSchema = z.object({ groupType: z.enum(["work", "negotiation", "maintenance"]), groupId: positiveCreationIdSchema, workId: positiveCreationIdSchema,
@@ -43,5 +44,6 @@ export type NotificationDeviceResult = z.infer<typeof notificationDeviceResultSc
 export type NotificationInboxItem = z.infer<typeof notificationInboxItemSchema>;
 export type NotificationInbox = z.infer<typeof notificationInboxSchema>;
 export type NotificationReadResult = z.infer<typeof notificationReadResultSchema>;
-export type NotificationDeleteResult = z.infer<typeof notificationDeleteResultSchema>;
+export type NotificationReadAllResult = z.infer<typeof notificationReadAllResultSchema>;
+export type NotificationDeleteResult =z.infer<typeof notificationDeleteResultSchema>;
 export type NotificationTestResult = z.infer<typeof notificationTestResultSchema>;

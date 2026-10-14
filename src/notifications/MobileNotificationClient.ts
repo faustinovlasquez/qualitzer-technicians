@@ -1,6 +1,6 @@
 import {
   notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationPreferencesSchema,
-  notificationReadResultSchema, notificationDeleteResultSchema, notificationStatusSchema, notificationTestResultSchema,
+  notificationReadAllResultSchema, notificationReadResultSchema, notificationDeleteResultSchema, notificationStatusSchema, notificationTestResultSchema,
   type NotificationData, type NotificationInboxItem, type NotificationPreferences, type NotificationStatus,
 } from "../domain/notifications";
 import type { NativeNotificationResponse, NativePushToken, NotificationClientOptions, NotificationPermission } from "./contracts";
@@ -456,6 +456,37 @@ export class MobileNotificationClient {
     await this.updateBadge(unreadCount);
     if (owned) await this.dismissEvent(owned);
     try { await this.fetchInbox(false, this.state.unreadOnly); } catch { this.update({ notice: "Lectura guardada. Actualiza la bandeja para consultar el contador actual." }); }
+  }
+
+  /** El servidor puede no tener todavía la lectura masiva; en ese caso la app oculta el botón. */
+  get canMarkAllRead(): boolean { return typeof this.options.api.notificationReadAll === "function"; }
+
+  markAllRead = (): Promise<boolean> => this.runInbox(async () => {
+    this.requireInteraction();
+    const readAll = this.options.api.notificationReadAll;
+    if (!readAll) throw new Error("MOBILE_PUSH_INBOX_UPDATE_REQUIRED");
+    notificationReadAllResultSchema.parse(await readAll.call(this.options.api, this.options.session));
+    this.requireCurrent();
+    const readAt = new Date().toISOString();
+    this.allInbox.items = this.allInbox.items.map(item => item.readAt === null ? { ...item, readAt } : item);
+    this.unreadInbox.items = [];
+    if (this.unreadInbox.total !== null) this.unreadInbox.total = 0;
+    this.update({ unreadCount: 0 });
+    this.publishInbox();
+    await this.updateBadge(0);
+    await this.dismissAllEvents();
+    try { await this.fetchInbox(false, this.state.unreadOnly); this.update({ notice: "Todos los avisos quedaron como leídos." }); }
+    catch { this.update({ notice: "Avisos marcados como leídos. Actualiza la bandeja para consultar el contador actual." }); }
+  });
+
+  private async dismissAllEvents(): Promise<void> {
+    try {
+      const adapter = this.options.adapter;
+      for (const item of await notificationReadWithTimeout(adapter.presented(), 2_000)) {
+        this.requireCurrent();
+        if (notificationForSession(item.data, this.options.session)) await notificationReadWithTimeout(adapter.dismiss(item.identifier), 2_000);
+      }
+    } catch {}
   }
 
   deleteNotification = (eventId: string): Promise<boolean> => this.runInbox(async () => {
