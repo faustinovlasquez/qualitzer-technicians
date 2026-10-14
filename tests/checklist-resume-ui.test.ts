@@ -134,7 +134,7 @@ test("resumed queued answer cannot resubmit and can move forward without changin
   const tree = f.renderEditor();
   assert.equal(action(tree, "Respuesta ya registrada en cola").disabled, true);
   action(tree, "Respuesta ya registrada en cola").onPress();
-  action(tree, "Paso siguiente sin guardar").onPress();
+  action(tree, "Guardar y paso siguiente").onPress();
   assert.equal(element<EditorProps>(f.render(), "StepEditor").props.step.stepId, 22);
   assert.equal(f.saves(), 0);
   assert.deepEqual(operation, before);

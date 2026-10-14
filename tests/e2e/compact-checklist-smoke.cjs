@@ -64,7 +64,7 @@ async function main() {
     async function dockFits(width, height) {
       const dock = await page.getByTestId("checklist-step-dock").boundingBox();
       assert.ok(dock && dock.y >= 0 && Math.abs(dock.y + dock.height - height) <= 1, JSON.stringify({ dock, height }));
-      for (const locator of [button("Paso anterior sin guardar"), button("Paso siguiente sin guardar"), page.getByTestId("checklist-step-dock").getByRole("button").nth(1)]) {
+      for (const locator of [button("Guardar y paso anterior"), button("Guardar y paso siguiente"), page.getByTestId("checklist-step-dock").getByRole("button").nth(1)]) {
         const box = await locator.boundingBox();
         assert.ok(box && box.width >= 44 && box.height >= 44 && box.x >= 0 && box.x + box.width <= width, JSON.stringify(box));
       }
@@ -92,19 +92,19 @@ async function main() {
         await page.screenshot({ path: path.join(output, `${width}-question.png`) });
       });
     }
-    await check("draft survives navigation; scroll resets; no implicit save", async () => {
+    await check("answer and comment are saved when moving between steps; scroll resets", async () => {
       await page.getByRole("radio", { name: "Sí", exact: true }).click();
       await button("Añadir comentario del paso").click();
       await page.getByRole("textbox", { name: "Comentario del paso (opcional)", exact: true }).fill("Borrador que se conserva");
       const saves = await page.evaluate(() => window.compactChecklist.saves.length);
       await page.getByTestId("checklist-question-scroll").evaluate((element) => { element.scrollTop = element.scrollHeight; });
-      await button("Paso siguiente sin guardar").click();
+      await button("Guardar y paso siguiente").click();
       await heading("Pregunta 2").waitFor();
       assert.equal(await page.getByTestId("checklist-question-scroll").evaluate((element) => element.scrollTop), 0);
-      await button("Paso anterior sin guardar").click();
+      await button("Guardar y paso anterior").click();
       assert.equal(await page.getByRole("radio", { name: "Sí", exact: true }).getAttribute("aria-checked"), "true");
       assert.equal(await page.getByRole("textbox", { name: "Comentario del paso (opcional)", exact: true }).inputValue(), "Borrador que se conserva");
-      assert.equal(await page.evaluate(() => window.compactChecklist.saves.length), saves);
+      assert.ok(await page.evaluate(() => window.compactChecklist.saves.length) > saves, "moving between steps must send the pending comment");
     });
     await check("save failure remains on question and retry confirms once then advances", async () => {
       await page.evaluate(() => { window.compactChecklist.mode = "fail"; });
@@ -121,7 +121,7 @@ async function main() {
       await page.evaluate(() => { window.compactChecklist.mode = "hold"; });
       const before = await page.evaluate(() => window.compactChecklist.saves.length);
       await button("Guardar y siguiente").click();
-      assert.equal(await button("Paso siguiente sin guardar").isDisabled(), true);
+      assert.equal(await button("Guardar y paso siguiente").isDisabled(), true);
       assert.equal(await button("Resumen de pasos").isDisabled(), true);
       assert.equal(await button("Guardar y siguiente").isDisabled(), true);
       assert.equal(await page.evaluate(() => window.compactChecklist.saves.length), before + 1);
@@ -175,10 +175,10 @@ async function main() {
     await check("summary jump to last and first respects navigation limits", async () => {
       await step(47);
       await heading("Pregunta 47").waitFor();
-      assert.equal(await button("Paso siguiente sin guardar").isDisabled(), true);
+      assert.equal(await button("Guardar y paso siguiente").isDisabled(), true);
       await button("Guardar respuesta").waitFor();
       await step(1);
-      assert.equal(await button("Paso anterior sin guardar").isDisabled(), true);
+      assert.equal(await button("Guardar y paso anterior").isDisabled(), true);
     });
     await check("full work details and comments remain reachable", async () => {
       await button("Ver detalle del trabajo, archivos y comentarios").click();
@@ -196,7 +196,7 @@ async function main() {
       await page.getByRole("radio", { name: "Sí", exact: true }).click();
       await button("Guardar y siguiente").click();
       await heading("Pregunta 2").waitFor();
-      await button("Paso anterior sin guardar").click();
+      await button("Guardar y paso anterior").click();
       await page.getByText("Respuesta registrada en el teléfono", { exact: true }).waitFor();
       assert.equal(await button("Respuesta ya registrada en cola").isDisabled(), true);
       assert.match(await page.getByTestId("connection-status-bar").innerText(), /1/);
@@ -207,7 +207,7 @@ async function main() {
       assert.equal(await page.getByRole("radio", { name: "Sí", exact: true }).isDisabled(), true);
       assert.equal(await button("Guardar y siguiente").count(), 0);
       await button("Consultar evidencias del paso").waitFor();
-      await button("Paso siguiente sin guardar").click();
+      await button("Guardar y paso siguiente").click();
       await heading("Pregunta 2").waitFor();
       await page.evaluate(() => window.compactChecklist.render("empty"));
       await heading("Sin checklists disponibles").waitFor();
@@ -219,7 +219,7 @@ async function main() {
       await page.getByTestId("checklist-question-scroll").evaluate((element) => { element.scrollTop = element.scrollHeight; });
       assert.ok(await page.getByTestId("checklist-question-scroll").evaluate((element) => element.scrollTop > 0));
       assert.deepEqual(await dockFits(320, 640), before);
-      await button("Paso siguiente sin guardar").click();
+      await button("Guardar y paso siguiente").click();
       await heading("Pregunta 2").waitFor();
       assert.equal(await page.getByTestId("checklist-question-scroll").evaluate((element) => element.scrollTop), 0);
     });
@@ -227,7 +227,7 @@ async function main() {
       await check(`reduced viewport ${width}x380 with text focus (not native keyboard)`, async () => {
         await page.setViewportSize({ width, height: 640 });
         await fresh();
-        await button("Paso siguiente sin guardar").click();
+        await button("Guardar y paso siguiente").click();
         await page.getByRole("textbox", { name: "Texto (opcional)", exact: true }).fill("Respuesta con teclado");
         await page.setViewportSize({ width, height: 380 });
         await dockFits(width, 380);

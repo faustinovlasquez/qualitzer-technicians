@@ -604,6 +604,9 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
 
   // Datos de la tarjeta superior: equipo, ubicación, fotos y el mismo inicio/pausa del pie (con sus mismas condiciones).
   const heroEquipment = maintenance ? group.equipment : work.workEquipment ?? group.equipment;
+  // Sistema y subsistema del trabajo (los define el mantenimiento en la web): a la vista en la tarjeta.
+  const heroSystem = work.systemName?.trim() || work.componentName?.trim()
+    ? { system: plainText(work.systemName ?? "") || "Sin sistema", component: plainText(work.componentName ?? "") || "Sin subsistema" } : null;
   const heroLocation = plainText(group.locationName || group.locationAddress || "");
   const heroPhotos = (savedFiles ?? []).filter(file => /^image\//i.test(file.type ?? "") || /\.(jpe?g|png|webp|heic)$/i.test(file.name)).filter(file => Boolean(file.thumbnailUrl || file.url)).slice(0, 3);
   const heroExecution: { label: string; icon: IconName; disabled: boolean; onPress: () => void } | null = readOnly ? null
@@ -698,6 +701,15 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <Ionicons name="create-outline" size={22} color={palette.white} accessible={false} />
       </Pressable> : null}
     </View>
+    {heroSystem ? <View style={styles.heroSystemRow} testID="work-hero-system">
+      <View style={styles.heroCell}><View style={styles.heroFactText}><Text style={styles.heroFactLabel}>Sistema</Text><Text style={styles.heroCellValue} numberOfLines={2}>{heroSystem.system}</Text></View></View>
+      <View style={styles.heroDivider} />
+      <View style={styles.heroCell}><View style={styles.heroFactText}><Text style={styles.heroFactLabel}>Subsistema</Text><Text style={styles.heroCellValue} numberOfLines={2}>{heroSystem.component}</Text></View></View>
+    </View> : group.type === "internal_maintenance" && props.workEditor && !readOnly ? <Pressable accessibilityRole="button" accessibilityLabel="Agregar sistema y subsistema del trabajo"
+      accessibilityState={{ disabled: locked || !online || hasPendingOperations }} disabled={locked || !online || hasPendingOperations} onPress={() => void openEditor()}
+      style={({ pressed }) => [styles.heroSystemAdd, (locked || !online || hasPendingOperations) && styles.heroPlayDisabled, pressed && styles.heroCellPressed]} testID="work-hero-system-add">
+      <Ionicons name="add-circle-outline" size={16} color={palette.white} accessible={false} /><Text style={styles.heroCellValue}>Agregar sistema y subsistema</Text>
+    </Pressable> : null}
     <View style={styles.heroGrid}>
       <Pressable accessibilityRole="button" accessibilityLabel={`Equipo: ${heroEquipment?.label ?? "Sin equipo"}. Ver ficha del equipo`} disabled={locked} onPress={() => navigateTab("equipment")} style={({ pressed }) => [styles.heroCell, pressed && styles.heroCellPressed]}>
         <View style={styles.heroFactText}><Text style={styles.heroFactLabel}>Equipo</Text><Text style={styles.heroCellValue} numberOfLines={2}>{heroEquipment ? plainText(heroEquipment.label) : "Sin equipo"}</Text>

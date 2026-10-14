@@ -256,6 +256,10 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       {customer?.trim() ? <InfoBlock label="Cliente" value={customer} /> : null}
       <InfoBlock label="Equipo" value={equipment ? equipment.label || equipmentLabel(equipment) : "Sin equipo asociado"} detail={equipmentDetail} />
       <InfoBlock label="Ubicación" icon="location-outline" value={location?.trim() ? location : "Sin ubicación"} />
+      {work.systemName?.trim() || work.componentName?.trim() ? <View style={infoStyles.row} testID="assignment-work-system">
+        <InfoBlock label="Sistema" icon="cog-outline" value={work.systemName?.trim() || "Sin sistema"} style={infoStyles.half} />
+        <InfoBlock label="Subsistema" icon="layers-outline" value={work.componentName?.trim() || "Sin subsistema"} style={infoStyles.half} />
+      </View> : null}
       <View style={infoStyles.row} testID="assignment-work-schedule" accessibilityLabel={`${fullDate(work.scheduledDate)}. ${scheduleTime(work)}`}>
         <InfoBlock label="Horario" icon="calendar-outline" tone="blue" value={`${scheduledLabel} · ${scheduleTime(work)}`} style={infoStyles.half} />
         {colacion ? <InfoBlock label="Colación" icon="cafe-outline" tone="orange" value={colacion} style={infoStyles.half} /> : null}

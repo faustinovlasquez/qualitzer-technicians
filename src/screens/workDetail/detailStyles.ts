@@ -101,6 +101,8 @@ export const styles = StyleSheet.create({
   heroDescription: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", backgroundColor: "rgba(255,255,255,0.06)" },
   heroEdit: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   heroGrid: { flexDirection: "row", alignItems: "stretch", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "rgba(255,255,255,0.14)", paddingVertical: 4 },
+  heroSystemRow: { flexDirection: "row", alignItems: "stretch", paddingVertical: 2 },
+  heroSystemAdd: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: "rgba(255,255,255,0.35)" },
   heroCell: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "flex-start", borderRadius: radius.sm },
   heroCellPressed: { opacity: 0.7 },
   heroCellValue: { fontSize: 12, lineHeight: 16, fontWeight: "800", color: palette.white },

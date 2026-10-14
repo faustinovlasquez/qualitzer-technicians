@@ -13,6 +13,11 @@ import { checklistAnswerLabel, checklistStepStatus } from "./checklistPresentati
 import { ResponseInput } from "./ResponseInput";
 import { checklistStyles } from "./styles";
 
+/** Escribir el comentario no dispara el envío automático: se guarda con las flechas o el botón Guardar. */
+function answerChangesOnlyComment(previous: StepAnswer, next: StepAnswer): boolean {
+  return (previous.comment ?? "") !== (next.comment ?? "") && JSON.stringify({ ...previous, comment: "" }) === JSON.stringify({ ...next, comment: "" });
+}
+
 export function StepEditor({ step, context, onPrevious, onNext, notices }: { step: ChecklistStep; context: ChecklistTabProps; onPrevious?: () => void; onNext?: () => void; notices?: ReactNode }) {
   const [validation, setValidation] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -39,28 +44,54 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
   useEffect(() => { scroll.current?.scrollTo({ y: 0, animated: false }); }, [step.stepId]);
   useEffect(() => { if (validation) scroll.current?.scrollTo({ y: 0, animated: false }); }, [validation]);
 
+  // Guardado automático: las respuestas de selección se envían al elegirlas; la selección múltiple, al dejar de marcar.
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); }, [step.stepId]);
+  const autoSaved = !context.readOnly && supported && ["validation", "select", "approval", "multiselect"].includes(step.type);
+
   function change(next: StepAnswer): void {
     setValidation(null);
     context.onChange(step, next);
+    if (!autoSaved || answerChangesOnlyComment(answer, next)) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => { autoSaveTimer.current = null; void persist(next, undefined, true); }, step.type === "multiselect" ? 900 : 0);
   }
 
-  async function save(advance: boolean): Promise<void> {
-    if (disabled || running.current || !dirty || queued) return;
-    const submitted = normalizeChecklistAnswer(step, answer);
+  /** Envía la respuesta del paso. En el guardado automático un error de validación no se muestra (aún se está respondiendo). */
+  async function persist(value: StepAnswer, after?: () => void, automatic = false): Promise<boolean> {
+    if (disabled || running.current || queued) return false;
+    const submitted = normalizeChecklistAnswer(step, value);
     const error = checklistAnswerError(step, submitted);
-    setValidation(error);
-    if (error) return;
+    if (error) { if (!automatic) setValidation(error); return false; }
     running.current = true;
     setSaving(true);
     try {
       await Promise.resolve(context.onSave(step, submitted));
-      if (mounted.current && advance) nextAfterSave.current?.();
+      if (mounted.current) after?.();
+      return true;
     } catch (error) {
       if (mounted.current) setValidation(`No se pudo confirmar el guardado. El borrador se conserva. ${errorMessage(error)}`);
+      return false;
     } finally {
       running.current = false;
       if (mounted.current) setSaving(false);
     }
+  }
+
+  async function save(advance: boolean): Promise<void> {
+    if (!dirty) return;
+    await persist(answer, advance ? () => nextAfterSave.current?.() : undefined);
+  }
+
+  /** Las flechas guardan lo pendiente del paso antes de moverse; si no se puede enviar, el borrador queda en el teléfono. */
+  async function move(target?: () => void): Promise<void> {
+    if (!target) return;
+    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null; }
+    if (!context.readOnly && dirty && supported && !queued && !disabled && !running.current) {
+      const submitted = normalizeChecklistAnswer(step, answer);
+      if (!checklistAnswerError(step, submitted)) { await persist(answer, target); return; }
+    }
+    if (mounted.current && !running.current) target();
   }
 
   return (
@@ -107,14 +138,14 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
       {!context.readOnly ? <View style={styles.tight}>
         {onNext && dirty && !queued ? <Button title="Guardar sin avanzar" accessibilityLabel="Guardar respuesta sin avanzar" variant="secondary" style={checklistStyles.compactButton} disabled={disabled || !supported} onPress={() => { void save(false); }} /> : null}
         {dirty && !queued ? <Button title="Descartar borrador de este paso" variant="ghost" style={checklistStyles.compactButton} disabled={disabled} onPress={() => { setValidation(null); context.onDiscard(step); }} /> : null}
-        {dirty && !queued ? <Text style={styles.caption}>Las flechas y el resumen no envían respuestas. Pulsa Guardar para enviarlas.</Text> : null}
+        {dirty && !queued ? <Text style={styles.caption}>{autoSaved ? "La respuesta se envía sola al elegirla." : "Las flechas guardan esta respuesta al cambiar de paso; también puedes pulsar Guardar."}</Text> : null}
       </View> : null}
       {notices}
       </ScrollView>
       <View style={checklistStyles.dock} testID="checklist-step-dock">
-        <IconButton name="chevron-back-outline" label="Paso anterior sin guardar" disabled={!onPrevious || context.disabled || saving} onPress={() => onPrevious?.()} />
+        <IconButton name="chevron-back-outline" label="Guardar y paso anterior" disabled={!onPrevious || context.disabled || saving} onPress={() => { void move(onPrevious); }} />
         {context.readOnly ? <Text style={checklistStyles.dockHint}>Solo lectura</Text> : <Button title={queued ? "Registrada" : onNext ? "Guardar y seguir" : "Guardar respuesta"} accessibilityLabel={queued ? "Respuesta ya registrada en cola" : onNext ? "Guardar y siguiente" : "Guardar respuesta"} style={checklistStyles.dockSave} loading={saving || context.savingStep === id} disabled={disabled || !dirty || !supported || queued} onPress={() => { void save(Boolean(onNext)); }} />}
-        <IconButton name="chevron-forward-outline" label="Paso siguiente sin guardar" disabled={!onNext || context.disabled || saving} onPress={() => onNext?.()} />
+        <IconButton name="chevron-forward-outline" label="Guardar y paso siguiente" disabled={!onNext || context.disabled || saving} onPress={() => { void move(onNext); }} />
       </View>
     </View>
   );
