@@ -49,6 +49,31 @@ export interface FileWorkspaceProps {
 
 interface WorkspaceMessage { text: string; tone: "error" | "success" | "warning"; }
 
+const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
+
+/** Estado visual del guardado: progreso mientras se envía, subida al servidor y confirmación final. */
+function SaveStatusCard({ state, done, total, detail }: { state: "saving" | "syncing" | "offline" | "saved"; done: number; total: number; detail?: string }) {
+  const saved = state === "saved";
+  const ratio = total > 0 ? Math.min(1, Math.max(0, done / total)) : saved ? 1 : 0;
+  const title = saved ? total === 1 ? "Archivo guardado correctamente" : `${plural(total, "archivo guardado", "archivos guardados")} correctamente`
+    : state === "saving" ? `Guardando ${Math.min(done + 1, total)} de ${total}…`
+    : state === "offline" ? "Guardado en el teléfono"
+    : `Subiendo al servidor · ${done} de ${total}`;
+  const subtitle = saved ? "Ya quedó registrado en el trabajo." : state === "offline" ? "Se subirá automáticamente cuando vuelva la conexión. No necesitas repetirlo." : detail ?? "No cierres la app mientras termina.";
+  return <View style={[workspaceStyles.saveCard, saved ? workspaceStyles.saveCardDone : state === "offline" ? workspaceStyles.saveCardOffline : null]} accessibilityRole="progressbar" accessibilityLiveRegion="polite" accessibilityLabel={`${title}. ${subtitle}`} testID="file-save-status">
+    <View style={workspaceStyles.saveCardRow}>
+      {saved ? <View style={workspaceStyles.saveCheck}><Text style={workspaceStyles.saveCheckMark}>✓</Text></View>
+        : state === "offline" ? <View style={[workspaceStyles.saveCheck, workspaceStyles.saveCheckOffline]}><Text style={workspaceStyles.saveCheckMark}>↻</Text></View>
+        : <ActivityIndicator color={palette.primary} />}
+      <View style={workspaceStyles.saveCardText}>
+        <Text style={[workspaceStyles.saveCardTitle, saved ? workspaceStyles.saveCardTitleDone : null]}>{title}</Text>
+        <Text style={styles.caption} numberOfLines={2}>{subtitle}</Text>
+      </View>
+    </View>
+    {!saved ? <View style={workspaceStyles.saveTrack}><View style={[workspaceStyles.saveFill, { width: `${Math.max(8, Math.round(ratio * 100))}%` }, state === "offline" ? workspaceStyles.saveFillOffline : null]} /></View> : null}
+  </View>;
+}
+
 export function FileWorkspace(props: FileWorkspaceProps) {
   return <FileWorkspaceContent key={JSON.stringify([props.mode, props.scopeKey])} {...props} />;
 }
@@ -73,6 +98,10 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
   const [message, setMessage] = useState<WorkspaceMessage | null>(null);
   const [operation, setOperation] = useState<"select" | "prepare" | "upload" | "delete" | "remove" | null>(null);
   const [progress, setProgress] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<{ index: number; total: number; name: string } | null>(null);
+  // Archivos enviados a la cola en este guardado: se sigue su subida para avisar cuando queden confirmados.
+  const [syncWatch, setSyncWatch] = useState<{ total: number } | null>(null);
+  const [savedFlash, setSavedFlash] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<Attachment | null>(null);
   const [help, setHelp] = useState(false);
   useEffect(() => {
@@ -106,6 +135,24 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
   const localFiles = [...displayedFiles.values()].flatMap((file) => { const local = offlineAttachment(file); return local && !local.offline.confirmed ? [local] : []; });
   const remoteFiles = [...displayedFiles.values()].filter((file) => isConfirmedAttachment(file) && !String(file.id).startsWith("local-"));
   useEffect(() => { if (message || draft.error || loadError) list.current?.scrollTo({ y: 0, animated: false }); }, [message, draft.error, loadError]);
+  const queuedLocal = localFiles.length;
+  // Un archivo con error queda señalado en su propia tarjeta; la subida en curso ya no lo cuenta.
+  const stuckLocal = localFiles.filter((file) => ["blocked", "auth_required", "needs_review", "conflict"].includes(file.offline.status ?? "pending")).length;
+  useEffect(() => {
+    if (syncWatch === null) return;
+    if (queuedLocal === 0) { setSavedFlash(syncWatch.total); setSyncWatch(null); }
+    else if (stuckLocal === queuedLocal) setSyncWatch(null);
+  }, [syncWatch, queuedLocal, stuckLocal]);
+  useEffect(() => {
+    if (savedFlash === null) return;
+    const timer = setTimeout(() => setSavedFlash(null), 4500);
+    return () => clearTimeout(timer);
+  }, [savedFlash]);
+  const saveStatus = operation === "upload" && uploadProgress
+    ? <SaveStatusCard state="saving" done={uploadProgress.index - 1} total={uploadProgress.total} detail={uploadProgress.name} />
+    : syncWatch !== null && queuedLocal > 0
+      ? <SaveStatusCard state={props.offline !== undefined && props.offline !== null && !props.offline.online ? "offline" : "syncing"} done={Math.max(0, syncWatch.total - queuedLocal)} total={Math.max(syncWatch.total, queuedLocal)} />
+      : savedFlash !== null ? <SaveStatusCard state="saved" done={savedFlash} total={savedFlash} /> : null;
 
   const load = useCallback(async (): Promise<boolean> => {
     const request = ++generation.current;
@@ -209,23 +256,29 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     const uploadFile = callbacks.current.onUpload;
     const resource = callbacks.current.resourceKey;
     setMessage(null);
+    setSavedFlash(null);
     setOperation("upload");
     try {
       const { saved, queued, failure } = await saveFileBatch({
         store: draft.store, upload: uploadFile, fileIds,
         canContinue: () => active.current && (securityRef.current?.isUnlocked() ?? true) && !callbacks.current.readOnly && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.resourceKey === resource,
         requireSource: callbacks.current.offline === undefined,
-        onProgress: (index, total, name) => { if (active.current) setProgress(`${index}/${total} · ${name}`); },
+        onProgress: (index, total, name) => { if (active.current) { setProgress(`${index}/${total} · ${name}`); setUploadProgress({ index, total, name }); } },
       });
       if (saved > 0 && active.current) void load();
       if (active.current) {
-        const resultText = props.autoSave ? `${saved} confirmado(s) · ${queued} pendiente(s) de sincronizar.` : `${saved} confirmado(s)${props.mode === "demo" ? " en demo" : ""} · ${queued} en cola, sin confirmar.`;
-        setMessage({ text: `${resultText}${failure ? ` ${failure} Los restantes se conservan; reintenta solo los pendientes.` : props.autoSave ? "" : " No repitas los transferidos."}`, tone: failure && saved + queued === 0 ? "error" : queued > 0 || failure ? "warning" : "success" });
+        if (failure) {
+          const done = saved + queued;
+          setMessage({ text: `${done > 0 ? `${plural(done, "archivo guardado", "archivos guardados")}. ` : ""}${failure} Los restantes se conservan; reintenta solo los pendientes.`, tone: done === 0 ? "error" : "warning" });
+        }
+        // Lo enviado a la cola se sigue en la tarjeta de estado hasta que el servidor lo confirme.
+        if (queued > 0) setSyncWatch((current) => ({ total: (current?.total ?? 0) + queued }));
+        else if (saved > 0 && !failure) setSavedFlash(saved);
       }
     } catch (error) {
       if (active.current) setMessage({ text: `No se pudo terminar el guardado. Conserva los borradores y revisa la cola antes de reintentar: ${errorMessage(error)}`, tone: "error" });
     } finally {
-      if (active.current) { setOperation(null); setProgress(""); }
+      if (active.current) { setOperation(null); setProgress(""); setUploadProgress(null); }
       draft.store.endFiles(lease);
     }
   }
@@ -262,9 +315,10 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       {draft.error ? <View style={styles.tight}><Notice message={userErrorText(draft.error)} tone="error" />{!draft.closed ? <Button title="Reintentar borrador" variant="secondary" disabled={draft.saving || draft.fileBusy || props.busy} onPress={() => { void retryDraft(); }} /> : null}</View> : null}
       {!draft.hydrated && !draft.error ? <View style={styles.row}><ActivityIndicator color={palette.primary} /><BodyText>Recuperando borradores de este destino…</BodyText></View> : null}
       {draft.fileBusy && operation === null ? <Notice message="Hay una operación de archivos en curso para este destino. Espera a que termine antes de realizar otra." /> : null}
+      {saveStatus}
       {message ? <Notice message={userErrorText(message.text)} tone={message.tone} onDismiss={() => setMessage(null)} /> : null}
       {props.compact && Platform.OS === "web" && pending.length > 0 ? <Text style={styles.caption}>Sin guardar: se pierden al recargar.</Text> : null}
-      {draft.hydrated && (!props.autoSave || pending.length > 0) ? <Text style={styles.label}>{pending.length} sin guardar · {fileSizeLabel(draft.files.reduce((sum, file) => sum + file.size, 0))} / 40 MiB</Text> : null}
+      {draft.hydrated && pending.length > 0 ? <Text style={styles.label}>{pending.length} sin guardar · {fileSizeLabel(draft.files.reduce((sum, file) => sum + file.size, 0))} / 40 MiB</Text> : null}
       <PendingFileList files={props.offline !== undefined ? pending : draft.files} expanded={props.autoSave} disabled={unavailable} onRemove={(id) => { void remove(id); }} />
       {draft.files.some((file) => file.uploaded) ? <View style={styles.tight}><Notice message="Ya transferidos; no se reenviarán. Falta limpiar el borrador original." tone="warning" />{draft.files.filter((file) => file.uploaded).map((file) => <Button key={file.id} title={`Limpiar borrador original: ${file.name}`} variant="secondary" disabled={unavailable} onPress={() => void remove(file.id)} />)}</View> : null}
       <View style={styles.between}><Text style={styles.label}>{[...displayedFiles.values()].filter(isConfirmedAttachment).length}{props.mode === "demo" ? " en listado demo" : " confirmados"} · {localFiles.filter((file) => !file.offline.confirmed).length} en cola</Text><IconButton label={loadError ? "Reintentar archivos" : "Actualizar archivos"} name="refresh-outline" disabled={loading || props.busy || draft.fileBusy || draft.closed} onPress={() => { void load(); }} /></View>

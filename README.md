@@ -1,4 +1,4 @@
-# Qualitzer técnicos
+# Qualitzer operaciones
 
 ## Instalación, producción y otros entornos
 

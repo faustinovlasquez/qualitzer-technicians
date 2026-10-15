@@ -7,11 +7,11 @@ const { readApiEnvironment } = require("../../config/apiEnvironment");
 const { standaloneGatewayUrl } = require("../../config/gatewayPolicy");
 
 const packageName = "com.qualitzer.field";
-const applicationName = "Qualitzer técnicos";
+const applicationName = "Qualitzer operaciones";
 const certificateSha256 = "06da359352b67f02805c065a4f7054fc863cc606221dfe054462f261da32b510";
 const previous = Object.freeze({
-  name: "qualitzer-tecnicos-1.0.125-android.apk", version: "1.0.125", versionCode: 126,
-  sha256: "1665cefe07c7bce6c592e7fc0f007b44f16aaaa2584718730e956281025b277e",
+  name: "qualitzer-tecnicos-1.0.127-android.apk", version: "1.0.127", versionCode: 128,
+  sha256: "6129f2baec7eff615235c3b15c1b4a79e54ae863207d533dce662d5beaf492c5",
 });
 
 function releaseEndpoints(root, environment = process.env) {

@@ -94,7 +94,7 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
       </Card>
       <Card style={styles.stack}>
         <SectionTitle title="Empresa en tu teléfono" />
-        <BodyText>La aplicación instalada sigue siendo Qualitzer técnicos. Puedes añadir un acceso de {session.tenant.name} a la pantalla de inicio; esto no renombra el icono principal del menú de aplicaciones.</BodyText>
+        <BodyText>La aplicación instalada sigue siendo Qualitzer operaciones. Puedes añadir un acceso de {session.tenant.name} a la pantalla de inicio; esto no renombra el icono principal del menú de aplicaciones.</BodyText>
         <BodyText>{companyBranding.logoMessage}</BodyText>
         <Button title="Añadir empresa a pantalla de inicio" icon="add-circle-outline" variant="secondary" loading={companyBranding.busy} disabled={busy || !companyBranding.canPin} onPress={companyBranding.onPin} />
         <Text accessibilityLiveRegion="polite" style={styles.brandingMessage}>{companyBranding.message}</Text>
@@ -182,7 +182,7 @@ export function ProfileScreen({ session, profileAccess, companyBranding, deviceS
       <MenuRow icon="log-out" color={palette.danger} title="Cerrar sesión / cambiar empresa" subtitle={session.tenant.name} danger disabled={busy} onPress={() => setSection("logout")} />
     </Group>
 
-    <Text style={styles.version}>{`Qualitzer técnicos${version ? ` · Versión ${version}` : ""}`}</Text>
+    <Text style={styles.version}>{`Qualitzer operaciones${version ? ` · Versión ${version}` : ""}`}</Text>
   </ScrollView>;
 }
 

@@ -1,6 +1,6 @@
 import type { Tenant } from "./models";
 
-export const QUALITZER_APP_NAME = "Qualitzer técnicos";
+export const QUALITZER_APP_NAME = "Qualitzer operaciones";
 
 export function brandName(tenant?: Tenant): string {
   return tenant?.name.trim() || QUALITZER_APP_NAME;

@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "Qualitzer técnicos",
+    "name": "Qualitzer operaciones",
     "slug": "qualitzer-tecnicos",
     "scheme": "qualitzer-field",
-    "version": "1.0.126",
+    "version": "1.0.128",
     "orientation": "portrait",
     "icon": "./assets/qualitzer-icon.png",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.qualitzer.field",
-      "versionCode": 127,
+      "versionCode": 129,
       "allowBackup": false,
       "googleServicesFile": "./config/firebase/google-services.json",
       "blockedPermissions": [
@@ -72,7 +72,7 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Qualitzer técnicos usa Face ID para desbloquear tu sesión en este teléfono."
+          "faceIDPermission": "Qualitzer operaciones usa Face ID para desbloquear tu sesión en este teléfono."
         }
       ],
       [

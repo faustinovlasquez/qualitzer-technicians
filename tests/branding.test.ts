@@ -11,7 +11,7 @@ import type { BrandProps } from "../src/ui/components";
 const tenant: Tenant = { id: "company-a", name: "Empresa A", portalOrigin: "https://company.example", environment: "production" };
 
 test("base name and company display name never invent a company", () => {
-  assert.equal(QUALITZER_APP_NAME, "Qualitzer técnicos");
+  assert.equal(QUALITZER_APP_NAME, "Qualitzer operaciones");
   assert.equal(brandName(), QUALITZER_APP_NAME);
   assert.equal(brandName({ ...tenant, name: "  " }), QUALITZER_APP_NAME);
   assert.equal(brandName({ ...tenant, name: "  Empresa verificada  " }), "Empresa verificada");

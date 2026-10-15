@@ -23,7 +23,7 @@ export function createDeviceSecurityAdapter(): DeviceSecurityAdapter {
     },
     async authenticate() {
       return LocalAuthentication.authenticateAsync({
-        promptMessage: "Desbloquear Qualitzer técnicos",
+        promptMessage: "Desbloquear Qualitzer operaciones",
         promptSubtitle: "Confirma que eres tú",
         promptDescription: "Usa la huella o la seguridad configurada en tu teléfono.",
         cancelLabel: "Cancelar",

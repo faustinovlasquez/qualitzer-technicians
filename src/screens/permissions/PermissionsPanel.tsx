@@ -59,7 +59,7 @@ export function PermissionsPanel({ disabled, onEnableNotifications }: { disabled
         if (action === "revoke") setMessage("Android no deja que una app se quite permisos. Se abrió la ficha de Qualitzer: entra a Permisos y elige \"No permitir\".");
         await Linking.openSettings();
       }
-    } catch { if (mounted.current) setMessage("No se pudo completar. Abre Ajustes del teléfono > Aplicaciones > Qualitzer técnicos > Permisos."); }
+    } catch { if (mounted.current) setMessage("No se pudo completar. Abre Ajustes del teléfono > Aplicaciones > Qualitzer operaciones > Permisos."); }
     finally { if (mounted.current) setBusy(null); await refresh(); }
   }
 

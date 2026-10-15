@@ -480,7 +480,7 @@ for (const [os, version, strength] of [["android", 29, "weak"], ["android", 30, 
     const f = nativeFixture({ os, version });
     const result = f.adapterModule.createDeviceSecurityAdapter().authenticate();
     assert.deepEqual(JSON.parse(JSON.stringify(f.prompts[0].options)), {
-      promptMessage: "Desbloquear Qualitzer técnicos", promptSubtitle: "Confirma que eres tú",
+      promptMessage: "Desbloquear Qualitzer operaciones", promptSubtitle: "Confirma que eres tú",
       promptDescription: "Usa la huella o la seguridad configurada en tu teléfono.", cancelLabel: "Cancelar",
       fallbackLabel: "Usar código del teléfono", disableDeviceFallback: false,
       biometricsSecurityLevel: strength, requireConfirmation: true,

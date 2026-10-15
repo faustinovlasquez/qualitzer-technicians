@@ -27,6 +27,7 @@ export function OfflineFileCard({ file, readLocalFile, actionsOnly = false, expa
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const localId = file.offline.localFileId;
+  const uploading = !file.offline.confirmed && ["pending", "syncing"].includes(file.offline.status ?? "pending");
   const [inlinePreview, setInlinePreview] = useState<{ file: LocalPhoto; reader: OfflineController["readLocalFile"] } | null>(null);
   useEffect(() => {
     let current = true;
@@ -65,9 +66,9 @@ export function OfflineFileCard({ file, readLocalFile, actionsOnly = false, expa
     </Pressable> : null}
     {!actionsOnly ? <>
     <Text selectable style={styles.label}>{file.name}</Text>
-    <Badge label={file.offline.confirmed ? "Confirmado" : `Pendiente · ${operationStatusLabels[file.offline.status ?? "pending"]}`} tone={file.offline.confirmed ? "success" : "warning"} />
+    <Badge label={file.offline.confirmed ? "Guardado" : uploading ? "Subiendo al servidor…" : operationStatusLabels[file.offline.status ?? "pending"]} tone={file.offline.confirmed ? "success" : uploading ? "info" : "warning"} />
     <BodyText>{file.size === undefined ? "Tamaño no informado" : fileSizeLabel(file.size)} · {file.offline.downloaded ? "Copia en este dispositivo" : "Bytes no descargados · requiere conexión"}</BodyText>
-    {!file.offline.confirmed ? <BodyText>No cuenta como evidencia confirmada. Su copia pendiente no se puede eliminar desde aquí.</BodyText> : null}
+    {!file.offline.confirmed ? <BodyText>{uploading ? "Se guarda automáticamente; aparecerá como guardado al terminar." : "Revisa el aviso de este archivo. Su copia se conserva en el teléfono."}</BodyText> : null}
     </> : null}
     <View style={styles.row}>
       <Button title="Abrir copia local" variant="secondary" loading={busy} disabled={!localId || !readLocalFile || !file.offline.downloaded || busy} onPress={() => void open(false)} />

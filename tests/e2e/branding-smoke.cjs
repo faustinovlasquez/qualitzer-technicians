@@ -47,9 +47,9 @@ async function main() {
     for (const width of [320, 360, 390, 1280]) {
       await page.setViewportSize({ width, height: 220 });
       await page.evaluate(() => window.showBrand());
-      await page.getByText("Qualitzer técnicos", { exact: true }).waitFor();
+      await page.getByText("Qualitzer operaciones", { exact: true }).waitFor();
       await page.getByTestId("brand-base-logo").waitFor();
-      assert.equal(await page.getByText("Qualitzer técnicos", { exact: true }).count(), 1);
+      assert.equal(await page.getByText("Qualitzer operaciones", { exact: true }).count(), 1);
       assert.doesNotMatch(await page.locator("body").innerText(), /FIELD/);
       await page.screenshot({ path: path.join(output, `base-${width}.png`) });
       const company = { id: "brand-test", name: "Empresa de servicios técnicos con un nombre corporativo muy largo", portalOrigin: "https://example.invalid", environment: "production" };

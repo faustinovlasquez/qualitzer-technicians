@@ -29,7 +29,8 @@ gradle.beforeProject { project ->
             def signing = android.signingConfigs.maybeCreate("qualitzerRelease")
             signing.storeFile = project.file(required("QUALITZER_SIGNING_STORE_FILE"))
             signing.storePassword = required("QUALITZER_SIGNING_STORE_PASSWORD")
-            signing.keyAlias = "qualitzer-field"
+            // El paquete de Google Play se firma con la llave de subida; el APK de descarga directa con la de la app.
+            signing.keyAlias = System.getenv("QUALITZER_SIGNING_KEY_ALIAS") ?: "qualitzer-field"
             signing.keyPassword = required("QUALITZER_SIGNING_KEY_PASSWORD")
             signing.storeType = "PKCS12"
             android.buildTypes.getByName("release").with {
