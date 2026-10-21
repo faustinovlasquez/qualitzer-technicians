@@ -3,6 +3,7 @@ const { existsSync } = require("node:fs");
 const { resolve, dirname, delimiter } = require("node:path");
 const { networkInterfaces } = require("node:os");
 const { readApiEnvironment } = require("../config/apiEnvironment");
+const { branchEnvironment } = require("../config/branchEnvironments");
 
 const root = resolve(__dirname, "..");
 const node = process.platform === "win32" ? resolve(root, "node_modules/node/bin/node.exe") : resolve(root, "node_modules/node/bin/node");
@@ -11,12 +12,20 @@ if (!existsSync(node)) {
   process.exit(1);
 }
 const env = { ...process.env, PATH: `${dirname(node)}${delimiter}${process.env.PATH}` };
+const shellBackendUrl = process.env.BACKEND_URL;
 if (existsSync(resolve(root, ".env"))) process.loadEnvFile?.(resolve(root, ".env"));
 Object.assign(env, process.env, { PATH: `${dirname(node)}${delimiter}${process.env.PATH}` });
+const target = branchEnvironment(root);
+if (shellBackendUrl === undefined && target) {
+  env.BACKEND_URL = target.backendUrl;
+  if (target.gatewayUrl) env.GATEWAY_URL = target.gatewayUrl;
+}
 const endpoints = readApiEnvironment(root, env);
 env.BACKEND_URL = endpoints.backendUrl;
 const addresses = Object.values(networkInterfaces()).flat().filter((address) => address?.family === "IPv4" && !address.internal).map((address) => address.address);
 console.log("\nQUALITZER FIELD\n");
+console.log(`Entorno: ${shellBackendUrl === undefined && target ? `rama ${target.branch}` : "BACKEND_URL"} → ${endpoints.backendUrl}`);
+if (shellBackendUrl === undefined && target?.branch === "local") console.log("Rama local: deja corriendo `npm run gateway` en otra terminal.");
 console.log("Vista de prueba: http://localhost:8081");
 console.log(`Pasarela configurada: ${endpoints.gatewayUrl}`);
 for (const address of addresses) console.log(`Teléfono (Expo Go): exp://${address}:8081`);

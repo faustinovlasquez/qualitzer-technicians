@@ -62,7 +62,7 @@
     "mobile": "node scripts/start.cjs --mobile",
     "android": "node node_modules/expo/bin/cli start --android",
     "web": "node scripts/start.cjs",
-    "gateway": "node --env-file-if-exists=.env --import tsx server/index.ts",
+    "gateway": "node scripts/gateway.cjs",
     "typecheck": "tsc --noEmit && tsc --project server/tsconfig.json",
     "test": "node scripts/test.cjs",
     "export:web": "expo export --platform web",

@@ -208,6 +208,7 @@ test("Expo launcher starts only the app with the same configured API and no inde
         if (name === "node:os") return { networkInterfaces: () => ({ wifi: [{ family: "IPv4", internal: false, address: "192.168.1.2" }] }) };
         if (name === "node:path") return require("node:path");
         if (name === "../config/apiEnvironment") return { readApiEnvironment };
+        if (name === "../config/branchEnvironments") return { branchEnvironment: () => undefined };
         if (name === "node:child_process") return { spawn: (_node: string, args: string[], options: { env: typeof environment }) => {
           launches.push({ args: [...args], backendUrl: options.env.BACKEND_URL });
           return { on: () => undefined, kill: () => undefined };
