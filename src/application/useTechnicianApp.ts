@@ -55,7 +55,7 @@ async function pendingOfflineChanges(repo: TechnicianRepository | null): Promise
   return repo instanceof OfflineTechnicianRepository ? repo.hasPendingChanges() : hasPendingChanges(await createDurableStore());
 }
 
-type AppTab = "today" | "agenda" | "notifications" | "profile" | "materials";
+type AppTab = "today" | "agenda" | "notifications" | "profile" | "materials" | "workshop";
 interface SelectedWork {
   groupId: string;
   workId: string;

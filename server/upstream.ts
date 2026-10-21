@@ -11,6 +11,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   "/profiles/me" | "/profiles/me/avatar" |
   "/worker-locations/batch" | "/worker-locations/me" |
   "/inventory_consumptions_v2/my-receipts" | "/inventory_consumptions_v2/my-receipts/confirm" | `/inventory_consumptions_v2/my-receipts/${number}/dispositions` |
+  "/workshops/select" | "/operation_area/dashboard" |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |

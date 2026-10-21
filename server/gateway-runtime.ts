@@ -16,6 +16,7 @@ import { createUserSignatureRouter } from "./userSignatures/routes";
 import { createUserProfileRouter } from "./userProfile/routes";
 import { createLocationRouter } from "./locations/routes";
 import { createMaterialReceiptRouter } from "./receipts/routes";
+import { createWorkshopRouter } from "./workshop/routes";
 import { createDiagnosticsRouter } from "./diagnostics/routes";
 import { type TenantRegistry, type TenantRuntime } from "./tenants";
 import type { SessionManager } from "./sessions";
@@ -86,12 +87,13 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
     router.use("/user-profile", createUserProfileRouter(upstream));
     router.use("/worker-locations", createLocationRouter(upstream));
     router.use("/material-receipts", createMaterialReceiptRouter(upstream));
+    router.use("/workshop", createWorkshopRouter(upstream));
     router.use("/diagnostics", createDiagnosticsRouter(upstream));
     mobileRouters.set(runtime, router);
     return router;
   };
   app.use("/api", (req, res, next) => {
-    if (!/^\/(creation|mobile-notifications|offline|user-signatures|user-profile|worker-locations|material-receipts)(\/|$)/.test(req.path)) { next(); return; }
+    if (!/^\/(creation|mobile-notifications|offline|user-signatures|user-profile|worker-locations|material-receipts|workshop)(\/|$)/.test(req.path)) { next(); return; }
     context.middleware()(req, res, (error?: unknown) => {
       if (error) { next(error); return; }
       mobileRouter(context.get(req).runtime)(req, res, next);

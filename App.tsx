@@ -44,6 +44,9 @@ import { useMaterialReceipts } from "./src/receipts/useMaterialReceipts";
 import { MaterialReceiptsScreen } from "./src/receipts/MaterialReceiptsScreen";
 import { pendingMaterialCount } from "./src/receipts/receiptTimeline";
 import { createDemoMaterialReceiptPort } from "./src/receipts/demoReceipts";
+import { useWorkshopBoard } from "./src/workshop/useWorkshopBoard";
+import { WorkshopBoardScreen } from "./src/workshop/WorkshopBoardScreen";
+import { createDemoWorkshopPort } from "./src/workshop/demoWorkshop";
 import { flushAppErrors, installAppErrorReporting, recordAppError, setAppErrorScreen } from "./src/diagnostics/errorReporter";
 import { recordNonFatal, setCrashContext, setCrashScreen } from "./src/diagnostics/nativeCrashReporter";
 
@@ -84,6 +87,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const materialReceipts = useMaterialReceipts(demoReceiptPort ?? app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0,
     app.storageKey, app.session?.token ?? "", (demoMode || app.session?.mode === "live" && app.liveVerified) && !security.blocked && !app.busy, security.isUnlocked);
   const pendingMaterials = pendingMaterialCount(materialReceipts.data);
+  // Taller (naves e ingresos): se carga solo con la pestaña abierta.
+  const demoWorkshopPort = useMemo(() => demoMode ? createDemoWorkshopPort() : null, [demoMode, app.session?.token]);
+  const workshop = useWorkshopBoard(demoWorkshopPort ?? app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0, app.storageKey, app.session?.token ?? "",
+    app.tab === "workshop" && (demoMode || app.session?.mode === "live" && app.liveVerified) && !security.blocked);
   const brandingContext = companyBrandingContext(app);
   const companyBranding = useCompanyBranding(brandingContext.input, app.busy || security.blocked, allowAutomaticPin && brandingContext.automaticPinEligible && !security.blocked);
   useEffect(() => { setNotificationSettings(false); }, [app.session?.token, app.session?.branchId]);
@@ -246,10 +253,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
     </FadeIn>;
   }
-  const navigation: { id: "today" | "agenda" | "materials"; label: string; icon: IconName }[] = [{ id: "today", label: "Mi jornada", icon: "grid-outline" }, { id: "agenda", label: "Agenda", icon: "calendar-outline" }, { id: "materials", label: "Materiales", icon: "cube-outline" }];
+  const navigation: { id: "today" | "agenda" | "materials" | "workshop"; label: string; icon: IconName }[] = [{ id: "today", label: "Mi jornada", icon: "grid-outline" }, { id: "agenda", label: "Agenda", icon: "calendar-outline" }, { id: "materials", label: "Materiales", icon: "cube-outline" }, { id: "workshop", label: "Taller", icon: "construct-outline" }];
   const navBusy = app.busy || materialReceipts.busy;
   const navTab = (item: (typeof navigation)[number]) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "materials" && pendingMaterials > 0 ? `${item.label}, ${pendingMaterials} por confirmar` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: navBusy }} disabled={navBusy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
-    <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}><Ionicons name={app.tab === item.id && item.id === "materials" ? "cube" : item.icon} size={20} color={app.tab === item.id ? palette.primary : palette.textSecondary} />
+    <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}><Ionicons name={app.tab === item.id && item.id === "materials" ? "cube" : app.tab === item.id && item.id === "workshop" ? "construct" : item.icon} size={20} color={app.tab === item.id ? palette.primary : palette.textSecondary} />
       {item.id === "materials" && pendingMaterials > 0 ? <View style={styles.navBadge}><Text style={styles.unreadText}>{pendingMaterials > 99 ? "99+" : pendingMaterials}</Text></View> : null}
     </View>
     <Text style={[styles.navText, app.tab === item.id && { color: palette.primary, fontWeight: "800" }]}>{item.label}</Text>
@@ -295,7 +302,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
+      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopBoardScreen workshop={workshop} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
         <ActiveTimersBanner timers={app.activeTimers ?? []} disabled={app.busy} compact={timerBannerCompact} onOpen={(timer) => app.openActiveTimer(timer)}
           onPause={(timer) => app.pauseActiveTimer(timer)} onPauseLocal={(timer) => app.pauseLoadedWork(timer.groupId, timer.workId)}
           localTimers={snapshotActiveTimers(app.data, new Set((app.activeTimers ?? []).map((timer) => String(timer.workId))), Date.now())}

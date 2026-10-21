@@ -128,6 +128,8 @@ function fixture() {
     "location/useLocationTracking": { useLocationTracking: () => locationTracking },
     "location/LocationHistoryPanel": { LocationHistoryPanel: "LocationHistoryPanel" }, "location/LocationSettingsPanel": { LocationSettingsPanel: "LocationSettingsPanel" },
     "receipts/useMaterialReceipts": { useMaterialReceipts: () => materialReceipts }, "receipts/MaterialReceiptsScreen": { MaterialReceiptsScreen: "MaterialReceiptsScreen" },
+    "workshop/useWorkshopBoard": { useWorkshopBoard: () => ({ workshops: null, workshopId: null, board: null, loading: false, error: "", refresh: async () => {}, selectWorkshop: () => {} }) },
+    "workshop/WorkshopBoardScreen": { WorkshopBoardScreen: "WorkshopBoardScreen" }, "workshop/demoWorkshop": { createDemoWorkshopPort: () => ({}) },
     "diagnostics/nativeCrashReporter": { recordNonFatal: () => {}, setCrashContext: () => {}, setCrashScreen: () => {} },
     "diagnostics/errorReporter": { flushAppErrors: async () => {}, installAppErrorReporting: () => {}, recordAppError: async () => {}, setAppErrorScreen: () => {} },
   };

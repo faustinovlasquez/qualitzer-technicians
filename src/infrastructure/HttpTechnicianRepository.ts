@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { materialDispositionInputSchema, materialReceiptInputSchema, materialReceiptResultSchema, materialReceiptSchema, materialReceiptsSchema, materialReceiptStatusSchema,
   type MaterialDispositionInput, type MaterialReceiptInput, type MaterialReceiptStatus } from "../domain/materialReceipts";
+import { workshopBoardSchema, workshopListSchema } from "../domain/workshopBoard";
 import { locationAckSchema, locationBatchSchema, locationHistoryQuerySchema, locationHistorySchema, type LocationPoint } from "../domain/locationTracking";
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
 import { appErrorBatchSchema, appErrorResultSchema, type AppError } from "../domain/diagnostics";
@@ -34,6 +35,15 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async confirmMaterialReceipts(input: MaterialReceiptInput) {
     return materialReceiptResultSchema.parse(await this.request<unknown>("/api/material-receipts/confirm", "POST", materialReceiptInputSchema.parse(input)));
+  }
+  /** Talleres de la sucursal (para elegir cuál tablero de naves ver). */
+  async workshops(branchId: number) {
+    return workshopListSchema.parse(await this.request<unknown>(`/api/workshop/workshops?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  }
+  /** Naves del taller con sus ingresos (solo lectura). */
+  async workshopBoard(branchId: number, workshopId: number) {
+    const query = `companyBranchId=${positiveCreationIdSchema.parse(branchId)}&workshopId=${positiveCreationIdSchema.parse(workshopId)}`;
+    return workshopBoardSchema.parse(await this.request<unknown>(`/api/workshop/board?${query}`));
   }
   async reportAppErrors(errors: AppError[]) {
     return appErrorResultSchema.parse(await this.request<unknown>("/api/diagnostics/errors", "POST", appErrorBatchSchema.parse({ errors })));

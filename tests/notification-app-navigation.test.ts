@@ -176,6 +176,8 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
   const imports = new Map<string, unknown>([
     ["./src/receipts/useMaterialReceipts", { useMaterialReceipts: () => receipts }],
     ["./src/receipts/MaterialReceiptsScreen", { MaterialReceiptsScreen: "MaterialReceiptsScreen" }],
+    ["./src/workshop/useWorkshopBoard", { useWorkshopBoard: () => ({ workshops: null, workshopId: null, board: null, loading: false, error: "", refresh: async () => {}, selectWorkshop: () => {} }) }],
+    ["./src/workshop/WorkshopBoardScreen", { WorkshopBoardScreen: "WorkshopBoardScreen" }], ["./src/workshop/demoWorkshop", { createDemoWorkshopPort: () => ({}) }],
     ["./src/screens/notifications/ActiveTimersBanner", { ActiveTimersBanner: "ActiveTimersBanner" }],
     ["./src/notifications/runningTimers", { snapshotActiveTimers: () => [] }],
     ["./src/diagnostics/nativeCrashReporter", { recordNonFatal: () => {}, setCrashContext: () => {}, setCrashScreen: () => {} }],
@@ -276,7 +278,7 @@ for (const tab of ["notifications", "profile"] as const) {
     assert.equal(avisos.props.accessibilityState?.selected, tab === "notifications");
     assert.deepEqual(textLeaves(avisos), [87]);
     const tabs = elements(f.tree).filter(element => element.props.accessibilityRole === "tab");
-    assert.deepEqual(tabs.flatMap(textLeaves), ["Mi jornada", "Agenda", "Materiales"]);
+    assert.deepEqual(tabs.flatMap(textLeaves), ["Mi jornada", "Agenda", "Materiales", "Taller"]);
     assert.equal(elements(avisos).filter(element => element.type === "Text" && element.props.children === 87).length, 1);
   });
 }

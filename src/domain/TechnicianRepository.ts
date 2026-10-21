@@ -13,6 +13,8 @@ import type { LocationPoint } from "./locationTracking";
 export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort>, Partial<OwnProfilePort> {
   materialReceipts?: import("./materialReceipts").MaterialReceiptPort["materialReceipts"];
   confirmMaterialReceipts?: import("./materialReceipts").MaterialReceiptPort["confirmMaterialReceipts"];
+  workshops?: import("./workshopBoard").WorkshopBoardPort["workshops"];
+  workshopBoard?: import("./workshopBoard").WorkshopBoardPort["workshopBoard"];
   equipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget): Promise<import("./equipmentLocation").EquipmentLocation>;
   workEdit?(scope: WorkScope): Promise<import("./creation").WorkEditDocument>;
   updateWork?(scope: WorkScope, input: import("./creation").WorkEditInput): Promise<import("./creation").WorkEditDocument>;
