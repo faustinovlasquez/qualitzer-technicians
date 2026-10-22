@@ -57,7 +57,8 @@ export function normalizeChecklistAnswer(step: ChecklistStep, answer: StepAnswer
   return { ...answer, responseValue: value, isCompleted: completed, executionStatus: completed ? "completed" : value === "not_applicable" ? null : answered ? "not_completed" : null };
 }
 
-export function checklistAnswerError(step: ChecklistStep, answer: StepAnswer): string | null {
+/** `allowMissingFiles`: la inspección del taller guarda la respuesta y deja el paso pendiente hasta subir la foto (como la web). */
+export function checklistAnswerError(step: ChecklistStep, answer: StepAnswer, rules: { allowMissingFiles?: boolean } = {}): string | null {
   const value = answer.responseValue;
   if (!["validation", "text", "number", "select", "multiselect", "approval"].includes(step.type)) return "Este tipo de respuesta no está disponible en esta aplicación.";
   if (!hasResponse(value)) return isChecklistStepProgressRelevant(step) ? "Completa una respuesta válida antes de guardar. Puedes pasar a otro paso sin guardar." : null;
@@ -74,6 +75,6 @@ export function checklistAnswerError(step: ChecklistStep, answer: StepAnswer): s
   }
   if (!valid) return step.type === "number" ? "Ingresa un número válido; usa punto para los decimales." : "Selecciona una respuesta válida con las opciones de esta asignación.";
   if (step.type === "validation" && typeof value === "boolean" && (answer.isCompleted !== value || (value === false && answer.executionStatus !== "not_completed"))) return "La validación negativa debe conservarse como no completada.";
-  if (step.type !== "text" && step.isFilesRequired === true && (step.attachments ?? []).length === 0) return "Falta evidencia confirmada para este paso. Adjunta los archivos y actualiza la asignación; el borrador se conserva.";
+  if (!rules.allowMissingFiles && step.type !== "text" && step.isFilesRequired === true && (step.attachments ?? []).length === 0) return "Falta evidencia confirmada para este paso. Adjunta los archivos y actualiza la asignación; el borrador se conserva.";
   return null;
 }

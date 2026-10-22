@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Animated, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { IconButton, type IconName } from "../ui/components";
+import { Animated, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Button, type IconName } from "../ui/components";
 import { PrivateModal } from "../security/DeviceSecurityContext";
 import { palette, radius, theme, typography } from "../ui/theme";
 import { animateNextLayout } from "../ui/motion";
@@ -61,28 +61,65 @@ function EntryCard({ entry, onOpen }: { entry: WorkshopEntry; onOpen: () => void
   </Pressable>;
 }
 
-function AreaSection({ area, index, onOpenEntry }: { area: WorkshopArea; index: number; onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void }) {
+/** Nave vacía con espacio: toda la tarjeta lleva a registrar un ingreso en esa nave. */
+function FreeArea({ area, onNewEntry }: { area: WorkshopArea; onNewEntry: (area: WorkshopArea) => void }) {
+  if (!workshopAreaHasRoom(area)) {
+    return <View style={styles.freeQuiet}><Ionicons name="eye-off-outline" size={16} color={palette.textMuted} accessible={false} /><Text style={styles.freeQuietText}>Sin ingresos visibles</Text></View>;
+  }
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Nave ${area.title} libre. Registrar un ingreso aquí`} onPress={() => onNewEntry(area)}
+    style={({ pressed }) => [styles.free, pressed && styles.freePressed]}>
+    <View style={styles.freeIcon}><Ionicons name="add" size={26} color={palette.white} accessible={false} /></View>
+    <View style={styles.freeBody}>
+      <Text style={styles.freeTitle}>Nave libre</Text>
+      <Text style={styles.freeText}>Toca para registrar un ingreso en {area.title}</Text>
+    </View>
+    <Ionicons name="arrow-forward-circle" size={26} color={palette.primary} accessible={false} />
+  </Pressable>;
+}
+
+function AreaSection({ area, index, pinned, onTogglePin, onOpenEntry, onNewEntry }: {
+  area: WorkshopArea; index: number; pinned: boolean; onTogglePin: () => void;
+  onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void; onNewEntry: (area: WorkshopArea) => void;
+}) {
   const occupancy = area.hasUnlimitedSlots ? `${area.occupiedSlots} en nave` : area.occupiedSlots === 0 ? "Libre" : `${area.occupiedSlots} de ${area.maxSlots}`;
+  const room = workshopAreaHasRoom(area);
   return <FadeIn index={index}>
-    <View style={styles.area}>
+    <View style={[styles.area, pinned && styles.areaPinned]}>
       <View style={styles.areaHeader}>
-        <Ionicons name="business-outline" size={17} color={palette.primary} accessible={false} />
-        <Text style={styles.areaTitle} numberOfLines={1} accessibilityRole="header">{area.title}</Text>
-        <View style={[styles.occupancy, area.entries.length === 0 && styles.occupancyFree]}>
-          <Text style={[styles.occupancyText, area.entries.length === 0 && styles.occupancyTextFree]}>{occupancy}</Text>
+        <View style={[styles.areaIcon, pinned && styles.areaIconPinned]}>
+          <Ionicons name="business" size={15} color={pinned ? palette.white : palette.primary} accessible={false} />
         </View>
+        <View style={styles.areaTitleBox}>
+          <Text style={styles.areaTitle} numberOfLines={1} accessibilityRole="header">{area.title}</Text>
+          <View style={styles.areaMeta}>
+            <View style={[styles.occupancy, area.entries.length === 0 && styles.occupancyFree]}>
+              <Text style={[styles.occupancyText, area.entries.length === 0 && styles.occupancyTextFree]}>{occupancy}</Text>
+            </View>
+            {pinned ? <Text style={styles.pinnedLabel}>Fijada</Text> : null}
+          </View>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={pinned ? `Desfijar ${area.title}` : `Fijar ${area.title} arriba`} accessibilityState={{ selected: pinned }}
+          hitSlop={6} onPress={() => { animateNextLayout(); onTogglePin(); }} style={({ pressed }) => [styles.pin, pinned && styles.pinOn, pressed && styles.freePressed]}>
+          <Ionicons name={pinned ? "pin" : "pin-outline"} size={17} color={pinned ? palette.white : palette.textSecondary} accessible={false} />
+        </Pressable>
+        {room ? <Pressable accessibilityRole="button" accessibilityLabel={`Nuevo ingreso en ${area.title}`} onPress={() => onNewEntry(area)}
+          style={({ pressed }) => [styles.areaAdd, pressed && styles.freePressed]}>
+          <Ionicons name="add" size={18} color={palette.white} accessible={false} />
+          <Text style={styles.areaAddText}>Ingresar</Text>
+        </Pressable> : null}
       </View>
       {area.entries.length > 0 ? area.entries.map((entry) => <EntryCard key={entry.id} entry={entry} onOpen={() => onOpenEntry(entry, area)} />)
-        : <View style={styles.free}><Ionicons name="checkmark-circle-outline" size={18} color={palette.primary} accessible={false} />
-          <Text style={styles.freeText}>{workshopAreaHasRoom(area) ? "Nave libre, sin equipos" : "Sin ingresos visibles"}</Text></View>}
+        : <FreeArea area={area} onNewEntry={onNewEntry} />}
     </View>
   </FadeIn>;
 }
 
 /** Taller: naves una debajo de otra con sus ingresos; tocar un ingreso abre su ficha. */
-export function WorkshopBoardScreen({ workshop, onOpenEntry }: { workshop: WorkshopModel; onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void }) {
-  const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
+export function WorkshopBoardScreen({ workshop, onOpenEntry, onNewEntry, query = "" }: {
+  workshop: WorkshopModel; onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void; onNewEntry: (area: WorkshopArea | null) => void;
+  /** Texto del buscador fijo del encabezado de la app, igual que en Mi jornada. */
+  query?: string;
+}) {
   const [chip, setChip] = useState<Chip>("all");
   const [picker, setPicker] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,7 +141,11 @@ export function WorkshopBoardScreen({ workshop, onOpenEntry }: { workshop: Works
       if (normalized === "") return true;
       return [entry.code, entry.title, entry.equipmentLabel, entry.equipmentCode, entry.customerName, area.title].join(" ").toLowerCase().includes(normalized);
     })
-  })).filter((area) => (chip === "all" && normalized === "") || area.entries.length > 0), [areas, chip, normalized]);
+  })).filter((area) => (chip === "all" && normalized === "") || area.entries.length > 0)
+    // Las fijadas primero, en el orden en que se fijaron; el resto conserva el orden del taller.
+    .map((area, order) => ({ area, order, pin: workshop.pinned.indexOf(area.id) }))
+    .sort((a, b) => (a.pin === -1 ? Infinity : a.pin) - (b.pin === -1 ? Infinity : b.pin) || a.order - b.order)
+    .map(({ area }) => area), [areas, chip, normalized, workshop.pinned]);
   const workshopName = workshop.workshops?.find((item) => item.id === workshop.workshopId)?.name ?? "Elegir taller";
   const chips: Array<{ id: Chip; label: string; count: number }> = [
     { id: "all", label: "Todos", count: counts.all }, { id: "inProgress", label: "En proceso", count: counts.inProgress },
@@ -122,19 +163,13 @@ export function WorkshopBoardScreen({ workshop, onOpenEntry }: { workshop: Works
             <Text accessibilityRole="header" style={styles.heroTitle}>Taller</Text>
             <Text style={styles.heroSubtitle}>{counts.all === 1 ? "1 equipo en naves" : `${counts.all} equipos en naves`}</Text>
           </View>
-          <IconButton name={searching ? "close-outline" : "search-outline"} label={searching ? "Cerrar búsqueda" : "Buscar"} onPress={() => { animateNextLayout(); if (searching) setQuery(""); setSearching((value) => !value); }} />
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel={`Taller: ${workshopName}`} disabled={(workshop.workshops?.length ?? 0) < 2} onPress={() => setPicker(true)} style={styles.select}>
           <Ionicons name="storefront-outline" size={17} color={palette.primary} accessible={false} />
           <Text style={styles.selectText} numberOfLines={1}>{workshopName}</Text>
           {(workshop.workshops?.length ?? 0) > 1 ? <Ionicons name="chevron-down" size={16} color={palette.textSecondary} accessible={false} /> : null}
         </Pressable>
-        {searching ? <View style={styles.search}>
-          <Ionicons name="search-outline" size={17} color={palette.textMuted} accessible={false} />
-          <TextInput value={query} onChangeText={setQuery} autoFocus placeholder="Buscar ingreso, equipo o cliente" placeholderTextColor={palette.textMuted}
-            style={styles.searchInput} returnKeyType="search" accessibilityLabel="Buscar en el taller" />
-          {query ? <Pressable accessibilityRole="button" accessibilityLabel="Limpiar búsqueda" hitSlop={8} onPress={() => setQuery("")}><Ionicons name="close-circle" size={18} color={palette.textMuted} /></Pressable> : null}
-        </View> : null}
+        {workshop.board ? <Button title="Nuevo ingreso" icon="add-circle-outline" onPress={() => onNewEntry(null)} /> : null}
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -160,7 +195,8 @@ export function WorkshopBoardScreen({ workshop, onOpenEntry }: { workshop: Works
         <Text style={styles.emptyTitle}>{normalized || chip !== "all" ? "Sin resultados" : "Sin naves configuradas"}</Text>
         <Text style={styles.emptyText}>{normalized || chip !== "all" ? "Prueba con otra búsqueda o filtro." : "Este taller todavía no tiene naves."}</Text>
       </View> : null}
-      {visibleAreas.map((area, index) => <AreaSection key={area.id} area={area} index={index} onOpenEntry={onOpenEntry} />)}
+      {visibleAreas.map((area, index) => <AreaSection key={area.id} area={area} index={index} pinned={workshop.pinned.includes(area.id)}
+        onTogglePin={() => workshop.togglePin(area.id)} onOpenEntry={onOpenEntry} onNewEntry={onNewEntry} />)}
     </ScrollView>
 
     <PrivateModal visible={picker} transparent animationType="fade" onRequestClose={() => setPicker(false)}>
@@ -188,8 +224,6 @@ const styles = StyleSheet.create({
   heroText: { flex: 1, minWidth: 0 }, heroTitle: { ...typography.heading, color: palette.heading }, heroSubtitle: { ...typography.caption, color: palette.textSecondary },
   select: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, height: 44, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
   selectText: { flex: 1, ...typography.label, color: palette.text },
-  search: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, height: 44, borderRadius: radius.md, borderWidth: 1, borderColor: palette.primaryBorder, backgroundColor: palette.surface },
-  searchInput: { flex: 1, fontSize: 15, color: palette.text, paddingVertical: 0 },
   chips: { gap: 8, paddingRight: 4 },
   chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 14, paddingRight: 8, height: 36, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
   chipOn: { borderColor: palette.primary, backgroundColor: palette.primary },
@@ -203,13 +237,29 @@ const styles = StyleSheet.create({
   emptyIcon: { width: 64, height: 64, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
   emptyTitle: { ...typography.label, fontSize: 16, color: palette.text }, emptyText: { ...typography.caption, color: palette.textSecondary, textAlign: "center" },
   area: { gap: 8 },
+  areaPinned: { padding: 10, marginHorizontal: -10, borderRadius: radius.lg, backgroundColor: palette.primarySoft, borderWidth: 1, borderColor: palette.primaryBorder },
   areaHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 2 },
-  areaTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: palette.heading },
-  occupancy: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: palette.successSoft },
+  areaIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  areaIconPinned: { backgroundColor: palette.primary },
+  areaTitleBox: { flex: 1, minWidth: 0, gap: 3 },
+  areaTitle: { fontSize: 16, fontWeight: "800", color: palette.heading },
+  areaMeta: { flexDirection: "row", alignItems: "center", gap: 6 },
+  pinnedLabel: { fontSize: 11, fontWeight: "800", color: palette.primary },
+  occupancy: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: palette.successSoft },
   occupancyFree: { backgroundColor: palette.track },
-  occupancyText: { fontSize: 12, fontWeight: "800", color: palette.success }, occupancyTextFree: { color: palette.textSecondary },
-  free: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 52, borderRadius: radius.lg, borderWidth: 1.5, borderStyle: "dashed", borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
-  freeText: { fontSize: 13, fontWeight: "700", color: palette.primary },
+  pin: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  pinOn: { borderColor: palette.primary, backgroundColor: palette.primary },
+  areaAdd: { flexDirection: "row", alignItems: "center", gap: 4, height: 36, paddingLeft: 10, paddingRight: 14, borderRadius: radius.pill, backgroundColor: palette.primary, ...theme.shadow },
+  areaAddText: { fontSize: 13, fontWeight: "800", color: palette.white },
+  occupancyText: { fontSize: 11, fontWeight: "800", color: palette.success }, occupancyTextFree: { color: palette.textSecondary },
+  free: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 72, paddingHorizontal: 14, paddingVertical: 12, borderRadius: radius.lg, borderWidth: 1.5, borderStyle: "dashed", borderColor: palette.primary, backgroundColor: palette.surface },
+  freePressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+  freeIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary },
+  freeBody: { flex: 1, minWidth: 0, gap: 2 },
+  freeTitle: { fontSize: 15, fontWeight: "800", color: palette.heading },
+  freeText: { ...typography.caption, color: palette.textSecondary },
+  freeQuiet: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 44, borderRadius: radius.lg, backgroundColor: palette.track },
+  freeQuietText: { fontSize: 13, fontWeight: "700", color: palette.textMuted },
   card: { flexDirection: "row", gap: 12, padding: 12, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, ...theme.shadow },
   cardPending: { borderColor: palette.orange },
   cardPressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },

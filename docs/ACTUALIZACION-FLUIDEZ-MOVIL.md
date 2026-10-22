@@ -1,3 +1,15 @@
+# Inspección completa y mantenimientos desde el ingreso: gateway 1.0.46 / APK 1.0.132
+
+Inspección única (guía, fotos adicionales, comparar, zip y enlace con QR), listas de revisión con el diseño y autoguardado del checklist de trabajos, y mantenimientos creados desde un ingreso de equipo propio. Timer, checklist y notificaciones no cambian. Desplegar backend y gateway 1.0.46 juntos. Ver [actualizacion 1.0.132](ACTUALIZACION-1.0.132.md).
+
+# Crear clientes, sucursales y contactos desde el ingreso: gateway 1.0.45 / APK 1.0.131
+
+Naves fijadas y botón "Ingresar" en el tablero, y creación rápida de cliente, sucursal y contacto en el ingreso. Nuevo logo oficial. Timer, checklist y notificaciones no cambian. Desplegar backend y gateway 1.0.45 juntos. Ver [actualizacion 1.0.131](ACTUALIZACION-1.0.131.md).
+
+# Taller en la app: gateway 1.0.44 / APK 1.0.129
+
+El técnico gestiona el taller desde la app: naves, ingresos en tres pasos, trabajos con su ficha normal (timer, checklist, archivos), órdenes de trabajo hacia comercial y entrega con firma. Nuevo logo oficial. Desplegar backend y gateway 1.0.44 juntos. Ver [actualizacion 1.0.129](ACTUALIZACION-1.0.129.md).
+
 # Sesión de la app que no se cierra sola: gateway 1.0.43 / APK 1.0.125
 
 Entrar a la web desde el navegador del teléfono ya no cierra la sesión de la app, y una acción sin permiso ya no la cierra. Desplegar backend y gateway 1.0.43 juntos. Sin migraciones. No requiere APK nueva.

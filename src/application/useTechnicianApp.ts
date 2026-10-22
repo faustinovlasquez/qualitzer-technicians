@@ -799,6 +799,96 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     } finally { endAction(action); }
   }
 
+  /**
+   * Abre desde el Taller la ficha normal de un trabajo (iniciar, cronómetro, archivos, checklist). Lo busca en la agenda del
+   * técnico ±15 días y lo muestra el día que corresponde; al cerrarlo se vuelve al Taller. Devuelve el motivo si no se pudo.
+   */
+  const workshopReturnRange = useRef<DateRange | null>(null);
+  /** Al cerrar un trabajo abierto desde el Taller, Mi jornada y la Agenda vuelven a los días que mostraban. */
+  function restoreWorkshopRange(): boolean {
+    const previous = workshopReturnRange.current;
+    workshopReturnRange.current = null;
+    if (!previous || state.current.tab !== "workshop") return false;
+    updateRange(previous);
+    return true;
+  }
+
+  async function openWorkshopWork(workId: number): Promise<string | null> {
+    const current = state.current.session;
+    const repo = repository.current;
+    if (!current || current.branchId === null || !repo || actionLock.current || state.current.selected || state.current.selectedOrder || state.current.selectedCreationKind) {
+      return "Hay otra acción en curso. Inténtalo de nuevo en unos segundos.";
+    }
+    const today = scheduleClock(current.user.system.timezone)?.day;
+    if (!today) return "La sucursal no tiene una zona horaria válida configurada.";
+    const branchId = current.branchId;
+    const version = sessionVersion.current;
+    const action = beginAction();
+    requestVersion.current += 1;
+    const still = () => version === sessionVersion.current && repository.current === repo && state.current.session === current && isAccessAllowed();
+    try {
+      const wide: DateRange = { startDate: shiftDate(today, -15), endDate: shiftDate(today, 15) };
+      const all = normalizeAssignmentsChecklistProgress(await repo.assignments(wide, branchId));
+      if (!still()) return null;
+      if (all.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
+      const group = all.groups.find((item) => item.works.some((work) => work.id === String(workId)));
+      if (!group) return "Este trabajo no está en tu agenda de estos días. Puede estar asignado a otro técnico o planificado más adelante.";
+      const groupId = Number(group.id.replace(/^(maintenance|external|direct-np|direct)-/, ""));
+      const target: NoticeTarget = { groupType: group.id.startsWith("maintenance-") ? "maintenance" : group.id.startsWith("external-") ? "negotiation" : "work", groupId, workId };
+      const day = noticeDayInRange(all, target, wide, today) ?? today;
+      const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(dailyRange(day), branchId));
+      if (!still()) return null;
+      const located = locateNotice(fresh, target, day);
+      if (!located?.work) return "No se pudo abrir el trabajo en tu agenda. Actualiza y vuelve a intentarlo.";
+      const nextRange = dailyRange(day);
+      const nextWork: SelectedWork = { groupId: located.group.id, workId: located.work.id, queryDate: day, scheduledDate: located.scheduledDate ?? day, initialTab: "work" };
+      manualRefresh.current = { session: current, range: nextRange };
+      // Se queda en la pestaña Taller: al cerrar el trabajo se vuelve a la ficha del ingreso y a los días que se veían antes.
+      workshopReturnRange.current = state.current.range;
+      state.current = { ...state.current, data: fresh, range: nextRange, selected: nextWork, selectedOrder: null };
+      setData(fresh); setRange(nextRange); setSelected(nextWork); setSelectedOrder(null); setError(null); setNoticeError(null);
+      return null;
+    } catch (caught) {
+      return still() ? errorText(caught) : null;
+    } finally { endAction(action); }
+  }
+
+  /** Crear un trabajo (o un mantenimiento, si el equipo es propio) de un ingreso con el formulario normal de creación (solo con conexión). */
+  function workshopCreationContext(companyBranchId: number): { current: Session; repo: TechnicianRepository } {
+    const current = state.current.session;
+    const repo = repository.current;
+    if (!currentContext() || state.current.selected || state.current.selectedOrder || state.current.selectedCreationKind || !current || !repo || !current.user.workerId
+      || companyBranchId !== current.branchId || !current.user.accessBranchs.some((item) => item.id === companyBranchId && item.isEnabled !== false && item.isDeleted !== true)) {
+      throw new Error("La sesión o la sucursal cambió. Vuelve a abrir el formulario.");
+    }
+    return { current, repo };
+  }
+  async function workshopCreationOptions(query: CreationOptionsQuery): Promise<CreationOptions> {
+    const input = creationOptionsQuerySchema.parse(query);
+    const { current, repo } = workshopCreationContext(input.companyBranchId);
+    const result = creationOptionsSchema.parse(await repo.creationOptions(input));
+    if (result.companyBranchId !== current.branchId || result.userId !== current.user.id || result.workerId !== current.user.workerId) throw new Error("Las opciones no corresponden a tu sesión.");
+    return result;
+  }
+  async function createWorkshopWork(input: CreationInput): Promise<CreationResult> {
+    const value = creationInputSchema.parse(input);
+    const entryId = value.kind === "work" ? value.work.operationAreaEntryId : value.kind === "maintenance" ? value.maintenance.operationAreaEntryId : undefined;
+    if (!entryId) throw new Error(value.kind === "maintenance" ? "El mantenimiento no corresponde a un ingreso del taller." : "El trabajo no corresponde a un ingreso del taller.");
+    const { current, repo } = workshopCreationContext(value.companyBranchId);
+    if (actionLock.current) throw new Error("Hay una operación en curso. Espera a que termine.");
+    const version = sessionVersion.current;
+    const action = beginAction();
+    try {
+      // Sin cola sin conexión: un trabajo de ingreso se crea solo en línea.
+      const remote = remoteRepository(repo);
+      if (!remote) throw new Error("La creación no está disponible en este momento.");
+      const result = creationResultSchema.parse(await remote.createRecord(value));
+      if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió. La creación fue confirmada; no la repitas.");
+      if (result.kind !== value.kind || result.companyBranchId !== current.branchId || result.schedule.date !== value.schedule.date) throw new Error("La respuesta no corresponde a la solicitud enviada.");
+      return result;
+    } finally { endAction(action); }
+  }
+
   async function refreshFromNotification(context: NotificationOpenContext): Promise<void> {
     const live = state.current;
     if (!notificationContextIsCurrent(context) || actionLock.current || live.selectedCreationKind || live.selected || live.selectedOrder || (live.tab !== "today" && live.tab !== "agenda")) return;
@@ -1712,6 +1802,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (!currentContext() || actionLock.current || !selected) return;
     state.current = { ...state.current, selected: null };
     setSelected(null);
+    restoreWorkshopRange();
   }
 
   function closeOrder(): void {
@@ -1731,11 +1822,13 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (!currentContext() || actionLock.current) return;
     state.current = { ...state.current, selected: null, selectedOrder: null };
     setSelected(null); setSelectedOrder(null);
+    restoreWorkshopRange();
   }
 
   function homeFromDetails(): void {
     if (!currentContext() || actionLock.current || selectedCreationKind) return;
     closeDetails();
+    workshopReturnRange.current = null;
     mainHistory.current.entries = [];
     state.current = { ...state.current, tab: "today" };
     setTab("today");
@@ -1817,6 +1910,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     equipmentLocation: { load: loadEquipmentLocation, save: saveEquipmentLocation },
     workEditor: { load: loadWorkEdit, options: workEditOptions, save: saveWorkEdit, saved: onWorkEdited },
     orderCreation: { onLoadOptions: orderCreationOptions, onSubmit: createOrderWork, onCreated: onOrderWorkCreated },
+    workshopCreation: { onLoadOptions: workshopCreationOptions, onSubmit: createWorkshopWork },
+    openWorkshopWork,
     creationNotice: visibleCreationNotice,
     dismissCreationNotice: () => setCreationNotice(null),
     locationPort: remoteRepository(repository.current),

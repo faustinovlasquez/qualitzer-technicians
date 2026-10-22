@@ -46,6 +46,32 @@ export async function workshopActor(upstream: Upstream, req: Request, branchId: 
   return { token, user, branchId };
 }
 
+/**
+ * Naves de los talleres de la sucursal (nave → taller). El backend no revisa a qué sucursal pertenece un ingreso o una
+ * nave, así que el conector lo confirma con el tablero de cada taller (el listado de naves omite las llenas).
+ */
+export async function branchAreas(upstream: Upstream, token: string, branchId: number): Promise<Map<number, number>> {
+  const workshops = list(await upstream.request("/workshops/select", { token, query: new URLSearchParams({ companyBranchId: String(branchId), page: "1", limit: "100" }) }))
+    .flatMap((option) => { const id = positive(asRecord(option).value ?? asRecord(option).id); return id === null ? [] : [id]; });
+  const boards = await Promise.all(workshops.map(async (workshopId) => ({ workshopId, areas: list(await upstream.request("/operation_area/dashboard", {
+    token, query: new URLSearchParams({ companyBranchId: String(branchId), workshopId: String(workshopId) })
+  })) })));
+  const areas = new Map<number, number>();
+  for (const board of boards) for (const area of board.areas) { const areaId = positive(asRecord(area).id); if (areaId !== null) areas.set(areaId, board.workshopId); }
+  return areas;
+}
+
+/** El ingreso existe y su nave es de un taller de la sucursal del usuario. Devuelve el ingreso tal como lo da el backend. */
+export async function branchEntry(upstream: Upstream, token: string, branchId: number, entryId: number): Promise<{ raw: Raw; areas: Map<number, number> }> {
+  const [entry, areas] = await Promise.all([upstream.request(`/operation_area_entries/${entryId}`, { token }), branchAreas(upstream, token, branchId)]);
+  const raw = asRecord(entry);
+  const areaId = positive(raw.operationAreaId);
+  if (positive(raw.id) !== entryId || areaId === null || !areas.has(areaId)) {
+    throw new GatewayError(404, "ENTRY_NOT_FOUND", "Este ingreso no está en tu sucursal o ya no existe. Actualiza el tablero.");
+  }
+  return { raw, areas };
+}
+
 interface LedgerEntry { fingerprint: string; expiresAt: number; result: Promise<unknown> }
 
 /**

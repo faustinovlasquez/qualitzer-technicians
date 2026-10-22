@@ -1,5 +1,20 @@
 # Marca de Qualitzer técnicos y distribuciones por empresa
 
+## Logo oficial (2026-10-22, APK 1.0.131)
+
+Logo oficial de la app: Q hexagonal con degradado azul y el técnico con casco y lentes, sobre fondo claro `#F1F4F9`. Reemplaza las versiones anteriores del mismo día (Q blanca sobre azul `#1447E6`, APK 1.0.129 y 1.0.130). Imagen aprobada: [../assets/qualitzer-original.png](../assets/qualitzer-original.png) (1024 × 1024, SHA-256 `263aee3d…b915`). `node scripts/generate-qualitzer-brand.cjs` recorta el dibujo, lo separa del fondo claro (opacidad según cuán azul u oscuro es cada píxel; el gris que toca el borde del recorte es sombra del cuadrado original y se descarta), lo centra y le da margen, y genera:
+
+| Archivo | Uso |
+|---|---|
+| `qualitzer-icon.png` (1024) | Ícono de la app: fondo claro de borde a borde, dibujo centrado al 66 % del ancho; iOS y Android ponen sus esquinas. |
+| `qualitzer-adaptive.png` (1024) | Primer plano adaptativo Android, opaco, con el dibujo entero dentro del círculo seguro 66/108; fondo `#F1F4F9` en `app.json`. |
+| `qualitzer-source.png` (1024) | Logo oficial completo: cuadrado redondeado con esquinas transparentes. |
+| `qualitzer-logo.png` (512) | Logo dentro de la app y en la página de descarga del APK, igual que el anterior. |
+| `qualitzer-favicon.png` (64) | Favicon web, igual que el logo. |
+| `notification-icon.png` (96) | Ícono de notificaciones Android: silueta blanca del dibujo sobre transparente. |
+
+El color de las notificaciones (`app.json` y el canal Android) es `#353EE1`, el azul del hexágono. Las seis pruebas de `tests/branding-assets.test.cjs` verifican la fuente, regeneración exacta, fondo claro en el borde, centrado con margen, zona segura, esquinas transparentes y la silueta de notificación. El ícono del teléfono cambia al instalar una APK nueva; recargar la app no basta. Las secciones siguientes son historia de logos anteriores.
+
 ## Icono sin borde blanco 1.0.64 (2026-09-29)
 
 La captura del teléfono mostró que la versión 1.0.63 reducía todo el PNG, incluido su margen blanco, sobre un fondo Android también blanco. Ahora el generador recorta únicamente el exterior del original aprobado (`left=160`, `top=170`, `width=960`, `height=884`) y extiende los colores de sus bordes hasta cubrir el lienzo completo. No redibuja la Q ni la llave; conserva el círculo blanco que forma parte de la propia llave.

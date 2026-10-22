@@ -17,6 +17,10 @@ import { createUserProfileRouter } from "./userProfile/routes";
 import { createLocationRouter } from "./locations/routes";
 import { createMaterialReceiptRouter } from "./receipts/routes";
 import { createWorkshopRouter } from "./workshop/routes";
+import { WORKSHOP_IMAGE_PATH } from "./workshop/intake";
+import { WORKSHOP_INSPECTION_PHOTO_PATH } from "./workshop/inspection";
+import { WORKSHOP_RECEPTION_PATH } from "./workshop/reception";
+import { WORKSHOP_DELIVERY_PATH } from "./workshop/delivery";
 import { createDiagnosticsRouter } from "./diagnostics/routes";
 import { type TenantRegistry, type TenantRuntime } from "./tenants";
 import type { SessionManager } from "./sessions";
@@ -49,7 +53,9 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
   const parseJson = express.json({ limit: "32kb", strict: true, inflate: false });
   app.use((req, res, next) => {
     if (req.method === "POST" && (/^\/api\/assignments\/maintenance-\d+\/deliver\/?$/i.test(req.path) || /^\/api\/offline\/(commands|documents)\/?$/i.test(req.path) || /^\/api\/worker-locations\/batch\/?$/i.test(req.path))
-      || req.method === "PUT" && (/^\/api\/user-signatures\/?$/i.test(req.path) || /^\/api\/user-profile\/avatar\/?$/i.test(req.path))) next();
+      || req.method === "PUT" && (/^\/api\/user-signatures\/?$/i.test(req.path) || /^\/api\/user-profile\/avatar\/?$/i.test(req.path))
+      || req.method === "POST" && (WORKSHOP_IMAGE_PATH.test(req.path) || WORKSHOP_INSPECTION_PHOTO_PATH.test(req.path) || WORKSHOP_RECEPTION_PATH.test(req.path)
+        || WORKSHOP_DELIVERY_PATH.test(req.path))) next();
     else parseJson(req, res, next);
   });
   if (development) app.use("/api/development", development);

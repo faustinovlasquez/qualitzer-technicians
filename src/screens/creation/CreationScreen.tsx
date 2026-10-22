@@ -25,6 +25,8 @@ export type { CreationInput, CreationKind, CreationOptions, CreationOptionsQuery
 
 export interface CreationScreenProps {
   parentMaintenance?: { id: number; code: string; equipment: import("../../domain/models").Equipment | null };
+  /** Trabajo de un ingreso a taller: el equipo y el cliente los pone el servidor desde el ingreso. */
+  parentEntry?: { id: number; code: string; equipmentLabel: string };
   kind: CreationKind;
   user: User;
   tenant: Tenant;
@@ -45,7 +47,8 @@ export interface CreationScreenProps {
 
 export function CreationScreen(props: CreationScreenProps | WorkEditScreenProps) {
   if ("editing" in props) return <WorkEditScreen key={`${props.storageKey}:${props.editing.groupId}:${props.editing.workId}`} {...props} />;
-  const scope = creationDraftKey(props.storageKey, props.tenant.id, props.user.id, props.companyBranchId, props.kind, props.mode) + (props.parentMaintenance ? `:maintenance:${props.parentMaintenance.id}` : "");
+  const scope = creationDraftKey(props.storageKey, props.tenant.id, props.user.id, props.companyBranchId, props.kind, props.mode) + (props.parentMaintenance ? `:maintenance:${props.parentMaintenance.id}` : "")
+    + (props.parentEntry ? `:entry:${props.parentEntry.id}` : "");
   return <CreationScreenContent key={scope} {...props} draftKey={scope} />;
 }
 
@@ -62,17 +65,20 @@ const serverMessages = new Map<string, string>([
   ["MOBILE_CREATION_TIMEZONE_NOT_CONFIGURED", "La sucursal no tiene una zona horaria válida configurada."],
   ["MOBILE_CREATION_SCHEMA_NOT_READY", "La creación móvil aún no está habilitada en el servidor."],
   ["MOBILE_CREATION_ACTOR_NOT_AUTHORIZED", "Tu sesión no tiene acceso a esta creación."],
+  ["MOBILE_CREATION_ENTRY_NOT_FOUND", "El ingreso ya no existe o no es de tu sucursal."],
+  ["MOBILE_CREATION_ENTRY_DELIVERED", "Este equipo ya fue entregado: no se le pueden agregar trabajos."],
 ]);
 
 function submissionError(error: unknown): string {
   return error instanceof Error ? serverMessages.get(error.message) ?? "No se confirmó la creación. Puede haberse recibido en el servidor." : "No se confirmó la creación. Puede haberse recibido en el servidor.";
 }
 
-function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey, parentMaintenance }: CreationScreenProps & { draftKey: string }) {
+function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey, parentMaintenance, parentEntry }: CreationScreenProps & { draftKey: string }) {
   const security = useDeviceSecurity();
   const store = useMemo(() => openCreationDraftStore(draftKey, kind, companyBranchId), [draftKey, kind, companyBranchId]);
   const catalogCache = useMemo<CreationCatalogCache>(() => new Map(), [draftKey]);
-  const initialForm = () => ({ ...emptyCreationForm(initialDate), ...(parentMaintenance ? { maintenanceId: parentMaintenance.id } : {}) });
+  const initialForm = () => ({ ...emptyCreationForm(initialDate), ...(parentMaintenance ? { maintenanceId: parentMaintenance.id } : {}),
+    ...(parentEntry ? { operationAreaEntryId: parentEntry.id } : {}) });
   const [draft, setDraft] = useState<CreationDraft>(() => ({ version: 1, kind, phase: "editing", form: initialForm() }));
   const current = useRef(draft);
   const [ready, setReady] = useState(false);
@@ -121,7 +127,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     mounted.current = true;
     void store.read().then((saved) => {
       if (!active) return;
-      if (saved && saved.form.maintenanceId !== parentMaintenance?.id) throw new Error("CREATION_PARENT_MISMATCH");
+      if (saved && (saved.form.maintenanceId !== parentMaintenance?.id || saved.form.operationAreaEntryId !== parentEntry?.id)) throw new Error("CREATION_PARENT_MISMATCH");
       if (saved) { replaceDraft(saved); changed.current = true; if (saved.phase !== "editing") setStep(2); }
       setReady(true);
     }).catch(() => {
@@ -203,6 +209,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     if (!mounted.current || !latest.current.isUnlocked() || lock.current || latest.current.busy || !ready || !options || current.current.phase === "confirmed" || current.current.phase === "queued") return;
     if (current.current.phase === "editing" && !checkForm(true)) return;
     if (parentMaintenance && latest.current.offline !== undefined && !latest.current.offline?.online) { setError("Conecta para crear un trabajo en este mantenimiento."); return; }
+    if (parentEntry && latest.current.offline !== undefined && latest.current.offline !== null && !latest.current.offline.online) { setError(kind === "maintenance" ? "Conecta para crear un mantenimiento en este ingreso." : "Conecta para crear un trabajo en este ingreso."); return; }
     lock.current = true;
     setSending(true);
     setError("");
@@ -319,6 +326,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <Text style={styles.context}>{tenant.name} · {branch?.name ?? `Sucursal ${companyBranchId}`} · {user.name} {user.lastnames}</Text>
         {parentMaintenance ? <Text style={styles.heading}>{parentMaintenance.code}</Text> : null}
+        {parentEntry ? <Text style={styles.heading}>Ingreso {parentEntry.code}</Text> : null}
         {mode === "demo" ? <Badge label="Demostración · no crea registros reales" tone="warning" /> : null}
         {draft.phase === "queued" ? <Card style={styles.card}>
           <Badge label="Creación anterior" tone="neutral" />
@@ -353,7 +361,8 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar creación. Crear otro registro puede duplicar uno ya guardado.</Text>
             </Card> : null}
             {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={kind === "maintenance" || !!parentMaintenance} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
-              equipmentLookup={parentMaintenance ? <View style={styles.card}><Text style={styles.heading}>Equipo del mantenimiento</Text><Text style={styles.body}>{parentMaintenance.equipment?.label ?? "No informado"}</Text><Text style={styles.hint}>{parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier}</Text></View> : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
+              equipmentLookup={parentEntry ? <View style={styles.card}><Text style={styles.heading}>Equipo del ingreso</Text><Text style={styles.body}>{parentEntry.equipmentLabel}</Text><Text style={styles.hint}>{kind === "maintenance" ? "El mantenimiento queda unido al ingreso con su equipo propio." : "El trabajo queda unido al ingreso con su cliente y equipo."}</Text></View>
+                : parentMaintenance ? <View style={styles.card}><Text style={styles.heading}>Equipo del mantenimiento</Text><Text style={styles.body}>{parentMaintenance.equipment?.label ?? "No informado"}</Text><Text style={styles.hint}>{parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier}</Text></View> : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
                 required={kind === "maintenance"} disabled={frozen} selected={form.equipment} error={errors.equipment} cache={catalogCache}
                 onLoadOptions={onLoadOptions} onSelect={(item) => change("equipment", item)} />} /></Card> : null}
             {step === 1 ? <Card style={styles.card}>
@@ -369,7 +378,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
                 <Text style={styles.body}>{kind === "work" ? form.summary.trim() : form.motive.trim()}</Text>
                 {kind === "maintenance" ? <Text style={styles.body}>Tipo: {form.maintenanceType === "correctivo" ? "Correctivo" : "Detención"}</Text> : null}
                 <Text style={styles.body}>Prioridad: {priorityLabels[form.priority]}</Text>
-                <Text style={styles.body}>{parentMaintenance ? `Equipo del mantenimiento: ${parentMaintenance.equipment?.label ?? "No informado"}` : form.equipment ? `Equipo: ${form.equipment.label} · ID ${form.equipment.id}` : "Sin equipo asociado"}</Text>
+                <Text style={styles.body}>{parentEntry ? `Ingreso ${parentEntry.code}: ${parentEntry.equipmentLabel}` : parentMaintenance ? `Equipo del mantenimiento: ${parentMaintenance.equipment?.label ?? "No informado"}` : form.equipment ? `Equipo: ${form.equipment.label} · ID ${form.equipment.id}` : "Sin equipo asociado"}</Text>
                 {form.specialty ? <Text style={styles.body}>Especialidad: {form.specialty.label}</Text> : null}
                 {form.system && (kind === "maintenance" || parentMaintenance) ? <Text style={styles.body}>Sistema: {form.system.label}{form.component ? ` · Subsistema: ${form.component.label}` : ""}</Text> : null}
                 {kind === "maintenance" && form.damageType ? <Text style={styles.body}>Daño: {form.damageType === "desgaste" ? "Desgaste" : "Operacional"}</Text> : null}

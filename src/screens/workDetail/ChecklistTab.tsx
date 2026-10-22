@@ -16,7 +16,12 @@ import type { WorkDraft } from "./useWorkDraft";
 export interface ChecklistTabProps {
   backHandler?: { current: ((home?: boolean) => boolean) | null };
   initialChecklistId?: number;
-  work: AssignmentWork;
+  /** Solo se usan el id y las listas: la inspección del taller entrega sus listas con la misma forma. */
+  work: Pick<AssignmentWork, "id" | "checklists">;
+  /** La respuesta se guarda aunque falte la evidencia obligatoria (el paso queda pendiente hasta subirla). */
+  allowAnswerWithoutFiles?: boolean;
+  /** Textos de la vista de listas cuando no es un trabajo. */
+  labels?: { catalogTitle: string; catalogSubtitle: string; progressNote: string };
   draft: WorkDraft;
   maintenance: boolean;
   disabled: boolean;
@@ -116,12 +121,12 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
   if (navigation.restoring) return <View style={checklistStyles.screen}><BodyText>Recuperando navegación del checklist…</BodyText></View>;
 
   if (!checklist) return <ScrollView style={checklistStyles.screen} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled">
-    <SectionTitle title="Checklists del trabajo" subtitle="Selecciona una lista para responder." />
+    <SectionTitle title={props.labels?.catalogTitle ?? "Checklists del trabajo"} subtitle={props.labels?.catalogSubtitle ?? "Selecciona una lista para responder."} />
     {notices}
     {navigation.selection.checklistId !== null ? <Notice message="El checklist seleccionado ya no aparece en la ficha recibida. No se ha elegido otro ni eliminado sus borradores." tone="warning" /> : null}
     {props.work.checklists.length === 0 ? <EmptyState title="Sin checklists disponibles" message="No se recibieron listas de verificación en esta ficha. Si esperabas un checklist, actualiza la asignación; los borradores anteriores no se eliminan." icon="list-outline" /> : <ChecklistCatalog checklists={props.work.checklists} draft={props.draft} onOpen={open} />}
     {props.catalogHeader}
-    <BodyText>{props.mode === "demo" ? "Demostración local. El progreso usa las respuestas guardadas de la ficha demo, no los borradores." : "Progreso confirmado por Qualitzer. Los borradores no cuentan; una respuesta confirmada no significa aprobación."}</BodyText>
+    <BodyText>{props.labels ? props.labels.progressNote : props.mode === "demo" ? "Demostración local. El progreso usa las respuestas guardadas de la ficha demo, no los borradores." : "Progreso confirmado por Qualitzer. Los borradores no cuentan; una respuesta confirmada no significa aprobación."}</BodyText>
     {props.onRefresh ? <Button title="Actualizar respuestas y archivos" icon="refresh-outline" variant="ghost" loading={refreshing} disabled={props.disabled} onPress={() => { void refresh(); }} /> : null}
   </ScrollView>;
 

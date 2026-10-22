@@ -61,7 +61,7 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
   async function persist(value: StepAnswer, after?: () => void, automatic = false): Promise<boolean> {
     if (disabled || running.current || queued) return false;
     const submitted = normalizeChecklistAnswer(step, value);
-    const error = checklistAnswerError(step, submitted);
+    const error = checklistAnswerError(step, submitted, { allowMissingFiles: context.allowAnswerWithoutFiles });
     if (error) { if (!automatic) setValidation(error); return false; }
     running.current = true;
     setSaving(true);
@@ -89,7 +89,7 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
     if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null; }
     if (!context.readOnly && dirty && supported && !queued && !disabled && !running.current) {
       const submitted = normalizeChecklistAnswer(step, answer);
-      if (!checklistAnswerError(step, submitted)) { await persist(answer, target); return; }
+      if (!checklistAnswerError(step, submitted, { allowMissingFiles: context.allowAnswerWithoutFiles })) { await persist(answer, target); return; }
     }
     if (mounted.current && !running.current) target();
   }

@@ -4,7 +4,16 @@ import { workshopBoardSchema, workshopListSchema, type WorkshopArea, type Worksh
 import { emptySchema } from "../validation";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
-import { asRecord, clip, count, isoDate, list, positive, text, workshopActor } from "./support";
+import { asRecord, clip, count, isoDate, list, positive, text, workshopActor, WorkshopRequestLedger } from "./support";
+import { registerIntakeRoutes } from "./intake";
+import { registerInspectionRoutes } from "./inspection";
+import { registerReceptionRoutes } from "./reception";
+import { registerWorkRoutes } from "./works";
+import { registerOrderRoutes } from "./orders";
+import { registerDeliveryRoutes } from "./delivery";
+import { registerManageRoutes } from "./manage";
+import { registerCustomerRoutes } from "./customers";
+import { equipmentSummary, loadWorkshopEntry } from "./entry";
 
 /** Ingreso del tablero web (operation_area/dashboard) a la forma que muestra la app. */
 function toEntry(raw: unknown): WorkshopEntry | null {
@@ -12,9 +21,7 @@ function toEntry(raw: unknown): WorkshopEntry | null {
   const entryId = positive(entry.id);
   if (entryId === null) return null;
   const equipment = asRecord(entry.equipment);
-  const nameOf = (value: unknown) => text(asRecord(value).name);
-  const equipmentParts = [nameOf(equipment.manufacturer), nameOf(equipment.type), nameOf(equipment.model)].filter((part): part is string => part !== null);
-  const equipmentCode = text(equipment.identification) ?? text(equipment.internalNumber) ?? text(equipment.autoGenerateCode);
+  const summary = equipmentSummary(equipment);
   const status = asRecord(entry.status);
   const subStatus = asRecord(entry.subStatus);
   return {
@@ -24,8 +31,8 @@ function toEntry(raw: unknown): WorkshopEntry | null {
     statusKey: clip(text(status.key), 80),
     statusColor: clip(text(status.color), 40),
     subStatusName: clip(text(subStatus.key), 200),
-    equipmentLabel: (equipmentParts.length > 0 ? equipmentParts.join(" · ") : equipmentCode ?? "Sin equipo").slice(0, 500),
-    equipmentCode: clip(equipmentCode, 120),
+    equipmentLabel: summary.label,
+    equipmentCode: summary.code,
     customerName: clip(text(entry.customerName), 300),
     isInternalEntry: entry.isInternalEntry === true,
     daysInArea: count(entry.daysElapsed),
@@ -54,6 +61,15 @@ function toArea(raw: unknown): WorkshopArea | null {
 /** Taller (naves e ingresos) para la app, con la sesión del usuario. */
 export function createWorkshopRouter(upstream: Upstream): Router {
   const router = Router();
+  const ledger = new WorkshopRequestLedger();
+  registerIntakeRoutes(router, upstream, ledger);
+  registerInspectionRoutes(router, upstream);
+  registerReceptionRoutes(router, upstream, ledger);
+  registerWorkRoutes(router, upstream);
+  registerOrderRoutes(router, upstream, ledger);
+  registerDeliveryRoutes(router, upstream, ledger);
+  registerManageRoutes(router, upstream);
+  registerCustomerRoutes(router, upstream, ledger);
   router.get("/workshops", async (req, res) => {
     const query = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict().parse(req.query);
     emptySchema.parse(req.body ?? {});
@@ -81,6 +97,13 @@ export function createWorkshopRouter(upstream: Upstream): Router {
     const result = workshopBoardSchema.safeParse({ workshopId: query.workshopId, areas: areas.slice(0, 500) });
     if (!result.success) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.json(result.data);
+  });
+  router.get("/entries/:entryId", async (req, res) => {
+    const { entryId } = z.object({ entryId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict().parse(req.params);
+    const query = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict().parse(req.query);
+    emptySchema.parse(req.body ?? {});
+    const { token } = await workshopActor(upstream, req, query.companyBranchId);
+    res.json(await loadWorkshopEntry(upstream, token, query.companyBranchId, entryId));
   });
   return router;
 }

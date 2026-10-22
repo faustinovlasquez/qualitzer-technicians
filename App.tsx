@@ -29,6 +29,7 @@ import { OfflineStatusBar } from "./src/screens/offline/OfflineStatusBar";
 import { OfflineCenterScreen } from "./src/screens/offline/OfflineCenterScreen";
 import { weekRange } from "./src/domain/format";
 import { dailyRange } from "./src/domain/assignmentSchedule";
+import { scheduleClock } from "./src/domain/weeklySchedule";
 import { useCompanyBranding } from "./src/branding/useCompanyBranding";
 import { companyBrandingContext } from "./src/branding/companyBrandingContext";
 import { gatewayConfiguration } from "./src/infrastructure/gatewayConfig";
@@ -77,7 +78,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const [profileDetail, setProfileDetail] = useState(false);
   // Con la ficha de un ingreso abierta, el botón atrás lo maneja la pestaña Taller y vuelve al tablero.
   const [workshopDetail, setWorkshopDetail] = useState(false);
+  // Lo abierto en Taller (ficha del ingreso) se conserva mientras se abre la ficha normal de un trabajo y se vuelve.
+  const workshopMemory = useRef<{ key: string; view: unknown } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [workshopQuery, setWorkshopQuery] = useState("");
   const [timerBannerCompact, setTimerBannerCompact] = useState(false);
   // Al tocar el buscador se agranda y el botón de recargar se oculta.
   const [searchFocused, setSearchFocused] = useState(false);
@@ -129,7 +133,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     <NotificationSettingsScreen notifications={app.notifications} onBack={() => { if (security.isUnlocked()) setNotificationSettings(false); }} />
   </SafeAreaView>;
   const unreadNotifications = app.notifications.state?.unreadCount ?? 0;
-  const searchable = (app.tab === "today" || app.tab === "agenda") && app.session.branchId !== null;
+  const workshopSearch = app.tab === "workshop" && !workshopDetail;
+  const searchable = (app.tab === "today" || app.tab === "agenda" || workshopSearch) && app.session.branchId !== null;
+  const headerQuery = workshopSearch ? workshopQuery : searchQuery;
+  const setHeaderQuery = workshopSearch ? setWorkshopQuery : setSearchQuery;
   const connection = app.offlineController ? connectionPresentation(app.offline) : null;
   const dotColor = app.offlineSetupError ? palette.amber : !connection ? palette.success
     : connection.tone === "success" ? palette.success : connection.tone === "error" ? palette.danger : connection.tone === "warning" ? palette.amber : palette.info;
@@ -272,12 +279,12 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
           : app.offline.pending > 0 ? "Hay cambios sin sincronizar en esta sucursal. Sincronízalos antes de cambiar; no se borrará nada." : null} />
       {searchable ? <View style={styles.headerSearch}>
         <Ionicons name="search-outline" size={18} color={palette.textMuted} />
-        <TextInput accessibilityLabel="Buscar tareas" accessibilityHint="Busca por tarea, código, equipo, ubicación o cliente." placeholder="Buscar OT" placeholderTextColor={palette.textMuted}
-          value={searchQuery} onChangeText={setSearchQuery} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType="search" selectionColor={palette.primary} style={styles.headerSearchInput} />
-        {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={8} onPress={() => setSearchQuery("")}><Ionicons name="close-circle" size={18} color={palette.textMuted} /></Pressable> : null}
+        <TextInput accessibilityLabel={workshopSearch ? "Buscar en el taller" : "Buscar tareas"} accessibilityHint={workshopSearch ? "Busca por ingreso, equipo, cliente o nave." : "Busca por tarea, código, equipo, ubicación o cliente."} placeholder={workshopSearch ? "Buscar ingreso" : "Buscar OT"} placeholderTextColor={palette.textMuted}
+          value={headerQuery} onChangeText={setHeaderQuery} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType="search" selectionColor={palette.primary} style={styles.headerSearchInput} />
+        {headerQuery ? <Pressable accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={8} onPress={() => setHeaderQuery("")}><Ionicons name="close-circle" size={18} color={palette.textMuted} /></Pressable> : null}
       </View> : <View style={styles.brandSlot} />}
       <View style={styles.headerActions}>
-        {searchable && !searchFocused && !searchQuery ? <Pressable testID="header-refresh" accessibilityRole="button" accessibilityLabel="Recargar mi jornada" accessibilityState={{ disabled: app.busy || app.loading, busy: app.loading }} disabled={app.busy || app.loading} hitSlop={4} onPress={() => void app.refresh().catch(() => undefined)} style={[styles.headerToggle, app.loading && styles.headerToggleBusy]}>
+        {searchable && !workshopSearch && !searchFocused && !searchQuery ? <Pressable testID="header-refresh" accessibilityRole="button" accessibilityLabel="Recargar mi jornada" accessibilityState={{ disabled: app.busy || app.loading, busy: app.loading }} disabled={app.busy || app.loading} hitSlop={4} onPress={() => void app.refresh().catch(() => undefined)} style={[styles.headerToggle, app.loading && styles.headerToggleBusy]}>
           <Ionicons name="sync-outline" size={22} color={palette.textSecondary} />
         </Pressable> : null}
         <Pressable testID="header-notifications" accessibilityRole="button" accessibilityLabel={unreadNotifications > 0 ? `Avisos, ${unreadNotifications} sin leer` : "Avisos"} accessibilityState={{ selected: app.tab === "notifications", disabled: app.busy }} disabled={app.busy} hitSlop={4} onPress={() => app.setTab("notifications")} style={[styles.headerToggle, app.tab === "notifications" && styles.headerToggleActive]}>
@@ -304,7 +311,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopScreen key={`${app.storageKey}:${app.session.branchId ?? 0}`} workshop={workshop} onSectionChange={setWorkshopDetail} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
+      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopScreen key={`${app.storageKey}:${app.session.branchId ?? 0}`} memoryKey={`${app.storageKey}:${app.session.branchId ?? 0}`} memory={workshopMemory}
+            workshop={workshop} onSectionChange={setWorkshopDetail} onOpenWork={app.openWorkshopWork} query={workshopQuery}
+            creation={app.session.branchId && app.session.user.workerId ? { ...app.workshopCreation, user: app.session.user, tenant: app.session.tenant, companyBranchId: app.session.branchId,
+              initialDate: scheduleClock(app.session.user.system.timezone)?.day ?? app.range.startDate, mode: app.session.mode, storageKey: app.storageKey, offline: app.offlineController ? app.offline : undefined, busy: app.busy } : undefined} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
         <ActiveTimersBanner timers={app.activeTimers ?? []} disabled={app.busy} compact={timerBannerCompact} onOpen={(timer) => app.openActiveTimer(timer)}
           onPause={(timer) => app.pauseActiveTimer(timer)} onPauseLocal={(timer) => app.pauseLoadedWork(timer.groupId, timer.workId)}
           localTimers={snapshotActiveTimers(app.data, new Set((app.activeTimers ?? []).map((timer) => String(timer.workId))), Date.now())}

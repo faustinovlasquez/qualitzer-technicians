@@ -9,6 +9,8 @@ const draftText = (max: number) => z.string().max(max).regex(/^[^\x00-\x08\x0b\x
 const catalogReferenceSchema = z.object({ id: positiveCreationIdSchema, label: draftText(500) }).strict();
 export const creationFormSchema = z.object({
   maintenanceId: positiveCreationIdSchema.optional(),
+  /** Ingreso a taller al que pertenece el trabajo: el equipo y el cliente salen del ingreso. */
+  operationAreaEntryId: positiveCreationIdSchema.optional(),
   title: draftText(255), summary: draftText(5000), motive: draftText(5000),
   priority: creationPrioritySchema, maintenanceType: z.enum(["correctivo", "detencion"]),
   equipment: z.object({ id: positiveCreationIdSchema, label: draftText(500), internalNumber: draftText(500).nullish(), identifier: draftText(500).nullish(), equipmentType: draftText(500).nullish() }).strict().nullable(),
@@ -42,11 +44,13 @@ export function creationPayload(kind: CreationKind, form: CreationForm, companyB
   const workSystem = form.system ? { systemId: form.system.id, ...(form.component ? { componentId: form.component.id } : {}) } : {};
   if (kind === "work") return creationInputSchema.parse({ ...base, kind, ...(form.maintenanceId ? { maintenanceId: form.maintenanceId } : {}), work: {
     title: form.title, summary: form.summary.trim(), priority: form.priority, ...specialty,
-    ...(form.equipment && !form.maintenanceId ? { rentalEquipmentId: form.equipment.id } : {}),
+    ...(form.operationAreaEntryId ? { operationAreaEntryId: form.operationAreaEntryId } : {}),
+    ...(form.equipment && !form.maintenanceId && !form.operationAreaEntryId ? { rentalEquipmentId: form.equipment.id } : {}),
     ...(form.maintenanceId ? workSystem : {}),
   } });
   if (kind === "maintenance") return creationInputSchema.parse({ ...base, kind, maintenance: {
-    type: form.maintenanceType, title: form.title, motive: form.motive, equipmentId: form.equipment?.id, priority: form.priority,
+    type: form.maintenanceType, title: form.title, motive: form.motive, priority: form.priority,
+    ...(form.operationAreaEntryId ? { operationAreaEntryId: form.operationAreaEntryId } : { equipmentId: form.equipment?.id }),
     ...specialty, ...(form.damageType ? { damageType: form.damageType } : {}), ...workSystem,
   } });
   return creationInputSchema.parse({ ...base, kind, nonProductive: {
@@ -61,7 +65,7 @@ export function validateCreationForm(kind: CreationKind, form: CreationForm): Cr
     if (!form[field].trim()) errors[field] = `${label} es obligatorio.`;
   };
   if (kind !== "non_productive") requiredText("title", "El título");
-  if (kind === "maintenance") { requiredText("motive", "El motivo"); if (!form.equipment) errors.equipment = "Selecciona un equipo."; }
+  if (kind === "maintenance") { requiredText("motive", "El motivo"); if (!form.equipment && !form.operationAreaEntryId) errors.equipment = "Selecciona un equipo."; }
   if (kind === "non_productive" && form.reason === "other") requiredText("reasonText", "El detalle del motivo");
   if (!calendarDateSchema.safeParse(form.date).success) errors.date = "Ingresa una fecha real YYYY-MM-DD entre 2000 y 2100.";
   const time = /^([01]\d|2[0-3]):[0-5]\d$/;

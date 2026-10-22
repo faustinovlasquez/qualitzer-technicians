@@ -206,7 +206,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["./src/offline/connectionPresentation", connectionPresentationModule],
     ["./src/screens/notifications/NotificationSettingsScreen", { NotificationSettingsScreen: "NotificationSettingsScreen" }],
     ["./src/screens/creation", { CreationScreen: "CreationScreen", CreationQuickMenu: "CreationQuickMenu" }],
-    ["./src/domain/format", { weekRange: forbidden }], ["./src/domain/assignmentSchedule", { dailyRange: forbidden }],
+    ["./src/domain/format", { weekRange: forbidden }], ["./src/domain/assignmentSchedule", { dailyRange: forbidden }], ["./src/domain/weeklySchedule", { scheduleClock: () => null }],
   ]);
   for (const [path, name] of [
     ["screens/LoginScreen", "LoginScreen"], ["screens/TenantSelectionScreen", "TenantSelectionScreen"],

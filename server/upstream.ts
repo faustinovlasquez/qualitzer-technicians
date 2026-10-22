@@ -12,6 +12,18 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   "/worker-locations/batch" | "/worker-locations/me" |
   "/inventory_consumptions_v2/my-receipts" | "/inventory_consumptions_v2/my-receipts/confirm" | `/inventory_consumptions_v2/my-receipts/${number}/dispositions` |
   "/workshops/select" | "/operation_area/dashboard" |
+  `/operation_area_entries/${number}` | `/equipment_dispatches/inspections/by-entry/${number}/compliance` |
+  `/branches/${number}/inspectionRequirementsConfig` | "/equipment_masters/required_photos" | "/works" | `/works/${number}` | "/negotiations" | "/maintenances" |
+  "/operation_area_entries" | "/operation_area/select" | "/customers/select" | `/customers/${number}` | `/customer_branches/select/${number}` |
+  "/customers" | `/customers/${number}/contacts` | "/customer_branches" | "/DocumentsSalesCountries/select" |
+  `/customers_equipments/customers/${number}` | "/rental_equipments" | "/checklists" | "/equipment_dispatches/inspections/ensure" |
+  `/equipment_dispatches/inspections/${number}` | `/equipment_dispatches/inspections/${number}/${"checklists" | "patio-context" | "checklist-steps" | "photos" | "damages" | "meta" | "complete" | "public-link/extend"}` |
+  `/equipment_dispatches/inspections/${number}/photos/${string}` | `/equipment_dispatches/inspections/checklist-steps/${number}/files` |
+  `/equipment_dispatches/inspections/checklist-steps/files/${number}` | `/equipment_dispatches/inspections/damages/${number}/files` |
+  "/select/employees" | "/user_signatures/options" | "/works/link-entry" | "/works/link-negotiation" |
+  "/master_commercial/business-type-select-by-branch" | "/master_commercial/segments/selects" | "/master_commercial/taxes" | `/branches/${number}/negotiationFieldsConfig` |
+  `/negotiations/${number}/send-to-commercial` | `/negotiations/${number}/work-order` | `/operation_area_entries/${number}/deliver` |
+  "/operation_area_entries/move" | `/operation_area_entries/${number}/estimated-delivery-date` | "/master_commercial/get-all-status" | `/operation_area_entries/${number}/change-status` |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
   "/technician-dashboard/assignments" | "/technician-dashboard/update-work-status" |
@@ -77,6 +89,36 @@ export class Upstream {
 
   async request(path: BackendPath, options: RequestOptions = {}): Promise<unknown> {
     return this.performRequest(path, options);
+  }
+
+  /** Dirección web de la empresa (la misma que identifica a la empresa ante el backend). Sirve para armar enlaces públicos. */
+  get webOrigin(): string {
+    return this.config.tenantOrigin;
+  }
+
+  /** Descarga un archivo del backend (por ejemplo, el .zip de fotos de una inspección), con tope de tamaño. */
+  async download(path: `/equipment_dispatches/inspections/photos/download/${number}`, token: string, maxBytes: number): Promise<{ bytes: Buffer; contentType: string }> {
+    const headers = new Headers({ Origin: this.config.tenantOrigin, "User-Agent": MOBILE_USER_AGENT, Authorization: token, "Cache-Control": "no-cache" });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    timeout.unref();
+    try {
+      const response = await fetch(new URL(`${this.config.backendUrl}${path}`), { headers, redirect: "manual", signal: controller.signal });
+      if (!response.ok) {
+        await response.body?.cancel();
+        if (response.status === 401) throw new GatewayError(401, "UNAUTHORIZED");
+        if (response.status === 404) throw new GatewayError(404, "RESOURCE_NOT_FOUND", "La inspección todavía no tiene fotos para descargar.");
+        throw new GatewayError(502, "UPSTREAM_ERROR");
+      }
+      const declared = Number(response.headers.get("Content-Length") ?? "0");
+      if (declared > maxBytes) { await response.body?.cancel(); throw new GatewayError(413, "DOWNLOAD_TOO_LARGE", "El comprimido es demasiado grande para el teléfono. Descárgalo desde la web."); }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.length > maxBytes) throw new GatewayError(413, "DOWNLOAD_TOO_LARGE", "El comprimido es demasiado grande para el teléfono. Descárgalo desde la web.");
+      return { bytes, contentType: response.headers.get("Content-Type") ?? "application/zip" };
+    } catch (error) {
+      if (error instanceof GatewayError) throw error;
+      throw new GatewayError(503, "UPSTREAM_UNAVAILABLE");
+    } finally { clearTimeout(timeout); }
   }
 
   async requestReceipt(path: "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}`, operationId: string, options: RequestOptions = {}): Promise<{ status: number; receipt: SyncReceipt }> {
@@ -218,8 +260,8 @@ export class Upstream {
 }
 
 /** Rutas del backend que usa el taller: sus códigos de error se conservan para mostrarlos en español. */
-const WORKSHOP_BACKEND_PATH = /^\/(?:operation_area|operation_area_entries|operation_area_departures|equipment_dispatches|negotiations|works\/technician)(?:\/|$)/;
-const WORKSHOP_ERROR_CODE = /^(?:OPERATION_AREA_[A-Z_]+|ENTRY_[A-Z_]+|DEPARTURE_[A-Z_]+|RECEIVER_[A-Z_]+|NEGOTIATION_[A-Z_]+|INSPECTION_[A-Z_]+|WORKER_NOT_FOUND|INVALID_[A-Z_]+)$/;
+const WORKSHOP_BACKEND_PATH = /^\/(?:operation_area|operation_area_entries|operation_area_departures|equipment_dispatches|negotiations|works\/technician|works\/link-negotiation|works\/link-entry)(?:\/|$)/;
+const WORKSHOP_ERROR_CODE = /^(?:OPERATION_AREA_[A-Z_]+|ENTRY_[A-Z_]+|DEPARTURE_[A-Z_]+|RECEIVER_[A-Z_]+|NEGOTIATION_[A-Z_]+|INSPECTION_[A-Z_]+|WORK_ORDER_[A-Z_]+|ONLY_WORK_ORDERS_CAN_BE_DELETED|WORKS_ALREADY_LINKED|WORKER_NOT_FOUND|INVALID_[A-Z_]+)$/;
 
 export function workshopErrorMessage(code: string): string {
   if (code === "OPERATION_AREA_FULL") return "La nave está llena. Elige otra nave o libera un espacio.";
@@ -230,6 +272,12 @@ export function workshopErrorMessage(code: string): string {
   if (code === "DEPARTURE_ALREADY_EXISTS") return "Este equipo ya fue entregado.";
   if (code === "RECEIVER_NAME_REQUIRED") return "Indica el nombre de quien retira el equipo.";
   if (code === "NEGOTIATION_NOT_FOUND") return "La orden de trabajo ya no existe. Actualiza la ficha.";
+  if (code === "WORK_ORDER_ALREADY_SENT_TO_COMMERCIAL") return "Esta OT ya fue enviada a comercial: no se puede eliminar.";
+  if (code === "WORK_ORDER_HAS_EXECUTED_WORKS") return "Esta OT tiene trabajos con tiempo registrado: no se puede eliminar.";
+  if (code === "WORK_ORDER_FINISHED") return "Esta OT ya está finalizada.";
+  if (code === "ONLY_WORK_ORDERS_CAN_BE_DELETED") return "Solo se pueden eliminar órdenes de trabajo, no cotizaciones.";
+  if (code === "WORKS_ALREADY_LINKED") return "Esos trabajos ya están en una OT.";
+  if (code === "NEGOTIATION_APPROVAL_REQUIRED_FIELDS_MISSING") return "La sucursal exige más datos para esta OT. Complétala desde la web.";
   if (code === "WORKER_NOT_FOUND") return "Tu usuario no tiene un trabajador asociado. Contacta a un administrador.";
   if (code.startsWith("INSPECTION_")) return "No se pudo guardar la inspección. Actualiza la ficha e inténtalo de nuevo.";
   return "El servidor rechazó los datos. Revisa el formulario e inténtalo de nuevo.";
@@ -247,6 +295,9 @@ function mobileErrorMessage(code: string): string {
   if (code.startsWith("OWN_PROFILE_")) return "No se pudo guardar el perfil. Revisa los datos ingresados.";
   if (code === "MOBILE_CREATION_REQUEST_CONFLICT") return "Este intento ya se usó con otros datos. Inicia una nueva creación; para reintentar, conserva los datos originales.";
   if (code === "MOBILE_CREATION_MAINTENANCE_WEB_WIZARD_REQUIRED") return "Este mantenimiento requiere el asistente web.";
+  if (code === "MOBILE_CREATION_ENTRY_NOT_FOUND") return "El ingreso ya no existe o no es de tu sucursal. Actualiza el taller.";
+  if (code === "MOBILE_CREATION_ENTRY_DELIVERED") return "Este equipo ya fue entregado: no se le pueden agregar trabajos.";
+  if (code === "MOBILE_CREATION_ENTRY_NOT_INTERNAL") return "Solo los ingresos de equipos propios pueden tener mantenimientos.";
   if (code.includes("TIMEZONE")) return "La sucursal necesita una zona horaria válida configurada en el servidor.";
   if (code.includes("SCHEMA") || code === "MOBILE_PUSH_UNAVAILABLE") return "La función no está habilitada o requiere completar el despliegue del servidor.";
   if (code === "MOBILE_PUSH_TEST_RATE_LIMIT") return "Se alcanzó el límite de cinco pruebas por hora.";

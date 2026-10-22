@@ -75,7 +75,7 @@ export function createNotificationAdapter(): NotificationAdapter {
       const module = await notifications();
       if (nativePlatform === "android") await module.setNotificationChannelAsync("technical-work", {
         name: "Avisos de Qualitzer", importance: module.AndroidImportance.HIGH, sound: "default", showBadge: true,
-        enableVibrate: true, vibrationPattern: [0, 180, 100, 180], lightColor: "#226957",
+        enableVibrate: true, vibrationPattern: [0, 180, 100, 180], lightColor: "#353EE1",
         description: "Nuevas asignaciones y recordatorios de tu jornada", lockscreenVisibility: module.AndroidNotificationVisibility.PRIVATE,
       });
     },

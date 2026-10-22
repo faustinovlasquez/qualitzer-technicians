@@ -5,9 +5,13 @@ import type { TrustedNativePicker } from "../../security/contracts";
 
 export type AvatarSource = "camera" | "library";
 
-/** Abre la camara frontal o la galeria con recorte cuadrado; devuelve la URI local o null si se cancela. */
-export async function pickAvatar(source: AvatarSource, runNativePicker: TrustedNativePicker, isInteractionAllowed: () => boolean): Promise<string | null> {
-  const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 1, allowsEditing: Platform.OS !== "web", aspect: [1, 1], allowsMultipleSelection: false, exif: false };
+/**
+ * Abre la camara frontal o la galeria con recorte cuadrado; devuelve la URI local o null si se cancela.
+ * Para fotos de equipos (taller) se usa la cámara trasera y, si se pide, sin recorte.
+ */
+export async function pickAvatar(source: AvatarSource, runNativePicker: TrustedNativePicker, isInteractionAllowed: () => boolean,
+  { camera = "front", square = true }: { camera?: "front" | "back"; square?: boolean } = {}): Promise<string | null> {
+  const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 1, allowsEditing: square && Platform.OS !== "web", ...(square ? { aspect: [1, 1] as [number, number] } : {}), allowsMultipleSelection: false, exif: false };
   let result: ImagePicker.ImagePickerResult;
   if (source === "camera") {
     if (Platform.OS !== "web") {
@@ -20,7 +24,7 @@ export async function pickAvatar(source: AvatarSource, runNativePicker: TrustedN
       if (!isInteractionAllowed()) throw new NativeSelectionError();
       if (!permission.granted) throw new CameraPermissionError(permission.canAskAgain);
     }
-    try { result = await runNativePicker(() => ImagePicker.launchCameraAsync({ ...options, cameraType: ImagePicker.CameraType.front })); }
+    try { result = await runNativePicker(() => ImagePicker.launchCameraAsync({ ...options, cameraType: camera === "front" ? ImagePicker.CameraType.front : ImagePicker.CameraType.back })); }
     catch (error) {
       if (typeof error === "object" && error !== null && "code" in error && (error.code === "ERR_MISSING_ACTIVITY_TO_HANDLE_INTENT" || error.code === "ERR_CAMERA_UNAVAILABLE")) throw new NativeCameraUnavailableError();
       throw new NativeSelectionError();
