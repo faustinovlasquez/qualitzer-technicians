@@ -164,6 +164,15 @@ export class Upstream {
           }
           throw new GatewayError(response.status, response.status === 401 ? "UNAUTHORIZED" : "UPSTREAM_REJECTED");
         }
+        if (WORKSHOP_BACKEND_PATH.test(path) && [400, 403, 404, 409, 413].includes(response.status)) {
+          let failure: unknown;
+          try { failure = JSON.parse(await readBody(response)); } catch { failure = null; }
+          const parsed = z.object({ error: z.string().regex(WORKSHOP_ERROR_CODE) }).safeParse(failure);
+          if (parsed.success) throw new GatewayError(response.status, parsed.data.error, workshopErrorMessage(parsed.data.error));
+          if (response.status === 403) throw new GatewayError(403, "FORBIDDEN");
+          if (response.status === 404) throw new GatewayError(404, "RESOURCE_NOT_FOUND");
+          throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó la operación.");
+        }
         if ((path.startsWith("/mobile-notifications/") || path.startsWith("/technician-dashboard/mobile-creations") || path.startsWith("/user_signatures/") || path.startsWith("/profiles/me")) && [400, 401, 403, 404, 409, 429, 500, 503].includes(response.status)) {
           const text = await readBody(response);
           let failure: unknown;
@@ -206,6 +215,24 @@ export class Upstream {
     try { await this.request("/auth/me"); return true; }
     catch (error) { return error instanceof GatewayError && error.status === 401; }
   }
+}
+
+/** Rutas del backend que usa el taller: sus códigos de error se conservan para mostrarlos en español. */
+const WORKSHOP_BACKEND_PATH = /^\/(?:operation_area|operation_area_entries|operation_area_departures|equipment_dispatches|negotiations|works\/technician)(?:\/|$)/;
+const WORKSHOP_ERROR_CODE = /^(?:OPERATION_AREA_[A-Z_]+|ENTRY_[A-Z_]+|DEPARTURE_[A-Z_]+|RECEIVER_[A-Z_]+|NEGOTIATION_[A-Z_]+|INSPECTION_[A-Z_]+|WORKER_NOT_FOUND|INVALID_[A-Z_]+)$/;
+
+export function workshopErrorMessage(code: string): string {
+  if (code === "OPERATION_AREA_FULL") return "La nave está llena. Elige otra nave o libera un espacio.";
+  if (code === "OPERATION_AREA_SLOTS_NOT_CONFIGURED") return "La nave no tiene espacios configurados. Pide que la configuren en la web.";
+  if (code === "INVALID_OPERATION_AREA") return "Elige una nave válida.";
+  if (code === "ENTRY_NOT_IN_SOURCE_OPERATION_AREA") return "El equipo ya no está en esa nave. Actualiza el tablero.";
+  if (code === "ENTRY_NOT_FOUND") return "El ingreso ya no existe o fue eliminado. Actualiza el tablero.";
+  if (code === "DEPARTURE_ALREADY_EXISTS") return "Este equipo ya fue entregado.";
+  if (code === "RECEIVER_NAME_REQUIRED") return "Indica el nombre de quien retira el equipo.";
+  if (code === "NEGOTIATION_NOT_FOUND") return "La orden de trabajo ya no existe. Actualiza la ficha.";
+  if (code === "WORKER_NOT_FOUND") return "Tu usuario no tiene un trabajador asociado. Contacta a un administrador.";
+  if (code.startsWith("INSPECTION_")) return "No se pudo guardar la inspección. Actualiza la ficha e inténtalo de nuevo.";
+  return "El servidor rechazó los datos. Revisa el formulario e inténtalo de nuevo.";
 }
 
 function mobileErrorMessage(code: string): string {

@@ -45,7 +45,7 @@ import { MaterialReceiptsScreen } from "./src/receipts/MaterialReceiptsScreen";
 import { pendingMaterialCount } from "./src/receipts/receiptTimeline";
 import { createDemoMaterialReceiptPort } from "./src/receipts/demoReceipts";
 import { useWorkshopBoard } from "./src/workshop/useWorkshopBoard";
-import { WorkshopBoardScreen } from "./src/workshop/WorkshopBoardScreen";
+import { WorkshopScreen } from "./src/workshop/WorkshopScreen";
 import { createDemoWorkshopPort } from "./src/workshop/demoWorkshop";
 import { flushAppErrors, installAppErrorReporting, recordAppError, setAppErrorScreen } from "./src/diagnostics/errorReporter";
 import { recordNonFatal, setCrashContext, setCrashScreen } from "./src/diagnostics/nativeCrashReporter";
@@ -75,6 +75,8 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const [notificationSettings, setNotificationSettings] = useState(false);
   // Con un detalle de Ajustes abierto, el botón atrás lo maneja ProfileScreen y vuelve al menú.
   const [profileDetail, setProfileDetail] = useState(false);
+  // Con la ficha de un ingreso abierta, el botón atrás lo maneja la pestaña Taller y vuelve al tablero.
+  const [workshopDetail, setWorkshopDetail] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [timerBannerCompact, setTimerBannerCompact] = useState(false);
   // Al tocar el buscador se agranda y el botón de recargar se oculta.
@@ -98,14 +100,14 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   // La app abre los avisos desde "Mi perfil" salvo que haya una sección abierta con posibles cambios sin guardar.
   useEffect(() => { app.setProfileEditing?.(app.tab === "profile" && (profileDetail || notificationSettings)); }, [app.tab, profileDetail, notificationSettings]);
   useEffect(() => {
-    if (!app.session || app.tab === "today" || app.selected || app.selectedOrder || app.selectedCreationKind || app.selectedOffline || notificationSettings || app.tab === "profile" && profileDetail) return;
+    if (!app.session || app.tab === "today" || app.selected || app.selectedOrder || app.selectedCreationKind || app.selectedOffline || notificationSettings || app.tab === "profile" && profileDetail || app.tab === "workshop" && workshopDetail) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       // Mientras se confirma una recepción no se sale de Materiales.
       if (!app.busy && !(app.tab === "materials" && materialReceipts.busy)) app.backTab();
       return true;
     });
     return () => subscription.remove();
-  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings, profileDetail, materialReceipts.busy]);
+  }, [app.session, app.tab, app.selected, app.selectedOrder, app.selectedCreationKind, app.selectedOffline, app.busy, app.backTab, notificationSettings, profileDetail, workshopDetail, materialReceipts.busy]);
 
   // El botón de la barra de conexión reemplaza al recargar de la cabecera: sincroniza la cola y actualiza las asignaciones.
   async function syncAndRefresh(): Promise<void> {
@@ -264,7 +266,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const canCreate = Boolean(app.session.branchId && app.session.user.workerId && app.session.user.accessBranchs.some((branch) => branch.id === app.session?.branchId && branch.isEnabled !== false && branch.isDeleted !== true));
   return <SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
     <View style={styles.top}>
-      {app.tab !== "today" ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
+      {app.tab !== "today" && !(app.tab === "workshop" && workshopDetail) ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
       <BranchSwitcher session={app.session} busy={app.busy} error={app.error} onSelect={(id) => void app.branch(id)}
         blockedReason={!app.offline ? null : !app.offline.online || app.offline.authBlocked ? "Necesitas conexión para cambiar de sucursal."
           : app.offline.pending > 0 ? "Hay cambios sin sincronizar en esta sucursal. Sincronízalos antes de cambiar; no se borrará nada." : null} />
@@ -302,7 +304,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopBoardScreen workshop={workshop} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
+      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopScreen key={`${app.storageKey}:${app.session.branchId ?? 0}`} workshop={workshop} onSectionChange={setWorkshopDetail} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
         <ActiveTimersBanner timers={app.activeTimers ?? []} disabled={app.busy} compact={timerBannerCompact} onOpen={(timer) => app.openActiveTimer(timer)}
           onPause={(timer) => app.pauseActiveTimer(timer)} onPauseLocal={(timer) => app.pauseLoadedWork(timer.groupId, timer.workId)}
           localTimers={snapshotActiveTimers(app.data, new Set((app.activeTimers ?? []).map((timer) => String(timer.workId))), Date.now())}

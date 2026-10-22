@@ -93,7 +93,7 @@ export function assembleApp(config: ResolvedConfig, tenants: TenantRegistry, ses
     return router;
   };
   app.use("/api", (req, res, next) => {
-    if (!/^\/(creation|mobile-notifications|offline|user-signatures|user-profile|worker-locations|material-receipts|workshop)(\/|$)/.test(req.path)) { next(); return; }
+    if (!/^\/(creation|mobile-notifications|offline|user-signatures|user-profile|worker-locations|material-receipts|workshop|diagnostics)(\/|$)/.test(req.path)) { next(); return; }
     context.middleware()(req, res, (error?: unknown) => {
       if (error) { next(error); return; }
       mobileRouter(context.get(req).runtime)(req, res, next);

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Animated, Image, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { IconButton, type IconName } from "../ui/components";
+import { PrivateModal } from "../security/DeviceSecurityContext";
 import { palette, radius, theme, typography } from "../ui/theme";
 import { animateNextLayout } from "../ui/motion";
 import { isWorkshopEntryOverdue, workshopAreaHasRoom, workshopStatusLabel, type WorkshopArea, type WorkshopEntry } from "../domain/workshopBoard";
@@ -29,9 +30,10 @@ function Tag({ label, color, soft, icon }: { label: string; color: string; soft:
 
 const shortDate = (iso: string) => new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short" }).format(new Date(iso));
 
-function EntryCard({ entry }: { entry: WorkshopEntry }) {
+function EntryCard({ entry, onOpen }: { entry: WorkshopEntry; onOpen: () => void }) {
   const overdue = isWorkshopEntryOverdue(entry);
-  return <View style={[styles.card, entry.isReceptionPending && styles.cardPending]} accessible accessibilityLabel={`${entry.code}, ${entry.equipmentLabel}`}>
+  return <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={`${entry.code}, ${entry.equipmentLabel}`} accessibilityHint="Abre la ficha del ingreso"
+    style={({ pressed }) => [styles.card, entry.isReceptionPending && styles.cardPending, pressed && styles.cardPressed]}>
     <View style={styles.thumb}>
       {entry.imageUrl ? <Image source={{ uri: entry.imageUrl }} style={styles.thumbImage} resizeMode="cover" accessible={false} />
         : <Ionicons name={entry.isReceptionPending ? "construct-outline" : "image-outline"} size={24} color={palette.textMuted} accessible={false} />}
@@ -55,10 +57,11 @@ function EntryCard({ entry }: { entry: WorkshopEntry }) {
           {entry.negotiationsCount > 0 ? <Tag label={`${entry.negotiationsCount} OT`} color={palette.info} soft={palette.infoSoft} icon="document-text-outline" /> : null}
         </View>}
     </View>
-  </View>;
+    <Ionicons name="chevron-forward" size={18} color={palette.textMuted} style={styles.chevron} accessible={false} />
+  </Pressable>;
 }
 
-function AreaSection({ area, index }: { area: WorkshopArea; index: number }) {
+function AreaSection({ area, index, onOpenEntry }: { area: WorkshopArea; index: number; onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void }) {
   const occupancy = area.hasUnlimitedSlots ? `${area.occupiedSlots} en nave` : area.occupiedSlots === 0 ? "Libre" : `${area.occupiedSlots} de ${area.maxSlots}`;
   return <FadeIn index={index}>
     <View style={styles.area}>
@@ -69,15 +72,15 @@ function AreaSection({ area, index }: { area: WorkshopArea; index: number }) {
           <Text style={[styles.occupancyText, area.entries.length === 0 && styles.occupancyTextFree]}>{occupancy}</Text>
         </View>
       </View>
-      {area.entries.length > 0 ? area.entries.map((entry) => <EntryCard key={entry.id} entry={entry} />)
+      {area.entries.length > 0 ? area.entries.map((entry) => <EntryCard key={entry.id} entry={entry} onOpen={() => onOpenEntry(entry, area)} />)
         : <View style={styles.free}><Ionicons name="checkmark-circle-outline" size={18} color={palette.primary} accessible={false} />
           <Text style={styles.freeText}>{workshopAreaHasRoom(area) ? "Nave libre, sin equipos" : "Sin ingresos visibles"}</Text></View>}
     </View>
   </FadeIn>;
 }
 
-/** Taller: naves una debajo de otra con sus ingresos (solo lectura). */
-export function WorkshopBoardScreen({ workshop }: { workshop: WorkshopModel }) {
+/** Taller: naves una debajo de otra con sus ingresos; tocar un ingreso abre su ficha. */
+export function WorkshopBoardScreen({ workshop, onOpenEntry }: { workshop: WorkshopModel; onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [chip, setChip] = useState<Chip>("all");
@@ -157,10 +160,10 @@ export function WorkshopBoardScreen({ workshop }: { workshop: WorkshopModel }) {
         <Text style={styles.emptyTitle}>{normalized || chip !== "all" ? "Sin resultados" : "Sin naves configuradas"}</Text>
         <Text style={styles.emptyText}>{normalized || chip !== "all" ? "Prueba con otra búsqueda o filtro." : "Este taller todavía no tiene naves."}</Text>
       </View> : null}
-      {visibleAreas.map((area, index) => <AreaSection key={area.id} area={area} index={index} />)}
+      {visibleAreas.map((area, index) => <AreaSection key={area.id} area={area} index={index} onOpenEntry={onOpenEntry} />)}
     </ScrollView>
 
-    <Modal visible={picker} transparent animationType="fade" onRequestClose={() => setPicker(false)}>
+    <PrivateModal visible={picker} transparent animationType="fade" onRequestClose={() => setPicker(false)}>
       <Pressable style={styles.backdrop} accessibilityLabel="Cerrar" onPress={() => setPicker(false)}>
         <Pressable style={styles.sheet} onPress={() => undefined}>
           <Text style={styles.sheetTitle}>Taller</Text>
@@ -172,7 +175,7 @@ export function WorkshopBoardScreen({ workshop }: { workshop: WorkshopModel }) {
           </Pressable>)}
         </Pressable>
       </Pressable>
-    </Modal>
+    </PrivateModal>
   </View>;
 }
 
@@ -209,6 +212,8 @@ const styles = StyleSheet.create({
   freeText: { fontSize: 13, fontWeight: "700", color: palette.primary },
   card: { flexDirection: "row", gap: 12, padding: 12, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, ...theme.shadow },
   cardPending: { borderColor: palette.orange },
+  cardPressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
+  chevron: { alignSelf: "center" },
   thumb: { width: 56, height: 56, borderRadius: 12, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
   thumbImage: { width: 56, height: 56 },
   cardBody: { flex: 1, minWidth: 0, gap: 3 },
