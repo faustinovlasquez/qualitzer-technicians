@@ -48,10 +48,24 @@ export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<
   createWorkshopCustomer?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopCustomer"];
   createWorkshopCustomerBranch?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopCustomerBranch"];
   createWorkshopCustomerContact?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopCustomerContact"];
+  workshopEquipmentMasters?: import("./workshopCustomers").WorkshopCustomersPort["workshopEquipmentMasters"];
+  createWorkshopCustomerEquipment?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopCustomerEquipment"];
   moveWorkshopEntry?: import("./workshopManage").WorkshopManagePort["moveWorkshopEntry"];
   changeEstimatedDelivery?: import("./workshopManage").WorkshopManagePort["changeEstimatedDelivery"];
   changeEntryStatus?: import("./workshopManage").WorkshopManagePort["changeEntryStatus"];
   workshopOrderRules?: import("./workshopOrders").WorkshopOrdersPort["workshopOrderRules"];
+  /** Permisos de la app configurados para la sucursal (web «Permisos de la app móvil»). */
+  mobileAppConfig?: (branchId: number) => Promise<import("./mobileAppConfig").MobileAppConfig>;
+  workshopOrderDetail?: import("./workshopOrders").WorkshopOrdersPort["workshopOrderDetail"];
+  updateOrderGeneral?: import("./workshopOrders").WorkshopOrdersPort["updateOrderGeneral"];
+  workshopProducts?: import("./workshopOrders").WorkshopOrdersPort["workshopProducts"];
+  workshopTransports?: import("./workshopOrders").WorkshopOrdersPort["workshopTransports"];
+  addOrderItem?: import("./workshopOrders").WorkshopOrdersPort["addOrderItem"];
+  updateOrderItem?: import("./workshopOrders").WorkshopOrdersPort["updateOrderItem"];
+  removeOrderItem?: import("./workshopOrders").WorkshopOrdersPort["removeOrderItem"];
+  workshopOrderFiles?: import("./workshopOrders").WorkshopOrdersPort["workshopOrderFiles"];
+  uploadWorkshopOrderFiles?: import("./workshopOrders").WorkshopOrdersPort["uploadWorkshopOrderFiles"];
+  deleteWorkshopOrderFile?: import("./workshopOrders").WorkshopOrdersPort["deleteWorkshopOrderFile"];
   createWorkshopOrder?: import("./workshopOrders").WorkshopOrdersPort["createWorkshopOrder"];
   addWorksToOrder?: import("./workshopOrders").WorkshopOrdersPort["addWorksToOrder"];
   sendOrderToCommercial?: import("./workshopOrders").WorkshopOrdersPort["sendOrderToCommercial"];

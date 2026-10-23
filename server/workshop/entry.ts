@@ -131,12 +131,16 @@ export function order(raw: unknown): WorkshopOrder | null {
     stage,
     sentToCommercial,
     quoted: netTotal > 0 || stage === "approved",
-    finished: row.isCompleted === true
+    finished: row.isCompleted === true,
+    typeLabel: createdAsOT ? (row.isWorkOrderInternal === true ? "OT interna" : "Orden de trabajo") : text(row.businessModality) === "DIRECT_AGREEMENT" ? "Venta directa" : "Cotización formal",
+    createdAt: isoDate(row.createdAt),
+    sentAt: createdAsOT ? isoDate(row.sentToCommercialAtIso ?? row.sentToCommercialAt) : null
   };
 }
 
 const MAINTENANCE_PREFIX: Record<string, string> = { detencion: "DET", correctivo: "COR", preventivo: "PRE", rutinario: "RUT", checklist: "CHK" };
-const MAINTENANCE_STATUS: Record<string, string> = { por_planificar: "Por planificar", planificada: "Planificada", en_progreso: "En progreso", entrega_tecnico: "Entrega técnica", finalizada: "Finalizada" };
+const MAINTENANCE_TYPE: Record<string, string> = { detencion: "Detención", correctivo: "Correctivo", preventivo: "Preventivo", rutinario: "Rutinario", checklist: "Checklist" };
+const MAINTENANCE_STATUS: Record<string, string> ={ por_planificar: "Por planificar", planificada: "Planificada", en_progreso: "En progreso", entrega_tecnico: "Entrega técnica", finalizada: "Finalizada" };
 
 export function maintenance(raw: unknown): WorkshopOrder | null {
   const row = asRecord(raw);
@@ -148,7 +152,8 @@ export function maintenance(raw: unknown): WorkshopOrder | null {
     id: maintenanceId, kind: "maintenance", code, workOrderCode: code,
     title: clip(text(row.title) ?? text(row.motive), 500),
     statusLabel: (status ? MAINTENANCE_STATUS[status] ?? status : "Sin estado").slice(0, 120),
-    stage: "approved", sentToCommercial: true, quoted: true, finished: status === "finalizada"
+    stage: "approved", sentToCommercial: true, quoted: true, finished: status === "finalizada",
+    typeLabel: MAINTENANCE_TYPE[text(row.type) ?? ""] ?? "Mantenimiento", createdAt: isoDate(row.createdAt), sentAt: null
   };
 }
 

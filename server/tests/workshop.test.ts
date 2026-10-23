@@ -87,7 +87,7 @@ const setEntryBackend = (state: Awaited<ReturnType<typeof harness>>["state"]) =>
     { id: "42", title: "Revisar motor", priority: "medium", mainStatus: "DONE", operationalProgress: 100 }
   ], totalRows: 2 } });
   state.failures.set("/api/negotiations", { status: 200, body: { data: [
-    { id: 81, correlative: 4265, businessModality: "FORMAL_QUOTE", businessTypeName: "project", title: "Reparación", commercialStatus: "APPROVED", createdAsODT: false, totalsSection: { totalNet: 0 } },
+    { id: 81, correlative: 4265, businessModality: "FORMAL_QUOTE", businessTypeName: "project", title: "Reparación", commercialStatus: "APPROVED", createdAsODT: false, createdAt: "2026-10-18T13:00:00.000Z", totalsSection: { totalNet: 0 } },
     { id: 82, correlative: null, workOrderNumber: 12, createdAsODT: true, sentToCommercialAt: null, title: "OT de taller", totalsSection: { totalNet: 0 } }
   ], totalRows: 2 } });
 };
@@ -110,8 +110,10 @@ test("la ficha del ingreso reúne datos, inspección, trabajos y órdenes sin en
       { id: 42, code: "TR-00042", title: "Revisar motor", priority: "medium", statusName: "Terminado", statusColor: null, progress: 100, finished: true, orderId: null, maintenanceCode: null, loose: true }
     ] },
     orders: { available: true, items: [
-      { id: 81, kind: "quote", code: "COT-PRO-4265", workOrderCode: null, title: "Reparación", statusLabel: "Aprobada", stage: "approved", sentToCommercial: true, quoted: true, finished: false },
-      { id: 82, kind: "workOrder", code: "OT-00012", workOrderCode: "OT-00012", title: "OT de taller", statusLabel: "Sin enviar a comercial", stage: "draft", sentToCommercial: false, quoted: false, finished: false }
+      { id: 81, kind: "quote", code: "COT-PRO-4265", workOrderCode: null, title: "Reparación", statusLabel: "Aprobada", stage: "approved", sentToCommercial: true, quoted: true, finished: false,
+        typeLabel: "Cotización formal", createdAt: "2026-10-18T13:00:00.000Z", sentAt: null },
+      { id: 82, kind: "workOrder", code: "OT-00012", workOrderCode: "OT-00012", title: "OT de taller", statusLabel: "Sin enviar a comercial", stage: "draft", sentToCommercial: false, quoted: false, finished: false,
+        typeLabel: "Orden de trabajo", createdAt: null, sentAt: null }
     ] }
   });
   assert.doesNotMatch(JSON.stringify(detail.data), /SECRETO|totalNet/);
@@ -119,6 +121,64 @@ test("la ficha del ingreso reúne datos, inspección, trabajos y órdenes sin en
   assert.deepEqual(JSON.parse(works?.query.get("filters") ?? "{}"), { companyBranchId: 1, operationAreaEntryWorks: { entryId: 12, negotiationIds: [81, 82] } });
   const negotiations = state.calls.find(call => call.path === "/api/negotiations");
   assert.equal(JSON.parse(negotiations?.query.get("filters") ?? "{}").operationAreaEntryId, 12);
+});
+
+test("el detalle de una OT del ingreso llega sin precios, con sus secciones y la regla de edición de la web", async context => {
+  const { state, baseUrl } = await harness(context);
+  setEntryBackend(state);
+  state.failures.set("/api/negotiations/82", { status: 200, body: {
+    mainStatus: "PENDING", subStatus: "Por revisar", businessTypeName: "service", customer: { name: "Cliente" },
+    totalsSection: { totalNet: 990000 }, resultFees: { estimated: { totalNet: 5 } },
+    negotiationDataSection: { id: 82, title: "OT de taller", description: "Revisar", internalNotes: null, priority: "high", serviceDate: "2026-10-20", isWorkOrderInternal: false,
+      totalNet: 990000, branchesCustomer: [{ value: "3", label: "Casa matriz" }], contacts: [{ id: 1, fullName: "Ana", isSelected: true }, { id: 2, fullName: "Luis", isSelected: false }],
+      customersEquipments: [{ value: 5, label: "Bomba DQ6" }] },
+    workSection: { works: [{ id: 42, title: "Revisar motor", priority: "medium", summary: "Ruido", assignedTime: 90, specialties: [{ value: "2", label: "Mecánica" }],
+      responsibles: [{ id: 5, name: "Juan" }], netCostHH: 15000, netSalePerHH: 30000 }] },
+    productsSection: { products: [{ id: 7, productId: 501, code: "SEL", name: "Sello", quantity: 2, stock: 6, costPrice: 1000, netSalePrice: 2000, itemType: "PRODUCT" },
+      { id: 8, productId: 502, name: "Borrado", quantity: 1, isDeleted: true }] },
+    transportSection: { transports: [{ id: 9, commercialTransportId: 4, quotedType: "km", quotedValue: 120, salePriceUnit: 900, costUnit: 500, detail: "Faena" }] },
+    othersSection: { others: [{ id: 10, name: "Limpieza", quantity: 1, unitCost: 30000 }] },
+    rentalEquipmentSection: { rentalEquipments: [] }
+  } });
+  state.failures.set("/api/commercial_transport/select", { status: 200, body: [{ value: "4", label: "Camioneta 4x4" }] });
+  const detail = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders/82?companyBranchId=1");
+  assert.equal(detail.response.status, 200);
+  const data = asRecordForTest(detail.data);
+  assert.doesNotMatch(JSON.stringify(data), /990000|30000|15000|2000|netSale|costPrice|unitCost|salePrice|totalNet/);
+  assert.equal(data.editable, true);
+  assert.deepEqual(asRecordForTest(data.general).contacts, ["Ana"]);
+  assert.deepEqual(data.products, [{ id: 7, productId: 501, code: "SEL", name: "Sello", description: null, unit: null, quantity: 2, stock: 6, isEquipment: false }]);
+  assert.deepEqual(data.transports, [{ id: 9, transportId: 4, name: "Camioneta 4x4", detail: "Faena", chargeType: "km", quantity: 120 }]);
+  assert.deepEqual(data.works, [{ id: 42, code: "TR-00042", title: "Revisar motor", priority: "medium", summary: "Ruido", assignedMinutes: 90, specialty: "Mecánica", responsibles: ["Juan"] }]);
+  // Igual que la web: aprobada (o enviada al cliente, rechazada…) queda solo para ver.
+  state.failures.set("/api/negotiations/82", { status: 200, body: { mainStatus: "APPROVED", negotiationDataSection: { id: 82 }, workSection: { works: [] } } });
+  const locked = asRecordForTest((await jsonRequest(baseUrl, "/api/workshop/entries/12/orders/82?companyBranchId=1")).data);
+  assert.equal(locked.editable, false);
+  assert.equal(locked.lockedReason, "La OT ya está aprobada.");
+  // Una OT de otro ingreso no se muestra.
+  assert.equal((await jsonRequest(baseUrl, "/api/workshop/entries/12/orders/99?companyBranchId=1")).response.status, 404);
+});
+
+test("los datos generales de la OT se guardan solo como columnas y no si la OT está aprobada", async context => {
+  const { state, baseUrl } = await harness(context);
+  setEntryBackend(state);
+  const document = (status: string) => ({ status: 200, body: { mainStatus: status, negotiationDataSection: { id: 82, title: "OT de taller" }, workSection: { works: [] } } });
+  state.failures.set("/api/negotiations/82", document("PENDING"));
+  state.failures.set("/api/branches/1/negotiationFieldsConfig", { status: 200, body: { negotiationFieldsConfig: [{ fieldName: "description", visible: true, required: true }] } });
+  state.failures.set("/api/negotiations/82/update_fields", { status: 200, body: {} });
+  const input = { companyBranchId: 1, title: "Cambio de sello", description: null, internalNotes: null, priority: "high", serviceDate: "2026-10-25" };
+  const missing = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders/82/general", "PUT", input);
+  assert.equal(missing.response.status, 400);
+  assert.equal(errorCode(missing.data), "WORKSHOP_ORDER_DESCRIPTION_REQUIRED");
+  const saved = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders/82/general", "PUT", { ...input, description: "Revisar fuga" });
+  assert.equal(saved.response.status, 200);
+  assert.deepEqual(asRecordForTest(state.calls.find(call => call.path === "/api/negotiations/82/update_fields")?.json),
+    { title: "Cambio de sello", description: "Revisar fuga", internalNotes: "", priority: "high", serviceDate: "2026-10-25" });
+  state.failures.set("/api/negotiations/82", document("APPROVED"));
+  const locked = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders/82/general", "PUT", { ...input, description: "Otra" });
+  assert.equal(locked.response.status, 409);
+  assert.equal(errorCode(locked.data), "WORKSHOP_ORDER_LOCKED");
+  assert.equal(state.calls.filter(call => call.path === "/api/negotiations/82/update_fields").length, 1);
 });
 
 test("si una parte de la ficha falla se marca no disponible; si el ingreso no existe responde 404", async context => {
@@ -150,7 +210,7 @@ test("en un equipo propio la ficha lista los mantenimientos del ingreso", async 
   const data = detail.data as { equipmentLabel: string; orders: { items: unknown[] }; works: { items: Array<{ loose: boolean }> } };
   assert.equal(data.equipmentLabel, "MAXUS · CAMIONETA · T 60");
   assert.deepEqual(data.orders.items, [{ id: 7, kind: "maintenance", code: "OT-COR-0007", workOrderCode: "OT-COR-0007", title: "Ruido en motor", statusLabel: "En progreso",
-    stage: "approved", sentToCommercial: true, quoted: true, finished: false }]);
+    stage: "approved", sentToCommercial: true, quoted: true, finished: false, typeLabel: "Correctivo", createdAt: null, sentAt: null }]);
   assert.equal(data.works.items[0]?.loose, false);
   assert.equal(state.calls.find(call => call.path === "/api/maintenances")?.query.get("operationAreaEntryId"), "12");
   assert.equal(state.calls.filter(call => call.path === "/api/negotiations").length, 0);
@@ -227,16 +287,21 @@ test("la foto del equipo conserva contactos y sucursales y solo acepta JPEG", as
 test("las opciones del ingreso: clientes con RUT, contactos, equipos del cliente agrupados y naves con espacio", async context => {
   const { state, baseUrl } = await harness(context);
   state.failures.set("/api/customers/select", { status: 200, body: [{ value: 40, label: "Zeta SpA (76.123.456-7)" }, { value: 41, label: "Alfa Ltda (Sin RUT)" }] });
-  state.failures.set("/api/customers/40", { status: 200, body: { id: 40, name: "Zeta SpA", contacts: [{ id: 9, fullName: "Ana", email: "ana@zeta.cl", phone: null, position: "Jefa" }] } });
+  state.failures.set("/api/customers/40", { status: 200, body: { id: 40, name: "Zeta SpA", identification: { number: "76.123.456-7" }, contacts: [{ id: 9, fullName: "Ana", email: "ana@zeta.cl", phone: null, position: "Jefa" }] } });
   state.failures.set("/api/customer_branches/select/40", { status: 200, body: [{ value: "7", label: "Casa matriz" }] });
   state.failures.set("/api/customers_equipments/customers/40", { status: 200, body: { BOMBA: [{ id: 56, identification: "416545", manufacturer: { name: "CLARKE" }, type: { name: "BOMBA" }, model: { name: "DQ6" }, year: 2020 }] } });
   state.failures.set("/api/operation_area/select", { status: 200, body: [{ value: 3, label: "Patio" }] });
   assert.deepEqual((await jsonRequest(baseUrl, "/api/workshop/options/customers?companyBranchId=1")).data, { items: [
-    { id: 41, name: "Alfa Ltda", document: null }, { id: 40, name: "Zeta SpA", document: "76.123.456-7" }] });
-  assert.deepEqual((await jsonRequest(baseUrl, "/api/workshop/options/customers/40?companyBranchId=1")).data, { id: 40, name: "Zeta SpA",
+    { id: 41, name: "Alfa Ltda", document: null }, { id: 40, name: "Zeta SpA", document: "76.123.456-7" }], hasMore: false });
+  // Búsqueda por RUT sin puntos ni guion, y de a una página.
+  assert.deepEqual((await jsonRequest(baseUrl, "/api/workshop/options/customers?companyBranchId=1&search=761234567")).data, { items: [
+    { id: 40, name: "Zeta SpA", document: "76.123.456-7" }], hasMore: false });
+  assert.deepEqual((await jsonRequest(baseUrl, "/api/workshop/options/customers?companyBranchId=1&page=1")).data, { items: [], hasMore: false });
+  assert.deepEqual((await jsonRequest(baseUrl, "/api/workshop/options/customers/40?companyBranchId=1")).data, { id: 40, name: "Zeta SpA", document: "76.123.456-7",
     contacts: [{ id: 9, fullName: "Ana", email: "ana@zeta.cl", phone: null, position: "Jefa" }], branches: [{ id: 7, name: "Casa matriz" }] });
   assert.deepEqual((await jsonRequest(baseUrl, "/api/workshop/options/equipment?companyBranchId=1&source=customer&customerId=40")).data, { hasMore: false, items: [
-    { id: 56, source: "customer", label: "CLARKE · BOMBA · DQ6", code: "416545", typeName: "BOMBA", detail: "2020", imageUrl: null }] });
+    { id: 56, source: "customer", label: "CLARKE · BOMBA · DQ6", code: "416545", typeName: "BOMBA", detail: "2020", imageUrl: null,
+      title: "CLARKE DQ6", year: "2020", color: null, identification: "416545", internalNumber: null }] });
   assert.equal((await jsonRequest(baseUrl, "/api/workshop/options/equipment?companyBranchId=1&source=customer")).response.status, 400);
   assert.deepEqual((await jsonRequest(baseUrl, "/api/workshop/options/areas?companyBranchId=1&workshopId=2")).data, { items: [{ id: 3, title: "Patio" }] });
   assert.equal(state.calls.find(call => call.path === "/api/operation_area/select")?.query.get("workshopId"), "2");
@@ -520,16 +585,29 @@ test("crear una OT sin precios une los trabajos sueltos, usa los valores de la s
   // Un trabajo que ya está en una OT no se puede volver a usar.
   const taken = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders", "POST", { ...newOrder, requestId: "1f14191f-e73a-4d92-91b9-bf3fa38a2df2", workIds: [41] });
   assert.equal(errorCode(taken.data), "WORKSHOP_WORK_NOT_LOOSE");
+  // Como en la web, la OT se puede crear sin trabajos y agregarlos después.
+  const empty = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders", "POST", { ...newOrder, requestId: "2a25202a-f84b-4e93-82c0-ca4fb49b3e03", workIds: [] });
+  assert.equal(empty.response.status, 201);
+  assert.deepEqual(asRecordForTest(asRecordForTest(state.calls.filter(call => call.path === "/api/negotiations" && call.method === "POST").at(-1)?.json).workSection).works, []);
 });
 
 test("si la sucursal exige campos que el técnico no puede completar, la OT no se crea y se explica", async context => {
   const { state, baseUrl } = await harness(context);
-  setOrderBackend(state, [{ fieldName: "costCenterRelation", visible: true, required: true }, { fieldName: "salesExecutiveId", visible: true, required: true }, { fieldName: "contacts", visible: true, required: true }]);
+  setOrderBackend(state, [{ fieldName: "departments", visible: true, required: true }, { fieldName: "salesExecutiveId", visible: true, required: true }, { fieldName: "contacts", visible: true, required: true }]);
   const rules = await jsonRequest(baseUrl, "/api/workshop/entries/12/order-rules?companyBranchId=1");
-  assert.deepEqual(rules.data, { blockingFields: ["Centro de costo"], descriptionRequired: false });
+  assert.deepEqual(rules.data, { blockingFields: ["Departamentos"], descriptionRequired: false, fields: [] });
   const blocked = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders", "POST", newOrder);
   assert.equal(errorCode(blocked.data), "WORKSHOP_ORDER_FIELDS_REQUIRED");
   assert.equal(state.calls.filter(call => call.path === "/api/negotiations" && call.method === "POST").length, 0);
+});
+
+test("origen del cliente y etiquetas exigidos en la web no se piden en la app: la OT se crea igual", async context => {
+  const { state, baseUrl } = await harness(context);
+  setOrderBackend(state, [{ fieldName: "customerOriginId", visible: true, required: true }, { fieldName: "tags", visible: true, required: true }]);
+  const rules = await jsonRequest(baseUrl, "/api/workshop/entries/12/order-rules?companyBranchId=1");
+  assert.deepEqual(rules.data, { blockingFields: [], descriptionRequired: false, fields: [] });
+  const created = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders", "POST", newOrder);
+  assert.equal(created.response.status, 201);
 });
 
 test("enviar o eliminar solo aplica a OT del ingreso que aún no se envían", async context => {
@@ -737,4 +815,31 @@ test("un intento fallido del taller se puede reintentar", async () => {
   await assert.rejects(ledger.run("9", "b", {}, async () => { calls++; throw new GatewayError(504, "UPSTREAM_TIMEOUT"); }));
   assert.deepEqual(await ledger.run("9", "b", {}, async () => { calls++; return "ok"; }), { result: "ok", replayed: false });
   assert.equal(calls, 2);
+});
+
+test("registrar un equipo del cliente desde el ingreso, como «Registrar equipo de cliente» de la web", async context => {
+  const { state, baseUrl } = await harness(context);
+  setBranchBays(state);
+  state.failures.set("/api/equipment_masters/types/select", { status: 200, body: [{ value: 1, label: "BOMBA" }] });
+  state.failures.set("/api/equipment_masters/manufacturers/select", { status: 200, body: [{ value: 2, label: "CLARKE" }] });
+  state.failures.set("/api/equipment_masters/models/select", { status: 200, body: [{ value: 3, label: "DQ6" }] });
+  state.failures.set("/api/equipment_masters/classifications/select", { status: 200, body: [{ value: 4, label: "GENERAL" }] });
+  state.failures.set("/api/customers_equipments", { status: 201, body: { id: 88 } });
+  const masters = await jsonRequest(baseUrl, "/api/workshop/options/equipment-masters?companyBranchId=1");
+  assert.deepEqual(masters.data, { types: [{ id: 1, name: "BOMBA" }], manufacturers: [{ id: 2, name: "CLARKE" }], models: [{ id: 3, name: "DQ6" }], classifications: [{ id: 4, name: "GENERAL" }] });
+  const input = { companyBranchId: 1, requestId: "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f", identificationTypeId: 2, identification: "VCRJ13", internalNumber: "045",
+    typeId: 1, manufacturerId: 2, modelId: 3, classificationId: 4, year: "2020", description: null, note: null };
+  const created = await jsonRequest(baseUrl, "/api/workshop/customers/40/equipment", "POST", input);
+  assert.equal(created.response.status, 201);
+  assert.deepEqual(created.data, { id: 88, source: "customer", label: "CLARKE · BOMBA · DQ6", code: "VCRJ13", typeName: "BOMBA", detail: "GENERAL · 2020", imageUrl: null,
+    title: "CLARKE DQ6", year: "2020", color: null, identification: "VCRJ13", internalNumber: "045" });
+  const sent = { ...asRecordForTest(state.calls.find(call => call.path === "/api/customers_equipments")?.json) };
+  assert.deepEqual(sent, { customerId: "40", companyBranchId: "1", identificationTypeId: "2", identification: "VCRJ13", internalNumber: "045", typeId: "1", manufacturerId: "2",
+    modelId: "3", classificationId: "4", year: "2020", isPublic: "true", isEnabled: "true", hasAddress: "false" });
+  state.failures.set("/api/customers_equipments", { status: 400, body: { error: "EQUIPMENT_IDENTIFICATION_EXISTS" } });
+  const duplicate = await jsonRequest(baseUrl, "/api/workshop/customers/40/equipment", "POST", { ...input, requestId: "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a" });
+  assert.equal(duplicate.response.status, 409);
+  assert.equal(errorCode(duplicate.data), "EQUIPMENT_IDENTIFICATION_EXISTS");
+  const invalid = await jsonRequest(baseUrl, "/api/workshop/customers/40/equipment", "POST", { ...input, requestId: "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b", modelId: 99 });
+  assert.equal(invalid.response.status, 400);
 });

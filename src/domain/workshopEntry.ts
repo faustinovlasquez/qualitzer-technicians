@@ -53,7 +53,11 @@ export const workshopOrderSchema = z.object({
   sentToCommercial: z.boolean(),
   /** Tiene montos o ya está aprobada (sin mostrar los montos al técnico). */
   quoted: z.boolean(),
-  finished: z.boolean()
+  finished: z.boolean(),
+  /** Tipo legible: "Cotización formal", "Venta directa", "OT interna", "Correctivo"… (opcional para gateways anteriores). */
+  typeLabel: label(60).nullable().optional(),
+  createdAt: isoDate.nullable().optional(),
+  sentAt: isoDate.nullable().optional()
 }).strict();
 
 const sectionOf = <T extends z.ZodType>(item: T) => z.object({ available: z.boolean(), items: z.array(item).max(500) }).strict();
@@ -124,7 +128,7 @@ export function evaluateInspection(requirement: InspectionRequirement, inspectio
   return { met: missing.length === 0, missing };
 }
 
-export interface DeliveryCondition { id: "intake" | "orders" | "works" | "exit"; met: boolean; title: string; detail: string }
+export interface DeliveryCondition { id: "intake" | "orders" | "sent" | "works" | "exit"; met: boolean; title: string; detail: string }
 
 /** Condiciones para entregar el equipo, las mismas de la ficha web. */
 export function workshopDeliveryConditions(detail: WorkshopEntryDetail): DeliveryCondition[] {
@@ -150,12 +154,19 @@ export function workshopDeliveryConditions(detail: WorkshopEntryDetail): Deliver
   } else {
     const commercial = detail.orders.items.filter((order) => order.kind !== "maintenance" && order.sentToCommercial);
     const unquoted = commercial.filter((order) => !order.quoted);
+    // Una OT sin enviar no llega a comercial: no se cotiza y el equipo no se puede entregar.
+    const unsent = detail.orders.items.filter((order) => order.kind === "workOrder" && !order.sentToCommercial);
     conditions.push({
       id: "orders", met: detail.orders.available && commercial.length > 0 && unquoted.length === 0, title: "Cotizaciones creadas",
       detail: !detail.orders.available ? "No se pudieron revisar las cotizaciones."
+        : commercial.length === 0 && unsent.length > 0 ? "Comercial todavía no puede cotizar: la OT no se ha enviado."
         : commercial.length === 0 ? "El ingreso aún no tiene cotizaciones."
         : unquoted.length > 0 ? `${unquoted.map((order) => order.code).join(", ")} sin cotizar todavía.`
         : `${commercial.length} cotización(es) con montos.`
+    });
+    if (detail.orders.available && unsent.length > 0) conditions.push({
+      id: "sent", met: false, title: "OTs enviadas a comercial",
+      detail: `${unsent.map((order) => order.code).join(", ")} sin enviar a comercial. Ábrela desde la pestaña OTs y envíala.`
     });
   }
   const loose = detail.works.items.filter((work) => work.loose);

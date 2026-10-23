@@ -8,7 +8,9 @@ import { IconButton, type IconName } from "../../ui/components";
 import { palette, radius, theme, typography } from "../../ui/theme";
 
 // inline: el botón vive dentro de la barra de navegación inferior en vez de flotar sobre el contenido.
-export interface CreationQuickMenuProps { onCreate: (kind: CreationKind) => void; disabled?: boolean; inline?: boolean; }
+export interface CreationQuickMenuProps { onCreate: (kind: CreationKind) => void; disabled?: boolean; inline?: boolean;
+  /** Lo que la sucursal permite crear desde la app (todo, si no se indica). */
+  allowed?: CreationKind[]; }
 const actions: { kind: CreationKind; label: string; detail: string; icon: IconName }[] = [
   { kind: "work", label: "Nuevo trabajo", detail: "Crea y planifica un trabajo propio", icon: "construct-outline" },
   { kind: "maintenance", label: "Nuevo mantenimiento", detail: "Correctivo o detención de un equipo", icon: "build-outline" },
@@ -24,7 +26,8 @@ export function CreationFloatingButton({ onPress, label, disabled = false, expan
   </Pressable>;
 }
 
-export function CreationQuickMenu({ onCreate, disabled = false, inline = false }: CreationQuickMenuProps) {
+export function CreationQuickMenu({ onCreate, disabled = false, inline = false, allowed }: CreationQuickMenuProps) {
+  const visible = allowed ? actions.filter((action) => allowed.includes(action.kind)) : actions;
   const [open, setOpen] = useState(false);
   const insets = useSafeAreaInsets();
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
@@ -39,7 +42,7 @@ export function CreationQuickMenu({ onCreate, disabled = false, inline = false }
         <View style={styles.menu} accessibilityViewIsModal onAccessibilityEscape={() => setOpen(false)}>
           <View style={styles.header}><Text accessibilityRole="header" style={styles.title}>Crear</Text><IconButton name="close-outline" label="Cerrar menú de creación" onPress={() => setOpen(false)} /></View>
           <ScrollView>
-          {actions.map((action) => <Pressable key={action.kind} accessibilityRole="button" accessibilityLabel={action.label} accessibilityHint={action.detail}
+          {visible.map((action) => <Pressable key={action.kind} accessibilityRole="button" accessibilityLabel={action.label} accessibilityHint={action.detail}
             onPress={() => { setOpen(false); onCreate(action.kind); }} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
             <View style={styles.icon}><Ionicons name={action.icon} size={23} color={palette.primary} accessible={false} /></View>
             <View style={styles.text}><Text style={styles.label}>{action.label}</Text><Text style={styles.detail}>{action.detail}</Text></View>

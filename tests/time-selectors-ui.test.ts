@@ -122,24 +122,27 @@ function localSession() {
 function uiImports(hooks: ReturnType<typeof reactFixture>, id: string): unknown {
   if (id === "react") return hooks.react;
   if (id === "react/jsx-runtime") return jsx;
-  if (id === "react-native") return { View: "View", Text: "Text" };
+  if (id === "react-native") return { View: "View", Text: "Text", Pressable: "Pressable", ScrollView: "ScrollView", StyleSheet: { create: (styles: unknown) => styles } };
+  if (id === "../theme") return { palette: {}, radius: {} };
   if (id === "../components") return { Button: "Button", IconButton: "IconButton" };
   if (id === "./SelectorUi") return { SelectorTrigger: "SelectorTrigger", SelectionModal: "SelectionModal", SelectionChip: "SelectionChip", timeStyles: {} };
   if (id === "./timeValues") return values;
   throw new Error(`UNEXPECTED_TIME_UI_IMPORT:${id}`);
 }
 
-test("web grid offers every minute; staged 23:59 is applied only by explicit confirmation", t => {
+test("web columns offer every hour and minute; staged 23:59 is applied only by explicit confirmation", t => {
   const hooks = reactFixture(); t.after(hooks.unmount);
   const f = localSession();
   const module = loadSource<typeof import("../src/ui/time/TimePickerPanel")>("ui/time/TimePickerPanel.tsx", id => uiImports(hooks, id));
   const render = () => hooks.render(() => module.TimePickerPanel({ label: "Inicio", value: "bad", session: f.session, onConfirm: f.session.commit, onError: () => assert.fail("unexpected error") }));
   let tree = render();
-  const chips = elements<Chip>(tree, "SelectionChip"); assert.equal(chips.length, 84);
-  for (const label of ["00 min", "07 min", "59 min"]) assert.ok(chips.some(chip => chip.props.label === label));
+  const options = () => elements<{ accessibilityLabel: string; onPress(): void }>(tree, "Pressable");
+  assert.equal(options().length, 84);
+  for (const label of ["00 minutos", "07 minutos", "59 minutos", "23 horas"]) assert.ok(options().some(option => option.props.accessibilityLabel === label));
   assert.deepEqual(f.changes, []);
-  chips.find(chip => chip.props.label === "23 h")!.props.onPress();
-  chips.find(chip => chip.props.label === "59 min")!.props.onPress();
+  options().find(option => option.props.accessibilityLabel === "23 horas")!.props.onPress();
+  tree = render();
+  options().find(option => option.props.accessibilityLabel === "59 minutos")!.props.onPress();
   tree = render(); assert.deepEqual(f.changes, []);
   elements<ModalActions>(tree, "SelectionModal")[0].props.onConfirm();
   elements<ModalActions>(tree, "SelectionModal")[0].props.onConfirm();

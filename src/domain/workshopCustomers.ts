@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { workshopBranchOptionSchema, workshopContactSchema, workshopCustomerOptionSchema } from "./workshopIntake";
+import { workshopBranchOptionSchema, workshopContactSchema, workshopCustomerOptionSchema, workshopEquipmentOptionSchema } from "./workshopIntake";
 
 const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const requestId = z.uuid();
@@ -50,14 +50,34 @@ export const workshopNewCustomerSchema = z.object({
 export const workshopNewBranchSchema = z.object({
   companyBranchId: id, requestId, name: z.string().trim().min(1).max(255), contactName: optionalText(255),
   address: optionalText(255), apartment: optionalText(60), noStreetNumber: z.boolean(),
-  county: optionalText(120), city: optionalText(120), region: optionalText(120)
-}).strict();
+  county: optionalText(120), city: optionalText(120), region: optionalText(120),
+  /** Del mapa de Google (como la web): país, código postal y coordenadas; opcionales. */
+  country: optionalText(120).optional(), postalCode: optionalText(32).optional(),
+  lat: z.string().regex(/^-?\d{1,2}(?:\.\d+)?$/).refine((value) => Math.abs(Number(value)) <= 90).nullable().optional(),
+  lon: z.string().regex(/^-?\d{1,3}(?:\.\d+)?$/).refine((value) => Math.abs(Number(value)) <= 180).nullable().optional()
+}).strict().refine((value) => (value.lat == null) === (value.lon == null), "COORDINATES_INCOMPLETE");
 /** Nuevo contacto del cliente. */
 export const workshopNewContactSchema = z.object({
   companyBranchId: id, requestId, firstName: z.string().trim().min(1).max(120), lastName: z.string().trim().min(1).max(120),
   position: optionalText(200), email: optionalText(200).refine((value) => value === null || isValidContactEmail(value), "EMAIL_INVALID"),
   phone: optionalText(30).refine((value) => value === null || isValidPhone(value), "PHONE_INVALID"), notes: optionalText(2000)
 }).strict();
+
+/** Listas del formulario «Registrar equipo de cliente» de la web. */
+const masterItems = z.array(z.object({ id, name: z.string().max(300) }).strict()).max(5000);
+export const workshopEquipmentMastersSchema = z.object({ types: masterItems, manufacturers: masterItems, models: masterItems, classifications: masterItems }).strict();
+/** Tipos de identificación fijos de la web: número de serie o patente. */
+export const EQUIPMENT_IDENTIFICATION_TYPES = [{ id: 2, label: "Patente" }, { id: 1, label: "Número de serie" }] as const;
+/** Nuevo equipo del cliente con los campos obligatorios de la web (tipo, marca, modelo, clasificación e identificación). */
+export const workshopNewEquipmentSchema = z.object({
+  companyBranchId: id, requestId, identificationTypeId: z.union([z.literal(1), z.literal(2)]), identification: z.string().trim().min(1).max(120),
+  internalNumber: optionalText(120), typeId: id, manufacturerId: id, modelId: id, classificationId: id,
+  year: z.string().trim().regex(/^(\d{4})?$/, "YEAR_INVALID").transform((value) => value || null).nullable(),
+  description: optionalText(2000), note: optionalText(2000)
+}).strict();
+export const workshopNewEquipmentResultSchema = workshopEquipmentOptionSchema;
+export type WorkshopEquipmentMasters = z.infer<typeof workshopEquipmentMastersSchema>;
+export type WorkshopNewEquipment = z.input<typeof workshopNewEquipmentSchema>;
 
 export const workshopNewCustomerResultSchema = workshopCustomerOptionSchema;
 export const workshopNewBranchResultSchema = workshopBranchOptionSchema;
@@ -73,4 +93,6 @@ export interface WorkshopCustomersPort {
   createWorkshopCustomer(input: WorkshopNewCustomer): Promise<z.infer<typeof workshopNewCustomerResultSchema>>;
   createWorkshopCustomerBranch(customerId: number, input: WorkshopNewBranch): Promise<z.infer<typeof workshopNewBranchResultSchema>>;
   createWorkshopCustomerContact(customerId: number, input: WorkshopNewContact): Promise<z.infer<typeof workshopNewContactResultSchema>>;
+  workshopEquipmentMasters(branchId: number): Promise<WorkshopEquipmentMasters>;
+  createWorkshopCustomerEquipment(customerId: number, input: WorkshopNewEquipment): Promise<z.infer<typeof workshopNewEquipmentResultSchema>>;
 }

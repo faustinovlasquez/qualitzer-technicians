@@ -1727,14 +1727,14 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   }
 
   function openWork(group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions): void {
-    if (!currentContext() || actionLock.current || selected || selectedCreationKind || (tab !== "today" && tab !== "agenda") || (selectedOrder && selectedOrder.id !== group.id)) return;
+    if (!currentContext() || actionLock.current || selected || selectedCreationKind || (tab !== "today" && tab !== "agenda" && tab !== "workshop") || (selectedOrder && selectedOrder.id !== group.id)) return;
     const next = workSelection(group, work, options);
     state.current = { ...state.current, selected: next };
     setSelected(next); setError(null);
   }
 
   async function onWorkStatus(group: AssignmentGroup, work: AssignmentWork, input: StatusInput): Promise<void> {
-    if (!currentContext() || !session?.branchId || selected || selectedCreationKind || (tab !== "today" && tab !== "agenda") || (selectedOrder && selectedOrder.id !== group.id)) throw new Error("La selección cambió. Vuelve a abrir la asignación.");
+    if (!currentContext() || !session?.branchId || selected || selectedCreationKind || (tab !== "today" && tab !== "agenda" && tab !== "workshop") || (selectedOrder && selectedOrder.id !== group.id)) throw new Error("La selección cambió. Vuelve a abrir la asignación.");
     const selection = workSelection(group, work);
     const value: WorkScope = { ...dailyRange(selection.queryDate), groupId: selection.groupId, workId: selection.workId, companyBranchId: session.branchId };
     await performMutation(value, async (repo, scope) => {

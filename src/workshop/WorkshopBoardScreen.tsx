@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Animated, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Button, type IconName } from "../ui/components";
+import type { IconName } from "../ui/components";
 import { PrivateModal } from "../security/DeviceSecurityContext";
 import { palette, radius, theme, typography } from "../ui/theme";
 import { animateNextLayout } from "../ui/motion";
+import { useAppPermission } from "../application/appPermissions";
 import { isWorkshopEntryOverdue, workshopAreaHasRoom, workshopStatusLabel, type WorkshopArea, type WorkshopEntry } from "../domain/workshopBoard";
 import type { useWorkshopBoard } from "./useWorkshopBoard";
 
@@ -28,7 +29,19 @@ function Tag({ label, color, soft, icon }: { label: string; color: string; soft:
   </View>;
 }
 
-const shortDate = (iso: string) => new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short" }).format(new Date(iso));
+const chipDots: Record<Exclude<Chip, "all">, { dot: string; soft: string }> = {
+  inProgress: { dot: palette.primary, soft: palette.primarySoft },
+  pending: { dot: palette.orange, soft: palette.orangeSoft },
+  overdue: { dot: palette.danger, soft: palette.dangerSoft },
+};
+
+const pairs =<T,>(items: T[]): Array<[T] | [T, T]> => {
+  const rows: Array<[T] | [T, T]> = [];
+  for (let index = 0; index < items.length; index += 2) rows.push(index + 1 < items.length ? [items[index]!, items[index + 1]!] : [items[index]!]);
+  return rows;
+};
+
+const shortDate =(iso: string) => new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short" }).format(new Date(iso));
 
 function EntryCard({ entry, onOpen }: { entry: WorkshopEntry; onOpen: () => void }) {
   const overdue = isWorkshopEntryOverdue(entry);
@@ -62,9 +75,10 @@ function EntryCard({ entry, onOpen }: { entry: WorkshopEntry; onOpen: () => void
 }
 
 /** Nave vacía con espacio: toda la tarjeta lleva a registrar un ingreso en esa nave. */
-function FreeArea({ area, onNewEntry }: { area: WorkshopArea; onNewEntry: (area: WorkshopArea) => void }) {
-  if (!workshopAreaHasRoom(area)) {
-    return <View style={styles.freeQuiet}><Ionicons name="eye-off-outline" size={16} color={palette.textMuted} accessible={false} /><Text style={styles.freeQuietText}>Sin ingresos visibles</Text></View>;
+function FreeArea({ area, onNewEntry }: { area: WorkshopArea; onNewEntry?: (area: WorkshopArea) => void }) {
+  if (!workshopAreaHasRoom(area) || !onNewEntry) {
+    return <View style={styles.freeQuiet}><Ionicons name={onNewEntry ? "eye-off-outline" : "checkmark-circle-outline"} size={16} color={palette.textMuted} accessible={false} />
+      <Text style={styles.freeQuietText}>{onNewEntry || !workshopAreaHasRoom(area) ? "Sin ingresos visibles" : "Nave libre"}</Text></View>;
   }
   return <Pressable accessibilityRole="button" accessibilityLabel={`Nave ${area.title} libre. Registrar un ingreso aquí`} onPress={() => onNewEntry(area)}
     style={({ pressed }) => [styles.free, pressed && styles.freePressed]}>
@@ -79,32 +93,26 @@ function FreeArea({ area, onNewEntry }: { area: WorkshopArea; onNewEntry: (area:
 
 function AreaSection({ area, index, pinned, onTogglePin, onOpenEntry, onNewEntry }: {
   area: WorkshopArea; index: number; pinned: boolean; onTogglePin: () => void;
-  onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void; onNewEntry: (area: WorkshopArea) => void;
+  onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void; onNewEntry?: (area: WorkshopArea) => void;
 }) {
   const occupancy = area.hasUnlimitedSlots ? `${area.occupiedSlots} en nave` : area.occupiedSlots === 0 ? "Libre" : `${area.occupiedSlots} de ${area.maxSlots}`;
   const room = workshopAreaHasRoom(area);
   return <FadeIn index={index}>
     <View style={[styles.area, pinned && styles.areaPinned]}>
       <View style={styles.areaHeader}>
-        <View style={[styles.areaIcon, pinned && styles.areaIconPinned]}>
-          <Ionicons name="business" size={15} color={pinned ? palette.white : palette.primary} accessible={false} />
+        <Ionicons name="business" size={15} color={palette.primary} accessible={false} />
+        <Text style={styles.areaTitle} numberOfLines={1} accessibilityRole="header">{area.title}</Text>
+        <View style={[styles.occupancy, area.entries.length === 0 && styles.occupancyFree]}>
+          <Text style={[styles.occupancyText, area.entries.length === 0 && styles.occupancyTextFree]}>{occupancy}</Text>
         </View>
-        <View style={styles.areaTitleBox}>
-          <Text style={styles.areaTitle} numberOfLines={1} accessibilityRole="header">{area.title}</Text>
-          <View style={styles.areaMeta}>
-            <View style={[styles.occupancy, area.entries.length === 0 && styles.occupancyFree]}>
-              <Text style={[styles.occupancyText, area.entries.length === 0 && styles.occupancyTextFree]}>{occupancy}</Text>
-            </View>
-            {pinned ? <Text style={styles.pinnedLabel}>Fijada</Text> : null}
-          </View>
-        </View>
+        <View style={styles.areaSpacer} />
         <Pressable accessibilityRole="button" accessibilityLabel={pinned ? `Desfijar ${area.title}` : `Fijar ${area.title} arriba`} accessibilityState={{ selected: pinned }}
-          hitSlop={6} onPress={() => { animateNextLayout(); onTogglePin(); }} style={({ pressed }) => [styles.pin, pinned && styles.pinOn, pressed && styles.freePressed]}>
-          <Ionicons name={pinned ? "pin" : "pin-outline"} size={17} color={pinned ? palette.white : palette.textSecondary} accessible={false} />
+          hitSlop={8} onPress={() => { animateNextLayout(); onTogglePin(); }} style={({ pressed }) => [styles.pin, pressed && styles.freePressed]}>
+          <Ionicons name={pinned ? "pin" : "pin-outline"} size={16} color={pinned ? palette.primary : palette.textMuted} accessible={false} />
         </Pressable>
-        {room ? <Pressable accessibilityRole="button" accessibilityLabel={`Nuevo ingreso en ${area.title}`} onPress={() => onNewEntry(area)}
+        {room && onNewEntry ? <Pressable accessibilityRole="button" accessibilityLabel={`Nuevo ingreso en ${area.title}`} hitSlop={{ top: 6, bottom: 6 }} onPress={() => onNewEntry(area)}
           style={({ pressed }) => [styles.areaAdd, pressed && styles.freePressed]}>
-          <Ionicons name="add" size={18} color={palette.white} accessible={false} />
+          <Ionicons name="add" size={15} color={palette.primary} accessible={false} />
           <Text style={styles.areaAddText}>Ingresar</Text>
         </Pressable> : null}
       </View>
@@ -114,12 +122,76 @@ function AreaSection({ area, index, pinned, onTogglePin, onOpenEntry, onNewEntry
   </FadeIn>;
 }
 
-/** Taller: naves una debajo de otra con sus ingresos; tocar un ingreso abre su ficha. */
+/** Ingreso dentro de la nave compacta: foto, equipo, días en taller y entrega. */
+function CompactEntry({ entry, onOpen }: { entry: WorkshopEntry; onOpen: () => void }) {
+  const overdue = isWorkshopEntryOverdue(entry);
+  return <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={`${entry.code}, ${entry.equipmentLabel}`} accessibilityHint="Abre la ficha del ingreso"
+    style={({ pressed }) => [styles.compactEntry, pressed && styles.cardPressed]}>
+    <View style={styles.compactTop}>
+      <View style={styles.compactThumb}>
+        {entry.imageUrl ? <Image source={{ uri: entry.imageUrl }} style={styles.compactThumbImage} resizeMode="cover" accessible={false} />
+          : <Ionicons name={entry.isReceptionPending ? "construct-outline" : "image-outline"} size={20} color={palette.textMuted} accessible={false} />}
+      </View>
+      <View style={styles.compactText}>
+        <Text style={styles.compactEquipment} numberOfLines={3}>{entry.equipmentLabel}</Text>
+        <Text style={styles.compactCode} numberOfLines={1}>{entry.code}</Text>
+      </View>
+    </View>
+    {entry.isReceptionPending ? <Text style={styles.compactPending} numberOfLines={1}>Falta firma de recepción</Text> : <>
+      <View style={styles.compactLine}>
+        <Ionicons name="time-outline" size={13} color={palette.textSecondary} accessible={false} />
+        <Text style={styles.compactLineText} numberOfLines={1}>{entry.daysInArea === 1 ? "1 día en taller" : `${entry.daysInArea} días en taller`}</Text>
+      </View>
+      <View style={styles.compactLine}>
+        <Ionicons name="calendar-outline" size={13} color={palette.textSecondary} accessible={false} />
+        <Text style={styles.compactLineText} numberOfLines={1}>Entrega: <Text style={{ color: !entry.estimatedDeliveryAt ? palette.textMuted : overdue ? palette.danger : palette.text, fontWeight: "800" }}>
+          {entry.estimatedDeliveryAt ? `${overdue ? "Atrasado " : ""}${shortDate(entry.estimatedDeliveryAt)}` : "Sin fecha"}</Text></Text>
+      </View>
+    </>}
+  </Pressable>;
+}
+
+/** Nave como tarjeta de la cuadrícula compacta (dos por fila). */
+function CompactArea({ area, pinned, onTogglePin, onOpenEntry, onNewEntry }: {
+  area: WorkshopArea; pinned: boolean; onTogglePin: () => void;
+  onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void; onNewEntry?: (area: WorkshopArea) => void;
+}) {
+  const room = workshopAreaHasRoom(area) && onNewEntry !== undefined;
+  const occupancy = area.hasUnlimitedSlots ? String(area.occupiedSlots) : `${area.occupiedSlots}/${area.maxSlots}`;
+  return <View style={[styles.tile, pinned && styles.tilePinned]}>
+    <View style={styles.tileHeader}>
+      <Text style={styles.tileTitle} numberOfLines={1} accessibilityRole="header">{area.title}</Text>
+      <View style={[styles.occupancy, area.entries.length === 0 && styles.occupancyFree]}>
+        <Text style={[styles.occupancyText, area.entries.length === 0 && styles.occupancyTextFree]}>{occupancy}</Text>
+      </View>
+      <Pressable accessibilityRole="button" accessibilityLabel={pinned ? `Desfijar ${area.title}` : `Fijar ${area.title} arriba`} accessibilityState={{ selected: pinned }}
+        hitSlop={8} onPress={() => { animateNextLayout(); onTogglePin(); }} style={({ pressed }) => pressed && styles.freePressed}>
+        <Ionicons name={pinned ? "pin" : "pin-outline"} size={16} color={pinned ? palette.primary : palette.textMuted} accessible={false} />
+      </Pressable>
+    </View>
+    {area.entries.map((entry, index) => <View key={entry.id} style={index > 0 && styles.compactDivider}><CompactEntry entry={entry} onOpen={() => onOpenEntry(entry, area)} /></View>)}
+    {area.entries.length === 0 && room ? <Pressable accessibilityRole="button" accessibilityLabel={`Nave ${area.title} libre. Agregar ingreso`} onPress={() => onNewEntry?.(area)}
+      style={({ pressed }) => [styles.tileFree, pressed && styles.freePressed]}>
+      <View style={styles.tileFreeIcon}><Ionicons name="add" size={26} color={palette.primary} accessible={false} /></View>
+      <Text style={styles.tileFreeText}>Agregar ingreso</Text>
+    </Pressable> : null}
+    {area.entries.length > 0 && room ? <Pressable accessibilityRole="button" accessibilityLabel={`Nuevo ingreso en ${area.title}`} onPress={() => onNewEntry?.(area)}
+      style={({ pressed }) => [styles.tileAdd, pressed && styles.freePressed]}>
+      <Ionicons name="add" size={15} color={palette.primary} accessible={false} /><Text style={styles.tileAddText}>Agregar</Text>
+    </Pressable> : null}
+    {area.entries.length === 0 && !room ? <View style={styles.tileQuiet}><Text style={styles.freeQuietText}>{workshopAreaHasRoom(area) ? "Nave libre" : "Sin ingresos visibles"}</Text></View> : null}
+  </View>;
+}
+
+/** Taller: naves una debajo de otra con sus ingresos (extendida) o en cuadrícula (compacta); tocar un ingreso abre su ficha. */
 export function WorkshopBoardScreen({ workshop, onOpenEntry, onNewEntry, query = "" }: {
   workshop: WorkshopModel; onOpenEntry: (entry: WorkshopEntry, area: WorkshopArea) => void; onNewEntry: (area: WorkshopArea | null) => void;
   /** Texto del buscador fijo del encabezado de la app, igual que en Mi jornada. */
   query?: string;
 }) {
+  // Sin permiso de la sucursal para registrar ingresos desde la app no se ofrecen los botones.
+  const canEnter = useAppPermission("workshopEntries");
+  const newEntry = canEnter ? onNewEntry : undefined;
   const [chip, setChip] = useState<Chip>("all");
   const [picker, setPicker] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -158,27 +230,53 @@ export function WorkshopBoardScreen({ workshop, onOpenEntry, onNewEntry, query =
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={palette.primary} colors={[palette.primary]} />}>
       <View style={styles.hero}>
         <View style={styles.heroTop}>
-          <View style={styles.heroIcon}><Ionicons name="construct" size={20} color={palette.white} accessible={false} /></View>
+          <View style={styles.heroIcon}><Ionicons name="construct" size={16} color={palette.white} accessible={false} /></View>
           <View style={styles.heroText}>
             <Text accessibilityRole="header" style={styles.heroTitle}>Taller</Text>
-            <Text style={styles.heroSubtitle}>{counts.all === 1 ? "1 equipo en naves" : `${counts.all} equipos en naves`}</Text>
+            <Text style={styles.heroSubtitle} numberOfLines={1}>{counts.all === 1 ? "1 equipo en naves" : `${counts.all} equipos en naves`}</Text>
           </View>
+          {workshop.board && canEnter ? <Pressable accessibilityRole="button" accessibilityLabel="Nuevo ingreso" onPress={() => onNewEntry(null)}
+            style={({ pressed }) => [styles.heroAdd, pressed && styles.freePressed]}>
+            <Ionicons name="add" size={18} color={palette.white} accessible={false} /><Text style={styles.heroAddText}>Nuevo ingreso</Text>
+          </Pressable> : null}
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel={`Taller: ${workshopName}`} disabled={(workshop.workshops?.length ?? 0) < 2} onPress={() => setPicker(true)} style={styles.select}>
-          <Ionicons name="storefront-outline" size={17} color={palette.primary} accessible={false} />
+          <Ionicons name="storefront-outline" size={15} color={palette.primary} accessible={false} />
           <Text style={styles.selectText} numberOfLines={1}>{workshopName}</Text>
-          {(workshop.workshops?.length ?? 0) > 1 ? <Ionicons name="chevron-down" size={16} color={palette.textSecondary} accessible={false} /> : null}
+          {(workshop.workshops?.length ?? 0) > 1 ? <Ionicons name="chevron-down" size={15} color={palette.textSecondary} accessible={false} /> : null}
         </Pressable>
-        {workshop.board ? <Button title="Nuevo ingreso" icon="add-circle-outline" onPress={() => onNewEntry(null)} /> : null}
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-        {chips.map((option) => <Pressable key={option.id} accessibilityRole="button" accessibilityState={{ selected: chip === option.id }} onPress={() => setChip(option.id)}
-          style={[styles.chip, chip === option.id && styles.chipOn]}>
-          <Text style={[styles.chipText, chip === option.id && styles.chipTextOn]}>{option.label}</Text>
-          <View style={[styles.chipCount, chip === option.id && styles.chipCountOn]}><Text style={[styles.chipCountText, chip === option.id && styles.chipTextOn]}>{option.count}</Text></View>
-        </Pressable>)}
-      </ScrollView>
+      <View style={styles.filterRow}>
+        {/* Mismo diseño que los filtros de estado de Mi jornada. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chips}>
+          {chips.map((option) => {
+            const selected = chip === option.id;
+            if (option.id === "all") return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={`${option.label}, ${option.count}`} accessibilityState={{ selected }} hitSlop={6}
+              onPress={() => setChip(option.id)} style={({ pressed }) => [styles.chipAll, pressed && styles.freePressed]}>
+              <Ionicons name="funnel-outline" size={14} color={selected ? palette.primary : palette.textMuted} accessible={false} />
+              <Text style={[styles.chipAllText, selected && styles.chipAllTextOn]}>{option.label}</Text>
+              <Text style={[styles.chipCountText, selected && styles.chipAllTextOn]}>{option.count}</Text>
+            </Pressable>;
+            const colors = chipDots[option.id];
+            return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={`${option.label}, ${option.count}`} accessibilityState={{ selected }} hitSlop={{ top: 7, bottom: 7 }}
+              onPress={() => setChip(selected ? "all" : option.id)} style={({ pressed }) => [styles.chip, selected && { borderColor: colors.dot, backgroundColor: colors.soft }, pressed && styles.freePressed]}>
+              <View style={[styles.chipDot, { backgroundColor: colors.dot }]} />
+              <Text style={[styles.chipText, selected && styles.chipTextOn]}>{option.label}</Text>
+              <Text style={[styles.chipCountText, selected && styles.chipTextOn]}>{option.count}</Text>
+            </Pressable>;
+          })}
+        </ScrollView>
+        <View style={styles.layoutSwitch} accessibilityRole="radiogroup" accessibilityLabel="Vista de las naves">
+          {([["extended", "list", "Vista extendida"], ["compact", "grid", "Vista compacta"]] as const).map(([value, icon, label]) => {
+            const on = workshop.layout === value;
+            return <Pressable key={value} accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{ checked: on }} hitSlop={4}
+              onPress={() => { if (!on) { animateNextLayout(); workshop.setLayout(value); } }} style={[styles.layoutOption, on && styles.layoutOptionOn]}>
+              <Ionicons name={on ? icon : `${icon}-outline`} size={17} color={on ? palette.white : palette.textSecondary} accessible={false} />
+            </Pressable>;
+          })}
+        </View>
+      </View>
 
       {workshop.error ? <View accessibilityRole="alert" style={styles.alert}>
         <Ionicons name="cloud-offline-outline" size={20} color={palette.danger} accessible={false} />
@@ -195,8 +293,16 @@ export function WorkshopBoardScreen({ workshop, onOpenEntry, onNewEntry, query =
         <Text style={styles.emptyTitle}>{normalized || chip !== "all" ? "Sin resultados" : "Sin naves configuradas"}</Text>
         <Text style={styles.emptyText}>{normalized || chip !== "all" ? "Prueba con otra búsqueda o filtro." : "Este taller todavía no tiene naves."}</Text>
       </View> : null}
-      {visibleAreas.map((area, index) => <AreaSection key={area.id} area={area} index={index} pinned={workshop.pinned.includes(area.id)}
-        onTogglePin={() => workshop.togglePin(area.id)} onOpenEntry={onOpenEntry} onNewEntry={onNewEntry} />)}
+      {workshop.layout === "compact"
+        ? pairs(visibleAreas).map((row, index) => <FadeIn key={row[0].id} index={index}>
+          <View style={styles.tileRow}>
+            {row.map((area) => <CompactArea key={area.id} area={area} pinned={workshop.pinned.includes(area.id)}
+              onTogglePin={() => workshop.togglePin(area.id)} onOpenEntry={onOpenEntry} onNewEntry={newEntry} />)}
+            {row.length === 1 ? <View style={styles.tileSpacer} /> : null}
+          </View>
+        </FadeIn>)
+        : visibleAreas.map((area, index) => <AreaSection key={area.id} area={area} index={index} pinned={workshop.pinned.includes(area.id)}
+          onTogglePin={() => workshop.togglePin(area.id)} onOpenEntry={onOpenEntry} onNewEntry={newEntry} />)}
     </ScrollView>
 
     <PrivateModal visible={picker} transparent animationType="fade" onRequestClose={() => setPicker(false)}>
@@ -218,18 +324,50 @@ export function WorkshopBoardScreen({ workshop, onOpenEntry, onNewEntry, query =
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
   content: { width: "100%", maxWidth: theme.contentWidth, alignSelf: "center", padding: 16, gap: 14, paddingBottom: 28 },
-  hero: { gap: 10, padding: 14, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, ...theme.shadow },
-  heroTop: { flexDirection: "row", alignItems: "center", gap: 10 },
-  heroIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary },
-  heroText: { flex: 1, minWidth: 0 }, heroTitle: { ...typography.heading, color: palette.heading }, heroSubtitle: { ...typography.caption, color: palette.textSecondary },
-  select: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, height: 44, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
-  selectText: { flex: 1, ...typography.label, color: palette.text },
-  chips: { gap: 8, paddingRight: 4 },
-  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 14, paddingRight: 8, height: 36, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
-  chipOn: { borderColor: palette.primary, backgroundColor: palette.primary },
-  chipText: { fontSize: 13, fontWeight: "700", color: palette.textSecondary }, chipTextOn: { color: palette.white },
-  chipCount: { minWidth: 22, paddingHorizontal: 6, height: 20, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
-  chipCountOn: { backgroundColor: "rgba(255,255,255,0.22)" }, chipCountText: { fontSize: 11, fontWeight: "800", color: palette.textSecondary },
+  hero: { gap: 8, padding: 10, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, ...theme.shadow },
+  heroTop: { flexDirection: "row", alignItems: "center", gap: 8 },
+  heroIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary },
+  heroText: { flex: 1, minWidth: 0 }, heroTitle: { fontSize: 17, lineHeight: 21, fontWeight: "800", color: palette.heading }, heroSubtitle: { fontSize: 12, color: palette.textSecondary },
+  heroAdd: { flexDirection: "row", alignItems: "center", gap: 4, height: 36, paddingLeft: 10, paddingRight: 14, borderRadius: radius.pill, backgroundColor: palette.primary },
+  heroAddText: { fontSize: 13, fontWeight: "800", color: palette.white },
+  select: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, height: 36, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
+  selectText: { flex: 1, fontSize: 14, fontWeight: "700", color: palette.text },
+  chips: { gap: 4, paddingVertical: 2, paddingRight: 4, alignItems: "center" },
+  chipAll: { minHeight: 30, flexDirection: "row", gap: 3, alignItems: "center", paddingRight: 2 },
+  chipAllText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: palette.textMuted },
+  chipAllTextOn: { color: palette.primary, fontWeight: "800" },
+  chipDot: { width: 8, height: 8, borderRadius: 4 },
+  filterRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  chipsScroll: { flex: 1 },
+  layoutSwitch: { flexDirection: "row", padding: 2, gap: 2, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  layoutOption: { width: 30, height: 26, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
+  layoutOptionOn: { backgroundColor: palette.primary },
+  tileRow: { flexDirection: "row", gap: 10, alignItems: "stretch" },
+  tileSpacer: { flex: 1 },
+  tile: { flex: 1, minWidth: 0, gap: 8, padding: 10, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, ...theme.shadow },
+  tilePinned: { borderColor: palette.primary, borderWidth: 1.5 },
+  tileHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
+  tileTitle: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "800", color: palette.heading },
+  tileFree: { flex: 1, minHeight: 116, alignItems: "center", justifyContent: "center", gap: 8, borderRadius: radius.md, backgroundColor: palette.successSoft },
+  tileFreeIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface },
+  tileFreeText: { fontSize: 14, fontWeight: "700", color: palette.primary, textAlign: "center" },
+  tileAdd: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, height: 30, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: palette.primaryBorder },
+  tileAddText: { fontSize: 12, fontWeight: "800", color: palette.primary },
+  tileQuiet: { flex: 1, minHeight: 60, alignItems: "center", justifyContent: "center", borderRadius: radius.md, backgroundColor: palette.track },
+  compactEntry: { gap: 5 },
+  compactDivider: { paddingTop: 8, borderTopWidth: 1, borderTopColor: palette.border },
+  compactTop: { flexDirection: "row", alignItems: "center", gap: 8 },
+  compactThumb: { width: 40, height: 40, borderRadius: 10, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
+  compactThumbImage: { width: 40, height: 40 },
+  compactText: { flex: 1, minWidth: 0, gap: 1 },
+  compactEquipment: { fontSize: 13, lineHeight: 17, fontWeight: "800", color: palette.heading },
+  compactCode: { fontSize: 11, fontWeight: "800", color: palette.primary },
+  compactLine: { flexDirection: "row", alignItems: "center", gap: 5 },
+  compactLineText: { flex: 1, fontSize: 12, color: palette.textSecondary },
+  compactPending: { fontSize: 12, fontWeight: "700", color: palette.orange },
+  chip: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  chipText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: palette.textSecondary }, chipTextOn: { color: palette.heading, fontWeight: "800" },
+  chipCountText: { fontSize: 12, lineHeight: 16, fontWeight: "700", color: palette.textMuted, fontVariant: ["tabular-nums"] },
   alert: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.danger, backgroundColor: palette.dangerSoft },
   alertText: { flex: 1, ...typography.caption, color: palette.text, fontWeight: "600" },
   loading: { ...typography.caption, color: palette.textSecondary, textAlign: "center", paddingVertical: 20 },
@@ -238,19 +376,14 @@ const styles = StyleSheet.create({
   emptyTitle: { ...typography.label, fontSize: 16, color: palette.text }, emptyText: { ...typography.caption, color: palette.textSecondary, textAlign: "center" },
   area: { gap: 8 },
   areaPinned: { padding: 10, marginHorizontal: -10, borderRadius: radius.lg, backgroundColor: palette.primarySoft, borderWidth: 1, borderColor: palette.primaryBorder },
-  areaHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 2 },
-  areaIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
-  areaIconPinned: { backgroundColor: palette.primary },
-  areaTitleBox: { flex: 1, minWidth: 0, gap: 3 },
-  areaTitle: { fontSize: 16, fontWeight: "800", color: palette.heading },
-  areaMeta: { flexDirection: "row", alignItems: "center", gap: 6 },
-  pinnedLabel: { fontSize: 11, fontWeight: "800", color: palette.primary },
+  areaHeader: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 2, minHeight: 30 },
+  areaTitle: { flexShrink: 1, fontSize: 15, fontWeight: "800", color: palette.heading },
+  areaSpacer: { flex: 1 },
   occupancy: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: palette.successSoft },
   occupancyFree: { backgroundColor: palette.track },
-  pin: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
-  pinOn: { borderColor: palette.primary, backgroundColor: palette.primary },
-  areaAdd: { flexDirection: "row", alignItems: "center", gap: 4, height: 36, paddingLeft: 10, paddingRight: 14, borderRadius: radius.pill, backgroundColor: palette.primary, ...theme.shadow },
-  areaAddText: { fontSize: 13, fontWeight: "800", color: palette.white },
+  pin: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
+  areaAdd: { flexDirection: "row", alignItems: "center", gap: 3, height: 28, paddingLeft: 7, paddingRight: 10, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
+  areaAddText: { fontSize: 12, fontWeight: "800", color: palette.primary },
   occupancyText: { fontSize: 11, fontWeight: "800", color: palette.success }, occupancyTextFree: { color: palette.textSecondary },
   free: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 72, paddingHorizontal: 14, paddingVertical: 12, borderRadius: radius.lg, borderWidth: 1.5, borderStyle: "dashed", borderColor: palette.primary, backgroundColor: palette.surface },
   freePressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },

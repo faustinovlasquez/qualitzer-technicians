@@ -1,26 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityIndicator, BackHandler, Image, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, BackHandler, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { Button, IconButton, type IconName } from "../ui/components";
 import { palette, radius, theme, typography } from "../ui/theme";
 import { isWorkshopEntryOverdue, workshopStatusLabel, type WorkshopArea, type WorkshopEntry } from "../domain/workshopBoard";
 import { workshopDeliveryConditions, type WorkshopEntryDetail } from "../domain/workshopEntry";
 import type { InspectionKind } from "../domain/workshopInspection";
 import { useWorkshopEntry } from "./useWorkshopEntry";
-import { DeliveredBanner, DeliveryConditions, IntakeProgress, Notice, WorkAndOrders } from "./entry/EntrySections";
+import { DeliveredBanner, IntakeProgress, Notice, WorkAndOrders } from "./entry/EntrySections";
 import { LinkWorksSheet } from "./works/LinkWorksSheet";
 import { AddWorksSheet, ConfirmOrderSheet, CreateOrderSheet } from "./orders/OrderSheets";
 import type { WorkshopOrder } from "../domain/workshopEntry";
 import { EstimatedDateSheet, ManageBar, MoveAreaSheet, StatusSheet } from "./manage/ManageSheets";
 import type { useWorkshopBoard } from "./useWorkshopBoard";
+import { useAppPermission } from "../application/appPermissions";
+import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
 
 const longDate = (iso: string) => new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
 
-function Fact({ icon, label, value, tone }: { icon: IconName; label: string; value: string; tone?: string }) {
-  return <View style={styles.fact}>
-    <Ionicons name={icon} size={16} color={palette.textSecondary} accessible={false} />
-    <Text style={styles.factLabel}>{label}</Text>
-    <Text style={[styles.factValue, tone ? { color: tone } : null]} numberOfLines={3}>{value}</Text>
+/** Dato de la tarjeta oscura del ingreso (dos por fila; los anchos ocupan la fila completa). */
+function HeroFact({ icon, label, value, tone, wide = false }: { icon: IconName; label: string; value: string; tone?: string; wide?: boolean }) {
+  return <View style={[styles.heroFact, wide && styles.heroFactWide]}>
+    <Ionicons name={icon} size={14} color={palette.onDark} accessible={false} />
+    <View style={styles.heroFactText}>
+      <Text style={styles.heroFactLabel}>{label}</Text>
+      <Text style={[styles.heroFactValue, tone ? { color: tone } : null]} numberOfLines={2}>{value}</Text>
+    </View>
   </View>;
 }
 
@@ -37,12 +43,26 @@ function headerOf(entry: WorkshopEntry, area: WorkshopArea, detail: WorkshopEntr
 }
 
 /** Ficha del ingreso abierta desde el tablero. Atrás (botón o el del teléfono) vuelve al tablero. */
-export function WorkshopEntryScreen({ entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, works, orders, onDeliver, manage, workshopId, initialNotice }: {
+export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChange, entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, onOpenOrder, works, orders, onDeliver, manage, workshopId, initialNotice }: {
+  onOpenOrder?: (orderId: number, entryCode: string) => void;
+  /** Búsqueda del encabezado de la app dentro del ingreso. */
+  query?: string;
+  /** Última pestaña Trabajos/OTs usada en cada ingreso, para volver a ella. */
+  rememberedTab?: (entryId: number) => string | undefined; onTabChange?: (entryId: number, tab: string) => void;
+  workCard?: (workId: number) => import("react").ReactNode | null;
   entry: WorkshopEntry; area: WorkshopArea; onBack: () => void; load: (entryId: number) => Promise<WorkshopEntryDetail>; initialNotice?: string;
   onEditIntake: (areaId: number | null, areaTitle: string | null, pending: boolean) => void; onOpenInspection: (kind: InspectionKind) => void; onSign: () => void;
   onAddWork?: (code: string, equipmentLabel: string) => void; onAddMaintenance?: (code: string, equipmentLabel: string) => void; onOpenWork: (workId: number) => Promise<string | null>; works: ReturnType<typeof useWorkshopBoard>["works"];
   orders: ReturnType<typeof useWorkshopBoard>["orders"]; onDeliver: () => void; manage: ReturnType<typeof useWorkshopBoard>["manage"]; workshopId: number | null;
 }) {
+  // Lo que la sucursal permite hacer desde la app (web «Permisos de la app móvil»).
+  const can = {
+    entries: useAppPermission("workshopEntries"), inspections: useAppPermission("workshopInspections"), reception: useAppPermission("workshopReception"),
+    delivery: useAppPermission("workshopDelivery"), manage: useAppPermission("workshopManage"), works: useAppPermission("workshopWorks"),
+    maintenances: useAppPermission("workshopMaintenances"), ordersCreate: useAppPermission("ordersCreate"), ordersSend: useAppPermission("ordersSend"),
+    ordersDelete: useAppPermission("ordersDelete"), ordersWorks: useAppPermission("ordersWorks")
+  };
+  const [heroCollapsed, setHeroCollapsed] = useState(false);
   const [orderSheet, setOrderSheet] = useState<{ kind: "create" } | { kind: "send" | "delete" | "add"; order: WorkshopOrder } | null>(null);
   const [orderNotice, setOrderNotice] = useState("");
   const orderAttempt = useRef<{ fingerprint: string; requestId: string } | null>(null);
@@ -73,6 +93,8 @@ export function WorkshopEntryScreen({ entry, area, onBack, load, onEditIntake, o
   const [refreshing, setRefreshing] = useState(false);
   async function pull() { setRefreshing(true); try { await refresh(); } finally { setRefreshing(false); } }
   const header = headerOf(entry, area, detail);
+  const [deliveryBlocked, setDeliveryBlocked] = useState(false);
+  const pendingDelivery = detail ? workshopDeliveryConditions(detail).filter((condition) => !condition.met) : [];
   const overdue = header.estimatedDeliveryAt !== null && !header.delivered && isWorkshopEntryOverdue({ ...entry, estimatedDeliveryAt: header.estimatedDeliveryAt });
 
   return <View style={styles.screen} pointerEvents={openingWork !== null ? "none" : "auto"}>
@@ -83,23 +105,54 @@ export function WorkshopEntryScreen({ entry, area, onBack, load, onEditIntake, o
         <Text style={styles.barArea} numberOfLines={1}>{header.areaTitle}</Text>
       </View>
       {loading && detail ? <ActivityIndicator size="small" color={palette.primary} accessibilityLabel="Actualizando" /> : null}
+      <View style={styles.barEquipment}>
+        <Text accessibilityRole="header" style={styles.barEquipmentText} numberOfLines={2}>{header.equipmentLabel}</Text>
+        <View style={styles.barPhoto}>
+          {header.imageUrl ? <Image source={{ uri: header.imageUrl }} style={styles.barPhotoImage} resizeMode="cover" accessibilityLabel="Foto del equipo" />
+            : <Ionicons name="image-outline" size={18} color={palette.textMuted} accessible={false} />}
+        </View>
+      </View>
     </View>
     <ScrollView contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void pull()} tintColor={palette.primary} colors={[palette.primary]} />}>
-      <View style={styles.hero}>
-        <View style={styles.photo}>
-          {header.imageUrl ? <Image source={{ uri: header.imageUrl }} style={styles.photoImage} resizeMode="cover" accessibilityLabel="Foto del equipo" />
-            : <Ionicons name="image-outline" size={34} color={palette.textMuted} accessible={false} />}
+      {/* Tarjeta superior oscura (como la del trabajo): estado principal y secundario, equipo y datos clave; se puede minimizar. */}
+      <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+        <View style={styles.heroTop}>
+          <View style={styles.heroChips}>
+            {header.delivered ? <View style={[styles.status, { backgroundColor: palette.success }]}><Text style={styles.statusText}>Entregado</Text></View>
+              : header.pendingReception ? <View style={[styles.status, { backgroundColor: palette.orangeSoft }]}><Text style={[styles.statusText, { color: palette.orange }]}>Pendiente por terminar</Text></View>
+              : <View style={[styles.status, { backgroundColor: header.statusColor ?? palette.textSecondary }]}><Text style={styles.statusText}>{workshopStatusLabel(header.statusKey)}</Text></View>}
+            {header.subStatusName && !header.delivered ? <View style={styles.heroBadge}><Text style={styles.heroBadgeText} numberOfLines={1}>{header.subStatusName}</Text></View> : null}
+            {!heroCollapsed && !header.delivered ? <View style={styles.heroChip}><Ionicons name="time-outline" size={12} color={palette.onDark} accessible={false} />
+              <Text style={styles.heroChipText}>{entry.daysInArea === 1 ? "1 día en nave" : `${entry.daysInArea} días en nave`}</Text></View> : null}
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel={heroCollapsed ? "Expandir tarjeta del ingreso" : "Minimizar tarjeta del ingreso"} accessibilityState={{ expanded: !heroCollapsed }}
+            hitSlop={10} onPress={() => setHeroCollapsed((value) => !value)} style={({ pressed }) => [styles.heroToggle, pressed && styles.heroPressed]}>
+            <Ionicons name={heroCollapsed ? "chevron-down" : "chevron-up"} size={16} color={palette.white} accessible={false} />
+          </Pressable>
         </View>
-        <View style={styles.heroBody}>
-          {header.delivered ? <View style={[styles.status, { backgroundColor: palette.success }]}><Text style={styles.statusText}>Entregado</Text></View>
-            : header.pendingReception ? <View style={[styles.status, { backgroundColor: palette.orangeSoft }]}><Text style={[styles.statusText, { color: palette.orange }]}>Pendiente por terminar</Text></View>
-            : <View style={[styles.status, { backgroundColor: header.statusColor ?? palette.textSecondary }]}><Text style={styles.statusText}>{workshopStatusLabel(header.statusKey)}</Text></View>}
-          {header.subStatusName && !header.delivered ? <Text style={styles.subStatus}>{header.subStatusName}</Text> : null}
-          <Text accessibilityRole="header" style={styles.equipment}>{header.equipmentLabel}</Text>
-          {header.title ? <Text style={styles.title} numberOfLines={3}>{header.title}</Text> : null}
-        </View>
-      </View>
+        {header.title ? <Text style={styles.title} numberOfLines={heroCollapsed ? 1 : 2}>{header.title}</Text> : null}
+        {/* Minimizada: los datos clave en una línea de etiquetas. */}
+        {heroCollapsed ? <View style={styles.heroChips}>
+          <View style={styles.heroChip}><Ionicons name="person-outline" size={12} color={palette.onDark} accessible={false} />
+            <Text style={styles.heroChipText} numberOfLines={1}>{header.isInternalEntry ? "Equipo propio" : header.customerName ?? "Sin cliente"}</Text></View>
+          {header.equipmentCode ? <View style={styles.heroChip}><Ionicons name="barcode-outline" size={12} color={palette.onDark} accessible={false} />
+            <Text style={styles.heroChipText} numberOfLines={1}>{header.equipmentCode}</Text></View> : null}
+          <View style={styles.heroChip}><Ionicons name="calendar-outline" size={12} color={overdue ? palette.dangerSoft : palette.onDark} accessible={false} />
+            <Text style={[styles.heroChipText, overdue ? { color: palette.dangerSoft } : null]} numberOfLines={1}>
+              {header.estimatedDeliveryAt ? `Entrega ${longDate(header.estimatedDeliveryAt)}${overdue ? " · atrasado" : ""}` : "Sin fecha de entrega"}</Text></View>
+          {!header.delivered ? <View style={styles.heroChip}><Ionicons name="time-outline" size={12} color={palette.onDark} accessible={false} />
+            <Text style={styles.heroChipText}>{entry.daysInArea === 1 ? "1 día en nave" : `${entry.daysInArea} días en nave`}</Text></View> : null}
+        </View> : <View style={styles.heroGrid}>
+          <HeroFact icon="person-outline" label="Cliente" value={header.isInternalEntry ? "Equipo propio" : header.customerName ?? "Sin cliente"} />
+          <HeroFact icon="barcode-outline" label="Identificación" value={header.equipmentCode ?? "—"} />
+          <HeroFact icon="business-outline" label="Nave" value={header.areaTitle} />
+          <HeroFact icon="enter-outline" label="Ingresó" value={detail?.entryAt ? longDate(detail.entryAt) : "—"} />
+          <HeroFact icon="calendar-outline" label="Entrega estimada" wide tone={overdue ? palette.dangerSoft : undefined}
+            value={header.estimatedDeliveryAt ? `${longDate(header.estimatedDeliveryAt)}${overdue ? " · atrasado" : ""}` : "Sin fecha"} />
+          {detail?.notes ? <HeroFact icon="chatbox-ellipses-outline" label="Observaciones" value={detail.notes} wide /> : null}
+        </View>}
+      </LinearGradient>
 
       {detail?.delivery ? <DeliveredBanner delivery={detail.delivery} /> : null}
       {error ? <View style={styles.errorBox}>
@@ -109,44 +162,56 @@ export function WorkshopEntryScreen({ entry, area, onBack, load, onEditIntake, o
       {!detail && loading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={styles.loadingText}>Cargando la ficha…</Text></View> : null}
 
       {detail ? <>
-        {!detail.delivery ? <View style={styles.actions}>
-          {!detail.reception.signed ? <Button title="Continuar ingreso" icon="arrow-forward-circle-outline" onPress={() => onEditIntake(detail.areaId, detail.areaTitle, true)} />
-            : <Button title="Editar datos del ingreso" icon="create-outline" variant="secondary" onPress={() => onEditIntake(detail.areaId, detail.areaTitle, false)} />}
-          <Button title={detail.inspections.entry ? `Inspección de ingreso · ${detail.inspections.entry.percentage}%` : "Inspección de ingreso"} icon="clipboard-outline"
-            variant="secondary" onPress={() => onOpenInspection("entry")} />
-          {!detail.reception.signed ? <Button title="Firmar recepción" icon="create-outline" variant="secondary" onPress={onSign} /> : null}
-        </View> : null}
-        {!detail.delivery ? <ManageBar onStatus={() => openManage("status")} onMove={() => openManage("move")} onDate={() => openManage("date")} /> : null}
+        {/* Acciones de gestión en una fila compacta; las del ingreso van dentro de su avance. */}
+        {!detail.delivery ? <ManageBar
+          onStatus={can.manage ? () => openManage("status") : undefined} onMove={can.manage ? () => openManage("move") : undefined} onDate={can.manage ? () => openManage("date") : undefined} /> : null}
         {manageNotice ? <Notice tone="success" icon="checkmark-circle-outline" message={manageNotice} /> : null}
-        <IntakeProgress detail={detail} />
-        {!detail.delivery ? <DeliveryConditions conditions={workshopDeliveryConditions(detail)} /> : null}
-        {!detail.delivery && detail.reception.signed ? <Button title={workshopDeliveryConditions(detail).every((condition) => condition.met) ? "Entregar equipo" : "Entregar equipo (ver qué falta)"}
-          icon="exit-outline" variant={workshopDeliveryConditions(detail).every((condition) => condition.met) ? "primary" : "secondary"} onPress={onDeliver} /> : null}
+        <IntakeProgress detail={detail} actions={detail.delivery ? [] : [
+          ...(can.entries ? [!detail.reception.signed
+            ? { icon: "arrow-forward-circle-outline" as const, label: "Continuar ingreso", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true), strong: true }
+            : { icon: "create-outline" as const, label: "Editar datos", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, false) }] : []),
+          ...(can.inspections ? [{ icon: "clipboard-outline" as const, label: detail.inspections.entry ? "Ver inspección" : "Hacer inspección", onPress: () => onOpenInspection("entry") }] : []),
+          ...(!detail.reception.signed && can.reception ? [{ icon: "pencil-outline" as const, label: "Firmar", onPress: onSign }] : [])
+        ]} />
         {linkNotice ? <Notice tone="success" icon="link-outline" message={linkNotice} /> : null}
         {workError ? <Notice tone="warning" icon="information-circle-outline" message={workError} /> : null}
         {orderNotice ? <Notice tone="success" icon="document-text-outline" message={orderNotice} /> : null}
-        <WorkAndOrders detail={detail} onAddWork={detail.delivery || !onAddWork ? undefined : () => onAddWork(detail.code, detail.equipmentLabel)}
-          onAddMaintenance={detail.delivery || !detail.isInternalEntry || !onAddMaintenance ? undefined : () => onAddMaintenance(detail.code, detail.equipmentLabel)}
-          onLinkWorks={detail.delivery ? undefined : () => { setLinkNotice(""); setLinking(true); }}
+        <WorkAndOrders query={query} detail={detail} workCard={workCard} initialTab={rememberedTab?.(entry.id) as "works" | "orders" | undefined} onTabChange={(tab) => onTabChange?.(entry.id, tab)} onOpenOrder={onOpenOrder ? (order) => onOpenOrder(order.id, detail.code) : undefined} onAddWork={detail.delivery || !onAddWork || !can.works ? undefined : () => onAddWork(detail.code, detail.equipmentLabel)}
+          onAddMaintenance={detail.delivery || !detail.isInternalEntry || !onAddMaintenance || !can.maintenances ? undefined : () => onAddMaintenance(detail.code, detail.equipmentLabel)}
+          onLinkWorks={detail.delivery || !can.works ? undefined : () => { setLinkNotice(""); setLinking(true); }}
           onOpenWork={(workId) => void openWork(workId)} openingWorkId={openingWork}
           orderActions={detail.delivery || detail.isInternalEntry ? undefined : {
-            onCreate: () => { setOrderNotice(""); setOrderSheet({ kind: "create" }); },
-            onSend: (order) => { setOrderNotice(""); setOrderSheet({ kind: "send", order }); },
-            onAddWorks: (order) => { setOrderNotice(""); setOrderSheet({ kind: "add", order }); },
-            onDelete: (order) => { setOrderNotice(""); setOrderSheet({ kind: "delete", order }); }
+            onCreate: can.ordersCreate ? () => { setOrderNotice(""); setOrderSheet({ kind: "create" }); } : undefined,
+            onSend: can.ordersSend ? (order) => { setOrderNotice(""); setOrderSheet({ kind: "send", order }); } : undefined,
+            onAddWorks: can.ordersWorks ? (order) => { setOrderNotice(""); setOrderSheet({ kind: "add", order }); } : undefined,
+            onDelete: can.ordersDelete ? (order) => { setOrderNotice(""); setOrderSheet({ kind: "delete", order }); } : undefined
           }} />
       </> : null}
 
-      <View style={styles.card}>
-        <Fact icon="person-outline" label="Cliente" value={header.isInternalEntry ? "Equipo propio" : header.customerName ?? "Sin cliente"} />
-        {header.equipmentCode ? <Fact icon="barcode-outline" label="Identificación" value={header.equipmentCode} /> : null}
-        <Fact icon="business-outline" label="Nave" value={header.areaTitle} />
-        {detail?.entryAt ? <Fact icon="enter-outline" label="Ingresó" value={longDate(detail.entryAt)} /> : null}
-        <Fact icon="calendar-outline" label="Entrega estimada" value={header.estimatedDeliveryAt ? `${longDate(header.estimatedDeliveryAt)}${overdue ? " · atrasado" : ""}` : "Sin fecha"}
-          tone={overdue ? palette.danger : undefined} />
-        {detail?.notes ? <Fact icon="chatbox-ellipses-outline" label="Observaciones" value={detail.notes} /> : null}
-      </View>
     </ScrollView>
+    {detail && !detail.delivery && detail.reception.signed && can.delivery ? <View style={styles.footer}>
+      <Button title="Entregar equipo" icon="exit-outline" variant="warning"
+        onPress={() => { if (pendingDelivery.length === 0) onDeliver(); else setDeliveryBlocked(true); }} />
+    </View> : null}
+    {deliveryBlocked ? <Modal visible transparent animationType="fade" onRequestClose={() => setDeliveryBlocked(false)}>
+      <View style={styles.overlay}>
+        <View style={styles.dialog} accessibilityRole="alert">
+          <View style={styles.dialogHead}>
+            <Ionicons name="alert-circle" size={22} color={palette.orange} accessible={false} />
+            <Text style={styles.dialogTitle}>Aún no se puede entregar</Text>
+          </View>
+          <Text style={styles.dialogText}>{pendingDelivery.length === 1 ? "Falta completar esto:" : `Faltan ${pendingDelivery.length} cosas por completar:`}</Text>
+          {pendingDelivery.map((condition) => <View key={condition.id} style={styles.dialogItem}>
+            <Ionicons name="alert-circle-outline" size={16} color={palette.orange} accessible={false} />
+            <View style={styles.dialogItemText}>
+              <Text style={styles.dialogItemTitle}>{condition.title}</Text>
+              <Text style={styles.dialogItemDetail}>{condition.detail}</Text>
+            </View>
+          </View>)}
+          <Button title="Entendido" onPress={() => setDeliveryBlocked(false)} />
+        </View>
+      </View>
+    </Modal> : null}
     {orderSheet?.kind === "create" && detail ? <CreateOrderSheet attempt={orderAttempt} looseWorks={detail.works.items.filter((work) => work.loose)} preselected={[]}
       loadRules={() => orders.rules(entry.id)} onClose={() => setOrderSheet(null)}
       onCreate={async (input) => {
@@ -156,7 +221,7 @@ export function WorkshopEntryScreen({ entry, area, onBack, load, onEditIntake, o
         await refresh();
         return result;
       }} /> : null}
-    {orderSheet?.kind === "add" && detail ? <AddWorksSheet order={orderSheet.order} looseWorks={detail.works.items.filter((work) => work.loose)} onClose={() => setOrderSheet(null)}
+    {orderSheet?.kind === "add" && detail ? <AddWorksSheet code={orderSheet.order.workOrderCode ?? orderSheet.order.code} looseWorks={detail.works.items.filter((work) => work.loose)} onClose={() => setOrderSheet(null)}
       onAdd={async (workIds) => {
         const result = await orders.addWorks(entry.id, orderSheet.order.id, workIds);
         setOrderSheet(null);
@@ -191,24 +256,48 @@ export function WorkshopEntryScreen({ entry, area, onBack, load, onEditIntake, o
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
   bar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface },
-  barText: { flex: 1, minWidth: 0 },
+  barText: { flexShrink: 0, maxWidth: "45%" },
+  barEquipment: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
+  barEquipmentText: { flexShrink: 1, textAlign: "right", fontSize: 12, lineHeight: 16, fontWeight: "800", color: palette.heading },
+  barPhoto: { width: 38, height: 38, borderRadius: 8, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
+  barPhotoImage: { width: 38, height: 38 },
+  footer: { paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: palette.border, backgroundColor: palette.surface },
+  overlay: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20, backgroundColor: "rgba(15,23,42,0.55)" },
+  dialog: { width: "100%", maxWidth: 420, gap: 10, padding: 16, borderRadius: radius.lg, backgroundColor: palette.surface },
+  dialogHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dialogTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: palette.heading },
+  dialogText: { ...typography.caption, color: palette.textSecondary },
+  dialogItem: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: radius.md, backgroundColor: palette.orangeSoft },
+  dialogItemText: { flex: 1, minWidth: 0, gap: 2 },
+  dialogItemTitle: { fontSize: 13, fontWeight: "800", color: palette.text },
+  dialogItemDetail: { ...typography.caption, color: palette.textSecondary },
   barCode: { fontSize: 15, fontWeight: "800", color: palette.primary, fontVariant: ["tabular-nums"] },
   barArea: { ...typography.caption, color: palette.textSecondary },
-  content: { width: "100%", maxWidth: theme.contentWidth, alignSelf: "center", padding: 16, gap: 14, paddingBottom: 28 },
-  hero: { flexDirection: "row", gap: 14, padding: 14, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border, ...theme.shadow },
-  photo: { width: 84, height: 84, borderRadius: 16, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
-  photoImage: { width: 84, height: 84 },
-  heroBody: { flex: 1, minWidth: 0, gap: 5, alignItems: "flex-start" },
+  content: { width: "100%", maxWidth: theme.contentWidth, alignSelf: "center", padding: 12, gap: 10, paddingBottom: 24 },
+  hero: { gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.lg, overflow: "hidden" },
+  heroTop: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  heroChips: { flex: 1, minWidth: 0, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  heroBadge: { maxWidth: 180, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, borderWidth: 1, borderColor: "rgba(255,255,255,0.35)" },
+  heroBadgeText: { fontSize: 11, lineHeight: 15, fontWeight: "700", color: palette.white },
+  heroChip: { maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: "rgba(255,255,255,0.10)" },
+  heroChipText: { flexShrink: 1, fontSize: 11, lineHeight: 15, fontWeight: "700", color: palette.white },
+  heroToggle: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.12)" },
+  heroPressed: { opacity: 0.7 },
+  heroGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  heroFact: { flexGrow: 1, flexBasis: "45%", minWidth: 0, flexDirection: "row", alignItems: "flex-start", gap: 6, paddingHorizontal: 8, paddingVertical: 6, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.08)" },
+  heroFactWide: { flexBasis: "100%" },
+  heroFactText: { flex: 1, minWidth: 0 },
+  heroFactLabel: { fontSize: 10, lineHeight: 13, fontWeight: "700", color: palette.onDark },
+  heroFactValue: { fontSize: 13, lineHeight: 17, fontWeight: "800", color: palette.white },
   status: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: radius.pill },
   statusText: { fontSize: 12, fontWeight: "800", color: palette.white },
   subStatus: { ...typography.caption, color: palette.textSecondary, fontWeight: "700" },
-  equipment: { fontSize: 16, lineHeight: 21, fontWeight: "800", color: palette.heading },
-  title: { ...typography.caption, color: palette.text },
+  title: { fontSize: 12, lineHeight: 16, color: palette.onDark },
   errorBox: { gap: 10 },
   actions: { gap: 8 },
   loading: { alignItems: "center", gap: 8, paddingVertical: 24 },
   loadingText: { ...typography.caption, color: palette.textSecondary },
-  card: { padding: 14, gap: 12, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
+  card: { padding: 12, gap: 8, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
   fact: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   factLabel: { width: 118, ...typography.caption, color: palette.textSecondary },
   factValue: { flex: 1, fontSize: 14, fontWeight: "700", color: palette.text }

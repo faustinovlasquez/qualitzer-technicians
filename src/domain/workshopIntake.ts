@@ -5,7 +5,22 @@ const isoDate = z.iso.datetime({ offset: true });
 
 /** Cliente para elegir en el ingreso (el técnico no crea clientes desde la app). */
 export const workshopCustomerOptionSchema = z.object({ id, name: z.string().max(300), document: z.string().max(60).nullable() }).strict();
-export const workshopCustomerOptionsSchema = z.object({ items: z.array(workshopCustomerOptionSchema).max(20_000) }).strict();
+export const CUSTOMER_PAGE_SIZE = 30;
+const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const rutDigits = (value: string) => value.replace(/[^0-9kK]/g, "").toLowerCase();
+
+/** Una página de clientes ordenados, filtrada por nombre o RUT (con o sin puntos y guion). */
+export function customerPage<T extends { name: string; document: string | null }>(all: T[], search: string, page: number): { items: T[]; hasMore: boolean } {
+  const term = plain(search.trim());
+  const digits = rutDigits(search);
+  const found = term === "" ? all : all.filter((item) => plain(item.name).includes(term)
+    || (item.document !== null && (plain(item.document).includes(term) || (digits.length >= 3 && rutDigits(item.document).includes(digits)))));
+  const start = page * CUSTOMER_PAGE_SIZE;
+  return { items: found.slice(start, start + CUSTOMER_PAGE_SIZE), hasMore: found.length > start + CUSTOMER_PAGE_SIZE };
+}
+
+/** Clientes de a una página (búsqueda por nombre o RUT en la pasarela). */
+export const workshopCustomerOptionsSchema = z.object({ items: z.array(workshopCustomerOptionSchema).max(50), hasMore: z.boolean() }).strict();
 
 export const workshopContactSchema = z.object({
   id, fullName: z.string().max(300), email: z.string().max(200).nullable(), phone: z.string().max(60).nullable(), position: z.string().max(200).nullable()
@@ -13,14 +28,19 @@ export const workshopContactSchema = z.object({
 export const workshopBranchOptionSchema = z.object({ id, name: z.string().max(300) }).strict();
 /** Sucursales y contactos del cliente elegido. */
 export const workshopCustomerDetailSchema = z.object({
-  id, name: z.string().max(300), contacts: z.array(workshopContactSchema).max(1000), branches: z.array(workshopBranchOptionSchema).max(1000)
+  id, name: z.string().max(300), contacts: z.array(workshopContactSchema).max(1000), branches: z.array(workshopBranchOptionSchema).max(1000),
+  /** RUT u otra identificación (opcional para pasarelas anteriores). */
+  document: z.string().max(60).nullable().optional()
 }).strict();
 
 export const workshopEquipmentSourceSchema = z.enum(["customer", "own"]);
 /** Equipo del cliente o propio (de la empresa). */
 export const workshopEquipmentOptionSchema = z.object({
   id, source: workshopEquipmentSourceSchema, label: z.string().max(500), code: z.string().max(120).nullable(),
-  typeName: z.string().max(200).nullable(), detail: z.string().max(300).nullable(), imageUrl: z.string().max(4000).nullable()
+  typeName: z.string().max(200).nullable(), detail: z.string().max(300).nullable(), imageUrl: z.string().max(4000).nullable(),
+  /** Para la lista: marca y modelo, año, color, identificación (patente) y número interno (opcionales para pasarelas anteriores). */
+  title: z.string().max(300).nullable().optional(), year: z.string().max(10).nullable().optional(), color: z.string().max(60).nullable().optional(),
+  identification: z.string().max(120).nullable().optional(), internalNumber: z.string().max(120).nullable().optional()
 }).strict();
 export const workshopEquipmentOptionsSchema = z.object({ items: z.array(workshopEquipmentOptionSchema).max(500), hasMore: z.boolean() }).strict();
 export const workshopEquipmentQuerySchema = z.object({
@@ -95,7 +115,7 @@ export type WorkshopImageInput = z.infer<typeof workshopImageInputSchema>;
 export type WorkshopIntakeForm = z.infer<typeof workshopIntakeFormSchema>;
 
 export interface WorkshopIntakePort {
-  workshopCustomers(branchId: number): Promise<{ items: WorkshopCustomerOption[] }>;
+  workshopCustomers(branchId: number, search: string, page: number): Promise<{ items: WorkshopCustomerOption[]; hasMore: boolean }>;
   workshopCustomer(branchId: number, customerId: number): Promise<WorkshopCustomerDetail>;
   workshopEquipment(query: WorkshopEquipmentQuery): Promise<WorkshopEquipmentOptions>;
   workshopAreas(branchId: number, workshopId: number): Promise<WorkshopAreaOptions>;

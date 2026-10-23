@@ -4,88 +4,38 @@ const path = require("node:path");
 const sharp = require("sharp");
 
 const root = path.resolve(__dirname, "..");
-// Logo oficial aprobado el 2026-10-22: Q hexagonal con degradado azul y el técnico con casco, sobre fondo claro.
-// Se usa el dibujo tal cual (con sus degradados y sombras), centrado y con margen para que no quede pegado a los bordes.
-const SOURCE_SHA256 = "263aee3da71a46cb9baae48883338dbf6c619c061a9144d0730d40004447b915";
-const SOURCE_SIZE = 1024;
+// Logo oficial aprobado el 2026-10-23: Q hexagonal blanca y azul con la cinta naranja de la llave, sobre un fondo azul
+// en degradado de izquierda a derecha que llega hasta los bordes. Se usa la imagen tal cual.
+const SOURCE_SHA256 = "5b99c1c6f1e7ae8c891820eb8dcbe18d91b45b2b55500b7cb7ea70179b71787a";
+const SOURCE_SIZE = 1107;
 const sourceAsset = "qualitzer-original.png";
-// Caja del dibujo en la imagen aprobada (Q y técnico), ajustada para no tomar el borde ni la sombra del cuadrado original.
-const ART = { left: 99, top: 166, width: 792, height: 702 };
-// Fondo claro de la imagen, de arriba hacia abajo.
-const BACKGROUND = { top: "#F1F4F9", bottom: "#ECEFF4" };
-const BACKGROUND_HEX = "#F1F4F9";
+// Color del centro del degradado (fondo del ícono adaptativo de Android, que queda tapado por la imagen).
+const BACKGROUND_HEX = "#3270CF";
 const ACCENT_HEX = "#353EE1";
-const MARGIN = 0.66; // ancho del dibujo respecto del ícono
 const CORNER = 0.22; // esquinas del cuadrado redondeado (logo y favicon)
+// El hexágono blanco debe quedar dentro del círculo seguro del ícono adaptativo (radio 33/108), con un poco de aire.
+const SAFE_SHARE = 33 / 108 * 0.94;
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 const png = (image) => image.png({ compressionLevel: 9, adaptiveFiltering: false }).toBuffer();
 const svg = (body, size) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${body}</svg>`);
-const backdrop = (size) => sharp(svg(`<defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BACKGROUND.top}"/><stop offset="1" stop-color="${BACKGROUND.bottom}"/></linearGradient></defs><rect width="${size}" height="${size}" fill="url(#b)"/>`, size)).removeAlpha();
+const isWhite = (data, offset) => Math.min(data[offset], data[offset + 1], data[offset + 2]) >= 225;
 
-/**
- * Dibujo recortado y separado de su fondo claro: cada píxel queda tan opaco como se aleja del fondo (por color azul o por
- * ser más oscuro, como el panel gris del centro). Así se apoya sobre cualquier fondo sin que se note un rectángulo.
- */
-async function artwork(original) {
-  const { width, height } = ART;
-  const { data } = await sharp(original).extract({ left: ART.left, top: ART.top, width, height }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  const out = Buffer.alloc(width * height * 4);
-  const blueOf = (pixel) => (data[pixel * 3 + 2] - data[pixel * 3] - 10) / 30;
-  // Lo gris que toca el borde del recorte es fondo o sombra del cuadrado original (no el panel del centro, que rodea el anillo azul).
-  const outside = new Uint8Array(width * height);
-  const queue = [];
-  for (let x = 0; x < width; x++) queue.push(x, (height - 1) * width + x);
-  for (let y = 0; y < height; y++) queue.push(y * width, y * width + width - 1);
-  while (queue.length > 0) {
-    const pixel = queue.pop();
-    if (outside[pixel] || blueOf(pixel) >= 0.5) continue;
-    outside[pixel] = 1;
-    const x = pixel % width;
-    if (x > 0) queue.push(pixel - 1);
-    if (x < width - 1) queue.push(pixel + 1);
-    if (pixel >= width) queue.push(pixel - width);
-    if (pixel < (height - 1) * width) queue.push(pixel + width);
-  }
-  for (let pixel = 0; pixel < width * height; pixel++) {
-    const [r, g, b] = [data[pixel * 3], data[pixel * 3 + 1], data[pixel * 3 + 2]];
-    const dark = outside[pixel] ? 0 : (236 - (r + g + b) / 3) / 22;
-    const alpha = Math.max(0, Math.min(1, Math.max(blueOf(pixel), dark)));
-    out[pixel * 4] = r; out[pixel * 4 + 1] = g; out[pixel * 4 + 2] = b; out[pixel * 4 + 3] = Math.round(alpha * 255);
-  }
-  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
-}
-
-/** Silueta del dibujo (opacidad según cuán azul es cada píxel): para notificaciones y para medir la zona segura. */
-async function silhouette(art) {
-  const { data, info } = await sharp(art).raw().toBuffer({ resolveWithObject: true });
-  const alpha = Buffer.alloc(info.width * info.height);
-  for (let pixel = 0; pixel < alpha.length; pixel++) {
-    const o = pixel * 4;
-    alpha[pixel] = Math.round(Math.max(0, Math.min(1, (data[o + 2] - data[o] - 25) / 55)) * (data[o + 3] / 255) * 255);
-  }
-  return { alpha, width: info.width, height: info.height };
-}
-
-/** Distancia del punto azul más lejano al centro de la caja, por cada píxel de ancho. */
-function farthestRatio(shape) {
+/** Distancia del punto blanco (hexágono) más lejano al centro, como parte del ancho de la imagen. */
+async function farthestWhite(original) {
+  const { data, info } = await sharp(original).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   let farthest = 0;
-  for (let y = 0; y < shape.height; y++) for (let x = 0; x < shape.width; x++) {
-    if (shape.alpha[y * shape.width + x] > 60) farthest = Math.max(farthest, Math.hypot(x + 0.5 - shape.width / 2, y + 0.5 - shape.height / 2));
+  for (let y = 0; y < info.height; y++) for (let x = 0; x < info.width; x++) {
+    if (isWhite(data, (y * info.width + x) * 3)) farthest = Math.max(farthest, Math.hypot(x + 0.5 - info.width / 2, y + 0.5 - info.height / 2));
   }
-  return farthest / shape.width;
+  return farthest / info.width;
 }
 
-/** Dibujo de `span` px de ancho, centrado sobre el fondo claro de `size` px. */
-async function onBackground(art, size, span) {
-  const resized = await sharp(art).resize({ width: span }).png().toBuffer();
-  return png(sharp(await png(backdrop(size))).composite([{ input: resized, gravity: "center" }]).removeAlpha());
-}
-
-async function rounded(art, size) {
-  const body = await sharp(await onBackground(art, size, Math.round(size * MARGIN))).raw().toBuffer();
+/** Imagen completa en un cuadrado redondeado con esquinas transparentes (logo, favicon y versión para documentos). */
+async function rounded(original, size) {
+  const body = await sharp(original).resize(size, size).removeAlpha().raw().toBuffer();
   const mask = await sharp(svg(`<rect width="${size}" height="${size}" rx="${size * CORNER}" ry="${size * CORNER}" fill="#fff"/>`, size)).extractChannel(0).raw().toBuffer();
   return png(sharp(body, { raw: { width: size, height: size, channels: 3 } }).joinChannel(mask, { raw: { width: size, height: size, channels: 1 } }));
 }
@@ -95,16 +45,21 @@ async function generateBrand({ source = path.join(root, "assets", sourceAsset), 
   if (sha256(original) !== SOURCE_SHA256) throw new Error("QUALITZER_SOURCE_SHA256_MISMATCH");
   const meta = await sharp(original).metadata();
   if (meta.width !== SOURCE_SIZE || meta.height !== SOURCE_SIZE) throw new Error("QUALITZER_SOURCE_SIZE_MISMATCH");
-  const art = await artwork(original);
-  const shape = await silhouette(art);
 
-  // Ícono (iOS y Android antiguos ponen sus esquinas): dibujo centrado al 66 % del ancho.
-  const icon = await onBackground(art, 1024, Math.round(1024 * MARGIN));
-  // Adaptativo Android: el dibujo entero dentro del círculo seguro 66/108, lo más grande posible.
-  const adaptive = await onBackground(art, 1024, Math.floor(1024 * 33 / 108 * 0.94 / farthestRatio(shape)));
-  // Notificaciones Android: solo la silueta en blanco sobre transparente, 80 px dentro de 96 px.
-  const mark = await sharp(Buffer.alloc(shape.width * shape.height * 3, 255), { raw: { width: shape.width, height: shape.height, channels: 3 } })
-    .joinChannel(shape.alpha, { raw: { width: shape.width, height: shape.height, channels: 1 } }).png().toBuffer();
+  // Ícono (iOS y Android antiguos ponen sus esquinas): la imagen completa de borde a borde.
+  const icon = await png(sharp(original).resize(1024, 1024).removeAlpha());
+  // Adaptativo Android: la imagen achicada hasta que el hexágono quepa en el círculo seguro y alargada hacia los bordes
+  // repitiendo su orilla. Como el degradado es solo horizontal no se nota la unión, y la cinta sigue hasta el borde de arriba.
+  const span = Math.floor(1024 * SAFE_SHARE / await farthestWhite(original));
+  const pad = 1024 - span;
+  const adaptive = await png(sharp(await sharp(original).resize(span, span).removeAlpha().png().toBuffer())
+    .extend({ left: Math.floor(pad / 2), right: Math.ceil(pad / 2), top: Math.floor(pad / 2), bottom: Math.ceil(pad / 2), extendWith: "copy" }));
+  // Notificaciones Android: la silueta blanca (hexágonos y llave) sobre transparente, 80 px dentro de 96 px.
+  const { data, info } = await sharp(original).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const alpha = Buffer.alloc(info.width * info.height);
+  for (let pixel = 0; pixel < alpha.length; pixel++) alpha[pixel] = isWhite(data, pixel * 3) ? 255 : 0;
+  const mark = await sharp(Buffer.alloc(info.width * info.height * 3, 255), { raw: { width: info.width, height: info.height, channels: 3 } })
+    .joinChannel(alpha, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
   const small = await sharp(mark).resize(80, 80, { fit: "inside" }).png().toBuffer({ resolveWithObject: true });
   const extended = await sharp(small.data).extend({
     left: Math.floor((96 - small.info.width) / 2), right: Math.ceil((96 - small.info.width) / 2),
@@ -117,9 +72,9 @@ async function generateBrand({ source = path.join(root, "assets", sourceAsset), 
     { file: "qualitzer-icon.png", size: 1024, bytes: icon },
     { file: "qualitzer-adaptive.png", size: 1024, bytes: adaptive },
     // Logo oficial completo (cuadrado redondeado, esquinas transparentes), para documentos y la web.
-    { file: "qualitzer-source.png", size: 1024, bytes: await rounded(art, 1024) },
-    { file: "qualitzer-logo.png", size: 512, bytes: await rounded(art, 512) },
-    { file: "qualitzer-favicon.png", size: 64, bytes: await rounded(art, 64) },
+    { file: "qualitzer-source.png", size: 1024, bytes: await rounded(original, 1024) },
+    { file: "qualitzer-logo.png", size: 512, bytes: await rounded(original, 512) },
+    { file: "qualitzer-favicon.png", size: 64, bytes: await rounded(original, 64) },
     { file: "notification-icon.png", size: 96, bytes: notification }
   ];
   await mkdir(output, { recursive: true });
@@ -144,4 +99,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { generateBrand, SOURCE_SHA256, BACKGROUND_HEX, ACCENT_HEX };
+module.exports = { generateBrand, SOURCE_SHA256, SOURCE_SIZE, BACKGROUND_HEX, ACCENT_HEX };

@@ -2,12 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import {
   cleanRut, formatRut, isValidRut, normalizePhone, workshopIdentificationTypesSchema, workshopNewBranchResultSchema, workshopNewBranchSchema,
-  workshopNewContactResultSchema, workshopNewContactSchema, workshopNewCustomerResultSchema, workshopNewCustomerSchema
+  workshopNewContactResultSchema, workshopNewContactSchema, workshopNewCustomerResultSchema, workshopNewCustomerSchema,
+  workshopEquipmentMastersSchema, workshopNewEquipmentResultSchema, workshopNewEquipmentSchema
 } from "../../src/domain/workshopCustomers";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
 import { emptySchema } from "../validation";
-import { contact } from "./intake";
+import { contact, forgetCustomerList } from "./intake";
 import { asRecord, list, positive, text, workshopActor, type WorkshopRequestLedger } from "./support";
 
 const customerParam = z.object({ customerId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
@@ -30,8 +31,76 @@ async function identificationTypes(upstream: Upstream, token: string) {
   }).slice(0, 100) });
 }
 
+const MASTER_PATHS = {
+  types: "/equipment_masters/types/select", manufacturers: "/equipment_masters/manufacturers/select",
+  models: "/equipment_masters/models/select", classifications: "/equipment_masters/classifications/select"
+} as const;
+
+/** Tipos, marcas, modelos y clasificaciones de equipos (los mismos selectores de la web, que no filtran modelos por marca). */
+async function equipmentMasters(upstream: Upstream, token: string) {
+  const load = async (path: (typeof MASTER_PATHS)[keyof typeof MASTER_PATHS]) => list(await upstream.request(path, { token, query: new URLSearchParams({ page: "1" }) })).flatMap((item) => {
+    const row = asRecord(item);
+    const itemId = positive(row.value ?? row.id);
+    const name = text(row.label ?? row.name);
+    return itemId === null || name === null ? [] : [{ id: itemId, name: name.slice(0, 300) }];
+  }).sort((a, b) => a.name.localeCompare(b.name, "es")).slice(0, 5000);
+  const [types, manufacturers, models, classifications] = await Promise.all([load(MASTER_PATHS.types), load(MASTER_PATHS.manufacturers), load(MASTER_PATHS.models), load(MASTER_PATHS.classifications)]);
+  return workshopEquipmentMastersSchema.parse({ types, manufacturers, models, classifications });
+}
+
 /** Crear cliente, sucursal o contacto desde el ingreso, con los mismos datos y reglas de los formularios rápidos de la web. */
 export function registerCustomerRoutes(router: Router, upstream: Upstream, ledger: WorkshopRequestLedger): void {
+  router.get("/options/equipment-masters", async (req, res) => {
+    const { companyBranchId } = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict().parse(req.query);
+    emptySchema.parse(req.body ?? {});
+    const { token } = await workshopActor(upstream, req, companyBranchId);
+    res.json(await equipmentMasters(upstream, token));
+  });
+
+  // Igual que «Registrar equipo de cliente» de la web: multipart a /customers_equipments, ficha pública y activo, sin ubicación.
+  router.post("/customers/:customerId/equipment", async (req, res) => {
+    const { customerId } = customerParam.parse(req.params);
+    emptySchema.parse(req.query);
+    const input = workshopNewEquipmentSchema.parse(req.body);
+    const { token, user } = await workshopActor(upstream, req, input.companyBranchId);
+    const { result, replayed } = await ledger.run(`${user.id}`, input.requestId, { customerId, input }, async () => {
+      const masters = await equipmentMasters(upstream, token);
+      const named = (items: Array<{ id: number; name: string }>, itemId: number, what: string) => {
+        const found = items.find((item) => item.id === itemId);
+        if (!found) throw new GatewayError(400, "EQUIPMENT_MASTER_INVALID", `Elige ${what} de la lista.`);
+        return found.name;
+      };
+      const typeName = named(masters.types, input.typeId, "un tipo de equipo");
+      const manufacturer = named(masters.manufacturers, input.manufacturerId, "un fabricante");
+      const model = named(masters.models, input.modelId, "un modelo");
+      const classification = named(masters.classifications, input.classificationId, "una clasificación");
+      const form = new FormData();
+      const set = (key: string, value: string | number | null | undefined) => { if (value !== null && value !== undefined) form.set(key, String(value)); };
+      set("customerId", customerId); set("companyBranchId", input.companyBranchId); set("identificationTypeId", input.identificationTypeId);
+      set("identification", input.identification); set("internalNumber", input.internalNumber); set("typeId", input.typeId);
+      set("manufacturerId", input.manufacturerId); set("modelId", input.modelId); set("classificationId", input.classificationId);
+      set("year", input.year); set("description", input.description); set("note", input.note);
+      set("isPublic", "true"); set("isEnabled", "true"); set("hasAddress", "false");
+      let created: Record<string, unknown>;
+      try {
+        created = asRecord(await permitted("\"crear\" en Equipos de clientes", () => upstream.request("/customers_equipments", { token, method: "POST", form })));
+      } catch (error) {
+        if (error instanceof GatewayError && error.code === "EQUIPMENT_IDENTIFICATION_EXISTS") {
+          throw new GatewayError(409, "EQUIPMENT_IDENTIFICATION_EXISTS", "Ya existe un equipo con esa identificación. Búscalo en la lista o revisa el número.");
+        }
+        throw error;
+      }
+      const equipmentId = positive(created.id);
+      if (equipmentId === null) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+      return workshopNewEquipmentResultSchema.parse({
+        id: equipmentId, source: "customer", label: `${manufacturer} · ${typeName} · ${model}`.slice(0, 500), code: input.identification.slice(0, 120), typeName: typeName.slice(0, 200),
+        detail: [classification, input.year].filter(Boolean).join(" · ").slice(0, 300) || null, imageUrl: null,
+        title: `${manufacturer} ${model}`.slice(0, 300), year: input.year ?? null, color: null, identification: input.identification.slice(0, 120), internalNumber: input.internalNumber ?? null
+      });
+    });
+    res.status(replayed ? 200 : 201).json(result);
+  });
+
   router.get("/options/identification-types", async (req, res) => {
     const { companyBranchId } = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict().parse(req.query);
     emptySchema.parse(req.body ?? {});
@@ -65,6 +134,7 @@ export function registerCustomerRoutes(router: Router, upstream: Upstream, ledge
       } })));
       const customerId = positive(created.id);
       if (customerId === null) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+      forgetCustomerList(upstream);
       return workshopNewCustomerResultSchema.parse({ id: customerId, name: input.name.slice(0, 300), document: number.slice(0, 60) });
     });
     res.status(replayed ? 200 : 201).json(result);
@@ -79,8 +149,9 @@ export function registerCustomerRoutes(router: Router, upstream: Upstream, ledge
       if (positive(asRecord(await upstream.request(`/customers/${customerId}`, { token })).id) !== customerId) throw new GatewayError(404, "CUSTOMER_NOT_FOUND", "El cliente ya no existe.");
       const street = input.address ? `${input.address}${input.noStreetNumber ? " S/N" : ""}` : "";
       const created = asRecord(await permitted("\"crear\" en Negocios", () => upstream.request("/customer_branches", { token, method: "POST", json: {
-        customerId: String(customerId), name: input.name, description: input.contactName ?? "", country: "", region: input.region ?? "", county: input.county ?? "",
-        city: input.city ?? "", address: [street, input.apartment ? `Depto ${input.apartment}` : ""].filter(Boolean).join(", "), postalCode: "", lat: "", lon: "", isEnabled: true
+        customerId: String(customerId), name: input.name, description: input.contactName ?? "", country: input.country ?? "", region: input.region ?? "", county: input.county ?? "",
+        city: input.city ?? "", address: [street, input.apartment ? `Depto ${input.apartment}` : ""].filter(Boolean).join(", "), postalCode: input.postalCode ?? "",
+        lat: input.lat ?? "", lon: input.lon ?? "", isEnabled: true
       } })));
       const branchId = positive(created.id);
       if (branchId === null) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");

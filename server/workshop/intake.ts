@@ -1,7 +1,7 @@
 import express, { Router, type Request } from "express";
 import { z } from "zod";
 import {
-  WORKSHOP_IMAGE_MAX_BYTES, workshopAreaOptionsSchema, workshopCustomerDetailSchema, workshopCustomerOptionsSchema, workshopEquipmentOptionsSchema,
+  WORKSHOP_IMAGE_MAX_BYTES, customerPage, workshopAreaOptionsSchema, workshopCustomerDetailSchema, workshopCustomerOptionsSchema, workshopEquipmentOptionsSchema,
   workshopEquipmentQuerySchema, workshopImageInputSchema, workshopIntakeFormSchema, workshopIntakeInputSchema, workshopIntakeResultSchema,
   type WorkshopContact, type WorkshopEquipmentOption, type WorkshopIntakeInput
 } from "../../src/domain/workshopIntake";
@@ -12,6 +12,11 @@ import { equipmentSummary } from "./entry";
 import { asRecord, branchAreas, branchEntry, clip, list, positive, text, workshopActor, type WorkshopRequestLedger } from "./support";
 
 const branchQuery = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict();
+const customerQuery = z.object({ companyBranchId: z.coerce.number().int().positive(), search: z.string().trim().max(100).optional(), page: z.coerce.number().int().min(0).max(2000).optional() }).strict();
+type CustomerOption = NonNullable<ReturnType<typeof customerOption>>;
+const customerLists = new WeakMap<Upstream, { items: CustomerOption[]; at: number }>();
+/** Al crear un cliente desde la app la lista se vuelve a pedir. */
+export const forgetCustomerList = (upstream: Upstream) => { customerLists.delete(upstream); };
 const idParam = (name: string) => z.object({ [name]: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
 const valid = <T>(schema: z.ZodType<T>, value: unknown): T => {
   const parsed = schema.safeParse(value);
@@ -50,7 +55,10 @@ function equipmentOption(raw: unknown, source: "customer" | "own"): WorkshopEqui
   const detail = [text(asRecord(row.classification).name), year].filter((part): part is string => part !== null).join(" · ");
   return {
     id: equipmentId, source, label: summary.label, code: summary.code ?? clip(text(row.identificationEquipment), 120), typeName: clip(summary.typeName, 200),
-    detail: detail ? detail.slice(0, 300) : null, imageUrl: clip(text(row.equipmentImageURL) ?? text(row.image), 4000)
+    detail: detail ? detail.slice(0, 300) : null, imageUrl: clip(text(row.equipmentImageURL) ?? text(row.image), 4000),
+    title: clip([asRecord(row.manufacturer).name, asRecord(row.model).name].map(text).filter((part): part is string => part !== null).join(" ") || null, 300),
+    year: clip(year, 10), color: clip(text(row.color), 60),
+    identification: clip(text(row.identification) ?? text(row.identificationEquipment), 120), internalNumber: clip(text(row.internalNumber), 120)
   };
 }
 
@@ -98,13 +106,19 @@ const imageJson = express.json({ limit: WORKSHOP_IMAGE_MAX_BYTES * 2, strict: tr
 /** Paso 1 del ingreso: opciones (clientes, equipos, naves), crear, editar y foto del equipo. */
 export function registerIntakeRoutes(router: Router, upstream: Upstream, ledger: WorkshopRequestLedger): void {
   router.get("/options/customers", async (req, res) => {
-    const { companyBranchId } = branchQuery.parse(req.query);
+    const { companyBranchId, search, page } = customerQuery.parse(req.query);
     emptySchema.parse(req.body ?? {});
     const { token } = await workshopActor(upstream, req, companyBranchId);
-    const items = list(await upstream.request("/customers/select", { token, query: new URLSearchParams({ page: "1" }) }))
-      .map(customerOption).filter((item) => item !== null).slice(0, 20_000);
-    items.sort((a, b) => a.name.localeCompare(b.name, "es"));
-    res.json(valid(workshopCustomerOptionsSchema, { items }));
+    // Al teléfono va solo una página (puede haber miles de clientes); la lista liviana se guarda unos minutos.
+    const cached = customerLists.get(upstream);
+    let items = cached && Date.now() - cached.at < 120_000 ? cached.items : null;
+    if (!items) {
+      items = list(await upstream.request("/customers/select", { token, query: new URLSearchParams({ page: "1" }) }))
+        .map(customerOption).filter((item) => item !== null).slice(0, 50_000);
+      items.sort((a, b) => a.name.localeCompare(b.name, "es"));
+      customerLists.set(upstream, { items, at: Date.now() });
+    }
+    res.json(valid(workshopCustomerOptionsSchema, customerPage(items, search ?? "", page ?? 0)));
   });
 
   router.get("/options/customers/:customerId", async (req, res) => {
@@ -120,6 +134,7 @@ export function registerIntakeRoutes(router: Router, upstream: Upstream, ledger:
     if (positive(row.id) !== customerId) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.json(valid(workshopCustomerDetailSchema, {
       id: customerId, name: (text(row.name) ?? text(row.fantasyName) ?? `Cliente ${customerId}`).slice(0, 300),
+      document: (text(row.documentIdentification) ?? text(asRecord(row.identification).number) ?? text(row.rut))?.slice(0, 60) ?? null,
       contacts: list(row.contacts).map(contact).filter((item) => item !== null).slice(0, 1000),
       branches: list(branches).flatMap((item) => {
         const branch = asRecord(item);

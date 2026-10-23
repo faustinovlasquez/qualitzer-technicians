@@ -7,7 +7,11 @@ import { Button, IconButton } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 
 /** Ventana de selección a pantalla casi completa, con título y cierre. */
-export function PickerSheet({ title, onClose, children, footer, search }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; search?: ReactNode }) {
+export function PickerSheet({ title, onClose, children, footer, search, onEndReached }: {
+  title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; search?: ReactNode;
+  /** Desplazamiento infinito: se llama al acercarse al final de la lista. */
+  onEndReached?: () => void;
+}) {
   return <PrivateModal visible transparent animationType="slide" onRequestClose={onClose}>
     <SafeAreaView style={styles.overlay}>
       <View style={styles.panel} accessibilityViewIsModal>
@@ -16,7 +20,11 @@ export function PickerSheet({ title, onClose, children, footer, search }: { titl
           <IconButton name="close" label="Cerrar" onPress={onClose} />
         </View>
         {search}
-        <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">{children}</ScrollView>
+        <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" scrollEventThrottle={120}
+          onScroll={onEndReached ? ({ nativeEvent }) => {
+            const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+            if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 320) onEndReached();
+          } : undefined}>{children}</ScrollView>
         {footer}
       </View>
     </SafeAreaView>
@@ -32,13 +40,18 @@ export function SearchBox({ value, onChange, placeholder }: { value: string; onC
   </View>;
 }
 
-export function OptionRow({ title, subtitle, selected, multiple, onPress, leading }: { title: string; subtitle?: string | null; selected: boolean; multiple?: boolean; onPress: () => void; leading?: ReactNode }) {
+export function OptionRow({ title, subtitle, selected, multiple, onPress, leading, extra }: {
+  title: string; subtitle?: string | null; selected: boolean; multiple?: boolean; onPress: () => void; leading?: ReactNode;
+  /** Línea adicional bajo el subtítulo (por ejemplo, códigos del equipo). */
+  extra?: ReactNode;
+}) {
   return <Pressable accessibilityRole={multiple ? "checkbox" : "radio"} accessibilityState={{ checked: selected }} aria-checked={selected} onPress={onPress}
     style={({ pressed }) => [styles.option, selected && styles.optionOn, pressed && styles.optionPressed]}>
     {leading}
     <View style={styles.optionText}>
       <Text style={[styles.optionTitle, selected && styles.optionTitleOn]} numberOfLines={2}>{title}</Text>
       {subtitle ? <Text style={styles.optionSubtitle} numberOfLines={2}>{subtitle}</Text> : null}
+      {extra}
     </View>
     <Ionicons name={multiple ? (selected ? "checkbox" : "square-outline") : (selected ? "radio-button-on" : "radio-button-off")} size={22}
       color={selected ? palette.primary : palette.textMuted} accessible={false} />
@@ -88,11 +101,11 @@ export function LocalPicker<T extends { id: number }>({ title, placeholder, load
   </PickerSheet>;
 }
 
-/** Lista con búsqueda en el servidor y "Cargar más" (por ejemplo, equipos). */
-export function RemotePicker<T extends { id: number }>({ title, placeholder, load, label, detail, leading, selectedId, onPick, onClose, emptyText }: {
+/** Lista con búsqueda en el servidor y desplazamiento infinito (clientes, equipos): carga de a una página. */
+export function RemotePicker<T extends { id: number }>({ title, placeholder, load, label, detail, leading, extra, selectedId, onPick, onClose, emptyText, action }: {
   title: string; placeholder: string; load: (search: string, page: number) => Promise<{ items: T[]; hasMore: boolean }>;
-  label: (item: T) => string; detail?: (item: T) => string | null; leading?: (item: T) => ReactNode;
-  selectedId: number | null; onPick: (item: T) => void; onClose: () => void; emptyText: string;
+  label: (item: T) => string; detail?: (item: T) => string | null; leading?: (item: T) => ReactNode; extra?: (item: T) => ReactNode;
+  selectedId: number | null; onPick: (item: T) => void; onClose: () => void; emptyText: string; action?: PickerAction;
 }) {
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<T[]>([]);
@@ -121,10 +134,13 @@ export function RemotePicker<T extends { id: number }>({ title, placeholder, loa
     const timer = setTimeout(() => { void fetchPage(query.trim(), 0); }, query ? 350 : 0);
     return () => clearTimeout(timer);
   }, [query]);
-  return <PickerSheet title={title} onClose={onClose} search={<SearchBox value={query} onChange={setQuery} placeholder={placeholder} />}
-    footer={hasMore && !loading ? <Button title="Cargar más" variant="secondary" icon="chevron-down" onPress={() => void fetchPage(query.trim(), page + 1)} /> : null}>
-    {items.map((item) => <OptionRow key={item.id} title={label(item)} subtitle={detail?.(item)} leading={leading?.(item)} selected={item.id === selectedId} onPress={() => onPick(item)} />)}
-    <PickerState loading={loading} error={error} empty={!loading && !error && items.length === 0 ? (query ? "Sin resultados para esa búsqueda." : emptyText) : null} onRetry={() => void fetchPage(query.trim(), page)} />
+  // Al acercarse al final se pide la página siguiente (una a la vez).
+  const loadMore = () => { if (hasMore && !loading && !error) void fetchPage(query.trim(), page + 1); };
+  return <PickerSheet title={title} onClose={onClose} search={<SearchBox value={query} onChange={setQuery} placeholder={placeholder} />} onEndReached={loadMore}>
+    {action ? <ActionRow action={action} /> : null}
+    {items.map((item) => <OptionRow key={item.id} title={label(item)} subtitle={detail?.(item)} leading={leading?.(item)} extra={extra?.(item)} selected={item.id === selectedId} onPress={() => onPick(item)} />)}
+    <PickerState loading={loading} error={error} empty={!loading && !error && items.length === 0 ? (query ? "Sin resultados para esa búsqueda." : emptyText) : null} onRetry={() => void fetchPage(query.trim(), items.length === 0 ? 0 : page + 1)} />
+    {hasMore && !loading && !error ? <Button title="Ver más" variant="secondary" icon="chevron-down" onPress={loadMore} /> : null}
   </PickerSheet>;
 }
 

@@ -46,7 +46,7 @@
         "android.permission.DETECT_SCREEN_CAPTURE"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#F1F4F9",
+        "backgroundColor": "#3270CF",
         "foregroundImage": "./assets/qualitzer-adaptive.png"
       },
       "predictiveBackGestureEnabled": false

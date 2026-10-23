@@ -118,7 +118,7 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
       {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{userErrorText(error)}</Text> : null}
       {refreshPending && confirmed ? <Button title="Actualizar detalle" variant="secondary" disabled={disabled} onPress={() => { void refresh(confirmed); }} /> : null}
       {opened && !blocked ? <View style={styles.panel}>
-        <Field label="Buscar por nombre o código" value={search} onChangeText={setSearch} maxLength={120} editable={!saving && !busy} onSubmitEditing={() => { void load(0, search); }} />
+        <Field label="Buscar por nombre o código" clearable value={search} onChangeText={setSearch} maxLength={120} editable={!saving && !busy} onSubmitEditing={() => { void load(0, search); }} />
         <Button title="Buscar" icon="search-outline" variant="secondary" loading={loading} disabled={disabled} onPress={() => { void load(0, search); }} />
         {page?.items.length === 0 ? <BodyText>No hay checklists activos con pasos para esta búsqueda.</BodyText> : null}
         {page?.items.map((option) => {

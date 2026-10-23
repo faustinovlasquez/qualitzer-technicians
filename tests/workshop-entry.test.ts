@@ -41,10 +41,12 @@ test("faltan firma, cotización o trabajos: cada condición explica qué falta",
   assert.deepEqual(conditions.map((condition) => [condition.id, condition.met, condition.detail]), [
     ["intake", false, "Falta la firma de recepción del ingreso."],
     ["orders", false, "COT-SER-0009 sin cotizar todavía."],
+    // Toda OT del ingreso debe estar enviada a comercial para entregar.
+    ["sent", false, "COT-PRO-0001 sin enviar a comercial. Ábrela desde la pestaña OTs y envíala."],
     ["works", false, "TR-00007 sin OT."]
   ]);
   // Una OT sin enviar a comercial no cuenta como cotización.
-  assert.equal(workshopDeliveryConditions(detail({ orders: { available: true, items: [order({ kind: "workOrder", sentToCommercial: false })] } }))[1]?.detail, "El ingreso aún no tiene cotizaciones.");
+  assert.equal(workshopDeliveryConditions(detail({ orders: { available: true, items: [order({ kind: "workOrder", sentToCommercial: false })] } }))[1]?.detail, "Comercial todavía no puede cotizar: la OT no se ha enviado.");
 });
 
 test("con inspecciones exigidas se revisa la de ingreso y aparece la de entrega", () => {

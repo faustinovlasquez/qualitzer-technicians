@@ -1,13 +1,13 @@
 import { workshopAreaHasRoom, type WorkshopArea, type WorkshopBoard, type WorkshopBoardPort, type WorkshopEntry, type WorkshopList } from "../domain/workshopBoard";
 import type { WorkshopEntryDetail, WorkshopEntryPort, WorkshopOrder, WorkshopWork } from "../domain/workshopEntry";
-import type { WorkshopCustomerDetail, WorkshopEquipmentOption, WorkshopEquipmentQuery, WorkshopImageInput, WorkshopIntakeForm, WorkshopIntakeInput, WorkshopIntakePort } from "../domain/workshopIntake";
+import { customerPage, type WorkshopCustomerDetail, type WorkshopEquipmentOption, type WorkshopEquipmentQuery, type WorkshopImageInput, type WorkshopIntakeForm, type WorkshopIntakeInput, type WorkshopIntakePort } from "../domain/workshopIntake";
 import { CUSTOM_SLOT_KEY, isInspectionStepCompleted, type InspectionStep, type WorkshopInspectionPort, type WorkshopInspectionState } from "../domain/workshopInspection";
 
 import { shouldMoveToStatus, type WorkshopReceptionPort, type WorkshopWorker } from "../domain/workshopReception";
 import { evaluateInspection } from "../domain/workshopEntry";
 
 import type { WorkshopWorksPort } from "../domain/workshopWorks";
-import type { WorkshopOrdersPort } from "../domain/workshopOrders";
+import type { WorkshopOrderDetail, WorkshopOrdersPort } from "../domain/workshopOrders";
 import { deliveryBlockers, type WorkshopDeliveryPort } from "../domain/workshopDelivery";
 import type { WorkshopManagePort } from "../domain/workshopManage";
 import { formatRut, isValidRut, type WorkshopCustomersPort } from "../domain/workshopCustomers";
@@ -67,8 +67,8 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
         work({ id: 42, title: "Prueba de presión", statusName: "Por hacer", statusColor: "#95A5A6", loose: true })
       ] },
       orders: { available: true, items: [
-        order({ id: 81, code: "COT-PRO-0042", title: "Reparación de bomba", statusLabel: "Aprobada", stage: "approved", quoted: true }),
-        order({ id: 82, kind: "workOrder", code: "OT-00012", workOrderCode: "OT-00012", title: "Repuestos adicionales", statusLabel: "Sin enviar a comercial", sentToCommercial: false })
+        order({ id: 81, code: "COT-PRO-0042", workOrderCode: "OT-00011", title: "Reparación de bomba", statusLabel: "Aprobada", stage: "approved", quoted: true, typeLabel: "Cotización formal", createdAt: inDays(-4) }),
+        order({ id: 82, kind: "workOrder", code: "OT-00012", workOrderCode: "OT-00012", title: "Repuestos adicionales", statusLabel: "Sin enviar a comercial", sentToCommercial: false, typeLabel: "Orden de trabajo", createdAt: inDays(-1) })
       ] }
     },
     6: {
@@ -364,8 +364,110 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
   };
   let nextOrder = 120;
   let nextCorrelative = 60;
+  /** Secciones de ejemplo de las OT de demostración (sin precios, como las entrega la pasarela). */
+  const orderSections: Record<number, Pick<WorkshopOrderDetail, "products" | "transports" | "others" | "rentals"> & { description?: string }> = {
+    81: {
+      description: "Reparación completa de la bomba con cambio de sello y prueba de presión.",
+      products: [
+        { id: 1, productId: 501, code: "SEL-220", name: "Sello mecánico 2\"", description: "Sello de carburo de silicio", unit: "Unidad", quantity: 2, stock: 6, isEquipment: false },
+        { id: 2, productId: 502, code: "ACE-15W40", name: "Aceite hidráulico 15W40", description: null, unit: "Litro", quantity: 8, stock: 120, isEquipment: false }
+      ],
+      transports: [{ id: 3, transportId: 7, name: "Camioneta 4x4", detail: "Retiro y entrega en faena", chargeType: "km", quantity: 140 }],
+      others: [{ id: 4, name: "Limpieza industrial", description: "Lavado de carcasa antes de desarmar", quantity: 1 }],
+      rentals: []
+    }
+  };
+  const orderGeneral = new Map<number, Pick<WorkshopOrderDetail["general"], "description" | "internalNotes" | "priority" | "serviceDate">>();
+  const demoProducts = [
+    { id: 501, code: "SEL-220", name: "Sello mecánico 2\"", description: "Sello de carburo de silicio", stock: 6, unit: "Unidad" },
+    { id: 502, code: "ACE-15W40", name: "Aceite hidráulico 15W40", description: null, stock: 120, unit: "Litro" },
+    { id: 503, code: "ROD-6205", name: "Rodamiento 6205 2RS", description: "Rodamiento rígido de bolas", stock: 14, unit: "Unidad" },
+    { id: 504, code: "FIL-H120", name: "Filtro hidráulico H120", description: null, stock: 0, unit: "Unidad" }
+  ];
+  const demoTransports = [{ id: 7, name: "Camioneta 4x4", chargeTypes: ["km", "day"] as const }, { id: 8, name: "Camión pluma", chargeTypes: ["hr", "day"] as const }];
+  let nextItem = 900;
+  const orderFiles: Record<number, import("../domain/models").Attachment[]> = {};
+  const sectionsOf = (orderId: number) => orderSections[orderId] ?? (orderSections[orderId] = { products: [], transports: [], others: [], rentals: [] });
   const ordersPort: WorkshopOrdersPort = {
-    async workshopOrderRules() { return { blockingFields: [], descriptionRequired: false }; },
+    async workshopOrderRules() {
+      return { blockingFields: [], descriptionRequired: false, fields: [] };
+    },
+    async workshopProducts(_branchId, search, page) {
+      await delay();
+      const term = search.trim().toLowerCase();
+      const found = demoProducts.filter((item) => !term || `${item.code} ${item.name}`.toLowerCase().includes(term));
+      return { items: found.slice(page * 25, page * 25 + 25), hasMore: found.length > (page + 1) * 25 };
+    },
+    async workshopTransports() { await delay(); return { items: demoTransports.map((item) => ({ ...item, chargeTypes: [...item.chargeTypes] })) }; },
+    async addOrderItem(entryId, orderId, input) {
+      await delay();
+      const sections = sectionsOf(orderId);
+      const { item } = input;
+      if (item.kind === "product") {
+        const product = demoProducts.find((entry) => entry.id === item.productId);
+        if (!product) throw new Error("Vuelve a buscar el producto para agregarlo.");
+        const existing = sections.products.find((row) => row.productId === product.id);
+        if (existing) existing.quantity += item.quantity;
+        else sections.products.push({ id: nextItem++, productId: product.id, code: product.code, name: product.name, description: product.description, unit: product.unit, quantity: item.quantity, stock: product.stock, isEquipment: false });
+      } else if (item.kind === "transport") {
+        const transport = demoTransports.find((entry) => entry.id === item.transportId);
+        sections.transports.push({ id: nextItem++, transportId: item.transportId, name: transport?.name ?? "Transporte", detail: item.detail, chargeType: item.chargeType, quantity: item.quantity });
+      } else sections.others.push({ id: nextItem++, name: item.name, description: item.description, quantity: item.quantity });
+      return ordersPort.workshopOrderDetail(entryId, orderId, input.companyBranchId);
+    },
+    async updateOrderItem(entryId, orderId, section, rowId, input) {
+      await delay();
+      const sections = sectionsOf(orderId);
+      const row = (sections[section] as Array<{ id: number; quantity: number; detail?: string | null; description?: string | null }>).find((item) => item.id === rowId);
+      if (!row) throw new Error("Ese ítem ya no está en la OT. Actualiza el detalle.");
+      row.quantity = input.quantity;
+      if (input.note !== undefined) { if (section === "transports") row.detail = input.note; else if (section === "others") row.description = input.note; }
+      return ordersPort.workshopOrderDetail(entryId, orderId, input.companyBranchId);
+    },
+    async removeOrderItem(entryId, orderId, section, rowId, branchId) {
+      await delay();
+      if (section === "works") {
+        const extra = extraOf(entryId);
+        extra.works = { available: true, items: extra.works.items.map((item) => item.id === rowId && item.orderId === orderId ? { ...item, orderId: null, loose: true } : item) };
+      } else {
+        const sections = sectionsOf(orderId);
+        if (section === "products") sections.products = sections.products.filter((item) => item.id !== rowId);
+        else if (section === "transports") sections.transports = sections.transports.filter((item) => item.id !== rowId);
+        else sections.others = sections.others.filter((item) => item.id !== rowId);
+      }
+      return ordersPort.workshopOrderDetail(entryId, orderId, branchId);
+    },
+    async updateOrderGeneral(entryId, orderId, input) {
+      await delay();
+      const extra = extraOf(entryId);
+      extra.orders = { available: true, items: extra.orders.items.map((item) => item.id === orderId ? { ...item, title: input.title } : item) };
+      orderGeneral.set(orderId, { description: input.description, internalNotes: input.internalNotes, priority: input.priority, serviceDate: input.serviceDate });
+      return ordersPort.workshopOrderDetail(entryId, orderId, input.companyBranchId);
+    },
+    async workshopOrderDetail(entryId, orderId) {
+      await delay();
+      const extra = extraOf(entryId);
+      const summary = extra.orders.items.find((item) => item.id === orderId && item.kind !== "maintenance");
+      if (!summary) throw new Error("Esa orden no pertenece a este ingreso. Actualiza la ficha.");
+      const sections = orderSections[orderId] ?? { products: [], transports: [], others: [], rentals: [] };
+      const entry = Object.values(boards).flatMap((board) => board.areas.flatMap((area) => area.entries)).find((item) => item.id === entryId);
+      const locked = summary.stage === "approved";
+      return structuredCopy({
+        id: summary.id, kind: summary.kind === "workOrder" ? "workOrder" : "quote", code: summary.code, workOrderCode: summary.workOrderCode,
+        statusLabel: summary.statusLabel, subStatusLabel: null, sentToCommercial: summary.sentToCommercial,
+        editable: !locked, lockedReason: locked ? "La OT ya está aprobada." : null,
+        general: {
+          title: summary.title, description: sections.description ?? null, internalNotes: null, priority: "medium", serviceDate: (summary.createdAt ?? inDays(0)).slice(0, 10),
+          businessType: "Servicio", customerName: entry?.customerName ?? null, branches: ["Casa matriz"], contacts: ["Pedro Soto"],
+          equipments: entry ? [entry.equipmentLabel] : [], createdAt: summary.createdAt ?? null, sentAt: summary.sentAt ?? null,
+          ...orderGeneral.get(orderId)
+        },
+        works: extra.works.items.filter((item) => item.orderId === orderId).map((item) => ({
+          id: item.id, code: item.code, title: item.title, priority: item.priority, summary: null, assignedMinutes: 120, specialty: "Mecánica", responsibles: ["Alex Martínez"]
+        })),
+        products: sections.products, transports: sections.transports, others: sections.others, rentals: sections.rentals
+      } satisfies WorkshopOrderDetail);
+    },
     async createWorkshopOrder(entryId, input) {
       await delay();
       const extra = extraOf(entryId);
@@ -398,6 +500,19 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
       // Igual que el servidor: al eliminar una OT no enviada también se eliminan sus trabajos.
       extra.works = { available: true, items: extra.works.items.filter((item) => item.orderId !== orderId) };
       return { id: orderId, deletedWorks: removed };
+    },
+    // Archivos de la OT en demostración: quedan solo en memoria.
+    async workshopOrderFiles(_entryId, orderId) {
+      await delay();
+      return [...(orderFiles[orderId] ?? [])];
+    },
+    async uploadWorkshopOrderFiles(_entryId, orderId, _branchId, files) {
+      await delay();
+      orderFiles[orderId] = [...(orderFiles[orderId] ?? []), ...files.map((file) => ({ id: nextItem++, name: file.name, url: file.uri, type: file.mimeType, createdAt: new Date().toISOString() }))];
+    },
+    async deleteWorkshopOrderFile(_entryId, orderId, _branchId, fileId) {
+      await delay();
+      orderFiles[orderId] = (orderFiles[orderId] ?? []).filter((file) => String(file.id) !== fileId);
     }
   };
   const deliveryPort: WorkshopDeliveryPort = {
@@ -488,6 +603,26 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
         phone: input.phone?.trim() || null, position: input.position?.trim() || null };
       customerOf(customerId).contacts.push(created);
       return created;
+    },
+    async workshopEquipmentMasters() {
+      return {
+        types: [{ id: 1, name: "BOMBA" }, { id: 2, name: "CAMIONETA" }, { id: 3, name: "GENERADOR" }],
+        manufacturers: [{ id: 1, name: "CAT" }, { id: 2, name: "CLARKE" }, { id: 3, name: "MAXUS" }],
+        models: [{ id: 1, name: "DQ6" }, { id: 2, name: "T 60" }, { id: 3, name: "420" }],
+        classifications: [{ id: 1, name: "GENERAL" }, { id: 2, name: "PESADO" }]
+      };
+    },
+    async createWorkshopCustomerEquipment(customerId, input) {
+      await delay();
+      const masters = await customersPort.workshopEquipmentMasters(0);
+      const name = (items: Array<{ id: number; name: string }>, itemId: number) => items.find((item) => item.id === itemId)?.name ?? "";
+      const manufacturer = name(masters.manufacturers, input.manufacturerId); const type = name(masters.types, input.typeId); const model = name(masters.models, input.modelId);
+      const created = { id: nextCustomerItem++, source: "customer" as const, label: `${manufacturer} · ${type} · ${model}`, code: input.identification.trim(), typeName: type,
+        detail: [name(masters.classifications, input.classificationId), input.year?.trim() || null].filter(Boolean).join(" · ") || null, imageUrl: null,
+        title: `${manufacturer} ${model}`, year: input.year?.trim() || null, color: null, identification: input.identification.trim(), internalNumber: input.internalNumber?.trim() || null };
+      equipment.push(created);
+      equipmentOwner[created.id] = customerId;
+      return created;
     }
   };
   const documents: Record<number, string> = {};
@@ -502,7 +637,9 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
     async workshops() { return workshops; },
     async workshopBoard(_branchId: number, workshopId: number) { return JSON.parse(JSON.stringify(boards[workshopId] ?? { workshopId, areas: [] })) as WorkshopBoard; },
     async workshopEntry(_branchId: number, entryId: number) { return detailOf(entryId); },
-    async workshopCustomers() { return { items: customers.map(({ id, name }) => ({ id, name, document: documents[id] ?? null })) }; },
+    async workshopCustomers(_branchId: number, search: string, page: number) {
+      return customerPage(customers.map(({ id, name }) => ({ id, name, document: documents[id] ?? null })), search, page);
+    },
     async workshopCustomer(_branchId: number, customerId: number) {
       const found = customers.find((item) => item.id === customerId);
       if (!found) throw new Error("WORKSHOP_CUSTOMER_NOT_FOUND");

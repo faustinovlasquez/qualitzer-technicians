@@ -6,6 +6,7 @@ import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
 import { emptySchema, positiveId } from "../validation";
 import { mobileActor } from "./authorization";
+import { assertAppPermission } from "../workshop/support";
 
 const optionsQuery = z.object({
   companyBranchId: positiveId.transform(Number), kind: creationCatalogResourceSchema.optional(),
@@ -37,6 +38,11 @@ export function createCreationRouter(upstream: Upstream): Router {
     emptySchema.parse(req.query);
     const input = creationInputSchema.parse(req.body);
     const { token } = await mobileActor(upstream, req, input.companyBranchId);
+    // Permisos de la app de la sucursal: lo creado desde un ingreso del taller depende de los permisos del Taller.
+    await assertAppPermission(upstream, token, input.companyBranchId,
+      input.kind === "non_productive" ? "createNonProductive"
+        : input.kind === "maintenance" ? input.maintenance.operationAreaEntryId !== undefined ? "workshopMaintenances" : "createMaintenances"
+          : input.work.operationAreaEntryId !== undefined ? "workshopWorks" : "createWorks");
     let status = 201;
     let replayed = "false";
     const result = parseUpstream(creationResultSchema, await upstream.request("/technician-dashboard/mobile-creations", { method: "POST", token, json: input, onResponse: (metadata) => {

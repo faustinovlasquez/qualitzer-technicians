@@ -5,7 +5,7 @@ import { assignmentNegotiationCode, assignmentWorkOrderCode } from "../../domain
 import { isFinished, plainText, shortDate, STATUS_LABELS } from "../../domain/format";
 import { assignmentDay } from "../../domain/assignmentSchedule";
 import type { AssignmentGroup } from "../../domain/models";
-import { Badge, Button, Card } from "../../ui/components";
+import { Badge, Button, Card, type IconName } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import { InfoBlock, infoStyles } from "./AssignmentInfoBlock";
 import { equipmentLabel, groupTypes, statusTones } from "./assignmentPresentation";
@@ -23,64 +23,88 @@ const heroStatusColors: Record<string, { soft: string; text: string }> = {
   completed: { soft: palette.successSoft, text: palette.success }, delivered: { soft: palette.infoSoft, text: palette.info },
 };
 
-/**
- * Tarjeta superior de la orden, fija sobre las pestañas: tipo y estado, título, equipo/cliente/ubicación a la izquierda
- * y trabajos, repuestos y avance a la derecha. Se puede minimizar a una línea con el título y el avance.
- */
-export function AssignmentOrderSummary({ group, collapsed = false, onToggle }: { group: AssignmentGroup; collapsed?: boolean; onToggle?: () => void }) {
-  const completed = group.works.filter(isFinished).length;
-  const total = group.works.length;
-  const remaining = total - completed;
-  const progress = total > 0 ? Math.round(completed / total * 100) : 0;
-  const closed = group.status === "completed" || group.status === "delivered";
-  const direct = group.type === "direct_assignment";
-  const maintenance = group.type === "internal_maintenance";
-  const location = group.locationName.trim() ? group.locationName : group.locationAddress;
-  const address = group.locationAddress?.trim() && group.locationName.trim() && group.locationAddress !== group.locationName ? group.locationAddress : null;
-  const status = heroStatusColors[group.status] ?? { soft: palette.track, text: palette.text };
-  const title = plainText(group.title) || groupTypes[group.type].label;
+export interface OrderHeroProps {
+  icon: IconName;
+  overline: string;
+  status: { label: string; soft: string; text: string };
+  alert?: string | null;
+  title: string;
+  facts: Array<{ label: string; value: string; detail?: string | null }>;
+  counts: Array<{ label: string; value: number }>;
+  /** Avance de los trabajos; sin dato no se muestra la barra. */
+  progress?: { completed: number; total: number } | null;
+  warning?: string | null;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}
 
+/**
+ * Tarjeta oscura de una orden: tipo y estado, título, datos a la izquierda y conteos y avance a la derecha.
+ * Se puede minimizar a una línea con el título y el avance. La usan Mi jornada y el Taller.
+ */
+export function OrderHeroCard({ icon, overline, status, alert, title, facts, counts, progress, warning, collapsed = false, onToggle }: OrderHeroProps) {
+  const percent = progress && progress.total > 0 ? Math.round(progress.completed / progress.total * 100) : 0;
   return <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero} testID="order-hero">
     <View style={styles.heroTop}>
-      <Ionicons name={groupTypes[group.type].icon} size={14} color={palette.onDark} accessible={false} />
-      <Text style={styles.heroOverline} numberOfLines={1}>{groupTypes[group.type].label.toUpperCase()}</Text>
-      {group.isOverdue && remaining > 0 ? <View style={styles.heroAlert}><Text style={styles.heroAlertText}>Con atrasos</Text></View> : null}
-      <View style={[styles.heroStatus, { backgroundColor: status.soft }]}><Text style={[styles.heroStatusText, { color: status.text }]}>{STATUS_LABELS[group.status]}</Text></View>
+      <Ionicons name={icon} size={14} color={palette.onDark} accessible={false} />
+      <Text style={styles.heroOverline} numberOfLines={1}>{overline.toUpperCase()}</Text>
+      {alert ? <View style={styles.heroAlert}><Text style={styles.heroAlertText}>{alert}</Text></View> : null}
+      <View style={[styles.heroStatus, { backgroundColor: status.soft }]}><Text style={[styles.heroStatusText, { color: status.text }]}>{status.label}</Text></View>
       {onToggle ? <Pressable accessibilityRole="button" accessibilityLabel={collapsed ? "Expandir tarjeta de la orden" : "Minimizar tarjeta de la orden"} accessibilityState={{ expanded: !collapsed }} hitSlop={10} onPress={onToggle} style={({ pressed }) => [styles.heroToggle, pressed && styles.heroPressed]} testID="order-hero-toggle">
         <Ionicons name={collapsed ? "chevron-down" : "chevron-up"} size={16} color={palette.white} accessible={false} />
       </Pressable> : null}
     </View>
     <View style={styles.heroTitleRow}>
       <Text accessibilityRole="header" style={styles.heroTitle} numberOfLines={collapsed ? 1 : 2}>{title}</Text>
-      {collapsed ? <Text style={styles.heroCollapsedProgress}>{completed}/{total} · {progress}%</Text> : null}
+      {collapsed && progress ? <Text style={styles.heroCollapsedProgress}>{progress.completed}/{progress.total} · {percent}%</Text> : null}
     </View>
     {collapsed ? null : <><View style={styles.heroBody}>
       <View style={styles.heroColumn}>
-        <HeroFact label="Equipo" value={equipmentLabel(group.equipment)} />
-        <HeroFact label="Cliente" value={group.customerName?.trim() ? group.customerName : "Cliente no informado"} />
-        <HeroFact label="Ubicación" value={location?.trim() ? location : "Ubicación no informada"} detail={address} />
+        {facts.map((fact) => <HeroFact key={fact.label} label={fact.label} value={fact.value} detail={fact.detail} />)}
       </View>
       <View style={styles.heroDivider} />
       <View style={styles.heroColumn}>
-        <View style={styles.heroCount}><Text style={styles.heroLabel}>Trabajos asignados</Text><Text style={styles.heroCountValue}>{total}</Text></View>
-        <View style={styles.heroCount}><Text style={styles.heroLabel}>{direct ? "Repuestos de asignación" : maintenance ? "Repuestos del mantenimiento" : "Repuestos de la OT"}</Text><Text style={styles.heroCountValue}>{group.products.length}</Text></View>
-        <View style={styles.heroProgress}>
+        {counts.map((item) => <View key={item.label} style={styles.heroCount}><Text style={styles.heroLabel}>{item.label}</Text><Text style={styles.heroCountValue}>{item.value}</Text></View>)}
+        {progress ? <View style={styles.heroProgress}>
           <Text style={styles.heroLabel}>Avance de trabajos</Text>
-          <Text style={styles.heroProgressCount}>{completed}/{total} completados</Text>
+          <Text style={styles.heroProgressCount}>{progress.completed}/{progress.total} completados</Text>
           <View style={styles.heroProgressRow}>
-            <View accessibilityRole="progressbar" accessibilityLabel="Trabajos completados y entregados" accessibilityValue={{ min: 0, max: total || 1, now: completed, text: `${completed} de ${total} trabajos completados o entregados` }} style={styles.heroTrack}>
-              <View style={[styles.heroFill, { width: `${progress}%` }]} />
+            <View accessibilityRole="progressbar" accessibilityLabel="Trabajos completados y entregados" accessibilityValue={{ min: 0, max: progress.total || 1, now: progress.completed, text: `${progress.completed} de ${progress.total} trabajos completados o entregados` }} style={styles.heroTrack}>
+              <View style={[styles.heroFill, { width: `${percent}%` }]} />
             </View>
-            <Text style={styles.heroPercent}>{progress}%</Text>
+            <Text style={styles.heroPercent}>{percent}%</Text>
           </View>
-        </View>
+        </View> : null}
       </View>
     </View>
-    {closed && remaining > 0 ? <View style={styles.heroWarning}>
+    {warning ? <View style={styles.heroWarning}>
       <Ionicons name="information-circle-outline" size={16} color={palette.amber} accessible={false} />
-      <Text style={styles.heroWarningText}>{direct ? "Asignación cerrada" : maintenance ? "Mantenimiento cerrado" : "OT cerrada"} con {remaining} {remaining === 1 ? "trabajo sin finalizar" : "trabajos sin finalizar"}. El estado de la orden no equivale al avance de sus trabajos.</Text>
+      <Text style={styles.heroWarningText}>{warning}</Text>
     </View> : null}</>}
   </LinearGradient>;
+}
+
+/** Tarjeta superior de la orden de Mi jornada, fija sobre las pestañas. */
+export function AssignmentOrderSummary({ group, collapsed = false, onToggle }: { group: AssignmentGroup; collapsed?: boolean; onToggle?: () => void }) {
+  const completed = group.works.filter(isFinished).length;
+  const total = group.works.length;
+  const remaining = total - completed;
+  const closed = group.status === "completed" || group.status === "delivered";
+  const direct = group.type === "direct_assignment";
+  const maintenance = group.type === "internal_maintenance";
+  const location = group.locationName.trim() ? group.locationName : group.locationAddress;
+  const address = group.locationAddress?.trim() && group.locationName.trim() && group.locationAddress !== group.locationName ? group.locationAddress : null;
+  const status = heroStatusColors[group.status] ?? { soft: palette.track, text: palette.text };
+  return <OrderHeroCard icon={groupTypes[group.type].icon} overline={groupTypes[group.type].label} status={{ label: STATUS_LABELS[group.status], ...status }}
+    alert={group.isOverdue && remaining > 0 ? "Con atrasos" : null} title={plainText(group.title) || groupTypes[group.type].label} collapsed={collapsed} onToggle={onToggle}
+    facts={[
+      { label: "Equipo", value: equipmentLabel(group.equipment) },
+      { label: "Cliente", value: group.customerName?.trim() ? group.customerName : "Cliente no informado" },
+      { label: "Ubicación", value: location?.trim() ? location : "Ubicación no informada", detail: address }
+    ]}
+    counts={[{ label: "Trabajos asignados", value: total }, { label: direct ? "Repuestos de asignación" : maintenance ? "Repuestos del mantenimiento" : "Repuestos de la OT", value: group.products.length }]}
+    progress={{ completed, total }}
+    warning={closed && remaining > 0 ? `${direct ? "Asignación cerrada" : maintenance ? "Mantenimiento cerrado" : "OT cerrada"} con ${remaining} ${remaining === 1 ? "trabajo sin finalizar" : "trabajos sin finalizar"}. El estado de la orden no equivale al avance de sus trabajos.` : null} />;
 }
 
 function HeroFact({ label, value, detail }: { label: string; value: string; detail?: string | null }) {

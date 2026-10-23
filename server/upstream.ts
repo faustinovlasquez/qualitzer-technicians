@@ -21,8 +21,8 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/equipment_dispatches/inspections/${number}/photos/${string}` | `/equipment_dispatches/inspections/checklist-steps/${number}/files` |
   `/equipment_dispatches/inspections/checklist-steps/files/${number}` | `/equipment_dispatches/inspections/damages/${number}/files` |
   "/select/employees" | "/user_signatures/options" | "/works/link-entry" | "/works/link-negotiation" |
-  "/master_commercial/business-type-select-by-branch" | "/master_commercial/segments/selects" | "/master_commercial/taxes" | `/branches/${number}/negotiationFieldsConfig` |
-  `/negotiations/${number}/send-to-commercial` | `/negotiations/${number}/work-order` | `/operation_area_entries/${number}/deliver` |
+  "/master_commercial/business-type-select-by-branch" | "/master_commercial/segments/selects" | "/master_commercial/taxes" | `/branches/${number}/negotiationFieldsConfig` | `/branches/${number}/mobileAppConfig` |
+  `/negotiations/${number}/send-to-commercial` | `/negotiations/${number}/work-order` | `/negotiations/${number}` | `/negotiations/${number}/update_fields` | "/commercial_transport/select" | "/products" | "/customer_origins/select" | "/master_commercial/tags/selects" | "/customers_equipments" | `/equipment_masters/${"types" | "manufacturers" | "models" | "classifications"}/select` | `/operation_area_entries/${number}/deliver` |
   "/operation_area_entries/move" | `/operation_area_entries/${number}/estimated-delivery-date` | "/master_commercial/get-all-status" | `/operation_area_entries/${number}/change-status` |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
@@ -260,8 +260,8 @@ export class Upstream {
 }
 
 /** Rutas del backend que usa el taller: sus códigos de error se conservan para mostrarlos en español. */
-const WORKSHOP_BACKEND_PATH = /^\/(?:operation_area|operation_area_entries|operation_area_departures|equipment_dispatches|negotiations|works\/technician|works\/link-negotiation|works\/link-entry)(?:\/|$)/;
-const WORKSHOP_ERROR_CODE = /^(?:OPERATION_AREA_[A-Z_]+|ENTRY_[A-Z_]+|DEPARTURE_[A-Z_]+|RECEIVER_[A-Z_]+|NEGOTIATION_[A-Z_]+|INSPECTION_[A-Z_]+|WORK_ORDER_[A-Z_]+|ONLY_WORK_ORDERS_CAN_BE_DELETED|WORKS_ALREADY_LINKED|WORKER_NOT_FOUND|INVALID_[A-Z_]+)$/;
+const WORKSHOP_BACKEND_PATH = /^\/(?:operation_area|operation_area_entries|operation_area_departures|equipment_dispatches|negotiations|works\/technician|works\/link-negotiation|works\/link-entry|customers_equipments)(?:\/|$)/;
+const WORKSHOP_ERROR_CODE = /^(?:OPERATION_AREA_[A-Z_]+|ENTRY_[A-Z_]+|DEPARTURE_[A-Z_]+|RECEIVER_[A-Z_]+|NEGOTIATION_[A-Z_]+|INSPECTION_[A-Z_]+|WORK_ORDER_[A-Z_]+|EQUIPMENT_IDENTIFICATION_EXISTS|ONLY_WORK_ORDERS_CAN_BE_DELETED|WORKS_ALREADY_LINKED|WORKER_NOT_FOUND|INVALID_[A-Z_]+)$/;
 
 export function workshopErrorMessage(code: string): string {
   if (code === "OPERATION_AREA_FULL") return "La nave está llena. Elige otra nave o libera un espacio.";

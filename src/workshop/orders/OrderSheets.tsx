@@ -5,7 +5,8 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { Button } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { WorkshopOrder, WorkshopWork } from "../../domain/workshopEntry";
-import type { WorkshopOrderInput, WorkshopOrderRules } from "../../domain/workshopOrders";
+import type { WorkshopOrderDetail, WorkshopOrderGeneralInput, WorkshopOrderInput, WorkshopOrderRules } from "../../domain/workshopOrders";
+import { CreationDatePicker } from "../../screens/creation/CreationDatePicker";
 import { OptionRow, PickerSheet } from "../intake/IntakePickers";
 import { Notice } from "../entry/EntrySections";
 
@@ -27,6 +28,9 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<WorkshopOrderInput["priority"]>("medium");
   const [chosen, setChosen] = useState<number[]>(preselected.length > 0 ? preselected : looseWorks.map((work) => work.id));
+  // Campos que la sucursal exige y que se completan aquí (centro de costo, notas internas).
+  const [costCenter, setCostCenter] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState<"save" | "send" | null>(null);
   const [error, setError] = useState("");
   const loader = useRef(loadRules);
@@ -37,9 +41,11 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
   async function create(sendToCommercial: boolean) {
     if (saving) return;
     if (!title.trim()) { setError("Escribe un título para la OT."); return; }
-    if (chosen.length === 0) { setError("Elige al menos un trabajo."); return; }
     if (rules?.descriptionRequired && !description.trim()) { setError("La sucursal exige una descripción para la OT."); return; }
-    const input = { title: title.trim(), description: description.trim() || null, priority, workIds: chosen, sendToCommercial };
+    const missing = (rules?.fields ?? []).filter((field) => field.key === "costCenterRelation" ? !costCenter.trim() : !notes.trim()).map((field) => field.label);
+    if (missing.length > 0) { setError(`Completa: ${missing.join(", ")}.`); return; }
+    const extra = { ...(costCenter.trim() ? { costCenterRelation: costCenter.trim() } : {}), ...(notes.trim() ? { internalNotes: notes.trim() } : {}) };
+    const input = { title: title.trim(), description: description.trim() || null, priority, workIds: chosen, sendToCommercial, ...(Object.keys(extra).length > 0 ? { extra } : {}) };
     const fingerprint = JSON.stringify(input);
     if (attempt.current?.fingerprint !== fingerprint) attempt.current = { fingerprint, requestId: Crypto.randomUUID() };
     setSaving(sendToCommercial ? "send" : "save"); setError("");
@@ -51,8 +57,8 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
   const blocked = Boolean(rules && rules.blockingFields.length > 0);
   return <PickerSheet title="Nueva orden de trabajo" onClose={saving ? () => undefined : onClose}
     footer={<View style={styles.footer}>
-      <Button title="Crear y enviar a comercial" icon="paper-plane-outline" loading={saving === "send"} disabled={saving !== null || !rules || blocked} onPress={() => void create(true)} />
-      <Button title="Crear sin enviar" variant="secondary" icon="save-outline" loading={saving === "save"} disabled={saving !== null || !rules || blocked} onPress={() => void create(false)} />
+      <Button title="Crear sin enviar" icon="save-outline" loading={saving === "save"} disabled={saving !== null || !rules || blocked} onPress={() => void create(false)} />
+      <Button title="Crear y enviar a comercial" variant="warning" icon="paper-plane-outline" loading={saving === "send"} disabled={saving !== null || !rules || blocked} onPress={() => void create(true)} />
     </View>}>
     {!rules && !rulesError ? <View style={styles.row}><ActivityIndicator color={palette.primary} /><Text style={styles.hint}>Revisando lo que exige la sucursal…</Text></View> : null}
     {rulesError ? <View style={styles.block}><Notice tone="danger" icon="cloud-offline-outline" message={rulesError} /><Button title="Reintentar" variant="secondary" icon="refresh" onPress={fetchRules} /></View> : null}
@@ -62,14 +68,16 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
       <Text style={styles.infoText}>La OT se crea sin precios: comercial los completa. Cliente, equipo, sucursales y contactos salen del ingreso.</Text>
     </View>
     <View style={styles.field}>
-      <Text style={styles.label}>Título *</Text>
+      <Text style={styles.label}>Título (descripción breve de la OT) *</Text>
       <TextInput value={title} onChangeText={(value) => { setTitle(value); setError(""); }} maxLength={100} placeholder="Ej.: Reparación de bomba" placeholderTextColor={palette.textMuted}
         style={styles.input} accessibilityLabel="Título de la OT" />
+      <Text style={styles.counter}>{title.length}/100</Text>
     </View>
     <View style={styles.field}>
       <Text style={styles.label}>Descripción{rules?.descriptionRequired ? " *" : ""}</Text>
       <TextInput value={description} onChangeText={setDescription} maxLength={5000} multiline placeholder="Qué incluye la OT" placeholderTextColor={palette.textMuted}
         style={[styles.input, styles.multiline]} textAlignVertical="top" accessibilityLabel="Descripción de la OT" />
+      <Text style={styles.counter}>{description.length}/5000</Text>
     </View>
     <View style={styles.field}>
       <Text style={styles.label}>Prioridad</Text>
@@ -78,17 +86,81 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
         <Text style={[styles.chipText, priority === option.value && styles.chipTextOn]}>{option.label}</Text>
       </Pressable>)}</View>
     </View>
-    <Text style={styles.label}>Trabajos que incluye ({chosen.length})</Text>
-    {looseWorks.length === 0 ? <Text style={styles.hint}>No hay trabajos sueltos. Agrega trabajos al ingreso primero.</Text> : null}
+    {(rules?.fields ?? []).map((field) => <View key={field.key} style={styles.field}>
+        <Text style={styles.label}>{field.label} *</Text>
+        <TextInput value={field.key === "costCenterRelation" ? costCenter : notes} onChangeText={field.key === "costCenterRelation" ? setCostCenter : setNotes}
+          maxLength={field.key === "costCenterRelation" ? 255 : 5000} multiline={field.key === "internalNotes"} placeholderTextColor={palette.textMuted}
+          style={[styles.input, field.key === "internalNotes" && styles.multiline]} textAlignVertical={field.key === "internalNotes" ? "top" : "center"} accessibilityLabel={field.label} />
+      </View>)}
+    {/* Solo si hay trabajos sueltos para elegir; sin ellos la OT se crea vacía y se le agregan después. */}
+    {looseWorks.length > 0 ? <Text style={styles.label}>Trabajos que incluye ({chosen.length})</Text> : null}
     {looseWorks.map((work) => <OptionRow key={work.id} multiple title={`${work.code} · ${work.title}`} subtitle={work.statusName} selected={chosen.includes(work.id)}
       onPress={() => setChosen((list) => list.includes(work.id) ? list.filter((value) => value !== work.id) : [...list, work.id])} />)}
     {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
   </PickerSheet>;
 }
 
+/** Editar los datos generales de la OT: título, descripción, notas internas, prioridad y fecha de servicio. */
+export function EditOrderGeneralSheet({ detail, onSave, onClose }: {
+  detail: WorkshopOrderDetail; onSave: (input: Omit<WorkshopOrderGeneralInput, "companyBranchId">) => Promise<void>; onClose: () => void;
+}) {
+  const [title, setTitle] = useState(detail.general.title ?? "");
+  const [description, setDescription] = useState(detail.general.description ?? "");
+  const [internalNotes, setInternalNotes] = useState(detail.general.internalNotes ?? "");
+  const [priority, setPriority] = useState<WorkshopOrderInput["priority"]>(detail.general.priority ?? "medium");
+  const [serviceDate, setServiceDate] = useState(detail.general.serviceDate);
+  const [picker, setPicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    if (saving) return;
+    if (!title.trim()) { setError("Escribe un título para la OT."); return; }
+    setSaving(true); setError("");
+    try { await onSave({ title: title.trim(), description: description.trim() || null, internalNotes: internalNotes.trim() || null, priority, serviceDate }); }
+    catch (failure) { setError(failureText(failure, "No se pudieron guardar los cambios. Revisa tu conexión.")); }
+    finally { setSaving(false); }
+  }
+  return <PickerSheet title="Editar datos generales" onClose={saving ? () => undefined : onClose}
+    footer={<View style={styles.footer}>
+      <Button title="Guardar cambios" icon="checkmark" loading={saving} disabled={saving} onPress={() => void save()} />
+      <Button title="Cancelar" variant="secondary" disabled={saving} onPress={onClose} />
+    </View>}>
+    <View style={styles.field}>
+      <Text style={styles.label}>Título *</Text>
+      <TextInput value={title} onChangeText={(value) => { setTitle(value); setError(""); }} maxLength={100} placeholderTextColor={palette.textMuted} style={styles.input} accessibilityLabel="Título de la OT" />
+    </View>
+    <View style={styles.field}>
+      <Text style={styles.label}>Prioridad</Text>
+      <View style={styles.chips}>{PRIORITIES.map((option) => <Pressable key={option.value} accessibilityRole="radio" accessibilityState={{ checked: priority === option.value }}
+        onPress={() => setPriority(option.value)} style={[styles.chip, priority === option.value && { backgroundColor: option.tone, borderColor: option.tone }]}>
+        <Text style={[styles.chipText, priority === option.value && styles.chipTextOn]}>{option.label}</Text>
+      </Pressable>)}</View>
+    </View>
+    <View style={styles.field}>
+      <Text style={styles.label}>Fecha de servicio</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Elegir fecha de servicio" onPress={() => setPicker(true)} style={[styles.input, styles.dateInput]}>
+        <Ionicons name="calendar-outline" size={18} color={palette.primary} accessible={false} />
+        <Text style={[styles.dateText, !serviceDate && { color: palette.textMuted }]}>{serviceDate ? serviceDate.split("-").reverse().join("-") : "Sin fecha"}</Text>
+      </Pressable>
+    </View>
+    <View style={styles.field}>
+      <Text style={styles.label}>Descripción</Text>
+      <TextInput value={description} onChangeText={setDescription} maxLength={5000} multiline placeholder="Qué incluye la OT" placeholderTextColor={palette.textMuted}
+        style={[styles.input, styles.multiline]} textAlignVertical="top" accessibilityLabel="Descripción de la OT" />
+    </View>
+    <View style={styles.field}>
+      <Text style={styles.label}>Notas internas</Text>
+      <TextInput value={internalNotes} onChangeText={setInternalNotes} maxLength={5000} multiline placeholder="Solo para el equipo, no para el cliente" placeholderTextColor={palette.textMuted}
+        style={[styles.input, styles.multiline]} textAlignVertical="top" accessibilityLabel="Notas internas de la OT" />
+    </View>
+    {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
+    {picker ? <CreationDatePicker value={serviceDate ?? new Date().toISOString().slice(0, 10)} showInputHint={false} onClose={() => setPicker(false)} onChange={(value) => setServiceDate(value)} /> : null}
+  </PickerSheet>;
+}
+
 /** Agregar trabajos sueltos a una OT que aún no se envía. */
-export function AddWorksSheet({ order, looseWorks, onAdd, onClose }: {
-  order: WorkshopOrder; looseWorks: WorkshopWork[]; onAdd: (workIds: number[]) => Promise<void>; onClose: () => void;
+export function AddWorksSheet({ code, looseWorks, onAdd, onClose }: {
+  code: string; looseWorks: WorkshopWork[]; onAdd: (workIds: number[]) => Promise<void>; onClose: () => void;
 }) {
   const [chosen, setChosen] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
@@ -97,7 +169,7 @@ export function AddWorksSheet({ order, looseWorks, onAdd, onClose }: {
     setSaving(true); setError("");
     try { await onAdd(chosen); } catch (failure) { setError(failureText(failure, "No se pudieron agregar los trabajos.")); } finally { setSaving(false); }
   }
-  return <PickerSheet title={`Agregar trabajos a ${order.workOrderCode ?? order.code}`} onClose={saving ? () => undefined : onClose}
+  return <PickerSheet title={`Agregar trabajos a ${code}`} onClose={saving ? () => undefined : onClose}
     footer={<Button title={chosen.length === 0 ? "Elige trabajos" : `Agregar ${chosen.length} trabajo(s)`} icon="add" loading={saving} disabled={saving || chosen.length === 0} onPress={() => void add()} />}>
     {looseWorks.length === 0 ? <Text style={styles.hint}>No hay trabajos sueltos en este ingreso.</Text> : null}
     {looseWorks.map((work) => <OptionRow key={work.id} multiple title={`${work.code} · ${work.title}`} subtitle={work.statusName} selected={chosen.includes(work.id)}
@@ -147,6 +219,9 @@ const styles = StyleSheet.create({
   label: { ...typography.label, color: palette.text },
   input: { minHeight: 46, paddingHorizontal: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background, fontSize: 15, color: palette.text },
   multiline: { minHeight: 80, paddingTop: 10 },
+  counter: { alignSelf: "flex-end", fontSize: 11, color: palette.textMuted, fontVariant: ["tabular-nums"] },
+  dateInput: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dateText: { fontSize: 15, color: palette.text },
   chips: { flexDirection: "row", gap: 8 },
   chip: { minHeight: 40, justifyContent: "center", paddingHorizontal: 14, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
   chipText: { fontSize: 14, fontWeight: "700", color: palette.text },

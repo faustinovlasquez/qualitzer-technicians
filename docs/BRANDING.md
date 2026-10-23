@@ -1,6 +1,21 @@
 # Marca de Qualitzer técnicos y distribuciones por empresa
 
-## Logo oficial (2026-10-22, APK 1.0.131)
+## Logo oficial (2026-10-23, desde APK 1.0.133)
+
+Logo oficial de la app: Q hexagonal blanca y azul con la cinta naranja de la llave, sobre fondo azul en degradado de izquierda a derecha que llega a los bordes. Reemplaza al logo del técnico con casco (sección siguiente). Imagen aprobada: [../assets/qualitzer-original.png](../assets/qualitzer-original.png) (1107 × 1107, SHA-256 `5b99c1c6…787a`). `node scripts/generate-qualitzer-brand.cjs` usa la imagen tal cual y genera:
+
+| Archivo | Uso |
+|---|---|
+| `qualitzer-icon.png` (1024) | Ícono de la app: la imagen completa de borde a borde; iOS y Android ponen sus esquinas. |
+| `qualitzer-adaptive.png` (1024) | Primer plano adaptativo Android, opaco: la imagen achicada hasta que el hexágono blanco quede dentro del círculo seguro 66/108 y alargada hacia los bordes repitiendo su orilla (el degradado es solo horizontal, así que no se nota; la cinta sigue hasta el borde de arriba). Fondo `#3270CF` en `app.json`. |
+| `qualitzer-source.png` (1024) | Logo completo: cuadrado redondeado con esquinas transparentes. |
+| `qualitzer-logo.png` (512) | Logo dentro de la app y en la página de descarga del APK, igual que el anterior. |
+| `qualitzer-favicon.png` (64) | Favicon web, igual que el logo. |
+| `notification-icon.png` (96) | Ícono de notificaciones Android: silueta blanca (hexágonos y llave) sobre transparente. |
+
+Las seis pruebas de `tests/branding-assets.test.cjs` verifican la fuente, la regeneración exacta, el fondo azul en los bordes, el hexágono centrado y dentro de la zona segura, las esquinas transparentes y la silueta de notificación. Las distribuciones por empresa (`field-icon.png`, `field-adaptive.png`) no cambian. El ícono del teléfono cambia al instalar una APK nueva; recargar la app no basta.
+
+## Logo anterior (2026-10-22, APK 1.0.131 y 1.0.132)
 
 Logo oficial de la app: Q hexagonal con degradado azul y el técnico con casco y lentes, sobre fondo claro `#F1F4F9`. Reemplaza las versiones anteriores del mismo día (Q blanca sobre azul `#1447E6`, APK 1.0.129 y 1.0.130). Imagen aprobada: [../assets/qualitzer-original.png](../assets/qualitzer-original.png) (1024 × 1024, SHA-256 `263aee3d…b915`). `node scripts/generate-qualitzer-brand.cjs` recorta el dibujo, lo separa del fondo claro (opacidad según cuán azul u oscuro es cada píxel; el gris que toca el borde del recorte es sombra del cuadrado original y se descarta), lo centra y le da margen, y genera:
 

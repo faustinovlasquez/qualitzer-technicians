@@ -3,10 +3,16 @@ import * as Crypto from "expo-crypto";
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { Button } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
-import { formatRut, isValidContactEmail, isValidPhone, isValidRut, type WorkshopIdentificationTypes, type WorkshopNewBranch,
-  type WorkshopNewContact, type WorkshopNewCustomer } from "../../domain/workshopCustomers";
-import type { WorkshopBranchOption, WorkshopContact, WorkshopCustomerOption } from "../../domain/workshopIntake";
-import { PickerSheet } from "./IntakePickers";
+import { EQUIPMENT_IDENTIFICATION_TYPES, formatRut, isValidContactEmail, isValidPhone, isValidRut, type WorkshopEquipmentMasters, type WorkshopIdentificationTypes, type WorkshopNewBranch,
+  type WorkshopNewContact, type WorkshopNewCustomer, type WorkshopNewEquipment } from "../../domain/workshopCustomers";
+import type { WorkshopBranchOption, WorkshopContact, WorkshopCustomerOption, WorkshopEquipmentOption } from "../../domain/workshopIntake";
+import { SelectorTrigger } from "../../ui/time/SelectorUi";
+import { LocalPicker, PickerSheet } from "./IntakePickers";
+import { GoogleMap } from "../../location/GoogleMap";
+import type { GoogleMapPoint } from "../../location/googleMapProtocol";
+import { requestEquipmentPosition } from "../../location/equipmentPosition";
+import type { EquipmentAddress } from "../../domain/equipmentLocation";
+import { useTrustedNativePicker } from "../../security/useTrustedNativePicker";
 
 const failureText = (failure: unknown, fallback: string) => failure instanceof Error && failure.message ? failure.message : fallback;
 
@@ -114,12 +120,31 @@ export function NewBranchSheet({ customerName, create, onCreated, onClose }: {
   customerName: string; create: (input: Omit<WorkshopNewBranch, "companyBranchId">) => Promise<WorkshopBranchOption>;
   onCreated: (branch: WorkshopBranchOption) => void; onClose: () => void;
 }) {
-  const [values, setValues] = useState({ name: "", contactName: "", address: "", apartment: "", noStreetNumber: false, region: "", county: "", city: "" });
+  const [values, setValues] = useState({ name: "", contactName: "", address: "", apartment: "", noStreetNumber: false, region: "", county: "", city: "", country: "", postalCode: "" });
+  // Punto del mapa de Google (igual que la web): se completa la dirección al buscar o tocar el mapa.
+  const [point, setPoint] = useState<GoogleMapPoint | null>(null);
+  const [selection, setSelection] = useState<GoogleMapPoint | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState("");
+  const runNativePicker = useTrustedNativePicker();
   const [issues, setIssues] = useState<Record<string, string>>({});
   const set = (patch: Partial<typeof values>) => { setValues((current) => ({ ...current, ...patch })); setIssues({}); };
   const blank = (value: string) => value.trim() || null;
+  const fromMap = (address: EquipmentAddress) => {
+    set({ address: address.address, region: address.region, county: address.county, city: address.city, country: address.country, postalCode: address.postalCode });
+    if (address.lat !== null && address.lon !== null) setPoint({ lat: Number(address.lat), lng: Number(address.lon) });
+  };
+  async function locate() {
+    if (locating) return;
+    setLocating(true); setLocateError("");
+    try { const position = await runNativePicker(requestEquipmentPosition); setSelection(position); setPoint(position); }
+    catch (failure) { setLocateError(failureText(failure, "No se pudo obtener tu posición.")); }
+    finally { setLocating(false); }
+  }
   const { saving, error, run } = useSave((requestId) => create({ requestId, name: values.name.trim(), contactName: blank(values.contactName), address: blank(values.address),
-    apartment: blank(values.apartment), noStreetNumber: values.noStreetNumber, region: blank(values.region), county: blank(values.county), city: blank(values.city) }), onCreated, "No se pudo crear la sucursal.");
+    apartment: blank(values.apartment), noStreetNumber: values.noStreetNumber, region: blank(values.region), county: blank(values.county), city: blank(values.city),
+    country: blank(values.country), postalCode: blank(values.postalCode),
+    lat: point ? point.lat.toFixed(7) : null, lon: point ? point.lng.toFixed(7) : null }), onCreated, "No se pudo crear la sucursal.");
   function save() {
     const found: Record<string, string> = values.name.trim() ? {} : { name: "Escribe el nombre de la sucursal." };
     setIssues(found);
@@ -129,16 +154,21 @@ export function NewBranchSheet({ customerName, create, onCreated, onClose }: {
     <Text style={styles.hint}>Cliente: {customerName}</Text>
     <Field label="Nombre *" value={values.name} onChange={(name) => set({ name })} error={issues.name} maxLength={255} placeholder="Ej.: Planta Lampa" />
     <Field label="Contacto" value={values.contactName} onChange={(contactName) => set({ contactName })} maxLength={255} placeholder="Persona de referencia" autoCapitalize="words" />
+    {/* Igual que la web: mapa con buscador y solo calle, departamento, región y comuna (ciudad, país y código postal salen del mapa). */}
     <Text style={styles.section}>Dirección</Text>
-    <Field label="Calle y número" value={values.address} onChange={(address) => set({ address })} maxLength={255} placeholder="Ej.: Av. Apoquindo 4501" />
+    <GoogleMap point={point} selection={selection} editable disabled={saving}
+      onPoint={(next) => setPoint(next)} onAddress={fromMap} />
+    <Button title="Usar mi ubicación" icon="locate-outline" variant="secondary" loading={locating} disabled={saving || locating} onPress={() => void locate()} />
+    <Text style={styles.hint}>Busca una dirección o toca el mapa.</Text>
+    {locateError ? <Text style={styles.error} accessibilityRole="alert">{locateError}</Text> : null}
+    <Field label="Calle y número" value={values.address} onChange={(address) => set({ address })} maxLength={255} placeholder="Ej: Av. Apoquindo 4501" />
     <View style={styles.switchRow}>
       <Text style={[styles.label, styles.grow]}>Sin numeración</Text>
       <Switch value={values.noStreetNumber} onValueChange={(noStreetNumber) => set({ noStreetNumber })} trackColor={{ true: palette.primary, false: palette.track }} accessibilityLabel="Sin numeración" />
     </View>
-    <Field label="Departamento" value={values.apartment} onChange={(apartment) => set({ apartment })} maxLength={60} placeholder="Ej.: 302" />
-    <Field label="Región" value={values.region} onChange={(region) => set({ region })} maxLength={120} placeholder="Ej.: Región Metropolitana" autoCapitalize="words" />
-    <Field label="Comuna" value={values.county} onChange={(county) => set({ county })} maxLength={120} placeholder="Ej.: Las Condes" autoCapitalize="words" />
-    <Field label="Ciudad" value={values.city} onChange={(city) => set({ city })} maxLength={120} placeholder="Ej.: Santiago" autoCapitalize="words" />
+    <Field label="Departamento" value={values.apartment} onChange={(apartment) => set({ apartment })} maxLength={60} placeholder="Ej: 302" />
+    <Field label="Departamento/Región/Estado" value={values.region} onChange={(region) => set({ region })} maxLength={120} placeholder="Departamento/Región/Estado" autoCapitalize="words" />
+    <Field label="Comuna/Municipio/Condado" value={values.county} onChange={(county) => set({ county })} maxLength={120} placeholder="Ingresa el condado" autoCapitalize="words" />
   </FormSheet>;
 }
 
@@ -173,6 +203,69 @@ export function NewContactSheet({ customerName, create, onCreated, onClose }: {
     <Field label="Correo electrónico" value={values.email} onChange={(email) => set({ email })} error={issues.email} maxLength={200} keyboardType="email-address" autoCapitalize="none" />
     <Field label="Teléfono" value={values.phone} onChange={(value) => set({ phone: value })} error={issues.phone} maxLength={30} keyboardType="phone-pad" />
     <Field label="Notas" value={values.notes} onChange={(notes) => set({ notes })} maxLength={2000} multiline />
+  </FormSheet>;
+}
+
+type MasterKey = "types" | "manufacturers" | "models" | "classifications";
+const MASTER_LABELS: Record<MasterKey, { label: string; title: string; placeholder: string }> = {
+  types: { label: "Tipo de equipo *", title: "Tipo de equipo", placeholder: "Buscar tipo" },
+  manufacturers: { label: "Fabricante (marca) *", title: "Fabricante", placeholder: "Buscar marca" },
+  models: { label: "Modelo *", title: "Modelo", placeholder: "Buscar modelo" },
+  classifications: { label: "Clasificación (segmento) *", title: "Clasificación", placeholder: "Buscar clasificación" }
+};
+
+/** Nuevo equipo del cliente: mismos campos obligatorios que «Registrar equipo de cliente» de la web. */
+export function NewEquipmentSheet({ customerName, loadMasters, create, onCreated, onClose }: {
+  customerName: string; loadMasters: () => Promise<WorkshopEquipmentMasters>;
+  create: (input: Omit<WorkshopNewEquipment, "companyBranchId">) => Promise<WorkshopEquipmentOption>;
+  onCreated: (equipment: WorkshopEquipmentOption) => void; onClose: () => void;
+}) {
+  const [masters, setMasters] = useState<WorkshopEquipmentMasters | null>(null);
+  const [mastersError, setMastersError] = useState("");
+  const [picker, setPicker] = useState<MasterKey | null>(null);
+  const [values, setValues] = useState({ identificationTypeId: 2 as 1 | 2, identification: "", internalNumber: "", year: "", description: "", note: "" });
+  const [chosen, setChosen] = useState<Record<MasterKey, { id: number; name: string } | null>>({ types: null, manufacturers: null, models: null, classifications: null });
+  const [issues, setIssues] = useState<Record<string, string>>({});
+  const loader = useRef(loadMasters);
+  loader.current = loadMasters;
+  const fetchMasters = () => { setMastersError(""); loader.current().then(setMasters, (failure: unknown) => setMastersError(failureText(failure, "No se pudieron cargar las listas de equipos."))); };
+  useEffect(fetchMasters, []);
+  const set = (patch: Partial<typeof values>) => {
+    setValues((current) => ({ ...current, ...patch }));
+    setIssues((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !(key in patch))));
+  };
+  const { saving, error, run } = useSave((requestId) => create({
+    requestId, identificationTypeId: values.identificationTypeId, identification: values.identification.trim(), internalNumber: values.internalNumber.trim() || null,
+    typeId: chosen.types!.id, manufacturerId: chosen.manufacturers!.id, modelId: chosen.models!.id, classificationId: chosen.classifications!.id,
+    year: values.year.trim() || null, description: values.description.trim() || null, note: values.note.trim() || null
+  }), onCreated, "No se pudo registrar el equipo.");
+  function save() {
+    const found: Record<string, string> = {};
+    if (!values.identification.trim()) found.identification = values.identificationTypeId === 2 ? "Escribe la patente." : "Escribe el número de serie.";
+    if (values.year.trim() && !/^\d{4}$/.test(values.year.trim())) found.year = "El año debe tener 4 dígitos.";
+    for (const key of Object.keys(MASTER_LABELS) as MasterKey[]) if (!chosen[key]) found[key] = `Elige ${MASTER_LABELS[key].title.toLowerCase()}.`;
+    setIssues(found);
+    if (Object.keys(found).length === 0) void run(JSON.stringify({ values, chosen }));
+  }
+  return <FormSheet title="Nuevo equipo del cliente" saving={saving} error={error} onSave={save} onClose={onClose}>
+    <Text style={styles.hint}>Cliente: {customerName}</Text>
+    <Choice label="Tipo de identificación *" value={values.identificationTypeId} onChange={(identificationTypeId) => set({ identificationTypeId })}
+      options={EQUIPMENT_IDENTIFICATION_TYPES.map((item) => ({ value: item.id, label: item.label }))} />
+    <Field label={values.identificationTypeId === 2 ? "Patente *" : "Número de serie *"} value={values.identification} onChange={(identification) => set({ identification })}
+      error={issues.identification} maxLength={120} autoCapitalize="characters" placeholder={values.identificationTypeId === 2 ? "Ej.: VCRJ13" : "Número de serie"} />
+    <Field label="Número interno" value={values.internalNumber} onChange={(internalNumber) => set({ internalNumber })} maxLength={120} autoCapitalize="characters" />
+    {!masters && !mastersError ? <View style={styles.row}><ActivityIndicator color={palette.primary} /><Text style={styles.hint}>Cargando tipos, marcas y modelos…</Text></View> : null}
+    {mastersError ? <View style={styles.field}><Text style={styles.error}>{mastersError}</Text><Button title="Reintentar" variant="secondary" icon="refresh" onPress={fetchMasters} /></View> : null}
+    {masters ? (Object.keys(MASTER_LABELS) as MasterKey[]).map((key) => <SelectorTrigger key={key} label={MASTER_LABELS[key].label} value={chosen[key]?.name ?? ""} icon="chevron-down"
+      disabled={saving} error={issues[key]} onPress={() => setPicker(key)} />) : null}
+    <Field label="Año" value={values.year} onChange={(year) => set({ year: year.replace(/[^\d]/g, "") })} error={issues.year} maxLength={4} placeholder="Ej.: 2020" keyboardType="phone-pad" />
+    <Field label="Descripción" value={values.description} onChange={(description) => set({ description })} maxLength={2000} multiline />
+    <Field label="Nota" value={values.note} onChange={(note) => set({ note })} maxLength={2000} multiline />
+    <Text style={styles.hint}>Se registra activo y con ficha pública, igual que en la web.</Text>
+    {picker && masters ? <LocalPicker<{ id: number; name: string }> title={MASTER_LABELS[picker].title} placeholder={MASTER_LABELS[picker].placeholder}
+      emptyText="No hay opciones registradas. Créalas desde la web." load={async () => masters[picker]} label={(item) => item.name}
+      selectedId={chosen[picker]?.id ?? null} onClose={() => setPicker(null)}
+      onPick={(item) => { setChosen((current) => ({ ...current, [picker]: item })); setIssues(({ [picker]: _, ...rest }) => rest); setPicker(null); }} /> : null}
   </FormSheet>;
 }
 

@@ -22,6 +22,9 @@ import { SessionContextBar } from "./src/ui/SessionContextBar";
 import { BranchSwitcher } from "./src/ui/BranchSwitcher";
 import { DevelopmentQrPanel } from "./src/ui/DevelopmentQrPanel";
 import { CreationQuickMenu, CreationScreen } from "./src/screens/creation";
+import { AppPermissionsProvider, useBranchAppPermissions } from "./src/application/appPermissions";
+import { assignmentOrderId, OrderFullDetail } from "./src/screens/orders/OrderFullDetail";
+import { isAppPermissionAllowed } from "./src/domain/mobileAppConfig";
 import { NotificationCenterScreen } from "./src/notifications";
 import { useNotificationPermissionPrompt } from "./src/notifications/useNotificationPermissionPrompt";
 import { NotificationSettingsScreen } from "./src/screens/notifications/NotificationSettingsScreen";
@@ -82,6 +85,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const workshopMemory = useRef<{ key: string; view: unknown } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [workshopQuery, setWorkshopQuery] = useState("");
+  // Búsqueda dentro del ingreso u OT abierta en el Taller; se limpia al cambiar de pantalla.
+  const [workshopView, setWorkshopView] = useState<string | null>(null);
+  const [detailQuery, setDetailQuery] = useState("");
+  useEffect(() => { setDetailQuery(""); }, [workshopView]);
   const [timerBannerCompact, setTimerBannerCompact] = useState(false);
   // Al tocar el buscador se agranda y el botón de recargar se oculta.
   const [searchFocused, setSearchFocused] = useState(false);
@@ -97,6 +104,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const demoWorkshopPort = useMemo(() => demoMode ? createDemoWorkshopPort() : null, [demoMode, app.session?.token]);
   const workshop = useWorkshopBoard(demoWorkshopPort ?? app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0, app.storageKey, app.session?.token ?? "",
     app.tab === "workshop" && (demoMode || app.session?.mode === "live" && app.liveVerified) && !security.blocked);
+  // Permisos de la app configurados por la sucursal en la web (todo permitido mientras cargan o sin conexión).
+  const appPermissions = useBranchAppPermissions(demoMode || !(app.session?.mode === "live" && app.liveVerified) ? null : app.receiptPort, app.session?.branchId ?? 0, app.session?.token ?? "", app.tab);
+  const workshopAllowed = isAppPermissionAllowed(appPermissions, "workshop");
+  useEffect(() => { if (!workshopAllowed && app.tab === "workshop") app.setTab("today"); }, [workshopAllowed, app.tab]);
   const brandingContext = companyBrandingContext(app);
   const companyBranding = useCompanyBranding(brandingContext.input, app.busy || security.blocked, allowAutomaticPin && brandingContext.automaticPinEligible && !security.blocked);
   useEffect(() => { setNotificationSettings(false); }, [app.session?.token, app.session?.branchId]);
@@ -134,9 +145,14 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   </SafeAreaView>;
   const unreadNotifications = app.notifications.state?.unreadCount ?? 0;
   const workshopSearch = app.tab === "workshop" && !workshopDetail;
-  const searchable = (app.tab === "today" || app.tab === "agenda" || workshopSearch) && app.session.branchId !== null;
-  const headerQuery = workshopSearch ? workshopQuery : searchQuery;
-  const setHeaderQuery = workshopSearch ? setWorkshopQuery : setSearchQuery;
+  const detailSearch = app.tab === "workshop" && workshopDetail && (workshopView === "entry" || workshopView === "order") ? workshopView : null;
+  const searchable = (app.tab === "today" || app.tab === "agenda" || workshopSearch || detailSearch !== null) && app.session.branchId !== null;
+  const headerQuery = workshopSearch ? workshopQuery : detailSearch ? detailQuery : searchQuery;
+  const setHeaderQuery = workshopSearch ? setWorkshopQuery : detailSearch ? setDetailQuery : setSearchQuery;
+  const searchCopy = detailSearch === "entry" ? { label: "Buscar en el ingreso", hint: "Busca trabajos y OTs del ingreso.", placeholder: "Buscar en el ingreso" }
+    : detailSearch === "order" ? { label: "Buscar en la OT", hint: "Busca en datos, trabajos, productos, transporte y otros de la OT.", placeholder: "Buscar en la OT" }
+    : workshopSearch ? { label: "Buscar en el taller", hint: "Busca por ingreso, equipo, cliente o nave.", placeholder: "Buscar ingreso" }
+    : { label: "Buscar tareas", hint: "Busca por tarea, código, equipo, ubicación o cliente.", placeholder: "Buscar OT" };
   const connection = app.offlineController ? connectionPresentation(app.offline) : null;
   const dotColor = app.offlineSetupError ? palette.amber : !connection ? palette.success
     : connection.tone === "success" ? palette.success : connection.tone === "error" ? palette.danger : connection.tone === "warning" ? palette.amber : palette.info;
@@ -145,16 +161,18 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const connectionStatusKey = app.offline ? (app.offline.authBlocked ? "auth_required" : snapshotConnection(app.offline).status) : null;
   const connectionAlert = Boolean(app.offlineSetupError) || Boolean(app.offline && (app.offline.pending > 0 || app.offline.conflicts > 0
     || ["offline", "unreachable", "auth_required", "service_error"].includes(connectionStatusKey ?? "")));
-  const connectionStatus = <>{app.offlineController ? <View pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
-    <OfflineStatusBar key={`${app.storageKey}:${app.session.user.workerId}`} snapshot={app.offline} onOpen={app.openOffline} onSync={syncAndRefresh} embedded />
-  </View> : app.offlineSetupError ? <Button title="Almacenamiento offline no disponible · revisar" variant="secondary" disabled={app.busy} onPress={app.openOffline} /> : null}
-    {locationHistoryKey === locationViewKey ? <CreationModal title={locationSettingsOpen ? "Configurar ubicación" : "Mi historial de ubicación"} onClose={() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }}>
+  /** Mi historial de ubicación (desde el menú de una OT o trabajo). */
+  const locationHistoryModal = locationHistoryKey === locationViewKey ? <CreationModal title={locationSettingsOpen ? "Configurar ubicación" : "Mi historial de ubicación"} onClose={() => { setLocationHistoryKey(null); setLocationSettingsOpen(false); }}>
       {locationSettingsOpen ? <>
         <Button title="Volver al historial" icon="arrow-back-outline" variant="secondary" disabled={locationTracking.busy} onPress={() => setLocationSettingsOpen(false)} />
         <LocationSettingsPanel tracking={locationTracking} disabled={app.busy} />
       </> : <LocationHistoryPanel key={locationViewKey} tracking={locationTracking} initialDate={new Intl.DateTimeFormat("en-CA", { timeZone: locationTracking.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())}
         onConfigure={() => setLocationSettingsOpen(true)} resource={app.selected ? { groupId: app.selected.groupId, workId: Number(app.selected.workId) } : app.selectedOrder ? { groupId: app.selectedOrder.id } : undefined} />}
-    </CreationModal> : null}
+    </CreationModal> : null;
+  const connectionStatus = <>{app.offlineController ? <View pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
+    <OfflineStatusBar key={`${app.storageKey}:${app.session.user.workerId}`} snapshot={app.offline} onOpen={app.openOffline} onSync={syncAndRefresh} embedded />
+  </View> : app.offlineSetupError ? <Button title="Almacenamiento offline no disponible · revisar" variant="secondary" disabled={app.busy} onPress={app.openOffline} /> : null}
+    {locationHistoryModal}
   </>;
   if (app.selectedCreationKind) {
     if (!app.session.branchId || !app.session.user.workerId) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Creación no disponible" message="Necesitas un trabajador y una sucursal habilitada en tu sesión." /><Button title="Volver" disabled={app.busy} onPress={app.closeCreate} /></SafeAreaView>;
@@ -225,6 +243,19 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   }
   if (app.selectedOrder) {
     if (!app.orderGroup) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Orden no disponible" message="Puede haber cambiado de responsable o período. Vuelve a tu jornada y actualiza las asignaciones." /><Button title="Volver a mi jornada" disabled={app.busy} onPress={app.closeOrder} /></SafeAreaView>;
+    // OT con conexión: el mismo detalle completo del Taller (datos, secciones y archivos). Sin conexión o en demostración, la vista de siempre.
+    const fullOrderId = assignmentOrderId(app.orderGroup);
+    const fullOrderOnline = !app.offline || (app.offline.online && !app.offline.authBlocked);
+    if (fullOrderId !== null && app.session.mode === "live" && app.liveVerified && workshopAllowed && fullOrderOnline && app.session.branchId && app.selectedOrder.deliveryIntent === undefined) {
+      return <FadeIn key={`order-full:${app.orderGroup.id}`} style={styles.app}>
+        <OrderFullDetail group={app.orderGroup} orderId={fullOrderId} port={app.receiptPort ?? {}} branchId={app.session.branchId} mode={app.session.mode} storageKey={app.storageKey}
+          permissions={appPermissions} tenant={app.session.tenant} branchName={branchName} connectionStatus={connectionStatus} range={app.range} generatedAt={app.data?.generatedAt}
+          workerId={app.session.user.workerId} offline={app.offlineController ? app.offline : undefined} busy={app.busy} initialTab={app.selectedOrder.initialTab}
+          onBack={() => { app.closeOrder(); void app.refresh().catch(() => undefined); }} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus}
+          onLocationHistory={() => setLocationHistoryKey(locationViewKey)} />
+        {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
+      </FadeIn>;
+    }
     return <FadeIn key={`order:${app.orderGroup.id}`} style={styles.app}>
       <OrderDetailScreen
         creation={app.session.mode === "live" ? { ...app.orderCreation, user: app.session.user } : undefined}
@@ -263,6 +294,9 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     </FadeIn>;
   }
   const navigation: { id: "today" | "agenda" | "materials" | "workshop"; label: string; icon: IconName }[] = [{ id: "today", label: "Mi jornada", icon: "grid-outline" }, { id: "agenda", label: "Agenda", icon: "calendar-outline" }, { id: "materials", label: "Materiales", icon: "cube-outline" }, { id: "workshop", label: "Taller", icon: "construct-outline" }];
+  const visibleNavigation = navigation.filter((item) => item.id !== "workshop" || workshopAllowed);
+  const creatable = ([["work", "createWorks"], ["maintenance", "createMaintenances"], ["non_productive", "createNonProductive"]] as const)
+    .filter(([, key]) => appPermissions[key]).map(([kind]) => kind);
   const navBusy = app.busy || materialReceipts.busy;
   const navTab = (item: (typeof navigation)[number]) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "materials" && pendingMaterials > 0 ? `${item.label}, ${pendingMaterials} por confirmar` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: navBusy }} disabled={navBusy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
     <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}><Ionicons name={app.tab === item.id && item.id === "materials" ? "cube" : app.tab === item.id && item.id === "workshop" ? "construct" : item.icon} size={20} color={app.tab === item.id ? palette.primary : palette.textSecondary} />
@@ -271,7 +305,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     <Text style={[styles.navText, app.tab === item.id && { color: palette.primary, fontWeight: "800" }]}>{item.label}</Text>
   </Pressable>;
   const canCreate = Boolean(app.session.branchId && app.session.user.workerId && app.session.user.accessBranchs.some((branch) => branch.id === app.session?.branchId && branch.isEnabled !== false && branch.isDeleted !== true));
-  return <SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
+  return <AppPermissionsProvider value={appPermissions}><SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
     <View style={styles.top}>
       {app.tab !== "today" && !(app.tab === "workshop" && workshopDetail) ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
       <BranchSwitcher session={app.session} busy={app.busy} error={app.error} onSelect={(id) => void app.branch(id)}
@@ -279,12 +313,12 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
           : app.offline.pending > 0 ? "Hay cambios sin sincronizar en esta sucursal. Sincronízalos antes de cambiar; no se borrará nada." : null} />
       {searchable ? <View style={styles.headerSearch}>
         <Ionicons name="search-outline" size={18} color={palette.textMuted} />
-        <TextInput accessibilityLabel={workshopSearch ? "Buscar en el taller" : "Buscar tareas"} accessibilityHint={workshopSearch ? "Busca por ingreso, equipo, cliente o nave." : "Busca por tarea, código, equipo, ubicación o cliente."} placeholder={workshopSearch ? "Buscar ingreso" : "Buscar OT"} placeholderTextColor={palette.textMuted}
+        <TextInput accessibilityLabel={searchCopy.label} accessibilityHint={searchCopy.hint} placeholder={searchCopy.placeholder} placeholderTextColor={palette.textMuted}
           value={headerQuery} onChangeText={setHeaderQuery} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType="search" selectionColor={palette.primary} style={styles.headerSearchInput} />
         {headerQuery ? <Pressable accessibilityRole="button" accessibilityLabel="Borrar búsqueda" hitSlop={8} onPress={() => setHeaderQuery("")}><Ionicons name="close-circle" size={18} color={palette.textMuted} /></Pressable> : null}
       </View> : <View style={styles.brandSlot} />}
       <View style={styles.headerActions}>
-        {searchable && !workshopSearch && !searchFocused && !searchQuery ? <Pressable testID="header-refresh" accessibilityRole="button" accessibilityLabel="Recargar mi jornada" accessibilityState={{ disabled: app.busy || app.loading, busy: app.loading }} disabled={app.busy || app.loading} hitSlop={4} onPress={() => void app.refresh().catch(() => undefined)} style={[styles.headerToggle, app.loading && styles.headerToggleBusy]}>
+        {searchable && !workshopSearch && !detailSearch && !searchFocused && !searchQuery ? <Pressable testID="header-refresh" accessibilityRole="button" accessibilityLabel="Recargar mi jornada" accessibilityState={{ disabled: app.busy || app.loading, busy: app.loading }} disabled={app.busy || app.loading} hitSlop={4} onPress={() => void app.refresh().catch(() => undefined)} style={[styles.headerToggle, app.loading && styles.headerToggleBusy]}>
           <Ionicons name="sync-outline" size={22} color={palette.textSecondary} />
         </Pressable> : null}
         <Pressable testID="header-notifications" accessibilityRole="button" accessibilityLabel={unreadNotifications > 0 ? `Avisos, ${unreadNotifications} sin leer` : "Avisos"} accessibilityState={{ selected: app.tab === "notifications", disabled: app.busy }} disabled={app.busy} hitSlop={4} onPress={() => app.setTab("notifications")} style={[styles.headerToggle, app.tab === "notifications" && styles.headerToggleActive]}>
@@ -298,7 +332,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         </Pressable>
       </View>
     </View>
-    {connectionAlert ? <SessionContextBar tenant={app.session.tenant} branchName={branchName} showBrand={false}>{connectionStatus}</SessionContextBar> : null}
+    {connectionAlert ? <SessionContextBar tenant={app.session.tenant} branchName={branchName} showBrand={false}>{connectionStatus}</SessionContextBar> : locationHistoryModal}
     {app.session.mode === "demo" && <View style={styles.demo}><Ionicons name="flask-outline" size={14} color={palette.amber} /><Text style={styles.demoText}>DEMOSTRACIÓN · No modifica datos reales</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Salir de la demostración" hitSlop={8} disabled={app.busy} onPress={() => void app.logout()} style={styles.demoExit}>
         <Ionicons name="log-out-outline" size={14} color={palette.amber} /><Text style={styles.demoExitText}>Salir</Text>
@@ -312,7 +346,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
       </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopScreen key={`${app.storageKey}:${app.session.branchId ?? 0}`} memoryKey={`${app.storageKey}:${app.session.branchId ?? 0}`} memory={workshopMemory}
-            workshop={workshop} onSectionChange={setWorkshopDetail} onOpenWork={app.openWorkshopWork} query={workshopQuery}
+            workshop={workshop} onSectionChange={setWorkshopDetail} onOpenWork={app.openWorkshopWork} query={workshopQuery} mode={app.session.mode} detailQuery={detailQuery} onViewChange={setWorkshopView}
+            onLocationHistory={() => setLocationHistoryKey(locationViewKey)}
+            assignments={{ data: app.data, range: app.range, openWork: app.openWork, refresh: () => { void app.refresh().catch(() => undefined); }, onWorkStatus: app.onWorkStatus, busy: app.busy, workerId: app.session.user.workerId,
+              companyBranchId: app.session.branchId, offline: app.offlineController ? app.offline : undefined }}
             creation={app.session.branchId && app.session.user.workerId ? { ...app.workshopCreation, user: app.session.user, tenant: app.session.tenant, companyBranchId: app.session.branchId,
               initialDate: scheduleClock(app.session.user.system.timezone)?.day ?? app.range.startDate, mode: app.session.mode, storageKey: app.storageKey, offline: app.offlineController ? app.offline : undefined, busy: app.busy } : undefined} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
         <ActiveTimersBanner timers={app.activeTimers ?? []} disabled={app.busy} compact={timerBannerCompact} onOpen={(timer) => app.openActiveTimer(timer)}
@@ -326,12 +363,13 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} view={app.tab} onScrolledChange={setTimerBannerCompact} />
       </>}
     </FadeIn>
-    <View style={styles.nav}>
-      <View style={styles.navSide}>{navigation.slice(0, 2).map(navTab)}</View>
-      {canCreate ? <View style={styles.navCreate}><CreationQuickMenu inline onCreate={app.openCreate} disabled={navBusy} /></View> : null}
-      <View style={styles.navSide}>{navigation.slice(2).map(navTab)}</View>
-    </View>
-  </SafeAreaView>;
+    {/* Dentro del Taller (ingreso, OT, inspección…) se oculta el menú inferior: se vuelve con la flecha de cada pantalla. */}
+    {app.tab === "workshop" && workshopDetail ? null : <View style={styles.nav}>
+      <View style={styles.navSide}>{visibleNavigation.slice(0, 2).map(navTab)}</View>
+      {canCreate && creatable.length > 0 ? <View style={styles.navCreate}><CreationQuickMenu inline onCreate={app.openCreate} disabled={navBusy} allowed={creatable} /></View> : null}
+      <View style={styles.navSide}>{visibleNavigation.slice(2).map(navTab)}</View>
+    </View>}
+  </SafeAreaView></AppPermissionsProvider>;
 }
 function ApplicationRoot() {
   const security = useDeviceSecurity();

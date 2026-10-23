@@ -9,8 +9,12 @@ import { workshopDeliveryInputSchema, workshopDeliveryResultSchema, type Worksho
 import { workshopIdentificationTypesSchema, workshopNewBranchResultSchema, workshopNewBranchSchema, workshopNewContactResultSchema, workshopNewContactSchema,
   workshopNewCustomerResultSchema, workshopNewCustomerSchema, type WorkshopNewBranch, type WorkshopNewContact, type WorkshopNewCustomer } from "../domain/workshopCustomers";
 import { workshopEstimatedDateInputSchema, workshopManageResultSchema, workshopMoveInputSchema, workshopStatusesSchema, workshopStatusInputSchema } from "../domain/workshopManage";
-import { workshopOrderActionInputSchema, workshopOrderDeletedSchema, workshopOrderInputSchema, workshopOrderResultSchema, workshopOrderRulesSchema, workshopOrderSentSchema,
-  workshopOrderWorksInputSchema, workshopOrderWorksResultSchema, type WorkshopOrderInput } from "../domain/workshopOrders";
+import { mobileAppConfigSchema } from "../domain/mobileAppConfig";
+import { workshopEquipmentMastersSchema, workshopNewEquipmentResultSchema, workshopNewEquipmentSchema, type WorkshopNewEquipment } from "../domain/workshopCustomers";
+import { workshopOrderActionInputSchema,workshopOrderDeletedSchema, workshopOrderDetailSchema, workshopOrderGeneralInputSchema, workshopOrderInputSchema, workshopOrderResultSchema, workshopOrderRulesSchema, workshopOrderSentSchema,
+  workshopOrderWorksInputSchema, workshopOrderWorksResultSchema, type WorkshopOrderInput,
+  workshopOrderItemInputSchema, workshopOrderItemSectionSchema, workshopOrderItemUpdateSchema, workshopProductPageSchema, workshopTransportOptionsSchema,
+  type WorkshopOrderItemInput, type WorkshopOrderItemSection } from "../domain/workshopOrders";
 import { workshopReceptionInputSchema, workshopReceptionResultSchema, workshopSavedSignaturesSchema, workshopWorkersSchema, type WorkshopReceptionInput } from "../domain/workshopReception";
 import { inspectionAnswerInputSchema, inspectionBranchInputSchema, inspectionChecklistOptionsSchema, inspectionChecklistsInputSchema, inspectionDamageInputSchema,
   inspectionMetaInputSchema, inspectionOpenInputSchema, inspectionPhotoInputSchema, inspectionSavedSchema, inspectionShareSchema, workshopInspectionStateSchema,
@@ -65,8 +69,10 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     const path = `/api/workshop/entries/${positiveCreationIdSchema.parse(entryId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`;
     return workshopEntryDetailSchema.parse(await this.request<unknown>(path));
   }
-  async workshopCustomers(branchId: number) {
-    return workshopCustomerOptionsSchema.parse(await this.request<unknown>(`/api/workshop/options/customers?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  async workshopCustomers(branchId: number, search: string, page: number) {
+    const query = new URLSearchParams({ companyBranchId: String(positiveCreationIdSchema.parse(branchId)), page: String(Math.max(0, Math.floor(page))) });
+    if (search.trim()) query.set("search", search.trim().slice(0, 100));
+    return workshopCustomerOptionsSchema.parse(await this.request<unknown>(`/api/workshop/options/customers?${query.toString()}`));
   }
   async workshopCustomer(branchId: number, customerId: number) {
     const path = `/api/workshop/options/customers/${positiveCreationIdSchema.parse(customerId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`;
@@ -166,6 +172,12 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   async createWorkshopCustomerBranch(customerId: number, input: WorkshopNewBranch) {
     return workshopNewBranchResultSchema.parse(await this.request<unknown>(`/api/workshop/customers/${positiveCreationIdSchema.parse(customerId)}/branches`, "POST", workshopNewBranchSchema.parse(input)));
   }
+  async workshopEquipmentMasters(branchId: number) {
+    return workshopEquipmentMastersSchema.parse(await this.request<unknown>(`/api/workshop/options/equipment-masters?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  }
+  async createWorkshopCustomerEquipment(customerId: number, input: WorkshopNewEquipment) {
+    return workshopNewEquipmentResultSchema.parse(await this.request<unknown>(`/api/workshop/customers/${positiveCreationIdSchema.parse(customerId)}/equipment`, "POST", workshopNewEquipmentSchema.parse(input)));
+  }
   async createWorkshopCustomerContact(customerId: number, input: WorkshopNewContact) {
     return workshopNewContactResultSchema.parse(await this.request<unknown>(`/api/workshop/customers/${positiveCreationIdSchema.parse(customerId)}/contacts`, "POST", workshopNewContactSchema.parse(input)));
   }
@@ -184,6 +196,50 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   async workshopOrderRules(entryId: number, branchId: number) {
     return workshopOrderRulesSchema.parse(await this.request<unknown>(`/api/workshop/entries/${positiveCreationIdSchema.parse(entryId)}/order-rules?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
   }
+  async mobileAppConfig(branchId: number) {
+    return mobileAppConfigSchema.parse(await this.request<unknown>(`/api/workshop/app-config?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  }
+  async workshopOrderDetail(entryId: number, orderId: number, branchId: number) {
+    return workshopOrderDetailSchema.parse(await this.request<unknown>(`${this.workshopOrderPath(entryId, orderId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  }
+  async updateOrderGeneral(entryId: number, orderId: number, input: z.infer<typeof workshopOrderGeneralInputSchema>) {
+    return workshopOrderDetailSchema.parse(await this.request<unknown>(`${this.workshopOrderPath(entryId, orderId)}/general`, "PUT", workshopOrderGeneralInputSchema.parse(input)));
+  }
+  async workshopProducts(branchId: number, search: string, page: number) {
+    const query = new URLSearchParams({ companyBranchId: String(positiveCreationIdSchema.parse(branchId)), page: String(page) });
+    if (search.trim()) query.set("search", search.trim().slice(0, 100));
+    return workshopProductPageSchema.parse(await this.request<unknown>(`/api/workshop/options/order-products?${query.toString()}`));
+  }
+  async workshopTransports(branchId: number) {
+    return workshopTransportOptionsSchema.parse(await this.request<unknown>(`/api/workshop/options/order-transports?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
+  }
+  /** Ingreso 0: OT abierta desde Mi jornada, sin ingreso del Taller. */
+  private workshopOrderPath(entryId: number, orderId: number) {
+    return `/api/workshop/entries/${entryId === 0 ? 0 : positiveCreationIdSchema.parse(entryId)}/orders/${positiveCreationIdSchema.parse(orderId)}`;
+  }
+  async addOrderItem(entryId: number, orderId: number, input: WorkshopOrderItemInput) {
+    return workshopOrderDetailSchema.parse(await this.request<unknown>(`${this.workshopOrderPath(entryId, orderId)}/items`, "POST", workshopOrderItemInputSchema.parse(input)));
+  }
+  async updateOrderItem(entryId: number, orderId: number, section: WorkshopOrderItemSection, rowId: number, input: z.infer<typeof workshopOrderItemUpdateSchema>) {
+    return workshopOrderDetailSchema.parse(await this.request<unknown>(`${this.workshopOrderPath(entryId, orderId)}/items/${workshopOrderItemSectionSchema.parse(section)}/${positiveCreationIdSchema.parse(rowId)}`, "PATCH", workshopOrderItemUpdateSchema.parse(input)));
+  }
+  async removeOrderItem(entryId: number, orderId: number, section: WorkshopOrderItemSection | "works", rowId: number, branchId: number) {
+    const kind = section === "works" ? "works" : workshopOrderItemSectionSchema.parse(section);
+    return workshopOrderDetailSchema.parse(await this.request<unknown>(`${this.workshopOrderPath(entryId, orderId)}/items/${kind}/${positiveCreationIdSchema.parse(rowId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`, "DELETE"));
+  }
+  async workshopOrderFiles(entryId: number, orderId: number, branchId: number) {
+    return (await this.request<{ data: Attachment[] }>(`${this.workshopOrderPath(entryId, orderId)}/files?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`)).data;
+  }
+  async uploadWorkshopOrderFiles(entryId: number, orderId: number, branchId: number, files: LocalPhoto[]) {
+    for (const file of files) {
+      const body = new FormData();
+      await appendPhoto(body, file);
+      await this.request<void>(`${this.workshopOrderPath(entryId, orderId)}/files?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`, "POST", body);
+    }
+  }
+  deleteWorkshopOrderFile(entryId: number, orderId: number, branchId: number, fileId: string) {
+    return this.request<void>(`${this.workshopOrderPath(entryId, orderId)}/files/${positiveCreationIdSchema.parse(Number(fileId))}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`, "DELETE");
+  }
   async createWorkshopOrder(entryId: number, input: WorkshopOrderInput) {
     return workshopOrderResultSchema.parse(await this.request<unknown>(`/api/workshop/entries/${positiveCreationIdSchema.parse(entryId)}/orders`, "POST", workshopOrderInputSchema.parse(input)));
   }
@@ -192,7 +248,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     return workshopOrderWorksResultSchema.parse(await this.request<unknown>(path, "POST", workshopOrderWorksInputSchema.parse(input)));
   }
   async sendOrderToCommercial(entryId: number, orderId: number, branchId: number) {
-    const path = `/api/workshop/entries/${positiveCreationIdSchema.parse(entryId)}/orders/${positiveCreationIdSchema.parse(orderId)}/send`;
+    const path = `${this.workshopOrderPath(entryId, orderId)}/send`;
     return workshopOrderSentSchema.parse(await this.request<unknown>(path, "POST", workshopOrderActionInputSchema.parse({ companyBranchId: branchId })));
   }
   async deleteWorkshopOrder(entryId: number, orderId: number, branchId: number) {

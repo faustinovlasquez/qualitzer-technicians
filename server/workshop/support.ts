@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Request } from "express";
 import type { User } from "../../src/domain/models";
+import { ALL_APP_PERMISSIONS, APP_PERMISSION_LABELS, isAppPermissionAllowed, normalizeMobileAppConfig, type MobileAppConfig, type MobileAppPermission } from "../../src/domain/mobileAppConfig";
 import { assertBranch, bearer, currentUser } from "../auth";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
@@ -38,11 +39,40 @@ export const list = (value: unknown): unknown[] => {
 
 export interface WorkshopActor { token: string; user: User; branchId: number }
 
+/** Permiso de la app que exige cada ruta del taller (lo marca un middleware antes de leer el cuerpo). */
+const requiredPermission = new WeakMap<Request, MobileAppPermission>();
+export const requireAppPermissionFor = (req: Request, key: MobileAppPermission) => { requiredPermission.set(req, key); };
+
+/** Configuración de la sucursal por pocos segundos: una inspección sube muchas fotos seguidas. */
+const configCache = new WeakMap<Upstream, Map<number, { config: MobileAppConfig; at: number }>>();
+export async function mobileAppConfig(upstream: Upstream, token: string, branchId: number): Promise<MobileAppConfig> {
+  const cache = configCache.get(upstream) ?? new Map<number, { config: MobileAppConfig; at: number }>();
+  configCache.set(upstream, cache);
+  const cached = cache.get(branchId);
+  if (cached && Date.now() - cached.at < 20_000) return cached.config;
+  let config: MobileAppConfig;
+  try { config = normalizeMobileAppConfig(asRecord(await upstream.request(`/branches/${branchId}/mobileAppConfig`, { token })).mobileAppConfig); }
+  catch (error) {
+    // Backend anterior sin esta configuración: todo permitido, como antes.
+    if (error instanceof GatewayError && error.status === 404) config = ALL_APP_PERMISSIONS;
+    else throw error;
+  }
+  cache.set(branchId, { config, at: Date.now() });
+  return config;
+}
+
+export async function assertAppPermission(upstream: Upstream, token: string, branchId: number, key: MobileAppPermission): Promise<void> {
+  if (isAppPermissionAllowed(await mobileAppConfig(upstream, token, branchId), key)) return;
+  throw new GatewayError(403, "BRANCH_APP_ACTION_DISABLED", `La sucursal no permite ${APP_PERMISSION_LABELS[key]} desde la app. Pide el cambio a un administrador o hazlo desde la web.`);
+}
+
 /** Sesión vigente del usuario con acceso a la sucursal pedida. El taller no exige trabajador. */
 export async function workshopActor(upstream: Upstream, req: Request, branchId: number): Promise<WorkshopActor> {
   const token = bearer(req);
   const user = await currentUser(upstream, token);
   assertBranch(user, branchId);
+  const permission = requiredPermission.get(req);
+  if (permission) await assertAppPermission(upstream, token, branchId, permission);
   return { token, user, branchId };
 }
 

@@ -20,7 +20,7 @@ export function ChecklistOverview({ steps, stepId, draft, onJump }: { steps: Che
   return (
     <View style={styles.stack}>
       <SectionTitle title="Resumen de pasos" subtitle="Elige cualquier paso. Navegar no guarda ni descarta respuestas." />
-      <Field label="Buscar paso" placeholder="Número, título o etiqueta" value={search} onChangeText={(value) => { setSearch(value); setPage(0); }} />
+      <Field label="Buscar paso" clearable placeholder="Número, título o etiqueta" value={search} onChangeText={(value) => { setSearch(value); setPage(0); }} />
       {matches.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map(({ step, number }) => {
         const status = checklistStepStatus(step);
         const dirty = draft.answers[String(step.stepId)]?.saved === false;

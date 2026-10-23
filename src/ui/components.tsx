@@ -19,7 +19,7 @@ import { palette, radius, theme, typography } from "./theme";
 
 export type IconName = ComponentProps<typeof Ionicons>["name"];
 export type BadgeTone = "neutral" | "teal" | "success" | "warning" | "danger" | "info";
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "warning";
 
 export interface ButtonProps {
   title: string;
@@ -43,6 +43,7 @@ const buttonColors: { [K in ButtonVariant]: { background: string; foreground: st
   secondary: { background: palette.surface, foreground: palette.heading, border: palette.border },
   ghost: { background: "transparent", foreground: palette.primary, border: "transparent" },
   danger: { background: palette.dangerSolid, foreground: palette.white, border: palette.dangerSolid },
+  warning: { background: palette.orange, foreground: palette.white, border: palette.orange },
 };
 
 const badgeColors: { [K in BadgeTone]: { background: string; foreground: string } } = {
@@ -108,9 +109,11 @@ export interface FieldProps extends TextInputProps {
   hint?: string;
   containerStyle?: StyleProp<ViewStyle>;
   ref?: Ref<TextInput>;
+  /** Muestra una X para borrar todo lo escrito (buscadores). */
+  clearable?: boolean;
 }
 
-export function Field({ label, icon, trailing, error, hint, containerStyle, ref, style, onFocus, onBlur, editable = true, ...inputProps }: FieldProps) {
+export function Field({ label, icon, trailing, error, hint, containerStyle, ref, style, onFocus, onBlur, editable = true, clearable = false, ...inputProps }: FieldProps) {
   const [focused, setFocused] = useState(false);
 
   return (
@@ -131,6 +134,9 @@ export function Field({ label, icon, trailing, error, hint, containerStyle, ref,
           onBlur={(event) => { setFocused(false); onBlur?.(event); }}
           style={[styles.input, style]}
         />
+        {clearable && editable && inputProps.value ? <Pressable accessibilityRole="button" accessibilityLabel="Limpiar búsqueda" hitSlop={8} onPress={() => inputProps.onChangeText?.("")} style={styles.fieldClear}>
+          <Ionicons name="close-circle" size={18} color={palette.textMuted} accessible={false} />
+        </Pressable> : null}
         {trailing}
       </View>
       {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.fieldError}>{error}</Text> : hint ? <Text style={styles.fieldHint}>{hint}</Text> : null}
@@ -243,6 +249,7 @@ export function Brand({ tenant, compact = false, genericLogo = true, logoOnly = 
 }
 
 const styles = StyleSheet.create({
+  fieldClear: { paddingHorizontal: 6, alignSelf: "center" },
   button: { minHeight: 54, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
   buttonText: { fontSize: 15, lineHeight: 22, fontWeight: "700", flexShrink: 1, textAlign: "center" },
   stackedButton: { flexDirection: "column", gap: 2, minHeight: 52, paddingHorizontal: 2, paddingVertical: 6 },

@@ -207,6 +207,8 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["./src/screens/notifications/NotificationSettingsScreen", { NotificationSettingsScreen: "NotificationSettingsScreen" }],
     ["./src/screens/creation", { CreationScreen: "CreationScreen", CreationQuickMenu: "CreationQuickMenu" }],
     ["./src/domain/format", { weekRange: forbidden }], ["./src/domain/assignmentSchedule", { dailyRange: forbidden }], ["./src/domain/weeklySchedule", { scheduleClock: () => null }],
+    ["./src/screens/orders/OrderFullDetail", { OrderFullDetail: () => null, assignmentOrderId: () => null }],
+    ["./src/application/appPermissions",{ AppPermissionsProvider: ({ children }: { children: unknown }) => children, useBranchAppPermissions: () => ({}) }], ["./src/domain/mobileAppConfig", { isAppPermissionAllowed: () => true }],
   ]);
   for (const [path, name] of [
     ["screens/LoginScreen", "LoginScreen"], ["screens/TenantSelectionScreen", "TenantSelectionScreen"],

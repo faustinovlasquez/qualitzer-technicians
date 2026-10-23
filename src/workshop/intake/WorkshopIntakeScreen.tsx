@@ -18,15 +18,16 @@ import {
 } from "../../domain/workshopIntake";
 import type { useWorkshopBoard } from "../useWorkshopBoard";
 import { LocalPicker, MultiPicker, RemotePicker } from "./IntakePickers";
-import { NewBranchSheet, NewContactSheet, NewCustomerSheet } from "./CustomerForms";
+import { NewBranchSheet, NewContactSheet, NewCustomerSheet, NewEquipmentSheet } from "./CustomerForms";
 import { Notice } from "../entry/EntrySections";
+import { useAppPermission } from "../../application/appPermissions";
 
 type Intake = ReturnType<typeof useWorkshopBoard>["intake"];
-type Picker = "customer" | "equipment" | "area" | "branches" | "contacts" | "entryDate" | "deliveryDate" | "newCustomer" | "newBranch" | "newContact" | null;
+type Picker = "customer" | "equipment" | "area" | "branches" | "contacts" | "entryDate" | "deliveryDate" | "newCustomer" | "newBranch" | "newContact" | "newEquipment" | null;
 
 interface Values {
   title: string; notes: string; isInternalEntry: boolean;
-  customer: { id: number; name: string } | null; equipment: WorkshopEquipmentOption | null;
+  customer: { id: number; name: string; document?: string | null } | null; equipment: WorkshopEquipmentOption | null;
   branchIds: number[]; contactIds: number[]; areaId: number | null; areaTitle: string | null;
   entryDate: string; entryTime: string; deliveryDate: string;
 }
@@ -56,7 +57,7 @@ function Section({ title, icon, children, hint }: { title: string; icon: React.C
 /** Elegidos como etiquetas que se quitan con la "×", y un botón para agregar más desde la lista del cliente. */
 function LinkList({ label, icon, addLabel, createLabel, items, disabled, onAdd, onCreate, onRemove }: {
   label: string; icon: React.ComponentProps<typeof Ionicons>["name"]; addLabel: string; createLabel: string; items: Array<{ id: number; name: string }>;
-  disabled: boolean; onAdd: () => void; onCreate: () => void; onRemove: (id: number) => void;
+  disabled: boolean; onAdd: () => void; onCreate?: () => void; onRemove: (id: number) => void;
 }) {
   // Como en la web: un campo que abre la lista (con los elegidos adentro) y, al lado, "+" para crear uno nuevo.
   return <View style={styles.field}>
@@ -76,11 +77,20 @@ function LinkList({ label, icon, addLabel, createLabel, items, disabled, onAdd, 
         </View>
         <Ionicons name="chevron-down" size={18} color={palette.primary} accessible={false} />
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={createLabel} disabled={disabled} onPress={onCreate}
+      {onCreate ? <Pressable accessibilityRole="button" accessibilityLabel={createLabel} disabled={disabled} onPress={onCreate}
         style={({ pressed }) => [styles.linkCreate, pressed && styles.linkAddPressed, disabled && styles.disabled]}>
         <Ionicons name="add" size={22} color={palette.text} accessible={false} />
-      </Pressable>
+      </Pressable> : null}
     </View>
+  </View>;
+}
+
+/** Foto del equipo o sus iniciales (marca y modelo), como en la lista de equipos de la web. */
+function EquipmentAvatar({ item }: { item: WorkshopEquipmentOption }) {
+  const initials = (item.title || item.label).split(/[\s·]+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+  return <View style={styles.equipmentAvatar}>
+    {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.equipmentAvatarImage} resizeMode="cover" accessible={false} />
+      : <Text style={styles.equipmentAvatarText}>{initials || "EQ"}</Text>}
   </View>;
 }
 
@@ -96,11 +106,16 @@ function TextField({ label, value, onChange, error, multiline, placeholder, maxL
 }
 
 /** Paso 1 del ingreso: datos del equipo. Crea el ingreso o edita uno ya registrado. Solo con conexión. */
-export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntryId, areaId, areaTitle, onClose, onSaved }: {
+export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntryId, areaId, areaTitle, onClose, onSaved, onContinue }: {
   intake: Intake; workshopId: number | null; entryId: number | null; areaId: number | null; areaTitle: string | null;
-  onClose: () => void; onSaved: (entryId: number) => void;
+  /** `next`: seguir con la inspección (y la firma si falta) en vez de volver a la ficha. */
+  onClose: () => void; onSaved: (entryId: number, next: boolean) => void;
+  /** Ir a la inspección sin guardar (al editar un ingreso que no cambió). */
+  onContinue?: (entryId: number) => void;
 }) {
   const picker = useTrustedNativePicker();
+  // La sucursal puede no permitir crear clientes, sucursales o contactos desde la app.
+  const canCreateCustomers = useAppPermission("workshopCustomers");
   const [entryId, setEntryId] = useState(initialEntryId);
   const editing = entryId !== null;
   const [values, setValues] = useState<Values>(() => emptyValues(areaId, areaTitle));
@@ -227,8 +242,11 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
     }
   }
 
-  async function save() {
+  // Al editar: «Guardar y seguir» lleva a la inspección; «Guardar y volver» a la ficha. Un ingreso nuevo siempre sigue.
+  const [next, setNext] = useState(true);
+  async function save(continueFlow = true) {
     if (saving) return;
+    setNext(continueFlow);
     const draft = buildInput();
     const found = workshopIntakeIssues(draft);
     if (!values.equipment) found.equipment = values.isInternalEntry ? "Elige el equipo propio." : "Elige el equipo del cliente.";
@@ -242,7 +260,7 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
       attempt.current = null;
       setEntryId(saved.id);
       if (!editing) await AsyncStorage.removeItem(intake.draftKey).catch(() => undefined);
-      if (await uploadImage(saved.id)) onSaved(saved.id);
+      if (await uploadImage(saved.id)) onSaved(saved.id, continueFlow);
     } catch (failure) {
       setMessage(failure instanceof Error ? failure.message : "No se pudo guardar el ingreso. Revisa tu conexión e inténtalo de nuevo.");
     } finally { setSaving(false); }
@@ -304,12 +322,13 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
 
           {!values.isInternalEntry ? <Section title="Cliente" icon="person-outline">
             <View style={styles.customerRow}>
-              <SelectorTrigger label="Cliente *" value={values.customer?.name ?? ""} icon="chevron-down" disabled={saving} error={issues.customerId} onPress={() => setOpen("customer")}
+              <SelectorTrigger label="Cliente *" value={values.customer?.name ?? ""}
+                detail={values.customer ? (customerDetail?.id === values.customer.id ? customerDetail.document : null) ?? values.customer.document ?? null : null} icon="chevron-down" disabled={saving} error={issues.customerId} onPress={() => setOpen("customer")}
                 containerStyle={styles.grow} />
-              <Pressable accessibilityRole="button" accessibilityLabel="Nuevo cliente" disabled={saving} onPress={() => setOpen("newCustomer")}
+              {canCreateCustomers ? <Pressable accessibilityRole="button" accessibilityLabel="Nuevo cliente" disabled={saving} onPress={() => setOpen("newCustomer")}
                 style={({ pressed }) => [styles.linkCreate, styles.customerCreate, pressed && styles.linkAddPressed]}>
                 <Ionicons name="add" size={22} color={palette.text} accessible={false} />
-              </Pressable>
+              </Pressable> : null}
             </View>
             {values.customer ? <View style={styles.switchRow}>
               <View style={styles.switchText}><Text style={styles.label}>Agregar sucursal y contactos</Text><Text style={styles.hint}>A quién avisar de este ingreso.</Text></View>
@@ -319,10 +338,10 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
             {values.customer && linksOpen ? <>
               <LinkList label="Sucursales del cliente" icon="business-outline" addLabel="Agregar sucursal" disabled={saving} createLabel="Nueva sucursal"
                 items={values.branchIds.map((id) => ({ id, name: branches.find((item) => item.id === id)?.name ?? `Sucursal ${id}` }))}
-                onAdd={() => setOpen("branches")} onCreate={() => setOpen("newBranch")} onRemove={(id) => update({ branchIds: values.branchIds.filter((value) => value !== id) })} />
+                onAdd={() => setOpen("branches")} onCreate={canCreateCustomers ? () => setOpen("newBranch") : undefined} onRemove={(id) => update({ branchIds: values.branchIds.filter((value) => value !== id) })} />
               <LinkList label="Contactos" icon="person-outline" addLabel="Agregar contacto" disabled={saving} createLabel="Nuevo contacto"
                 items={values.contactIds.map((id) => ({ id, name: contacts.find((item) => item.id === id)?.fullName ?? `Contacto ${id}` }))}
-                onAdd={() => setOpen("contacts")} onCreate={() => setOpen("newContact")} onRemove={(id) => update({ contactIds: values.contactIds.filter((value) => value !== id) })} />
+                onAdd={() => setOpen("contacts")} onCreate={canCreateCustomers ? () => setOpen("newContact") : undefined} onRemove={(id) => update({ contactIds: values.contactIds.filter((value) => value !== id) })} />
             </> : null}
           </Section> : null}
 
@@ -374,36 +393,50 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
 
           {imageFailed && entryId !== null ? <View style={styles.block}>
             <Notice tone="warning" icon="image-outline" message="El ingreso quedó guardado, pero la foto no se pudo subir." />
-            <Button title="Reintentar foto" icon="refresh" variant="secondary" loading={saving} onPress={() => { setSaving(true); void uploadImage(entryId).then((ok) => { setSaving(false); if (ok) onSaved(entryId); }); }} />
-            <Button title="Continuar sin foto" variant="ghost" disabled={saving} onPress={() => onSaved(entryId)} />
+            <Button title="Reintentar foto" icon="refresh" variant="secondary" loading={saving} onPress={() => { setSaving(true); void uploadImage(entryId).then((ok) => { setSaving(false); if (ok) onSaved(entryId, next); }); }} />
+            <Button title="Continuar sin foto" variant="ghost" disabled={saving} onPress={() => onSaved(entryId, next)} />
           </View> : null}
           {message ? <Notice tone="danger" icon="alert-circle-outline" message={message} /> : null}
-          {!imageFailed ? <Button title={editing ? "Guardar cambios" : "Registrar ingreso"} icon={editing ? "save-outline" : "checkmark-circle-outline"} loading={saving} disabled={saving} onPress={() => void save()} /> : null}
+          {!imageFailed && !editing ? <Button title="Registrar ingreso" icon="checkmark-circle-outline" loading={saving} disabled={saving} onPress={() => void save()} /> : null}
+          {!imageFailed && editing ? <View style={styles.block}>
+            <Button title="Guardar y seguir a la inspección" icon="arrow-forward-circle-outline" loading={saving && next} disabled={saving} onPress={() => void save(true)} />
+            <Button title="Guardar y volver al ingreso" icon="save-outline" variant="secondary" loading={saving && !next} disabled={saving} onPress={() => void save(false)} />
+            {onContinue && entryId !== null ? <Button title="Ir a la inspección sin guardar" icon="clipboard-outline" variant="ghost" disabled={saving} onPress={() => onContinue(entryId)} /> : null}
+            <Text style={styles.footnote}>Los pasos son: datos del equipo, inspección de ingreso y firma de recepción.</Text>
+          </View> : null}
           {!editing ? <Text style={styles.footnote}>Después de registrar sigue la inspección y la firma de recepción.</Text> : null}
         </ScrollView>
       </KeyboardAvoidingView>}
 
-    {open === "customer" ? <LocalPicker<WorkshopCustomerOption> title="Elegir cliente" placeholder="Buscar por nombre o RUT" emptyText="No hay clientes registrados."
-      load={async () => (await intake.customers()).items} label={(item) => item.name} detail={(item) => item.document}
-      selectedId={values.customer?.id ?? null} onClose={() => setOpen(null)} action={{ label: "Nuevo cliente", onPress: () => setOpen("newCustomer") }}
-      onPick={(item) => { setOpen(null); if (item.id !== values.customer?.id) update({ customer: { id: item.id, name: item.name }, equipment: null, branchIds: [], contactIds: [] }); }} /> : null}
+    {open === "customer" ? <RemotePicker<WorkshopCustomerOption> title="Elegir cliente" placeholder="Buscar por nombre o RUT" emptyText="No hay clientes registrados."
+      load={(search, page) => intake.customers(search, page)} label={(item) => item.name} detail={(item) => item.document}
+      selectedId={values.customer?.id ?? null} onClose={() => setOpen(null)} action={canCreateCustomers ? { label: "Nuevo cliente", onPress: () => setOpen("newCustomer") } : undefined}
+      onPick={(item) => { setOpen(null); if (item.id !== values.customer?.id) update({ customer: { id: item.id, name: item.name, document: item.document }, equipment: null, branchIds: [], contactIds: [] }); }} /> : null}
     {open === "equipment" ? <RemotePicker<WorkshopEquipmentOption> title={values.isInternalEntry ? "Equipo propio" : `Equipos de ${values.customer?.name ?? "cliente"}`}
       placeholder="Buscar por marca, modelo o identificación" emptyText={values.isInternalEntry ? "No hay equipos propios disponibles." : "Este cliente no tiene equipos registrados."}
       load={(search, page) => intake.equipment({ source: values.isInternalEntry ? "own" : "customer", customerId: values.customer?.id, search: search || undefined, page })}
-      label={(item) => item.label} detail={(item) => [item.code, item.detail].filter(Boolean).join(" · ") || null}
+      label={(item) => item.title || item.label}
+      detail={(item) => item.title ? [item.typeName, item.year, item.color].filter(Boolean).join(" · ") || null : [item.code, item.detail].filter(Boolean).join(" · ") || null}
+      leading={(item) => <EquipmentAvatar item={item} />}
+      extra={(item) => item.identification || item.internalNumber ? <Text style={styles.equipmentCodes} numberOfLines={1}>
+        # {[item.identification, item.internalNumber].filter(Boolean).join(" / ")}</Text> : null}
+      action={!values.isInternalEntry && values.customer && canCreateCustomers ? { label: "Nuevo equipo", onPress: () => setOpen("newEquipment") } : undefined}
       selectedId={values.equipment?.id ?? null} onClose={() => setOpen(null)} onPick={(equipment) => { setOpen(null); update({ equipment }); }} /> : null}
+    {open === "newEquipment" && values.customer ? <NewEquipmentSheet customerName={values.customer.name} onClose={() => setOpen("equipment")}
+      loadMasters={() => intake.equipmentMasters()} create={(input) => intake.createEquipment(values.customer!.id, input)}
+      onCreated={(equipment) => { setOpen(null); update({ equipment }); }} /> : null}
     {open === "area" && workshopId !== null ? <LocalPicker<{ id: number; title: string }> title="Elegir nave" placeholder="Buscar nave" emptyText="No hay naves con espacio en este taller."
       load={async () => (await intake.areas(workshopId)).items} label={(item) => item.title} selectedId={values.areaId} onClose={() => setOpen(null)}
       onPick={(area) => { setOpen(null); update({ areaId: area.id, areaTitle: area.title }); }} /> : null}
     {open === "branches" ? <MultiPicker<WorkshopBranchOption> title="Sucursales del cliente" items={branches} label={(item) => item.name} selected={values.branchIds}
       emptyText="El cliente no tiene sucursales registradas." onClose={() => setOpen(null)} onConfirm={(branchIds) => { setOpen(null); update({ branchIds }); }}
-      action={{ label: "Nueva sucursal", onPress: () => setOpen("newBranch") }} /> : null}
+      action={canCreateCustomers ? { label: "Nueva sucursal", onPress: () => setOpen("newBranch") } : undefined} /> : null}
     {open === "contacts" ? <MultiPicker<WorkshopContact> title="Contactos del cliente" items={contacts} label={(item) => item.fullName}
       detail={(item) => [item.position, item.email, item.phone].filter(Boolean).join(" · ") || null} selected={values.contactIds}
       emptyText="El cliente no tiene contactos registrados." onClose={() => setOpen(null)} onConfirm={(contactIds) => { setOpen(null); update({ contactIds }); }}
-      action={{ label: "Nuevo contacto", onPress: () => setOpen("newContact") }} /> : null}
+      action={canCreateCustomers ? { label: "Nuevo contacto", onPress: () => setOpen("newContact") } : undefined} /> : null}
     {open === "newCustomer" ? <NewCustomerSheet loadTypes={intake.identificationTypes} create={intake.createCustomer} onClose={() => setOpen("customer")}
-      onCreated={(customer) => { setOpen(null); update({ customer: { id: customer.id, name: customer.name }, equipment: null, branchIds: [], contactIds: [] }); }} /> : null}
+      onCreated={(customer) => { setOpen(null); update({ customer: { id: customer.id, name: customer.name, document: customer.document }, equipment: null, branchIds: [], contactIds: [] }); }} /> : null}
     {open === "newBranch" && values.customer ? <NewBranchSheet customerName={values.customer.name} onClose={() => setOpen(null)}
       create={(input) => intake.createBranch(values.customer!.id, input)}
       onCreated={(branch) => {
@@ -426,6 +459,10 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
 }
 
 const styles = StyleSheet.create({
+  equipmentAvatar: { width: 48, height: 48, borderRadius: 12, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.primary },
+  equipmentAvatarImage: { width: 48, height: 48 },
+  equipmentAvatarText: { fontSize: 14, fontWeight: "800", color: palette.white },
+  equipmentCodes: { fontSize: 12, fontWeight: "700", color: palette.textSecondary, marginTop: 2 },
   screen: { flex: 1, backgroundColor: palette.background },
   bar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: palette.surface },
   barText: { flex: 1, minWidth: 0 },

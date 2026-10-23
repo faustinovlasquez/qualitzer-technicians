@@ -1,24 +1,36 @@
 import { Router } from "express";
 import { z } from "zod";
 import {
-  ORDER_FIELD_LABELS, workshopOrderActionInputSchema, workshopOrderDeletedSchema, workshopOrderInputSchema, workshopOrderResultSchema,
-  workshopOrderRulesSchema, workshopOrderSentSchema, workshopOrderWorksInputSchema, workshopOrderWorksResultSchema, type WorkshopOrderRules
+  ORDER_FIELD_LABELS, workshopOrderActionInputSchema, workshopOrderDeletedSchema, workshopOrderGeneralInputSchema, workshopOrderInputSchema, workshopOrderResultSchema,
+  workshopOrderRulesSchema, workshopOrderSentSchema, workshopOrderWorksInputSchema, workshopOrderWorksResultSchema, type WorkshopOrderRules, type WorkshopOrderInput, ORDER_FILLABLE_FIELDS, ORDER_SKIPPED_IN_APP
 } from "../../src/domain/workshopOrders";
 import type { WorkshopEntryDetail } from "../../src/domain/workshopEntry";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
 import { emptySchema } from "../validation";
 import { loadWorkshopEntry } from "./entry";
+import { loadOrderDetail, NO_ENTRY } from "./orderDetail";
+import { registerOrderItemRoutes } from "./orderItems";
 import { asRecord, list, positive, text, workshopActor, type WorkshopRequestLedger } from "./support";
 
 const ids = z.object({ entryId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
 const orderIds = z.object({ entryId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER), orderId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
+/** Ver y editar datos generales también admite ingreso 0 (OT abierta desde Mi jornada). */
+const orderRef = z.object({ entryId: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER), orderId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
+/** Fila de trabajo: cada ingreso por separado; sin ingreso, cada OT por separado. */
+export const queueKey = (entryId: number, orderId: number) => entryId > 0 ? entryId : -orderId;
 const branchQuery = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict();
 
 /** Campos que la web oculta en una OT (no se exigen) y los que la pasarela completa desde el ingreso. */
 const HIDDEN_IN_WORK_ORDER = new Set(["probableClosingDate", "probablePaymentDate", "probableBillingDate", "sentDate", "salesExecutiveId", "maxPaymentTermId", "currencyId",
   "closingProbability", "negotiationOperationTypeId", "businessModality", "businessTypeId", "daysOfValidity", "termsCondition"]);
 const FILLED_BY_GATEWAY = new Set(["title", "customerId", "entryId", "priority", "placeId", "serviceDate", "description"]);
+
+/** Día de hoy en la zona horaria de la empresa (no UTC: de noche en Chile ya sería mañana y la OT no saldría en Mi jornada). */
+function localDay(timezone: string | undefined): string {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: timezone || "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+  catch { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+}
 
 /** Igual que la web (isFieldRequired): obligatorio del sistema, o visible y obligatorio. */
 async function orderRules(upstream: Upstream, token: string, branchId: number, entry: WorkshopEntryDetail, raw: Record<string, unknown>): Promise<WorkshopOrderRules> {
@@ -27,15 +39,28 @@ async function orderRules(upstream: Upstream, token: string, branchId: number, e
   const hasEquipment = positive(raw.customerEquipmentId) !== null;
   const hasContacts = list(raw.contacts).length > 0;
   const hasBranches = list(raw.branchesCustomer).length > 0;
+  const fillable = new Set<string>(ORDER_FILLABLE_FIELDS);
   const blocking = required.filter((field) => {
-    if (HIDDEN_IN_WORK_ORDER.has(field) || FILLED_BY_GATEWAY.has(field)) return false;
+    if (HIDDEN_IN_WORK_ORDER.has(field) || FILLED_BY_GATEWAY.has(field) || fillable.has(field) || (ORDER_SKIPPED_IN_APP as readonly string[]).includes(field)) return false;
     if (field === "customersEquipments") return !hasEquipment;
     if (field === "contacts") return !hasContacts;
     if (field === "branchesCustomer") return !hasBranches;
     return true;
   }).map((field) => ORDER_FIELD_LABELS[field] ?? field);
   if (entry.customerName === null && required.includes("customerId")) blocking.push(ORDER_FIELD_LABELS.customerId!);
-  return workshopOrderRulesSchema.parse({ blockingFields: [...new Set(blocking)].slice(0, 50), descriptionRequired: required.includes("description") });
+  // Lo que el técnico sí puede completar en la app (textos).
+  const fields = ORDER_FILLABLE_FIELDS.filter((field) => required.includes(field)).map((field) => ({ key: field, label: ORDER_FIELD_LABELS[field] ?? field, options: [] }));
+  return workshopOrderRulesSchema.parse({ blockingFields: [...new Set(blocking)].slice(0, 50), descriptionRequired: required.includes("description"), fields });
+}
+
+/** Revisa que vengan los campos exigidos que se completan en la app y que las opciones elegidas existan. */
+function orderExtra(rules: WorkshopOrderRules, extra: WorkshopOrderInput["extra"]) {
+  const value = extra ?? {};
+  for (const field of rules.fields) {
+    const missing = field.key === "costCenterRelation" ? !value.costCenterRelation : !value.internalNotes;
+    if (missing) throw new GatewayError(400, "WORKSHOP_ORDER_FIELDS_REQUIRED", `La sucursal exige completar: ${field.label}.`);
+  }
+  return value.costCenterRelation ? { costCenterRelation: value.costCenterRelation } : {};
 }
 
 async function entryContext(upstream: Upstream, token: string, branchId: number, entryId: number) {
@@ -80,6 +105,7 @@ export function registerOrderRoutes(router: Router, upstream: Upstream, ledger: 
     void tail.then(() => { if (busy.get(entryId) === tail) busy.delete(entryId); });
     return run;
   };
+  registerOrderItemRoutes(router, upstream, ledger, oneAtATime);
   router.get("/entries/:entryId/order-rules", async (req, res) => {
     const { entryId } = ids.parse(req.params);
     const { companyBranchId } = branchQuery.parse(req.query);
@@ -87,6 +113,36 @@ export function registerOrderRoutes(router: Router, upstream: Upstream, ledger: 
     const { token } = await workshopActor(upstream, req, companyBranchId);
     const { detail, raw } = await entryContext(upstream, token, companyBranchId, entryId);
     res.json(await orderRules(upstream, token, companyBranchId, detail, raw));
+  });
+
+  router.get("/entries/:entryId/orders/:orderId", async (req, res) => {
+    const { entryId, orderId } = orderRef.parse(req.params);
+    const { companyBranchId } = branchQuery.parse(req.query);
+    emptySchema.parse(req.body ?? {});
+    const { token } = await workshopActor(upstream, req, companyBranchId);
+    res.json(await loadOrderDetail(upstream, token, companyBranchId, entryId, orderId));
+  });
+
+  // Datos generales: solo columnas de la OT (sin tocar secciones, precios ni estados), con la regla de edición de la web.
+  router.put("/entries/:entryId/orders/:orderId/general", async (req, res) => {
+    const { entryId, orderId } = orderRef.parse(req.params);
+    emptySchema.parse(req.query);
+    if (!req.is("application/json")) throw new GatewayError(415, "JSON_REQUIRED");
+    const input = workshopOrderGeneralInputSchema.parse(req.body);
+    const { token } = await workshopActor(upstream, req, input.companyBranchId);
+    // En la misma fila que los ítems: un guardado completo no debe pisar este cambio con datos viejos.
+    res.json(await oneAtATime(queueKey(entryId, orderId), async () => {
+    const current = await loadOrderDetail(upstream, token, input.companyBranchId, entryId, orderId);
+    if (!current.editable) throw new GatewayError(409, "WORKSHOP_ORDER_LOCKED", `${current.lockedReason ?? "La OT no se puede editar."} Los cambios se hacen desde la web.`);
+    const config = list(asRecord(await upstream.request(`/branches/${input.companyBranchId}/negotiationFieldsConfig`, { token })).negotiationFieldsConfig).map(asRecord);
+    const required = (field: string) => config.some((row) => text(row.fieldName) === field && (row.isSystemRequired === true || (row.visible === true && row.required === true)));
+    if (required("description") && !input.description) throw new GatewayError(400, "WORKSHOP_ORDER_DESCRIPTION_REQUIRED", "La sucursal exige una descripción para la OT.");
+    if (required("internalNotes") && !input.internalNotes) throw new GatewayError(400, "WORKSHOP_ORDER_NOTES_REQUIRED", "La sucursal exige notas internas en la OT.");
+    await upstream.request(`/negotiations/${orderId}/update_fields`, { token, method: "PATCH", json: {
+      title: input.title, description: input.description ?? "", internalNotes: input.internalNotes ?? "", priority: input.priority, serviceDate: input.serviceDate
+    } });
+    return loadOrderDetail(upstream, token, input.companyBranchId, entryId, orderId);
+    }));
   });
 
   router.post("/entries/:entryId/orders", async (req, res) => {
@@ -104,6 +160,7 @@ export function registerOrderRoutes(router: Router, upstream: Upstream, ledger: 
         throw new GatewayError(409, "WORKSHOP_ORDER_FIELDS_REQUIRED", `La sucursal exige completar en la OT: ${rules.blockingFields.join(", ")}. Créala desde la web.`);
       }
       if (rules.descriptionRequired && !input.description) throw new GatewayError(400, "WORKSHOP_ORDER_DESCRIPTION_REQUIRED", "La sucursal exige una descripción para la OT.");
+      const extra = orderExtra(rules, input.extra);
       // Valores por defecto de la web: tipo de negocio "servicio", segmento predeterminado e impuestos predeterminados de la sucursal.
       const branch = new URLSearchParams({ companyBranchId: String(input.companyBranchId) });
       const [businessTypes, segments, taxes] = await Promise.all([
@@ -132,12 +189,18 @@ export function registerOrderRoutes(router: Router, upstream: Upstream, ledger: 
           branchesCustomer: list(raw.branchesCustomer).flatMap((item) => { const value = positive(asRecord(item).value ?? asRecord(item).id); return value === null ? [] : [{ value: String(value), label: text(asRecord(item).label) ?? "", isNew: true }]; }),
           contacts: list(raw.contacts).flatMap((item) => { const value = positive(asRecord(item).id); return value === null ? [] : [{ id: value, isSelected: true, isNew: false }]; }),
           currencyId: 1, placeId: 1, priority: input.priority, daysOfValidity: 15, closingProbability: 0, discountPercentage: 0,
-          segmentId: positive(segment?.value), segmentMarginHH: Number(segment?.marginHH) || 0, serviceDate: new Date().toISOString().slice(0, 10),
-          salesExecutiveId: actor.user.workerId, description: input.description ?? "", internalNotes: "", hasContractor: false, contractors: []
+          segmentId: positive(segment?.value), segmentMarginHH: Number(segment?.marginHH) || 0, serviceDate: localDay(actor.user.system?.timezone),
+          salesExecutiveId: actor.user.workerId, description: input.description ?? "", internalNotes: input.extra?.internalNotes ?? "", hasContractor: false, contractors: [],
+          ...extra
         },
         // Trabajos existentes sin precios: solo se unen (no se copian ni se modifican).
         workSection: { works: workIds.map((workId) => ({ existingWorkId: workId, isNew: true })), details: { ...details, showWorkHoursInPdf: true }, taxes: defaultTaxes },
-        transportSection: { transports: [], details, taxes: [] }
+        transportSection: { transports: [], details, taxes: [] },
+        // El backend lee la sección de arriendos al crear (aunque venga vacía), igual que la envía la web.
+        rentalEquipmentSection: { rentalEquipments: [], taxes: [], details: { fuelPriceRental: 0, fuelPriceRentalIso: "CLP", startDateRental: new Date().toISOString(),
+          endDateRental: new Date().toISOString(), genericDescription: "", showGenericDescription: false,
+          discountPercentage: 0, assignedBudget: 0, freeConsumption: true, blockConsumption: false, showFuelInPdf: false, showOperatorInPdf: false, showGpsInPdf: false,
+          showOnlyEquipmentTypeInPdf: false, showItemDescriptionInPdf: true } }
       } }));
       const orderId = positive(created.id);
       if (orderId === null) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
@@ -159,7 +222,9 @@ export function registerOrderRoutes(router: Router, upstream: Upstream, ledger: 
     const { token } = await workshopActor(upstream, req, input.companyBranchId);
     const raw = await oneAtATime(entryId, async () => {
       const { detail } = await entryContext(upstream, token, input.companyBranchId, entryId);
-      ownOrder(detail, orderId);
+      // Igual que la web: se agregan trabajos mientras la OT se pueda editar (aunque ya esté enviada a comercial).
+      const order = await loadOrderDetail(upstream, token, input.companyBranchId, entryId, orderId);
+      if (!order.editable) throw new GatewayError(409, "WORKSHOP_ORDER_LOCKED", `${order.lockedReason ?? "La OT no se puede editar."} Los cambios se hacen desde la web.`);
       const workIds = looseWorks(detail, input.workIds);
       try { return await upstream.request("/works/link-negotiation", { token, method: "PATCH", json: { negotiationId: orderId, workIds } }); }
       catch (error) {
@@ -172,12 +237,19 @@ export function registerOrderRoutes(router: Router, upstream: Upstream, ledger: 
   });
 
   router.post("/entries/:entryId/orders/:orderId/send", async (req, res) => {
-    const { entryId, orderId } = orderIds.parse(req.params);
+    const { entryId, orderId } = orderRef.parse(req.params);
     emptySchema.parse(req.query);
     const input = workshopOrderActionInputSchema.parse(req.body);
     const { token } = await workshopActor(upstream, req, input.companyBranchId);
-    const { detail } = await entryContext(upstream, token, input.companyBranchId, entryId);
-    ownOrder(detail, orderId);
+    if (entryId === NO_ENTRY) {
+      // OT abierta desde Mi jornada: se revisa contra la propia OT de la sucursal.
+      const current = await loadOrderDetail(upstream, token, input.companyBranchId, NO_ENTRY, orderId);
+      if (current.kind !== "workOrder") throw new GatewayError(409, "WORKSHOP_ORDER_NOT_WORK_ORDER", "Las cotizaciones se gestionan en comercial.");
+      if (current.sentToCommercial) throw new GatewayError(409, "WORK_ORDER_ALREADY_SENT_TO_COMMERCIAL", "Esta OT ya fue enviada a comercial.");
+    } else {
+      const { detail } = await entryContext(upstream, token, input.companyBranchId, entryId);
+      ownOrder(detail, orderId);
+    }
     await sendToCommercial(upstream, token, orderId);
     res.json(workshopOrderSentSchema.parse({ id: orderId }));
   });

@@ -7,15 +7,24 @@ import type { WorkshopEquipmentQuery, WorkshopIntakeInput, WorkshopIntakePort } 
 import type { InspectionAnswerInput, InspectionDamageInput, InspectionKind, WorkshopInspectionPort } from "../domain/workshopInspection";
 import type { WorkshopReceptionInput, WorkshopReceptionPort } from "../domain/workshopReception";
 import type { WorkshopWorksPort } from "../domain/workshopWorks";
-import type { WorkshopOrderInput, WorkshopOrdersPort } from "../domain/workshopOrders";
+import type { LocalPhoto } from "../domain/models";
+import type { WorkshopOrderGeneralInput, WorkshopOrderInput, WorkshopOrderItemInput, WorkshopOrderItemSection, WorkshopOrdersPort } from "../domain/workshopOrders";
 import type { WorkshopDeliveryInput, WorkshopDeliveryPort } from "../domain/workshopDelivery";
 import type { WorkshopManagePort } from "../domain/workshopManage";
-import type { WorkshopCustomersPort, WorkshopNewBranch, WorkshopNewContact, WorkshopNewCustomer } from "../domain/workshopCustomers";
+import type { WorkshopCustomersPort, WorkshopNewBranch, WorkshopNewContact, WorkshopNewCustomer, WorkshopNewEquipment } from "../domain/workshopCustomers";
 
 /**
  * Tablero del taller (naves e ingresos), solo lectura. Recuerda el último taller elegido por usuario y sucursal,
  * y se actualiza cada minuto y al volver a la app.
  */
+export type WorkshopBoardLayout = "extended" | "compact";
+
+/** Función del puerto ligada a su objeto: el repositorio HTTP es una clase y sus métodos usan `this`. */
+function bound<T extends object, K extends keyof T>(port: T | null | undefined, name: K): T[K] | undefined {
+  const method = port?.[name];
+  return typeof method === "function" ? (method as (...args: unknown[]) => unknown).bind(port) as T[K] : undefined;
+}
+
 export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort> | null, userId: number, branchId: number, storageKey: string, sessionIdentity: string, enabled: boolean) {
   const key = `workshop-board:${storageKey}:${userId}:${branchId}`;
   const [workshops, setWorkshops] = useState<WorkshopOption[] | null>(null);
@@ -92,6 +101,19 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     });
   }
 
+  // Vista de las naves (extendida o compacta), guardada en el teléfono por usuario.
+  const [layout, setLayoutState] = useState<WorkshopBoardLayout>("extended");
+  const layoutKey = `workshop-board-layout:${storageKey}:${userId}`;
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(layoutKey).then((raw) => { if (active && (raw === "compact" || raw === "extended")) setLayoutState(raw); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [layoutKey]);
+  function setLayout(next: WorkshopBoardLayout) {
+    setLayoutState(next);
+    void AsyncStorage.setItem(layoutKey, next).catch(() => undefined);
+  }
+
   function selectWorkshop(id: number) {
     if (id === workshopId) return;
     setBoard(null);
@@ -107,14 +129,14 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
 
   /** Acciones del formulario de ingreso con la sucursal del tablero. Solo con conexión. */
   function need<K extends keyof WorkshopIntakePort>(name: K): NonNullable<Partial<WorkshopIntakePort>[K]> {
-    const action = port?.[name];
+    const action = bound(port, name);
     if (!enabled || !action || branchId <= 0) throw new Error("No se puede usar el ingreso en este momento. Revisa tu conexión.");
     return action as NonNullable<Partial<WorkshopIntakePort>[K]>;
   }
   const intake = {
     branchId,
     draftKey: `workshop-intake-draft:${storageKey}:${userId}:${branchId}`,
-    customers: () => need("workshopCustomers")(branchId),
+    customers: (search: string, page: number) => need("workshopCustomers")(branchId, search, page),
     customer: (customerId: number) => need("workshopCustomer")(branchId, customerId),
     equipment: (query: Omit<WorkshopEquipmentQuery, "companyBranchId">) => need("workshopEquipment")({ ...query, companyBranchId: branchId }),
     areas: (targetWorkshopId: number) => need("workshopAreas")(branchId, targetWorkshopId),
@@ -125,18 +147,20 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     identificationTypes: () => needCustomers("workshopIdentificationTypes")(branchId),
     createCustomer: (input: Omit<WorkshopNewCustomer, "companyBranchId">) => needCustomers("createWorkshopCustomer")({ ...input, companyBranchId: branchId }),
     createBranch: (customerId: number, input: Omit<WorkshopNewBranch, "companyBranchId">) => needCustomers("createWorkshopCustomerBranch")(customerId, { ...input, companyBranchId: branchId }),
-    createContact: (customerId: number, input: Omit<WorkshopNewContact, "companyBranchId">) => needCustomers("createWorkshopCustomerContact")(customerId, { ...input, companyBranchId: branchId })
+    createContact: (customerId: number, input: Omit<WorkshopNewContact, "companyBranchId">) => needCustomers("createWorkshopCustomerContact")(customerId, { ...input, companyBranchId: branchId }),
+    equipmentMasters: () => needCustomers("workshopEquipmentMasters")(branchId),
+    createEquipment: (customerId: number, input: Omit<WorkshopNewEquipment, "companyBranchId">) => needCustomers("createWorkshopCustomerEquipment")(customerId, { ...input, companyBranchId: branchId })
   };
   /** Crear clientes, sucursales y contactos desde el ingreso. Solo con conexión. */
   function needCustomers<K extends keyof WorkshopCustomersPort>(name: K): NonNullable<Partial<WorkshopCustomersPort>[K]> {
-    const action = port?.[name];
+    const action = bound(port, name);
     if (!enabled || !action || branchId <= 0) throw new Error("No se puede crear en este momento. Revisa tu conexión.");
     return action as NonNullable<Partial<WorkshopCustomersPort>[K]>;
   }
 
   /** Inspección de ingreso o entrega con la sucursal del tablero. Solo con conexión. */
   function needInspection<K extends keyof WorkshopInspectionPort>(name: K): NonNullable<Partial<WorkshopInspectionPort>[K]> {
-    const action = port?.[name];
+    const action = bound(port, name);
     if (!enabled || !action || branchId <= 0) throw new Error("No se puede usar la inspección en este momento. Revisa tu conexión.");
     return action as NonNullable<Partial<WorkshopInspectionPort>[K]>;
   }
@@ -168,7 +192,7 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
 
   /** Recepción y firma con la sucursal del tablero. Solo con conexión. */
   function needReception<K extends keyof WorkshopReceptionPort>(name: K): NonNullable<Partial<WorkshopReceptionPort>[K]> {
-    const action = port?.[name];
+    const action = bound(port, name);
     if (!enabled || !action || branchId <= 0) throw new Error("No se puede firmar en este momento. Revisa tu conexión.");
     return action as NonNullable<Partial<WorkshopReceptionPort>[K]>;
   }
@@ -181,7 +205,7 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
 
   /** Trabajos del ingreso con la sucursal del tablero. Solo con conexión. */
   function needWorks<K extends keyof WorkshopWorksPort>(name: K): NonNullable<Partial<WorkshopWorksPort>[K]> {
-    const action = port?.[name];
+    const action = bound(port, name);
     if (!enabled || !action || branchId <= 0) throw new Error("No se pueden gestionar trabajos en este momento. Revisa tu conexión.");
     return action as NonNullable<Partial<WorkshopWorksPort>[K]>;
   }
@@ -193,21 +217,33 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
 
   /** Órdenes de trabajo del ingreso con la sucursal del tablero. Solo con conexión. */
   function needOrders<K extends keyof WorkshopOrdersPort>(name: K): NonNullable<Partial<WorkshopOrdersPort>[K]> {
-    const action = port?.[name];
+    const action = bound(port, name);
     if (!enabled || !action || branchId <= 0) throw new Error("No se pueden gestionar órdenes de trabajo en este momento. Revisa tu conexión.");
     return action as NonNullable<Partial<WorkshopOrdersPort>[K]>;
   }
   const orders = {
     rules: (entryId: number) => needOrders("workshopOrderRules")(entryId, branchId),
+    detail: (entryId: number, orderId: number) => needOrders("workshopOrderDetail")(entryId, orderId, branchId),
+    updateGeneral: (entryId: number, orderId: number, input: Omit<WorkshopOrderGeneralInput, "companyBranchId">) =>
+      needOrders("updateOrderGeneral")(entryId, orderId, { ...input, companyBranchId: branchId }),
+    products: (search: string, page: number) => needOrders("workshopProducts")(branchId, search, page),
+    transports: () => needOrders("workshopTransports")(branchId),
+    addItem: (entryId: number, orderId: number, input: Omit<WorkshopOrderItemInput, "companyBranchId">) => needOrders("addOrderItem")(entryId, orderId, { ...input, companyBranchId: branchId }),
+    updateItem: (entryId: number, orderId: number, section: WorkshopOrderItemSection, rowId: number, quantity: number, note?: string | null) =>
+      needOrders("updateOrderItem")(entryId, orderId, section, rowId, { companyBranchId: branchId, quantity, ...(note !== undefined ? { note } : {}) }),
+    removeItem: (entryId: number, orderId: number, section: WorkshopOrderItemSection | "works", rowId: number) => needOrders("removeOrderItem")(entryId, orderId, section, rowId, branchId),
     create: (entryId: number, input: Omit<WorkshopOrderInput, "companyBranchId">) => needOrders("createWorkshopOrder")(entryId, { ...input, companyBranchId: branchId }),
     addWorks: (entryId: number, orderId: number, workIds: number[]) => needOrders("addWorksToOrder")(entryId, orderId, { companyBranchId: branchId, workIds }),
     send: (entryId: number, orderId: number) => needOrders("sendOrderToCommercial")(entryId, orderId, branchId),
-    remove: (entryId: number, orderId: number) => needOrders("deleteWorkshopOrder")(entryId, orderId, branchId)
+    remove: (entryId: number, orderId: number) => needOrders("deleteWorkshopOrder")(entryId, orderId, branchId),
+    files: (entryId: number, orderId: number) => needOrders("workshopOrderFiles")(entryId, orderId, branchId),
+    uploadFiles: (entryId: number, orderId: number, files: LocalPhoto[]) => needOrders("uploadWorkshopOrderFiles")(entryId, orderId, branchId, files),
+    deleteFile: (entryId: number, orderId: number, fileId: string) => needOrders("deleteWorkshopOrderFile")(entryId, orderId, branchId, fileId)
   };
 
   const delivery = {
     deliver: (entryId: number, input: Omit<WorkshopDeliveryInput, "companyBranchId">) => {
-      const action = port?.deliverWorkshopEntry;
+      const action = bound(port, "deliverWorkshopEntry");
       if (!enabled || !action || branchId <= 0) throw new Error("No se puede entregar en este momento. Revisa tu conexión.");
       return action(entryId, { ...input, companyBranchId: branchId });
     }
@@ -215,7 +251,7 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
 
   /** Mover de nave, fecha estimada y estado, con la sucursal del tablero. Solo con conexión. */
   function needManage<K extends keyof WorkshopManagePort>(name: K): NonNullable<Partial<WorkshopManagePort>[K]> {
-    const action = port?.[name];
+    const action = bound(port, name);
     if (!enabled || !action || branchId <= 0) throw new Error("No se puede modificar el ingreso en este momento. Revisa tu conexión.");
     return action as NonNullable<Partial<WorkshopManagePort>[K]>;
   }
@@ -228,5 +264,5 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     status: (entryId: number, statusId: number, subStatusId: number | null) => needManage("changeEntryStatus")(entryId, { companyBranchId: branchId, statusId, subStatusId })
   };
 
-  return { workshops, workshopId, board, loading, error, refresh: () => loadBoard(), selectWorkshop, pinned, togglePin, loadEntry, intake, inspection, reception, works, orders, delivery, manage };
+  return { workshops, workshopId, board, loading, error, refresh: () => loadBoard(), selectWorkshop, pinned, togglePin, layout, setLayout, loadEntry, intake, inspection, reception, works, orders, delivery, manage };
 }

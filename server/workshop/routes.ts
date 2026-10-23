@@ -4,12 +4,14 @@ import { workshopBoardSchema, workshopListSchema, type WorkshopArea, type Worksh
 import { emptySchema } from "../validation";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
-import { asRecord, clip, count, isoDate, list, positive, text, workshopActor, WorkshopRequestLedger } from "./support";
+import { mobileAppConfigSchema, type MobileAppPermission } from "../../src/domain/mobileAppConfig";
+import { asRecord, clip, count, isoDate, list, mobileAppConfig, positive, requireAppPermissionFor, text, workshopActor, WorkshopRequestLedger } from "./support";
 import { registerIntakeRoutes } from "./intake";
 import { registerInspectionRoutes } from "./inspection";
 import { registerReceptionRoutes } from "./reception";
 import { registerWorkRoutes } from "./works";
 import { registerOrderRoutes } from "./orders";
+import { registerOrderFileRoutes } from "./orderFiles";
 import { registerDeliveryRoutes } from "./delivery";
 import { registerManageRoutes } from "./manage";
 import { registerCustomerRoutes } from "./customers";
@@ -58,15 +60,52 @@ function toArea(raw: unknown): WorkshopArea | null {
   };
 }
 
+/**
+ * Permiso de la app («Permisos de la app móvil» de la sucursal) que exige cada acción del taller. Los ítems nuevos de
+ * una OT dependen del tipo y se revisan en su ruta. Las lecturas solo exigen que el Taller esté habilitado.
+ */
+const ROUTE_PERMISSIONS: Array<[string, RegExp, MobileAppPermission]> = [
+  ["POST", /^\/entries$/, "workshopEntries"], ["PUT", /^\/entries\/\d+$/, "workshopEntries"], ["POST", /^\/entries\/\d+\/image$/, "workshopEntries"],
+  ["POST", /^\/customers(?:\/\d+\/(?:branches|contacts|equipment))?$/, "workshopCustomers"],
+  ["*", /^\/entries\/\d+\/inspections(?:\/|$)/, "workshopInspections"],
+  ["POST", /^\/entries\/\d+\/reception$/, "workshopReception"],
+  ["POST", /^\/entries\/\d+\/delivery$/, "workshopDelivery"],
+  ["POST", /^\/entries\/\d+\/(?:move|estimated-delivery|status)$/, "workshopManage"],
+  ["POST", /^\/entries\/\d+\/works\/link$/, "workshopWorks"],
+  ["POST", /^\/entries\/\d+\/orders$/, "ordersCreate"],
+  ["PUT", /^\/entries\/\d+\/orders\/\d+\/general$/, "ordersGeneral"],
+  ["POST", /^\/entries\/\d+\/orders\/\d+\/works$/, "ordersWorks"],
+  ["POST", /^\/entries\/\d+\/orders\/\d+\/send$/, "ordersSend"],
+  ["DELETE", /^\/entries\/\d+\/orders\/\d+$/, "ordersDelete"],
+  ["*", /^\/entries\/\d+\/orders\/\d+\/items\/works\/\d+$/, "ordersWorks"],
+  ["*", /^\/entries\/\d+\/orders\/\d+\/items\/products\/\d+$/, "ordersProducts"],
+  ["*", /^\/entries\/\d+\/orders\/\d+\/items\/transports\/\d+$/, "ordersTransports"],
+  ["*", /^\/entries\/\d+\/orders\/\d+\/items\/others\/\d+$/, "ordersOthers"]
+];
+
 /** Taller (naves e ingresos) para la app, con la sesión del usuario. */
 export function createWorkshopRouter(upstream: Upstream): Router {
   const router = Router();
   const ledger = new WorkshopRequestLedger();
+  router.use((req, _res, next) => {
+    const isRead = req.method === "GET" || req.method === "HEAD";
+    const match = isRead ? null : ROUTE_PERMISSIONS.find(([method, pattern]) => (method === "*" || method === req.method) && pattern.test(req.path));
+    // La configuración se puede leer siempre (la app la necesita para ocultar botones).
+    if (req.path !== "/app-config") requireAppPermissionFor(req, match?.[2] ?? "workshop");
+    next();
+  });
+  router.get("/app-config", async (req, res) => {
+    const { companyBranchId } = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict().parse(req.query);
+    emptySchema.parse(req.body ?? {});
+    const { token } = await workshopActor(upstream, req, companyBranchId);
+    res.json(mobileAppConfigSchema.parse(await mobileAppConfig(upstream, token, companyBranchId)));
+  });
   registerIntakeRoutes(router, upstream, ledger);
   registerInspectionRoutes(router, upstream);
   registerReceptionRoutes(router, upstream, ledger);
   registerWorkRoutes(router, upstream);
   registerOrderRoutes(router, upstream, ledger);
+  registerOrderFileRoutes(router, upstream);
   registerDeliveryRoutes(router, upstream, ledger);
   registerManageRoutes(router, upstream);
   registerCustomerRoutes(router, upstream, ledger);

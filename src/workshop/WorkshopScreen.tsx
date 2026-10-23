@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import type { Assignments as AssignmentData, AssignmentGroup, AssignmentWork, DateRange, StatusInput, WorkOpenOptions } from "../domain/models";
+import type { OfflineSnapshot } from "../domain/offline";
+import { assignmentWorkQueryRange } from "../domain/assignmentSchedule";
+import { isFinished } from "../domain/format";
+import { AssignmentWorkCard } from "../screens/orders/AssignmentWorkCard";
 import { StyleSheet, View } from "react-native";
 import type { WorkshopArea, WorkshopEntry } from "../domain/workshopBoard";
 import type { InspectionKind } from "../domain/workshopInspection";
@@ -10,6 +15,7 @@ import { WorkshopIntakeScreen } from "./intake/WorkshopIntakeScreen";
 import { WorkshopInspectionScreen } from "./inspection/WorkshopInspectionScreen";
 import { WorkshopReceptionScreen } from "./reception/WorkshopReceptionScreen";
 import { WorkshopDeliveryScreen } from "./delivery/WorkshopDeliveryScreen";
+import { WorkshopOrderScreen, type Section } from "./order/WorkshopOrderScreen";
 
 type WorkshopModel = ReturnType<typeof useWorkshopBoard>;
 interface EntryRef { entry: WorkshopEntry; area: WorkshopArea }
@@ -19,7 +25,43 @@ type Opened =
   | { kind: "inspection"; ref: EntryRef; inspection: InspectionKind; next: "reception" | "delivery" | null }
   | { kind: "reception"; ref: EntryRef }
   | { kind: "delivery"; ref: EntryRef }
-  | { kind: "create-work"; ref: EntryRef; code: string; equipmentLabel: string; creating?: "work" | "maintenance" };
+  | { kind: "create-work"; ref: EntryRef; code: string; equipmentLabel: string; creating?: "work" | "maintenance"; order?: { orderId: number; entryCode: string } }
+  | { kind: "order"; ref: EntryRef; orderId: number; entryCode: string; notice?: string };
+
+/** Última pestaña usada en cada ingreso y OT: al volver (de un trabajo, al guardar…) se abre en la misma. Dura mientras la app está abierta. */
+const rememberedTabs = new Map<string, string>();
+
+export interface WorkshopAssignments {
+  data: AssignmentData | null; range: DateRange; busy: boolean; workerId: number | null | undefined; companyBranchId: number | null;
+  offline?: OfflineSnapshot | null;
+  openWork: (group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions) => void;
+  onWorkStatus: (group: AssignmentGroup, work: AssignmentWork, input: StatusInput) => Promise<void>;
+  /** Vuelve a cargar Mi jornada (después de crear o unir trabajos desde el Taller). */
+  refresh?: () => void;
+}
+
+/** Tarjeta de Mi jornada del trabajo, si está en los días cargados; si no, null y la OT usa su tarjeta simple. */
+/** Avance de los trabajos de una OT según Mi jornada; sin dato si alguno no está ahí. */
+function assignmentProgress(assignments: WorkshopAssignments | undefined, workIds: number[]): { completed: number; total: number } | null {
+  const works = assignments?.data?.groups.flatMap((group) => group.works) ?? [];
+  const found = workIds.map((workId) => works.find((work) => work.id === String(workId)));
+  if (workIds.length === 0 || found.some((work) => !work)) return null;
+  return { completed: found.filter((work) => work && isFinished(work)).length, total: workIds.length };
+}
+
+function assignmentCard(assignments: WorkshopAssignments | undefined, workId: number): ReactNode | null {
+  const data = assignments?.data;
+  if (!assignments || !data) return null;
+  for (const group of data.groups) {
+    const work = group.works.find((item) => item.id === String(workId));
+    if (!work) continue;
+    return <AssignmentWorkCard key={JSON.stringify([group.id, work.id])} group={group} work={work} currentWorkerId={assignments.workerId}
+      queryDate={assignmentWorkQueryRange(work, assignments.range).startDate} companyBranchId={assignments.companyBranchId ?? undefined}
+      onOpenWork={assignments.openWork} onWorkStatus={assignments.onWorkStatus} busy={assignments.busy} generatedAt={data.generatedAt}
+      offline={assignments.offline} online={assignments.offline?.online ?? true} />;
+  }
+  return null;
+}
 
 /** Formulario normal de creación de trabajos de la app, con lo que el Taller necesita para usarlo. */
 export type WorkshopCreation = Pick<CreationScreenProps, "user" | "tenant" | "companyBranchId" | "initialDate" | "mode" | "storageKey" | "offline" | "busy" | "onLoadOptions" | "onSubmit">;
@@ -37,13 +79,19 @@ const placeholderArea = (areaId: number | null, title: string | null): WorkshopA
  * ficha normal de un trabajo (cronómetro, archivos…) para volver al mismo ingreso. Avisa a la app cuándo hay algo
  * abierto para que el botón atrás del teléfono lo cierre y no cambie de pestaña.
  */
-export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation, memory, memoryKey, query }: {
+export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation, memory, memoryKey, query, assignments, onLocationHistory, mode = "live", detailQuery = "", onViewChange }: {
+  /** Búsqueda del encabezado dentro del ingreso o la OT abierta. */
+  detailQuery?: string; onViewChange?: (kind: string | null) => void;
+  onLocationHistory?: () => void; mode?: "live" | "demo";
+  /** Datos de Mi jornada: los trabajos de una OT que estén ahí se muestran con la misma tarjeta (iniciar, entregar, archivos…). */
+  assignments?: WorkshopAssignments;
   workshop: WorkshopModel; onSectionChange?: (open: boolean) => void; onOpenWork: (workId: number) => Promise<string | null>;
   creation?: WorkshopCreation; memory: MutableRefObject<{ key: string; view: unknown } | null>; memoryKey: string; query?: string;
 }) {
   const [view, setView] = useState<Opened | null>(() => memory.current?.key === memoryKey ? memory.current.view as Opened | null : null);
   useEffect(() => { memory.current = { key: memoryKey, view }; }, [view, memoryKey]);
   useEffect(() => { onSectionChange?.(view !== null); }, [view !== null]);
+  useEffect(() => { onViewChange?.(view?.kind ?? null); }, [view?.kind]);
   useEffect(() => () => { onSectionChange?.(false); }, []);
   // Otro taller: lo abierto ya no corresponde (no al volver de la ficha de un trabajo).
   const workshopId = useRef(workshop.workshopId);
@@ -59,7 +107,7 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
     <View style={[styles.screen, view !== null && styles.hidden]}>
       <WorkshopBoardScreen workshop={workshop} onOpenEntry={(entry, area) => setView({ kind: "entry", ref: { entry, area }, revision: 0 })} onNewEntry={newEntry} query={query} />
     </View>
-    {view?.kind === "entry" ? <WorkshopEntryScreen key={`${view.ref.entry.id}:${view.revision}`} entry={view.ref.entry} area={view.ref.area} load={workshop.loadEntry}
+    {view?.kind === "entry" ? <WorkshopEntryScreen query={detailQuery} key={`${view.ref.entry.id}:${view.revision}`} entry={view.ref.entry} area={view.ref.area} load={workshop.loadEntry}
       initialNotice={view.notice}
       onBack={() => { setView(null); void workshop.refresh(); }}
       onEditIntake={(areaId, areaTitle, pending) => setView({ kind: "intake", entryId: view.ref.entry.id, areaId, areaTitle, back: view.ref, thenInspection: pending })}
@@ -67,27 +115,63 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
       onSign={() => setView({ kind: "reception", ref: view.ref })} works={workshop.works} orders={workshop.orders} onOpenWork={onOpenWork}
       manage={workshop.manage} workshopId={workshop.workshopId}
       onDeliver={() => setView({ kind: "delivery", ref: view.ref })}
+      workCard={(workId) => assignmentCard(assignments, workId)}
+      rememberedTab={(entryId) => rememberedTabs.get(`entry:${entryId}`)} onTabChange={(entryId, tab) => rememberedTabs.set(`entry:${entryId}`, tab)}
+      onOpenOrder={(orderId, entryCode) => setView({ kind: "order", ref: view.ref, orderId, entryCode })}
       onAddWork={creation ? (code, equipmentLabel) => setView({ kind: "create-work", ref: view.ref, code, equipmentLabel }) : undefined}
       onAddMaintenance={creation ? (code, equipmentLabel) => setView({ kind: "create-work", ref: view.ref, code, equipmentLabel, creating: "maintenance" }) : undefined} /> : null}
     {view?.kind === "create-work" && creation ? <CreationScreen kind={view.creating ?? "work"} {...creation} data={null} parentEntry={{ id: view.ref.entry.id, code: view.code, equipmentLabel: view.equipmentLabel }}
-      onBack={() => showEntry(view.ref)}
+      onBack={() => view.order ? setView({ kind: "order", ref: view.ref, ...view.order }) : showEntry(view.ref)}
       onCreated={async (result) => {
         workshop.works.noteCreated(view.ref.entry.id, result.workId);
+        assignments?.refresh?.();
         const ref = view.ref;
+        if (view.order) {
+          // Trabajo nuevo desde la OT: se une a la OT y se vuelve a su detalle.
+          const order = view.order;
+          const notice = await workshop.orders.addWorks(ref.entry.id, order.orderId, [result.workId]).then(() => undefined,
+            (failure: unknown) => `El trabajo se creó en el ingreso, pero no se pudo unir a la OT: ${failure instanceof Error ? failure.message : "revisa tu conexión"}. Únelo con «Unir trabajos sueltos».`);
+          setView({ kind: "order", ref, ...order, notice });
+          return;
+        }
         showEntry(ref);
         // Igual que al crear desde Mi jornada: se abre la ficha del trabajo recién creado. Si no se puede, se avisa en la ficha.
         const problem = await onOpenWork(result.workId);
         if (problem) setView({ kind: "entry", ref, revision: Date.now(), notice: `${view.creating === "maintenance" ? "El mantenimiento" : "El trabajo"} se creó, pero no se pudo abrir: ${problem}` });
       }} /> : null}
-    {view?.kind === "intake" ? <WorkshopIntakeScreen key={view.entryId ?? "new"} intake={workshop.intake} workshopId={workshop.workshopId} entryId={view.entryId}
+    {view?.kind === "order" ? <WorkshopOrderScreen query={detailQuery} key={view.orderId} initialSection={rememberedTabs.get(`order:${view.orderId}`) as Section | undefined}
+      onSectionChange={(section) => rememberedTabs.set(`order:${view.orderId}`, section)} workCard={(workId) => assignmentCard(assignments, workId)} entryCode={view.entryCode} load={() => workshop.orders.detail(view.ref.entry.id, view.orderId)}
+      onClose={() => showEntry(view.ref)} onOpenWork={(workId) => {
+        // Igual que desde la ficha: la ficha normal del trabajo; si no se puede abrir, se avisa en la OT.
+        void onOpenWork(workId).then((problem) => { if (problem) setView({ ...view, notice: problem }); });
+      }} notice={view.notice} onSaveGeneral={(input) => workshop.orders.updateGeneral(view.ref.entry.id, view.orderId, input)}
+      onNewWork={creation && !view.ref.entry.isInternalEntry ? (equipmentLabel) => setView({ kind: "create-work", ref: view.ref, code: view.entryCode, equipmentLabel,
+        order: { orderId: view.orderId, entryCode: view.entryCode } }) : undefined}
+      looseWorks={view.ref.entry.isInternalEntry ? undefined : () => workshop.loadEntry(view.ref.entry.id).then((entry) => entry.works.items.filter((work) => work.loose))}
+      onLinkWorks={(workIds) => workshop.orders.addWorks(view.ref.entry.id, view.orderId, workIds).then((result) => { assignments?.refresh?.(); return result.linked; })}
+      items={{
+        products: workshop.orders.products, transports: workshop.orders.transports,
+        add: (input) => workshop.orders.addItem(view.ref.entry.id, view.orderId, input),
+        update: (section, rowId, quantity, note) => workshop.orders.updateItem(view.ref.entry.id, view.orderId, section, rowId, quantity, note),
+        remove: (section, rowId) => workshop.orders.removeItem(view.ref.entry.id, view.orderId, section, rowId)
+      }}
+      files={{
+        load: () => workshop.orders.files(view.ref.entry.id, view.orderId), upload: (files) => workshop.orders.uploadFiles(view.ref.entry.id, view.orderId, files),
+        remove: (fileId) => workshop.orders.deleteFile(view.ref.entry.id, view.orderId, fileId), mode, scopeKey: memoryKey
+      }}
+      onLocationHistory={onLocationHistory} workProgress={(workIds) => assignmentProgress(assignments, workIds)}
+      onSend={view.ref.entry.isInternalEntry ? undefined : () => workshop.orders.send(view.ref.entry.id, view.orderId).then(() => { assignments?.refresh?.(); })} /> : null}
+    {view?.kind === "intake" ?<WorkshopIntakeScreen key={view.entryId ?? "new"} intake={workshop.intake} workshopId={workshop.workshopId} entryId={view.entryId}
       areaId={view.areaId} areaTitle={view.areaTitle}
       onClose={() => view.back ? showEntry(view.back) : setView(null)}
-      onSaved={(entryId) => {
+      onSaved={(entryId, next) => {
         const ref = view.back ?? { entry: placeholderEntry(entryId), area: placeholderArea(view.areaId, view.areaTitle) };
         void workshop.refresh();
-        // Igual que la web: después de los datos sigue la inspección de ingreso.
-        if (view.thenInspection) setView({ kind: "inspection", ref, inspection: "entry", next: "reception" }); else showEntry(ref);
-      }} /> : null}
+        // Igual que la web: después de los datos sigue la inspección de ingreso y, si falta, la firma.
+        if (next) setView({ kind: "inspection", ref, inspection: "entry", next: view.thenInspection ? "reception" : null }); else showEntry(ref);
+      }}
+      onContinue={view.back ? (entryId) => setView({ kind: "inspection", ref: view.back ?? { entry: placeholderEntry(entryId), area: placeholderArea(view.areaId, view.areaTitle) },
+        inspection: "entry", next: view.thenInspection ? "reception" : null }) : undefined} /> : null}
     {view?.kind === "inspection" ? <WorkshopInspectionScreen key={`${view.ref.entry.id}:${view.inspection}`} api={workshop.inspection} entryId={view.ref.entry.id} kind={view.inspection}
       onClose={() => view.next === "delivery" ? setView({ kind: "delivery", ref: view.ref }) : showEntry(view.ref)}
       onDone={() => view.next === "reception" ? setView({ kind: "reception", ref: view.ref }) : view.next === "delivery" ? setView({ kind: "delivery", ref: view.ref }) : showEntry(view.ref)} /> : null}

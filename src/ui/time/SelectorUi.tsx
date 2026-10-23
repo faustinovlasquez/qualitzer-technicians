@@ -13,15 +13,20 @@ export interface SelectorPresentation {
   containerStyle?: StyleProp<ViewStyle>;
 }
 
-export function SelectorTrigger({ label, value, icon, hint, error, containerStyle, disabled, onPress }: SelectorPresentation & {
+export function SelectorTrigger({ label, value, detail, icon, hint, error, containerStyle, disabled, onPress }: SelectorPresentation & {
   value: string; icon: IconName; disabled: boolean; onPress(): void;
+  /** Segunda línea opcional (por ejemplo, el RUT del cliente); con ella el valor se recorta a una línea. */
+  detail?: string | null;
 }) {
   return <View style={[timeStyles.field, containerStyle]}>
     <Text style={timeStyles.label}>{label}</Text>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${value || "Sin seleccionar"}`}
+    <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${value || "Sin seleccionar"}${detail ? `, ${detail}` : ""}`}
       accessibilityHint={error ?? hint ?? "Abre el selector, sin escribir"} accessibilityState={{ disabled }} disabled={disabled}
       onPress={onPress} style={[timeStyles.trigger, disabled && timeStyles.disabled, Boolean(error) && timeStyles.invalid]}>
-      <Text style={timeStyles.value}>{value || "Seleccionar"}</Text>
+      {detail ? <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={timeStyles.value} numberOfLines={1}>{value || "Seleccionar"}</Text>
+        <Text style={{ fontSize: 12, color: palette.textSecondary }} numberOfLines={1}>{detail}</Text>
+      </View> : <Text style={timeStyles.value}>{value || "Seleccionar"}</Text>}
       <Ionicons name={icon} size={22} color={palette.primary} accessible={false} />
     </Pressable>
     {error ? <Text accessibilityRole="alert" style={timeStyles.error}>{error}</Text> : hint ? <Text style={timeStyles.hint}>{hint}</Text> : null}

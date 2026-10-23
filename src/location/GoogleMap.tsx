@@ -81,7 +81,7 @@ export function GoogleMap(props: GoogleMapProps) {
   if (!googlePlaces.available()) return <GoogleMapConfiguration configuration={googlePlaces.configuration?.() ?? null} loaded={false} />;
   return <View style={styles.container}>
     {props.editable ? <>
-      <View style={styles.search}><View style={{ flex: 1 }}><Field label="Buscar dirección en Google" value={query} maxLength={200} editable={!props.disabled} onChangeText={value => { generation.current++; setBusy(false); setQuery(value); setSuggestions([]); }} onSubmitEditing={() => void search()} returnKeyType="search" /></View>
+      <View style={styles.search}><View style={{ flex: 1 }}><Field label="Buscar dirección en Google" clearable value={query} maxLength={200} editable={!props.disabled} onChangeText={value => { generation.current++; setBusy(false); setQuery(value); setSuggestions([]); }} onSubmitEditing={() => void search()} returnKeyType="search" /></View>
         <IconButton name="search-outline" label="Buscar dirección" disabled={busy || props.disabled || query.trim().length < 3} onPress={() => void search()} /></View>
       {suggestions.map(item => <Button key={item.id} title={item.label} icon="location-outline" variant="secondary" disabled={busy || props.disabled} onPress={() => void selectAddress(item.id)} />)}
       {suggestions.length > 0 ? <BodyText>Google Maps</BodyText> : null}

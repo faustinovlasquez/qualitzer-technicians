@@ -7,6 +7,7 @@ import { SelectorTrigger } from "../../ui/time/SelectorUi";
 import { TimeField } from "../../ui/time/TimeField";
 import { CreationDatePicker } from "../../screens/creation/CreationDatePicker";
 import type { WorkshopStatuses } from "../../domain/workshopManage";
+import { workshopStatusLabel } from "../../domain/workshopBoard";
 import { OptionRow, PickerSheet } from "../intake/IntakePickers";
 import { Notice } from "../entry/EntrySections";
 
@@ -47,17 +48,18 @@ export function StatusSheet({ load, onSave, onClose }: {
     try { await onSave(statusId, subStatusId); } catch (failure) { setError(failureText(failure, "No se pudo cambiar el estado.")); } finally { setSaving(false); }
   }
   return <PickerSheet title="Cambiar estado" onClose={saving ? () => undefined : onClose}
-    footer={<Button title={chosen ? `Guardar: ${chosen.name}` : "Elige un estado"} icon="checkmark" loading={saving} disabled={saving || !chosen} onPress={() => void save()} />}>
+    footer={<Button title={chosen ? `Guardar: ${workshopStatusLabel(chosen.name)}` : "Elige un estado"} icon="checkmark" loading={saving} disabled={saving || !chosen} onPress={() => void save()} />}>
     {!statuses.data ? <Loading text="Cargando estados…" error={statuses.error} retry={statuses.retry} /> : null}
     {statuses.data?.items.length === 0 ? <Text style={styles.hint}>La sucursal no tiene estados configurados para los ingresos.</Text> : null}
     {statuses.data?.items.map((status) => <View key={status.id} style={styles.group}>
-      <OptionRow title={status.name} selected={statusId === status.id}
+      <OptionRow title={workshopStatusLabel(status.name)} selected={statusId === status.id}
         onPress={() => { setStatusId(status.id); setSubStatusId(null); setError(""); }} />
       {statusId === status.id && status.subStatuses.length > 0 ? <View style={styles.subList}>
         <Text style={styles.label}>Subestado (opcional)</Text>
         {status.subStatuses.map((sub) => <OptionRow key={sub.id} title={sub.name} selected={subStatusId === sub.id}
           onPress={() => setSubStatusId((current) => current === sub.id ? null : sub.id)} />)}
       </View> : null}
+      {statusId === status.id && status.subStatuses.length === 0 ? <Text style={[styles.hint, styles.subList]}>Este estado no tiene subestados. Los subestados se configuran en la web.</Text> : null}
     </View>)}
     {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
   </PickerSheet>;
@@ -128,26 +130,33 @@ export function EstimatedDateSheet({ current, scopeKey, onSave, onClose }: {
   </PickerSheet>;
 }
 
-/** Accesos rápidos de la ficha: estado, nave y fecha de entrega. */
-export function ManageBar({ onStatus, onMove, onDate }: { onStatus: () => void; onMove: () => void; onDate: () => void }) {
-  const tiles: Array<{ icon: IconName; label: string; onPress: () => void }> = [
-    { icon: "flag-outline", label: "Cambiar estado", onPress: onStatus },
-    { icon: "swap-horizontal", label: "Mover de nave", onPress: onMove },
-    { icon: "calendar-outline", label: "Fecha de entrega", onPress: onDate }
+export interface ManageTile { icon: IconName; label: string; onPress: () => void; strong?: boolean }
+
+/** Accesos rápidos de la ficha en una fila compacta: datos, inspección, firma, estado, nave y fecha de entrega. */
+export function ManageBar({ onStatus, onMove, onDate, extra = [] }: { onStatus?: () => void; onMove?: () => void; onDate?: () => void; extra?: ManageTile[] }) {
+  const tiles: ManageTile[] = [
+    ...extra,
+    ...(onStatus ? [{ icon: "flag-outline" as const, label: "Estado", onPress: onStatus }] : []),
+    ...(onMove ? [{ icon: "swap-horizontal" as const, label: "Mover nave", onPress: onMove }] : []),
+    ...(onDate ? [{ icon: "calendar-outline" as const, label: "Fecha entrega", onPress: onDate }] : [])
   ];
-  return <View style={styles.bar}>{tiles.map((tile) => <Pressable key={tile.label} accessibilityRole="button" onPress={tile.onPress}
-    style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}>
-    <Ionicons name={tile.icon} size={20} color={palette.primary} accessible={false} />
-    <Text style={styles.tileText} numberOfLines={2}>{tile.label}</Text>
+  if (tiles.length === 0) return null;
+  return <View style={styles.bar}>{tiles.map((tile) => <Pressable key={tile.label} accessibilityRole="button" accessibilityLabel={tile.label} onPress={tile.onPress}
+    style={({ pressed }) => [styles.tile, tile.strong && styles.tileStrong, pressed && styles.tilePressed]}>
+    <Ionicons name={tile.icon} size={16} color={tile.strong ? palette.white : palette.primary} accessible={false} />
+    <Text style={[styles.tileText, tile.strong && styles.tileTextStrong]} numberOfLines={1}>{tile.label}</Text>
   </Pressable>)}</View>;
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: "row", gap: 8 },
-  tile: { flex: 1, minHeight: 64, alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 10, borderRadius: radius.md,
-    borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
-  tilePressed: { backgroundColor: palette.track },
-  tileText: { fontSize: 12, fontWeight: "700", color: palette.text, textAlign: "center" },
+  bar: { flexDirection: "row", gap: 6 },
+  // Botones de una línea (ícono junto al nombre) con el color de la marca para que se note que se tocan.
+  tile: { flex: 1, minWidth: 0, minHeight: 38, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 6, paddingVertical: 8, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: palette.primary, backgroundColor: palette.primarySoft },
+  tileStrong: { backgroundColor: palette.primary, borderColor: palette.primary },
+  tileTextStrong: { color: palette.white },
+  tilePressed: { opacity: 0.7 },
+  tileText: { flexShrink: 1, fontSize: 12, fontWeight: "800", color: palette.primary },
   row: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   grow: { flex: 1 },
   time: { width: 110 },
