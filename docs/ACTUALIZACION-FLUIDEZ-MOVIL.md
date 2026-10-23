@@ -1,4 +1,8 @@
-# Inspección completa y mantenimientos desde el ingreso: gateway 1.0.46 / APK 1.0.132
+# OT completa en la app y permisos por sucursal: gateway 1.0.47 / APK 1.0.133
+
+OT del Taller y de Mi jornada con datos, trabajos, productos, transporte, otros y archivos, envío a comercial y permisos de la app configurables por sucursal en la web. Desplegar backend y gateway 1.0.47 juntos y correr la migración de permisos. Ver [actualización 1.0.133](ACTUALIZACION-1.0.133.md).
+
+## Entrega anterior: gateway 1.0.46 / APK 1.0.132
 
 Inspección única (guía, fotos adicionales, comparar, zip y enlace con QR), listas de revisión con el diseño y autoguardado del checklist de trabajos, y mantenimientos creados desde un ingreso de equipo propio. Timer, checklist y notificaciones no cambian. Desplegar backend y gateway 1.0.46 juntos. Ver [actualizacion 1.0.132](ACTUALIZACION-1.0.132.md).
 

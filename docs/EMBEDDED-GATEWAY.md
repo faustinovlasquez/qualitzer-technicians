@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.46
+# @qualitzer/mobile-gateway 1.0.47
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.46. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.47. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.47 completa la OT en la app (Taller y Mi jornada): `GET/PUT /api/workshop/entries/:entryId/orders/:orderId[/general]` (detalle sin precios y datos generales; bloqueada como en la web si fue enviada al cliente, aprobada, rechazada, revisada o cancelada), ítems `POST/PATCH/DELETE .../items` (productos con precio del catálogo, transporte con la tarifa del vehículo, otros; guardado completo de la OT con totales recalculados), archivos `GET/POST/DELETE .../files` (archivos de la negociación) y `POST .../send` (enviar a comercial). Con `entryId` 0 la OT se abre desde Mi jornada, validada contra la sucursal. Permisos de la app por sucursal (`GET /api/workshop/app-config`; acciones con `BRANCH_APP_ACTION_DISABLED` si la sucursal las apagó) que **requieren el backend de la misma entrega y su migración `20261023140000-Add-MobileAppConfig-To-CompaniesBranches`**. También: clientes paginados, equipo nuevo del cliente, mantenimiento desde el ingreso y OTs de trabajos planificados en Mi jornada. La entrega del equipo exige que todas las OTs del ingreso estén enviadas a comercial.
 
 1.0.46 completa la inspección del Taller (una sola para ingreso y entrega): fotos adicionales con nombre (`custom-<n>`) y foto de referencia del ingreso al entregar, `GET .../inspections/:id/share` y `POST .../share/extend` (enlace público con QR; backend `canUpdate(rental_equipments)`), `GET .../inspections/:id/photos.zip` (descarga binaria del comprimido de fotos) y `GET /api/workshop/options/checklists` + `PUT .../inspections/:id/checklists` para asociar y responder listas de revisión con el mismo formato de la web. La creación móvil acepta `maintenance.operationAreaEntryId` para crear un mantenimiento de un ingreso de equipo propio (el equipo sale del ingreso; `MOBILE_CREATION_ENTRY_NOT_INTERNAL` si el equipo es de cliente), que **requiere el backend de la misma entrega**. Timer, checklist y notificaciones no cambian. Sin migraciones.
 
