@@ -213,6 +213,23 @@ test("catalog failure releases only the writer and retry reuses the existing key
   assert.deepEqual(fs.readFileSync(path.join(directory, "session.key")), key);
 });
 
+test("a writer lock left by a dead process or a previous run with the same PID does not keep the gateway down", async (t) => {
+  const options = fixture(t);
+  let valid = false;
+  mockCatalog(t, () => valid ? Response.json({ version: 1, tenants: [tenant] }) : Response.json({}, { status: 503 }));
+  await assert.rejects(createEmbeddedGateway(options), /BACKEND_DIRECTORY_UNAVAILABLE/);
+  const lockFile = path.join(path.dirname(options.sessionFile), ".writer.lock");
+  const dead = spawnSync(process.execPath, ["-e", "console.log(process.pid)"], { encoding: "utf8" });
+  fs.writeFileSync(lockFile, JSON.stringify({ pid: Number(dead.stdout.trim()), nonce: "stale" }), { mode: 0o600 });
+  await assert.rejects(createEmbeddedGateway(options), /BACKEND_DIRECTORY_UNAVAILABLE/);
+  assert.equal(fs.existsSync(lockFile), false);
+  fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, nonce: "previous-run" }), { mode: 0o600 });
+  valid = true;
+  assert.equal(typeof await createEmbeddedGateway(options), "function");
+  assert.equal(JSON.parse(fs.readFileSync(lockFile, "utf8")).pid, process.pid);
+  await assert.rejects(createEmbeddedGateway(options), /SESSION_PERSISTENCE_WRITER_EXISTS/);
+});
+
 test("invalid backend catalog Origin prevents startup and does not publish a handler", async (t) => {
   mockCatalog(t, () => Response.json({ version: 1, tenants: [{ ...tenant, portalOrigin: "https://tenant.invalid/path" }] }));
   await assert.rejects(createEmbeddedGateway(fixture(t)), /BACKEND_DIRECTORY_INVALID/);
@@ -264,14 +281,22 @@ test("missing key with an existing encrypted session refuses reset and preserves
   assert.equal(fs.existsSync(keyFile), false);
 });
 
-test("a leftover writer lock is never auto-deleted on presumed process death", (t) => {
+test("a writer lock held by a live process is never taken; one from a dead process is recovered", (t) => {
   const options = fixture(t);
   assert.equal(child(options).status, 0);
   const lock = path.join(path.dirname(options.sessionFile), ".writer.lock");
-  const owner = JSON.stringify({ pid: 99999999, nonce: "fixture-dead-owner" });
-  fs.writeFileSync(lock, owner, { mode: 0o600 });
+  const live = JSON.stringify({ pid: process.pid, nonce: "fixture-live-owner" });
+  fs.writeFileSync(lock, live, { mode: 0o600 });
   assert.deepEqual(child(options).data, { error: "SESSION_PERSISTENCE_WRITER_EXISTS" });
-  assert.equal(fs.readFileSync(lock, "utf8"), owner);
+  assert.equal(fs.readFileSync(lock, "utf8"), live);
+  for (const invalid of ["", "{", JSON.stringify({ pid: 0 }), JSON.stringify({ pid: "1" })]) {
+    fs.writeFileSync(lock, invalid, { mode: 0o600 });
+    assert.deepEqual(child(options).data, { error: "SESSION_PERSISTENCE_WRITER_EXISTS" });
+    assert.equal(fs.readFileSync(lock, "utf8"), invalid);
+  }
+  fs.writeFileSync(lock, JSON.stringify({ pid: 99999999, nonce: "fixture-dead-owner" }), { mode: 0o600 });
+  assert.equal(child(options).status, 0);
+  assert.equal(fs.existsSync(lock), false);
 });
 
 test("wrong keys, ciphertext corruption, backend rebinding and unavailable marker never silently reset sessions", (t) => {

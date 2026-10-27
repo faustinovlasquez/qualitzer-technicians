@@ -6,6 +6,7 @@ const { inspectApk } = require("./inspect-apk.cjs");
 const { expectedRelease, certificateSha256: pinnedCertificate, verifyPrevious, previous, sha256File } = require("./release-policy.cjs");
 const { captureSources, protectedSnapshot, verifySources, checkHealth } = require("./release-provenance.cjs");
 const { releaseEnvironment, resolveReleaseConfig, verifyPushConfig, readApkResources, verifyCompiledPush } = require("./release-push.cjs");
+const { saveReleaseMapping } = require("./release-mapping.cjs");
 
 const root = path.resolve(__dirname, "../..");
 const args = process.argv.slice(2);
@@ -177,9 +178,10 @@ async function main() {
       if (sha256File(destination) !== sha256File(sourceApk)) throw new Error("VERSIONED_APK_ALREADY_EXISTS_WITH_DIFFERENT_BYTES");
     } else fs.copyFileSync(sourceApk, destination, fs.constants.COPYFILE_EXCL);
     const sha256 = createHash("sha256").update(fs.readFileSync(destination)).digest("hex");
+    const obfuscation = saveReleaseMapping(root, path.join(artifacts, expected.name.replace(/\.apk$/, "-mapping.txt")));
     const report = {
       verifiedAt: new Date().toISOString(),
-      apk: path.relative(root, destination), sha256, bytes: fs.statSync(destination).size,
+      apk: path.relative(root, destination), sha256, bytes: fs.statSync(destination).size, obfuscation,
       certificateSha256, zipAlignment16KiB: true,
       variant: "release", gatewayUrl, ...inspection, pushConfigured: push.pushConfigured, push, phases,
       previousApk, provenance, health, protectedProjectFilesUnchanged: true,

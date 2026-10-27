@@ -3,7 +3,7 @@
     "name": "Qualitzer operaciones",
     "slug": "qualitzer-tecnicos",
     "scheme": "qualitzer-field",
-    "version": "1.0.133",
+    "version": "1.0.134",
     "orientation": "portrait",
     "icon": "./assets/qualitzer-icon.png",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.qualitzer.field",
-      "versionCode": 134,
+      "versionCode": 135,
       "allowBackup": false,
       "googleServicesFile": "./config/firebase/google-services.json",
       "blockedPermissions": [
@@ -93,7 +93,8 @@
       ],
       "@react-native-firebase/app",
       "@react-native-firebase/crashlytics",
-      "./plugins/withGradleMemory.js"
+      "./plugins/withGradleMemory.js",
+      "./plugins/withReleaseShrinking.js"
     ],
     "web": {
       "favicon": "./assets/qualitzer-favicon.png"

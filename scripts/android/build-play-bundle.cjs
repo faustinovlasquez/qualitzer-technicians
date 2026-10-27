@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { expectedRelease } = require("./release-policy.cjs");
 const { releaseEnvironment, resolveReleaseConfig } = require("./release-push.cjs");
+const { saveReleaseMapping } = require("./release-mapping.cjs");
 
 const root = path.resolve(__dirname, "../..");
 const args = process.argv.slice(2);
@@ -55,7 +56,8 @@ async function main() {
   fs.copyFileSync(bundle, target, fs.constants.COPYFILE_EXCL);
   const sha256 = createHash("sha256").update(fs.readFileSync(target)).digest("hex");
   fs.writeFileSync(`${target}.sha256`, `${sha256}  ${path.basename(target)}\n`);
-  console.log(`PLAY_BUNDLE ${path.relative(root, target)}\nVERSION ${expected.version} CODE ${expected.versionCode}\nSERVER ${environment.EXPO_PUBLIC_GATEWAY_URL}\nSHA256 ${sha256}`);
+  const { mapping } = saveReleaseMapping(root, target.replace(/\.aab$/, "-mapping.txt"));
+  console.log(`PLAY_BUNDLE ${path.relative(root, target)}\nVERSION ${expected.version} CODE ${expected.versionCode}\nSERVER ${environment.EXPO_PUBLIC_GATEWAY_URL}\nSHA256 ${sha256}\nMAPPING ${mapping}`);
 }
 
 main().catch((error) => { console.error(`PLAY_BUNDLE_FAILED ${error.message}`); process.exitCode = 1; });

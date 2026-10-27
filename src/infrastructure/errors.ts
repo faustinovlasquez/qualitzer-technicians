@@ -29,6 +29,7 @@ const messages: { [code: string]: string } = {
   ASSIGNMENT_NOT_FOUND: "Este trabajo ya no está asignado a tu usuario en el período consultado. Actualiza la jornada.",
   WORK_READ_ONLY: "Este trabajo ya está cerrado y no admite cambios.",
   UPSTREAM_UNAVAILABLE: "El backend de Qualitzer no responde. Verifica que esté iniciado.",
+  MOBILE_GATEWAY_UNAVAILABLE: "El servicio de la app no está disponible en este momento. Inténtalo más tarde o contacta a tu administrador.",
   UPSTREAM_TIMEOUT: "Qualitzer tardó demasiado. Actualiza antes de repetir un envío: podría haberse guardado.",
   UPSTREAM_INVALID_RESPONSE: "La API devolvió un formato inesperado. Revisa la compatibilidad de la pasarela.",
   RATE_LIMITED: "Se alcanzó el límite de solicitudes. Espera un momento antes de volver a intentar.",

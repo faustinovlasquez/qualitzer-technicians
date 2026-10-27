@@ -1,4 +1,12 @@
-# OT completa en la app y permisos por sucursal: gateway 1.0.47 / APK 1.0.133
+# Pasarela que no queda apagada tras una caída: gateway 1.0.49 (APK 1.0.134)
+
+La pasarela recupera el candado de sesiones que deja un proceso muerto; antes ningún técnico podía iniciar sesión hasta borrarlo a mano. Desplegar junto al backend que registra el motivo cuando la pasarela no arranca. Ver [actualización 1.0.134](ACTUALIZACION-1.0.134.md).
+
+## Entrega anterior: archivos, chat, equipo de técnicos y ofuscación: gateway 1.0.48 / APK 1.0.134
+
+Gestor de archivos con carpetas y chat de comentarios en ingreso, OT, trabajo y mantenimiento, equipo de técnicos asignados, trabajos atrasados visibles hasta terminarlos, vista compacta o extendida de trabajos y APK ofuscada (R8) con su archivo de desofuscación. Desplegar backend `development` y gateway 1.0.48 juntos. Ver [actualización 1.0.134](ACTUALIZACION-1.0.134.md).
+
+## Entrega anterior: gateway 1.0.47 / APK 1.0.133
 
 OT del Taller y de Mi jornada con datos, trabajos, productos, transporte, otros y archivos, envío a comercial y permisos de la app configurables por sucursal en la web. Desplegar backend y gateway 1.0.47 juntos y correr la migración de permisos. Ver [actualización 1.0.133](ACTUALIZACION-1.0.133.md).
 

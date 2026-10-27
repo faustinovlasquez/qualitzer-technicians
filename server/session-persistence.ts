@@ -232,7 +232,20 @@ export function createSessionPersistence(config: ResolvedConfig, backend?: Backe
 }
 
 const embeddedWriters = new Set<() => void>();
+const heldWriterLocks = new Set<string>();
 let embeddedExitRegistered = false;
+
+// Un candado que quedó de un proceso muerto (caída, falta de memoria, SIGKILL) no debe dejar la pasarela apagada para siempre.
+// Solo se recupera si su dueño ya no existe o es este mismo proceso sin tenerlo tomado (en contenedores el PID se repite).
+function staleWriterLock(lockFile: string): boolean {
+  if (heldWriterLocks.has(lockFile)) return false;
+  let pid: unknown;
+  try { pid = JSON.parse(fs.readFileSync(lockFile, "utf8")).pid; } catch { return false; }
+  if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return false;
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
 
 function assertPrivateEmbeddedPath(file: string, directory: boolean): void {
   const stat = fs.lstatSync(file);
@@ -267,7 +280,12 @@ export function prepareEmbeddedSessionStorage(sessionFile: string) {
   const lockFile = join(directory, ".writer.lock");
   const owner = Buffer.from(JSON.stringify({ pid: process.pid, nonce: randomBytes(16).toString("hex") }));
   try { writeExclusive(lockFile, owner); }
-  catch { throw new Error("SESSION_PERSISTENCE_WRITER_EXISTS"); }
+  catch {
+    if (!staleWriterLock(lockFile)) throw new Error("SESSION_PERSISTENCE_WRITER_EXISTS");
+    try { fs.unlinkSync(lockFile); writeExclusive(lockFile, owner); }
+    catch { throw new Error("SESSION_PERSISTENCE_WRITER_EXISTS"); }
+  }
+  heldWriterLocks.add(lockFile);
   let released = false;
   let key: Buffer | undefined;
   const release = (): void => {
@@ -275,6 +293,7 @@ export function prepareEmbeddedSessionStorage(sessionFile: string) {
     released = true;
     key?.fill(0);
     embeddedWriters.delete(release);
+    heldWriterLocks.delete(lockFile);
     try {
       if (fs.readFileSync(lockFile).equals(owner)) { fs.unlinkSync(lockFile); syncDirectory(directory); }
     } catch {}

@@ -23,6 +23,7 @@ function loginErrorMessage(message: string | null): string | null {
   }
   if (message.startsWith("No se pudo conectar con ") || message.startsWith("La conexión tardó demasiado con ")) return connectionFailure;
   if (message === apiMessage("UPSTREAM_UNAVAILABLE") || message === apiMessage("UPSTREAM_TIMEOUT")) return connectionFailure;
+  if (message === apiMessage("MOBILE_GATEWAY_UNAVAILABLE")) return message;
   if (message === apiMessage("UPSTREAM_INVALID_RESPONSE")) return "El servicio no está disponible en este momento. Inténtalo más tarde o contacta a tu administrador.";
   if (message === apiMessage("TENANT_NOT_FOUND")) return "Esta empresa no está disponible. Contacta a tu administrador.";
   if (message === apiMessage("ORIGIN_FORBIDDEN")) return "No se puede acceder desde esta versión de la app. Contacta a tu administrador.";
