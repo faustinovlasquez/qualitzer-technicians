@@ -464,11 +464,11 @@ async function main() {
     await page.waitForFunction(() => Boolean(window.compactOverviewFixture));
     if (!process.argv.includes("--parent-orders") && !agendaOnly && !jornadaOnly && !badgesOnly) await check("login-credentials-visibility-validation-and-busy-guards", async () => {
       await fresh("login");
-      const username = page.getByRole("textbox", { name: "Correo o usuario", exact: true });
+      const username = page.getByRole("textbox", { name: "Correo", exact: true });
       const password = page.getByLabel("Contraseña", { exact: true });
       await page.getByRole("button", { name: "Iniciar sesión", exact: true }).click();
       assert.equal((await page.evaluate(() => window.compactOverviewFixture.metrics())).loginCalls.length, 0);
-      await page.getByText("Ingresa tu correo o usuario.", { exact: true }).waitFor();
+      await page.getByText("Ingresa tu correo.", { exact: true }).waitFor();
       await username.fill("  alex.fixture  "); await password.fill("Fixture password only");
       assert.equal(await password.getAttribute("type"), "password");
       await page.getByRole("button", { name: "Mostrar contraseña", exact: true }).click();

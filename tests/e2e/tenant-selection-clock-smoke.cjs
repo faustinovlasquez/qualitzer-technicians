@@ -93,7 +93,7 @@ async function scenario(browser, width, kind, offset) {
   try {
     await page.goto(metro, { waitUntil: "domcontentloaded", timeout: 120000 });
     assert.equal(await page.getByRole("textbox", { name: "URL de la pasarela", exact: true }).count(), 0, "Standalone connection must not be editable");
-    await page.getByRole("textbox", { name: "Correo o usuario", exact: true }).fill("clock-fixture");
+    await page.getByRole("textbox", { name: "Correo", exact: true }).fill("clock-fixture");
     await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill("fictional-clock-only");
     await button(page, "Iniciar sesión").click();
     await page.getByRole("heading", { name: "Elige la empresa para esta sesión", exact: true }).waitFor();

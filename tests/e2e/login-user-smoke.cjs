@@ -69,12 +69,12 @@ async function main() {
       await page.setContent('<!doctype html><html><head><meta charset="utf-8"><style>html,body,#root{margin:0;width:100%;height:100%;overflow:hidden}#root{display:flex;flex-direction:column}</style></head><body><div id="root"></div></body></html>');
       await page.addScriptTag({ content: compiled.outputFiles[0].text });
       const button = (name) => page.getByRole("button", { name, exact: true });
-      const user = () => page.getByRole("textbox", { name: "Correo o usuario", exact: true });
+      const user = () => page.getByRole("textbox", { name: "Correo", exact: true });
       const password = () => page.getByLabel("Contraseña", { exact: true });
       async function fresh(options = {}) {
         await page.evaluate((value) => window.loginFixture.render(value), options);
         await user().waitFor();
-        await page.waitForFunction(() => document.querySelector('input[aria-label="Correo o usuario"]')?.value === "");
+        await page.waitForFunction(() => document.querySelector('input[aria-label="Correo"]')?.value === "");
       }
       async function check(name, run) { await run(); report.tests.push({ name: `${development ? "dev" : "release"}: ${name}`, passed: true }); }
       async function noTechnical() {
@@ -102,7 +102,7 @@ async function main() {
       await check("validation, password reveal, submit lock and clearing", async () => {
         await fresh();
         await button("Iniciar sesión").click();
-        await page.getByRole("alert").filter({ hasText: "Ingresa tu correo o usuario." }).waitFor();
+        await page.getByRole("alert").filter({ hasText: "Ingresa tu correo." }).waitFor();
         assert.equal(await page.evaluate(() => window.loginFixture.calls), 0);
         await user().fill(" fixture-user ");
         await password().fill("synthetic-only");

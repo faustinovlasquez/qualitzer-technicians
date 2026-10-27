@@ -140,12 +140,13 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
 
             <View style={[styles.formColumn, wide && styles.formColumnWide]}>
               <Card style={styles.form}>
-                <SectionTitle title="Entra a tu jornada" subtitle="Ingresa con tu usuario y contraseña." />
+                <SectionTitle title="Entra a tu jornada" subtitle="Ingresa con tu correo y contraseña." />
                 <View style={styles.fields}>
                   <Field
-                    label="Correo o usuario"
-                    icon="person-outline"
-                    placeholder="Tu correo o nombre de usuario"
+                    label="Correo"
+                    icon="mail-outline"
+                    placeholder="nombre@empresa.cl"
+                    keyboardType="email-address"
                     value={username}
                     onChangeText={(value) => { setUsername(value); setLocalError(null); }}
                     autoCapitalize="none"
@@ -157,7 +158,7 @@ export function LoginScreen({ onLogin, onDemo, gatewayUrl, suggestedGatewayUrl, 
                     onSubmitEditing={() => passwordInput.current?.focus()}
                     editable={!isBusy}
                     accessibilityState={{ disabled: isBusy }}
-                    error={attempted && !username.trim() ? "Ingresa tu correo o usuario." : null}
+                    error={attempted && !username.trim() ? "Ingresa tu correo." : null}
                   />
                   <Field
                     ref={passwordInput}

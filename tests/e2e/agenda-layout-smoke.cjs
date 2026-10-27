@@ -115,7 +115,7 @@ async function scenario(browser, width) {
     await page.goto(metro);
     await button(page, "Conexión avanzada. Configurar pasarela móvil").click();
     await page.getByRole("textbox", { name: "URL de la pasarela", exact: true }).fill(gateway);
-    await page.getByRole("textbox", { name: "Correo o usuario", exact: true }).fill("offline-fixture");
+    await page.getByRole("textbox", { name: "Correo", exact: true }).fill("offline-fixture");
     await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill("fictional-offline-only");
     await button(page, "Iniciar sesión").click();
     await button(page, /^Conectado a Qualitzer · 0 pendientes$/).waitFor();

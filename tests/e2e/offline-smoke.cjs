@@ -165,7 +165,7 @@ async function main() {
     await page.goto("http://localhost:8081");
     await page.getByRole("button", { name: "Conexión avanzada. Configurar pasarela móvil" }).click();
     await page.getByRole("textbox", { name: "URL de la pasarela" }).fill(gateway);
-    await page.getByRole("textbox", { name: "Correo o usuario", exact: true }).fill("offline-fixture");
+    await page.getByRole("textbox", { name: "Correo", exact: true }).fill("offline-fixture");
     await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill("fictional-offline-only");
     await page.getByRole("button", { name: "Iniciar sesión", exact: true }).click();
     await page.getByText("Inspección del sistema hidráulico", { exact: true }).first().waitFor();
