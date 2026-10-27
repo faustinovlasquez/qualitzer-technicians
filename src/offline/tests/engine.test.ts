@@ -185,7 +185,7 @@ test("401 403 404 503 and invalid JSON never qualify as cache fallback", () => {
 });
 test("cache is bounded without evicting queued commands", () => {
   const state = emptyState(); state.operations.push(comment());
-  for (let i = 0; i < 250; i++) putCache(state, { key: String(i), json: "{}", fetchedAt: i });
+  for (let i = 0; i < OFFLINE_LIMITS.cacheEntries + 70; i++) putCache(state, { key: String(i), json: "{}", fetchedAt: i });
   assert.equal(state.cache.length, OFFLINE_LIMITS.cacheEntries); assert.equal(state.operations.length, 1);
 });
 test("oversized cache insertion preserves previous value", () => {

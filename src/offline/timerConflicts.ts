@@ -64,6 +64,13 @@ export function rebaseTimerChain(state: OfflineState, scope: Intention["scope"],
       continue;
     }
     const target = operation.payload.input.status;
+    // Si otro ya lo dejó «finalizado» y el técnico pedía «entregado», su entrega no se pierde en silencio: queda a la vista
+    // con el motivo para revisarla o descartarla.
+    if (base === "completed" && target === "delivered") {
+      rename.set(operation.id, operation.id);
+      rebuilt.push({ ...operation, status: "needs_review", lastError: "OFFLINE_WORK_COMPLETED_ELSEWHERE" });
+      continue;
+    }
     if (base === target || base === "completed" || base === "delivered") { rename.set(operation.id, undefined); result.resolved.push(operation.id); continue; }
     const next: Intention = { ...operation, ...fresh, dependencyId: undefined,
       payload: { ...operation.payload, baseStatus: base, previousTimerOperationId: previousTimer } };

@@ -13,6 +13,7 @@ import { workshopIdentificationTypesSchema, workshopNewBranchResultSchema, works
 import { workshopEstimatedDateInputSchema, workshopManageResultSchema, workshopMoveInputSchema, workshopStatusesSchema, workshopStatusInputSchema } from "../domain/workshopManage";
 import { mobileAppConfigSchema } from "../domain/mobileAppConfig";
 import { deletionCheckSchema, deletionRoute, type DeletionScope } from "../domain/deletion";
+import { noteServerDate } from "../offline/serverClock";
 import {
   THREAD_ATTACHMENTS_MAX, threadActiveMentions, threadEditSchema, threadLiveSchema, threadMentionsSchema, threadPageSchema, threadPeopleSchema, threadRoute,
   threadTabSchema, threadTextSchema, type ThreadMention, type ThreadScope, type ThreadTab
@@ -557,7 +558,8 @@ export class HttpTechnicianRepository implements TechnicianRepository {
 
   private async request<T>(path: string, method = "GET", body?: object | FormData, receiptOperationId?: string, onResponseHeaders?: (timing: TenantChallengeResponseTiming) => void, signal?: AbortSignal, extraHeaders?: { [name: string]: string }): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), body instanceof FormData ? 150_000 : 45_000);
+    // Con archivos se espera más que la pasarela (hasta 10 min según tamaño) para no cortar una subida lenta que sí avanza.
+    const timeout = setTimeout(() => controller.abort(), body instanceof FormData ? 11 * 60_000 : 45_000);
     const cancel = () => { clearTimeout(timeout); controller.abort(); };
     signal?.addEventListener("abort", cancel, { once: true });
     try {
@@ -570,6 +572,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
       if (extraHeaders) Object.assign(headers, extraHeaders);
       const requestBody = body instanceof FormData ? body : body ? JSON.stringify(body) : undefined;
       const requestStartedAt = onResponseHeaders ? tenantChallengeMonotonicNow() : 0;
+      const sentAt = Date.now();
       const response = await uploadFetch(`${this.baseUrl}${path}`, {
         method, headers, credentials: Platform.OS === "web" ? "include" : "omit", body: requestBody, signal: controller.signal,
       }).catch((error: unknown) => {
@@ -581,6 +584,8 @@ export class HttpTechnicianRepository implements TechnicianRepository {
         throw classifyTransportError(error, controller.signal.aborted, Platform.OS !== "web");
       });
       onResponseHeaders?.({ requestStartedAt, headersReceivedAt: tenantChallengeMonotonicNow(), serverDate: response.headers.get("Date") });
+      // Hora del servidor para corregir lo que se guarda sin conexión si el reloj del teléfono está desajustado.
+      noteServerDate(response.headers?.get?.("Date"), sentAt, Date.now());
       const text = await response.text().catch((error: unknown) => {
         if (signal?.aborted) throw new AssignmentReadCancelledError();
         throw classifyTransportError(error, controller.signal.aborted, Platform.OS !== "web");

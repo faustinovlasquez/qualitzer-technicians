@@ -257,7 +257,7 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
           title="Archivos de la OT" onLoad={files.load} onUpload={files.upload} onDelete={files.remove} />}
       </View> : null}
       {comments && section === "comments" && !searching ? <View style={styles.filePanel}>
-        <ChatThread key={detail.id} embedded api={comments} title="Comentarios de la OT" subtitle={detail.workOrderCode ?? detail.code} />
+        <ChatThread key={detail.id} embedded api={comments} title="Comentarios de la OT" subtitle={detail.workOrderCode ?? detail.code} draftKey={`order:${detail.id}`} />
       </View> : null}
       {(section === "files" || section === "comments") && !searching ? null : <ScrollView style={styles.scroll} contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void reload().finally(() => setRefreshing(false)); }} tintColor={palette.primary} colors={[palette.primary]} />}>

@@ -6,11 +6,14 @@ export const OFFLINE_LIMITS = {
   fileBytes: 25 * 1024 * 1024,
   totalFileBytes: 500 * 1024 * 1024,
   cacheBytes: 16 * 1024 * 1024,
-  cacheEntries: 180,
+  // Preparar una semana guarda la agenda, el catálogo y los archivos de cada paso de hasta 30 trabajos: 180 se quedaba corto.
+  cacheEntries: 600,
   leaseMs: 240_000,
   cycleOperations: 30,
   prepareWorks: 30,
   maxBackoffMs: 300_000,
+  /** Lo ya confirmado (y sus copias de archivos) se archiva pasados estos días para no llenar el teléfono. */
+  retainAppliedMs: 14 * 24 * 60 * 60_000,
 } as const;
 export interface CacheEntry { key: string; json: string; fetchedAt: number; coverage?: OfflineCoverage; timerReadOperationIds?: string[]; fileReadOperationIds?: string[]; activityReadOperationIds?: string[]; }
 export interface Passport { key: string; user: User; verifiedAt: number; disabled: boolean; }
@@ -26,6 +29,8 @@ export interface OfflineState {
   lease: { owner: string; until: number } | null;
   authBlocked: boolean;
   lastSyncedAt: number | null;
+  /** Operaciones guardadas que esta versión no puede leer (por ejemplo, de otra versión de la app): se apartan sin borrarlas. */
+  quarantine?: unknown[];
 }
 export interface DurableStore {
   read(namespace: string): Promise<OfflineState>;
@@ -63,4 +68,9 @@ export interface EngineDependencies {
   onVerified?(user: User): Promise<void>;
   onAuthBlocked?(): Promise<void>;
   canAccessLocal?(): Promise<boolean>;
+  /**
+   * Una sola ejecución de la app usa este almacenamiento (teléfono). Una reserva de envío guardada por otra ejecución quedó
+   * de un cierre forzado y se puede tomar sin esperar su vencimiento. En la web (varias pestañas) no se usa.
+   */
+  exclusiveProcess?: boolean;
 }

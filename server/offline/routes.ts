@@ -10,6 +10,7 @@ import type { Upstream } from "../upstream";
 import { emptySchema } from "../validation";
 import { readSyncDocument } from "./upload";
 import { assignmentsSchema, parseUpstream } from "../contracts";
+import { assertAppPermission } from "../workshop/support";
 
 const receiptQuery = z.object({ companyBranchId: syncResourceIdSchema }).strict();
 function respond(res: Response, result: { status: number; receipt: SyncReceipt }): void {
@@ -34,6 +35,8 @@ export function createOfflineRouter(upstream: Upstream, uploadLimiter: RequestHa
     if (!req.is("application/json")) throw new GatewayError(415, "JSON_REQUIRED");
     const input = syncCommandSchema.parse(req.body);
     const { token, user } = await mobileActor(upstream, req, input.scope.companyBranchId);
+    // Permisos de la sucursal para la app: también aplican a lo guardado sin conexión.
+    if (input.kind === "comment") await assertAppPermission(upstream, token, input.scope.companyBranchId, "commentsWrite");
     if (input.kind === "activity" || input.kind === "completion" || input.kind === "timer" && input.payload.recordedAt !== undefined) {
       const query = new URLSearchParams({ companyBranchId: String(input.scope.companyBranchId), startDate: input.scope.startDate, endDate: input.scope.startDate });
       const data = parseUpstream(assignmentsSchema, await upstream.request("/technician-dashboard/assignments", { token, query }));
@@ -71,6 +74,8 @@ export function createOfflineRouter(upstream: Upstream, uploadLimiter: RequestHa
       const { metadata, file } = await readSyncDocument(req, res);
       const { token, user: fresh } = await mobileActor(upstream, req, metadata.scope.companyBranchId);
       if (fresh.id !== user.id || fresh.workerId !== user.workerId) throw new GatewayError(401, "SESSION_CHANGED");
+      // Archivos generales: permiso «Subir archivos». La evidencia de un paso del checklist es parte de ejecutar el trabajo.
+      if (metadata.stepId === undefined) await assertAppPermission(upstream, token, metadata.scope.companyBranchId, "filesUpload");
       const form = new FormData();
       const { sha256: _sha256, ...backendMetadata } = metadata;
       form.append("metadata", JSON.stringify(backendMetadata));

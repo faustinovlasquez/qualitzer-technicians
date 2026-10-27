@@ -268,7 +268,7 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     if (id === "../infrastructure/HttpTechnicianRepository") return { HttpTechnicianRepository: HttpRepository };
     if (id === "../infrastructure/gatewayConfig") return { gatewayConfiguration: configuration };
     if (id === "../infrastructure/gatewayConnection") return connection;
-    if (id === "../infrastructure/errors") return errors;
+    if (id === "../infrastructure/errors") return errors; if (id === "../offline/serverClock") return { noteServerDate: () => undefined };
     if (id === "../domain/tenantSession") return tenantSession;
     if (id === "../infrastructure/tenantSchemas") return tenantSchemas;
     if (id === "../domain/assignmentChecklistProgress") return progress;
@@ -287,7 +287,7 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
       createOfflineRepository: async (remote: HttpRepository) => { const wrapped = new OfflineRepository(remote); wrappers.push(wrapped); return wrapped; },
       saveOfflineProfile: noop, restoreOfflineProfile: async () => null, establishVerifiedOfflineSession: noop, disableOfflineProfile: noop,
     };
-    if (id === "../offline/connectivity") return { createConnectivity: () => ({ current: async () => true, subscribe: () => () => {} }) };
+    if (id === "../offline/pendingReminder") return { schedulePendingReminder: async () => undefined, cancelPendingReminder: async () => undefined }; if (id === "../offline/connectivity") return { createConnectivity: () => ({ current: async () => true, subscribe: () => () => {} }) };
     if (id === "../offline/foreground") return {
       readForeground: () => foreground,
       bindForeground: (controller: { setForeground(active: boolean): void }) => bindForegroundSource(controller, {

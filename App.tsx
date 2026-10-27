@@ -54,6 +54,7 @@ import { QuickOrderCreator } from "./src/workshop/orders/QuickOrderCreator";
 import { fileDrivePort } from "./src/domain/fileDrive";
 import { threadPort } from "./src/domain/threads";
 import { deletionPort } from "./src/domain/deletion";
+import { clockOffsetMs } from "./src/offline/serverClock";
 import { WorkshopScreen } from "./src/workshop/WorkshopScreen";
 import { createDemoWorkshopPort } from "./src/workshop/demoWorkshop";
 import { flushAppErrors, installAppErrorReporting, recordAppError, setAppErrorScreen } from "./src/diagnostics/errorReporter";
@@ -214,6 +215,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       threadPort={app.session.mode === "live" ? threadPort(app.receiptPort) : null}
       deletionPort={app.session.mode === "live" && app.liveVerified ? deletionPort(app.receiptPort) : null}
       onDeleted={() => { app.closeWork(); void app.refresh().catch(() => undefined); }}
+      onDiscardOperation={app.offlineController?.discard ? (id: string) => app.offlineController!.discard!(id) : undefined}
       timezone={app.session.user.system.timezone}
       equipmentLocation={app.equipmentLocation}
       workEditor={app.session.mode === "live" ? { ...app.workEditor, user: app.session.user } : undefined}
@@ -443,7 +445,7 @@ function ApplicationRoot() {
             <Text style={styles.offlineContextText}>Perfil verificado: {app.offlineVerifiedAt ? new Date(app.offlineVerifiedAt).toLocaleString("es-CL") : "No disponible"}. Preparar guarda datos y metadatos; no descarga fotos remotas.</Text>
             {app.error ? <Notice message={app.error} tone="warning" /> : null}
           </SafeAreaView>
-          <View style={styles.body}><OfflineCenterScreen key={`${app.storageKey}:${app.session.user.workerId}`} controller={app.offlineController} snapshot={app.offline} range={weekRange(app.range.startDate)} branchId={app.session.branchId} branchName={branchName} onBack={app.closeOffline} onPrepare={app.prepareOfflineWeek} /></View>
+          <View style={styles.body}><OfflineCenterScreen key={`${app.storageKey}:${app.session.user.workerId}`} controller={app.offlineController} snapshot={app.offline} range={weekRange(app.range.startDate)} branchId={app.session.branchId} branchName={branchName} onBack={app.closeOffline} onPrepare={app.prepareOfflineWeek} clockOffsetMs={clockOffsetMs()} /></View>
         </> : <SafeAreaView style={styles.center}>
           <EmptyState title="Sin copia offline disponible" message={app.offlineSetupError ?? "Se requiere un trabajador y una sucursal verificados para habilitar el almacenamiento local."} />
           <Button title="Volver" onPress={app.closeOffline} />

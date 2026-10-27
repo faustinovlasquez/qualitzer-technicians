@@ -20,7 +20,7 @@ export function ResourceSheet({ sheetKey, title, subtitle, drive, thread, onClos
   return <PrivateModal visible animationType="slide" onRequestClose={onClose}>
     <SafeAreaView style={styles.safe} testID={`order-quick-${kind}`}>
       {drive ? <FileDrive key={sheetKey} api={drive} title={title} subtitle={subtitle} onClose={onClose} />
-        : thread ? <ChatThread key={sheetKey} api={thread} title={title} subtitle={subtitle} onClose={onClose} /> : null}
+        : thread ? <ChatThread key={sheetKey} api={thread} title={title} subtitle={subtitle} onClose={onClose} draftKey={sheetKey} /> : null}
     </SafeAreaView>
   </PrivateModal>;
 }

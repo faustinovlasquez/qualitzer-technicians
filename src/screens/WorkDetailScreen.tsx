@@ -50,7 +50,8 @@ import { FadeIn } from "../ui/motion";
 import { useHeroCollapsed } from "../ui/heroPreference";
 import { useWorkTeamSheet } from "./workTeam/WorkTeamSheet";
 import { DeleteRecordDialog } from "../deletion/DeleteRecordDialog";
-import type { DeletionPort } from "../domain/deletion";
+import { DISCARDABLE_STATUSES } from "../offline/discard";
+import { pendingRecordChanges, type DeletionPort } from "../domain/deletion";
 import { useAppPermission } from "../application/appPermissions";
 
 export { clearWorkDetailDrafts, workDetailDraftKey } from "./workDetail/useWorkDraft";
@@ -60,6 +61,8 @@ export interface WorkDetailScreenProps {
   deletionPort?: DeletionPort | null;
   /** Se eliminó el trabajo: volver y actualizar la jornada. */
   onDeleted?: () => void;
+  /** Descarta una operación de la cola que Qualitzer no aceptó (por ejemplo, una entrega), para corregirla y repetirla. */
+  onDiscardOperation?: (operationId: string) => Promise<unknown>;
   /** Gestor de archivos con carpetas (como la web) para los archivos generales del trabajo, con conexión. */
   drivePort?: FileDrivePort | null;
   /** Comentarios como chat (como la web), con conexión. */
@@ -201,6 +204,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const reportOperation = scopedOperations.filter(operation => operation.kind === "document" ? operation.reportText === draft.data.report.trim()
     : operation.kind === "comment" && operation.text === draft.data.report.trim()).at(-1);
   const queuedCompletion = completionForWork(scopedOperations, work);
+  // Entrega guardada que Qualitzer no aceptó: no congela el trabajo, se explica y se puede corregir y volver a entregar.
+  const rejectedCompletion = queuedCompletion && DISCARDABLE_STATUSES.includes(queuedCompletion.status) ? queuedCompletion : null;
   const statusLabel = queuedCompletion ? completionStatusLabel(queuedCompletion) : STATUS_LABELS[work.status];
   const durableDelivery = props.offline != null && offlineReady;
   const evidenceWork = durableDelivery ? locallySavedWork(work, scopedOperations) : confirmedEvidenceWork(work);
@@ -711,6 +716,12 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     ? { port: props.deletionPort, scope: { groupId: group.id, workId: work.id, range: { startDate: range.startDate, endDate: range.endDate, companyBranchId: props.companyBranchId } } }
     : null;
   const evidenceContent = drive ? <FileDrive key={`${group.id}:${work.id}`} embedded api={drive} title="Archivos del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled}
+    // Sin señal a mitad de una subida: los archivos pasan a la cola de siempre y se envían solos después.
+    onOfflineSave={async (documents) => {
+      try { await callbacks.current.onUploadDocuments(documents, undefined); }
+      catch (failure) { if (!isOfflineQueuedError(failure)) throw failure; }
+    }}
+    onChanged={() => { if (mounted.current) void files.load(); }}
     notice={work.isFilesRequired ? <Notice message="Evidencia obligatoria del trabajo." tone="warning" /> : null} /> : workspaceContent;
 
   // Tarjeta superior compacta, fija arriba de las pestañas (diseño de referencia).
@@ -828,7 +839,10 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => navigateTab("evidence", id)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /></View> : null}
-      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : tab === "comments" && chat ? <ChatThread key={`${group.id}:${work.id}`} embedded api={chat} title="Comentarios del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled} /> : <FadeIn key={tab} style={styles.screen}><ScrollView ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
+      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : tab === "comments" && chat ? <ChatThread key={`${group.id}:${work.id}`} embedded api={chat} title="Comentarios del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled}
+          draftKey={`${storageKey}:${group.id}:${work.id}`}
+          // Sin señal: el texto va a la cola de comentarios del trabajo y se envía solo después.
+          onOfflineSend={async (text) => { try { await callbacks.current.onAddComment(text); } catch (failure) { if (!isOfflineQueuedError(failure)) throw failure; } }} /> : <FadeIn key={tab} style={styles.screen}><ScrollView ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
           {mode === "demo" ? <Notice message="Modo demostración · los cambios y confirmaciones son locales, no se envían a Qualitzer." /> : null}
           {props.workEditor && !readOnly && tab !== "work" ? <Button title="Editar trabajo" icon="create-outline" variant="secondary" disabled={locked || !online || hasPendingOperations} onPress={() => void openEditor()} /> : null}
           {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
@@ -838,7 +852,12 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Button title="Volver sin copia duradera" variant="danger" disabled={locked} onPress={onBack} />
           </Card> : null}
           {message ? <Notice message={message} tone={props.offline !== undefined ? "info" : "success"} onDismiss={() => setMessage(null)} /> : null}
-          {readOnly ? <Notice message={queuedCompletion ? queuedCompletion.status === "applied" ? "Entrega confirmada. Actualizando ficha." : "Entrega guardada en este dispositivo · pendiente de sincronización." : localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o finalizado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
+          {rejectedCompletion ? <Card style={styles.stack}>
+            <Notice message={syncUserError(rejectedCompletion.receipt?.error ?? rejectedCompletion.lastError) || "Qualitzer no aceptó la entrega."} tone="warning" />
+            {props.onDiscardOperation ? <Button title="Corregir y volver a entregar" icon="refresh-outline" variant="secondary" disabled={locked}
+              onPress={() => { void runAction("discard", async () => { await callbacks.current.onDiscardOperation?.(rejectedCompletion.id); if (mounted.current) setMessage("Se descartó la entrega anterior. Corrige lo que falte y vuelve a entregar."); }); }} /> : null}
+          </Card> : null}
+          {readOnly && !rejectedCompletion ? <Notice message={queuedCompletion ? queuedCompletion.status === "applied" ? "Entrega confirmada. Actualizando ficha." : "Entrega guardada en este dispositivo · pendiente de sincronización." : localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o finalizado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
           {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
           {!compactDetail ? <>
           {tab === "work" ? <View style={[styles.detailSection, styles.filesSection]} testID="work-files-section">
@@ -895,7 +914,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         </View></View>
       </PrivateModal> : null}
       <CameraPermissionGuide guide={cameraGuide} />
-      {deleting && deletion ? <DeleteRecordDialog port={deletion.port} scope={deletion.scope} kind="work" name={plainText(work.title)}
+      {deleting && deletion ? <DeleteRecordDialog port={deletion.port} scope={deletion.scope} kind="work" name={plainText(work.title)} pendingCount={pendingRecordChanges(props.offline?.operations, group.id, work.id)}
         onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); props.onDeleted?.(); }} /> : null}
       {editing && props.workEditor ? <PrivateModal visible animationType="slide" onRequestClose={() => editorBack.current?.()}>
         <CreationScreen editing={editing} backHandler={editorBack} user={props.workEditor.user} tenant={props.tenant} storageKey={storageKey} busy={busy} online={online && !hasPendingOperations}

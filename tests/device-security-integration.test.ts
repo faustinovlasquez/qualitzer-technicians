@@ -158,7 +158,7 @@ function nativeFixture(options: NativeOptions = {}) {
   });
   const adapterModule = loadSource<typeof import("../src/security/deviceSecurityAdapter")>("security/deviceSecurityAdapter.ts", id => {
     if (id === "react-native") return native;
-    if (id === "../offline/foreground") return foreground;
+    if (id === "../offline/pendingReminder") return { schedulePendingReminder: async () => undefined, cancelPendingReminder: async () => undefined }; if (id === "../offline/foreground") return foreground;
     if (id === "expo-secure-store") return {
       WHEN_UNLOCKED_THIS_DEVICE_ONLY: 73,
       getItemAsync: async (key: string) => { reads.push(key); return options.read ? options.read() : options.preference ?? null; },
@@ -228,7 +228,7 @@ function providerFixture(options: NativeOptions = {}) {
     if (id === "react/jsx-runtime") return view.jsx;
     if (id === "react-native") return ports.native;
     if (id === "expo-screen-capture") return ports.capture;
-    if (id === "../offline/foreground") return ports.foreground;
+    if (id === "../offline/pendingReminder") return { schedulePendingReminder: async () => undefined, cancelPendingReminder: async () => undefined }; if (id === "../offline/foreground") return ports.foreground;
     if (id === "./DeviceLockController") return { DeviceLockController };
     if (id === "./deviceSecurityAdapter") return ports.adapterModule;
     if (id === "./DeviceSecurityContext") return context;

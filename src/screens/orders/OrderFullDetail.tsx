@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { DeleteRecordDialog } from "../../deletion/DeleteRecordDialog";
-import type { DeletionPort } from "../../domain/deletion";
+import { pendingRecordChanges, type DeletionPort } from "../../domain/deletion";
 import { isAppPermissionAllowed } from "../../domain/mobileAppConfig";
 import { StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -87,7 +87,7 @@ export function OrderFullDetail({ group, orderId, port, branchId, mode, storageK
         comments={mode === "live" && chatPort ? threadApi(chatPort, { kind: "order", companyBranchId: branchId, entryId: NO_ENTRY, orderId }) : null}
         onSend={() => call("sendOrderToCommercial")(NO_ENTRY, orderId, branchId).then(() => undefined)}
         onLocationHistory={onLocationHistory} onDelete={deletion ? () => setDeleting(true) : undefined} />
-      {deleting && deletion ? <DeleteRecordDialog port={deletion.port} scope={deletion.scope} kind="order" name={plainText(group.title)}
+      {deleting && deletion ? <DeleteRecordDialog port={deletion.port} scope={deletion.scope} kind="order" name={plainText(group.title)} pendingCount={pendingRecordChanges(offline?.operations, group.id)}
         onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); onDeleted?.(); }} /> : null}
     </SafeAreaView>
   </AppPermissionsProvider>;

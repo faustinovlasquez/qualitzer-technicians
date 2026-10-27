@@ -7,6 +7,7 @@ import { Button } from "../ui/components";
 import { palette, radius } from "../ui/theme";
 
 type Phase =
+  | { step: "pending" }
   | { step: "checking" }
   | { step: "blocked"; check: DeletionCheck }
   | { step: "confirm"; check: DeletionCheck }
@@ -21,11 +22,13 @@ const failureText = (failure: unknown) => failure instanceof Error && failure.me
  * Confirmación para eliminar un trabajo, mantenimiento u OT que el técnico creó: primero pregunta al servidor si se
  * puede (y explica por qué no), luego muestra lo que se pierde y, al eliminar, una confirmación animada.
  */
-export function DeleteRecordDialog({ port, scope, kind, name, onClose, onDeleted }: {
+export function DeleteRecordDialog({ port, scope, kind, name, onClose, onDeleted, pendingCount = 0 }: {
   port: DeletionPort; scope: DeletionScope; kind: DeletionKind; name?: string | null;
   onClose: () => void; onDeleted: () => void;
+  /** Cambios de este registro guardados en el teléfono que aún no se envían: con ellos no se elimina (quedarían huérfanos). */
+  pendingCount?: number;
 }) {
-  const [phase, setPhase] = useState<Phase>({ step: "checking" });
+  const [phase, setPhase] = useState<Phase>(pendingCount > 0 ? { step: "pending" } : { step: "checking" });
   const appear = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
   const pop = useRef(new Animated.Value(0)).current;
@@ -35,6 +38,7 @@ export function DeleteRecordDialog({ port, scope, kind, name, onClose, onDeleted
   useEffect(() => {
     mounted.current = true;
     Animated.spring(appear, { toValue: 1, friction: 8, tension: 70, useNativeDriver: native }).start();
+    if (pendingCount > 0) return () => { mounted.current = false; };
     void port.deletionCheck(scope).then((check) => {
       if (mounted.current) setPhase(check.allowed ? { step: "confirm", check } : { step: "blocked", check });
     }, (failure: unknown) => { if (mounted.current) setPhase({ step: "error", message: failureText(failure), check: null }); });
@@ -80,6 +84,7 @@ export function DeleteRecordDialog({ port, scope, kind, name, onClose, onDeleted
   const reason = phase.step === "blocked" ? deletionReasonText(phase.check) : null;
   const tone = phase.step === "done" ? { color: palette.success, soft: palette.successSoft, icon: "checkmark" as const }
     : phase.step === "blocked" ? { color: palette.amber, soft: palette.amberSoft, icon: "lock-closed" as const }
+      : phase.step === "pending" ? { color: palette.amber, soft: palette.amberSoft, icon: "cloud-upload-outline" as const }
       : phase.step === "error" ? { color: palette.danger, soft: palette.dangerSoft, icon: "cloud-offline-outline" as const }
         : { color: palette.danger, soft: palette.dangerSoft, icon: "trash" as const };
   const ring = { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] }), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.45] }) }] };
@@ -98,11 +103,15 @@ export function DeleteRecordDialog({ port, scope, kind, name, onClose, onDeleted
 
         <Text style={styles.title} accessibilityRole="header">
           {phase.step === "checking" ? "Revisando…" : phase.step === "deleting" ? `Eliminando ${noun.one}…` : phase.step === "done" ? `${noun.the.charAt(0).toUpperCase()}${noun.the.slice(1)} se eliminó`
-            : phase.step === "blocked" ? reason!.title : phase.step === "error" ? "No se pudo completar" : `¿Eliminar ${noun.this}?`}
+            : phase.step === "blocked" ? reason!.title : phase.step === "pending" ? "Primero se deben enviar sus cambios" : phase.step === "error" ? "No se pudo completar" : `¿Eliminar ${noun.this}?`}
         </Text>
         {label && phase.step !== "error" ? <View style={styles.namePill}><Text style={styles.nameText} numberOfLines={2}>{label}</Text></View> : null}
 
         {phase.step === "checking" ? <Text style={styles.text}>Confirmando que se pueda eliminar.</Text> : null}
+        {phase.step === "pending" ? <View style={[styles.note, { backgroundColor: palette.amberSoft }]}>
+          <Ionicons name="information-circle" size={18} color={palette.amber} accessible={false} />
+          <Text style={[styles.noteText, { color: palette.heading }]}>{pendingCount === 1 ? "Hay 1 cambio" : `Hay ${pendingCount} cambios`} de {noun.this} guardados en el teléfono que aún no se envían. Espera a que se envíen (o descártalos en «Sin conexión») y vuelve a intentarlo.</Text>
+        </View> : null}
         {phase.step === "blocked" ? <View style={[styles.note, { backgroundColor: palette.amberSoft }]}>
           <Ionicons name="information-circle" size={18} color={palette.amber} accessible={false} />
           <Text style={[styles.noteText, { color: palette.heading }]}>{reason!.detail}</Text>

@@ -279,7 +279,7 @@ test("assignment cancellation leaves mutations and receipt requests independent 
   assignment.resolve(Response.json(assignmentsWithStep())); await flush(); assert.equal(f.clock.timers.size, 0);
 });
 
-test("FormData upload retains its 150-second deadline and is not cancelled with an assignment read", async () => {
+test("FormData upload retains its long (11-minute) deadline and is not cancelled with an assignment read", async () => {
   const assignment = deferred<Response>(); const upload = deferred<Response>();
   const f = harness((request) => request.init.body instanceof FormData ? upload.promise : assignment.promise);
   const controller = new AbortController();
@@ -289,7 +289,7 @@ test("FormData upload retains its 150-second deadline and is not cancelled with 
   await flush(); controller.abort(); await rejected;
   const request = f.requests.find((entry) => entry.init.body instanceof FormData);
   assert.ok(request); assert.equal(request.init.signal?.aborted, false);
-  assert.equal(f.clock.delays.filter((delay) => delay === 150_000).length, 1);
+  assert.equal(f.clock.delays.filter((delay) => delay === 11 * 60_000).length, 1);
   f.clock.tick(45_000); assert.equal(request.init.signal?.aborted, false);
   upload.resolve(new Response(null, { status: 204 })); await write;
   assignment.resolve(Response.json(assignmentsWithStep())); await flush(); assert.equal(f.clock.timers.size, 0);

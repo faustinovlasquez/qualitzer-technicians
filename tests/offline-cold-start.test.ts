@@ -72,7 +72,7 @@ function persistentRuntime(databasePath: string, connected: () => boolean) {
     if (id === "./profiles") return profiles;
     if (id === "./OfflineTechnicianRepository") return { OfflineTechnicianRepository };
     if (id === "./state") return offlineState;
-    if (id === "./engine") return require("../src/offline/engine");
+    if (id === "./engine") return require("../src/offline/engine"); if (id === "./serverClock") return { loadServerClock: async () => undefined, serverNow: () => Date.now() };
     if (id === "./contracts") return require("../src/offline/contracts");
     if (id === "../domain/offline") return require("../src/domain/offline");
     if (id === "../domain/tenantSession") return tenantSession;

@@ -44,10 +44,19 @@ const stateSchema = z.object({
   reservations: z.array(z.object({ id: z.string(), size: z.number(), namespace: z.string() })),
   attachments: z.array(z.object({ scope, stepId: z.string().optional(), attachmentId: z.string(), file: fileSchema })).default([]),
   lease: z.object({ owner: z.string(), until: z.number() }).nullable(), authBlocked: z.boolean(), lastSyncedAt: z.number().nullable(),
+  quarantine: z.array(z.unknown()).max(500).optional(),
 });
 export function emptyState(): OfflineState { return { version: 1, revision: 0, operations: [], cache: [], revokedResources: [], passports: [], reservations: [], attachments: [], lease: null, authBlocked: false, lastSyncedAt: null }; }
 export function decodeState(json: string): OfflineState {
-  const state: OfflineState = stateSchema.parse(JSON.parse(json));
+  // Cada operación se lee por separado: una que esta versión no entiende se aparta (sin borrarla) en vez de dejar
+  // ilegible toda la cola.
+  const raw: unknown = JSON.parse(json);
+  const record = raw !== null && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const rawOperations = Array.isArray(record.operations) ? record.operations : [];
+  const operations: unknown[] = [];
+  const quarantined: unknown[] = Array.isArray(record.quarantine) ? [...record.quarantine] : [];
+  for (const entry of rawOperations) (operation.safeParse(entry).success ? operations : quarantined).push(entry);
+  const state: OfflineState = stateSchema.parse({ ...record, operations, ...(quarantined.length ? { quarantine: quarantined.slice(-500) } : {}) });
   for (const entry of state.cache) {
     const kind = entry.key.startsWith("files:") ? "files" : entry.key.startsWith("comments:") ? "comments" : undefined;
     if (!kind) continue;
@@ -104,8 +113,38 @@ export async function updateState(store: DurableStore, namespace: string, change
 }
 export function pendingOperation(operation: OfflineOperation): boolean { return operation.status !== "applied"; }
 export async function hasPendingChanges(store: DurableStore): Promise<boolean> {
-  for (const namespace of await store.namespaces()) if ((await store.read(namespace)).operations.some(pendingOperation)) return true;
+  for (const namespace of await store.namespaces()) {
+    const state = await store.read(namespace);
+    // Lo apartado por no poder leerse también cuenta: no se pierde sin que el técnico lo decida.
+    if (state.operations.some(pendingOperation) || (state.quarantine?.length ?? 0) > 0) return true;
+  }
   return false;
+}
+
+/**
+ * Archiva lo ya confirmado más antiguo que `before` y borra sus copias de archivos, sin tocar nada que otra operación
+ * pendiente necesite (dependencias, prerrequisitos, lecturas del cronómetro o trabajos locales en uso).
+ * Devuelve los archivos que se deben borrar del teléfono.
+ */
+export function pruneApplied(state: OfflineState, before: number): import("../domain/offline").OfflineFile[] {
+  const referenced = new Set<string>();
+  const localGroupsInUse = new Set<string>();
+  for (const op of state.operations) {
+    if (op.status === "applied") continue;
+    if (op.dependencyId) referenced.add(op.dependencyId);
+    if (op.kind === "completion") for (const id of op.prerequisiteIds) referenced.add(id);
+    if (op.kind !== "create") localGroupsInUse.add(op.scope.groupId);
+  }
+  for (const entry of state.cache) for (const id of [...(entry.timerReadOperationIds ?? []), ...(entry.fileReadOperationIds ?? []), ...(entry.activityReadOperationIds ?? [])]) referenced.add(id);
+  const keep = (op: OfflineOperation) => op.status !== "applied" || op.createdAt > before || referenced.has(op.id)
+    || (op.kind === "create" && localGroupsInUse.has(op.localGroupId));
+  const removed = state.operations.filter((op) => !keep(op));
+  if (removed.length === 0) return [];
+  state.operations = state.operations.filter(keep);
+  const files = removed.flatMap((op) => op.kind === "document" ? [op.file] : []);
+  const fileIds = new Set(files.map((file) => file.id));
+  state.attachments = state.attachments.filter((entry) => !fileIds.has(entry.file.id));
+  return files;
 }
 export function putCache(state: OfflineState, entry: CacheEntry): void {
   if (entry.json.length * 2 > OFFLINE_LIMITS.cacheBytes) throw new OfflineUnavailableError("OFFLINE_CACHE_ENTRY_TOO_LARGE");
@@ -116,7 +155,14 @@ export function putCache(state: OfflineState, entry: CacheEntry): void {
   const pendingDates = new Set(state.operations.filter((operation) => operation.status !== "applied")
     .map((operation) => operation.kind === "create" ? operation.input.schedule.date : operation.scope.startDate));
   const agenda = (item: CacheEntry) => item.key.startsWith("assignments:");
-  const order = [...entries.filter((item) => !agenda(item)), ...entries.filter((item) => agenda(item) && !pendingDates.has(item.key.slice("assignments:".length)))];
+  // El catálogo base para crear trabajos (primera página sin búsqueda) y la identidad son necesarios para trabajar sin señal:
+  // se expulsan después de archivos, comentarios y búsquedas, y antes que la agenda.
+  const essential = (item: CacheEntry) => item.key === "me" || (item.key.startsWith("options:") && /"search":"","page":0/.test(item.key));
+  const order = [
+    ...entries.filter((item) => !agenda(item) && !essential(item)),
+    ...entries.filter((item) => essential(item)),
+    ...entries.filter((item) => agenda(item) && !pendingDates.has(item.key.slice("assignments:".length)))
+  ];
   const evicted = new Set<CacheEntry>();
   for (const item of order) {
     if (entries.length - evicted.size <= OFFLINE_LIMITS.cacheEntries && bytes <= OFFLINE_LIMITS.cacheBytes) break;

@@ -52,6 +52,10 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     if (operation && isStatusConflict(operation)) { this.timerResolveAttempts.clear(); await this.resolveTimerConflicts(); return; }
     return this.engine.retry(id);
   };
+  discard = (id: string) => this.engine.discard(id);
+  freeSpace = () => this.engine.freeSpace();
+  quarantineText = () => this.engine.quarantineText();
+  discardQuarantine = () => this.engine.discardQuarantine();
   /**
    * Relee el estado real de cada trabajo con un cronómetro o entrega en conflicto y reescribe la cadena local sobre ese estado,
    * conservando la hora original de cada acción. Devuelve cuántas operaciones se reemplazaron o se dieron por reflejadas.
@@ -471,6 +475,23 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     const registered = await this.engine.enqueue([operation], { reusePendingComments: true });
     await this.finish(registered);
   }
+  /**
+   * Choque de checklist (otro cambió el mismo paso): «mantener» relee el trabajo desde Qualitzer y vuelve a guardar la
+   * respuesta del técnico sobre la respuesta actual; «no mantener» descarta la del técnico y queda la de Qualitzer.
+   */
+  resolveAnswerConflict = async (id: string, keep: boolean): Promise<void> => {
+    const operation = this.getSnapshot().operations.find((entry) => entry.id === id);
+    if (!operation || operation.kind !== "answer" || operation.status !== "conflict") throw new OfflineUnavailableError("OFFLINE_OPERATION_NOT_FOUND");
+    if (!keep) { await this.engine.discard(id); return; }
+    if (!("executionStatus" in operation.answer)) throw new OfflineUnavailableError("OFFLINE_ANSWER_TYPE_UNKNOWN");
+    if (!this.getSnapshot().online) throw new OfflineUnavailableError("OFFLINE_NETWORK_UNAVAILABLE");
+    const { scope, stepId } = operation;
+    const answer = operation.answer as StepAnswer;
+    // Base fresca: la respuesta que hoy tiene Qualitzer para ese paso.
+    await this.assignments(dailyRange(scope.startDate), scope.companyBranchId);
+    await this.engine.discard(id);
+    await this.answer(scope, stepId, answer);
+  };
   async answer(scope: WorkScope, stepId: string, answer: StepAnswer): Promise<void> {
     const dependencyId = await this.dependency(scope);
     if (dependencyId) throw new OfflineUnavailableError("OFFLINE_LOCAL_CHECKLIST_NOT_AVAILABLE");

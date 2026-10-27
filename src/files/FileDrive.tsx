@@ -13,7 +13,9 @@ import { Button, IconButton } from "../ui/components";
 import { palette, radius, typography } from "../ui/theme";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
-type Upload = { id: string; name: string; status: "waiting" | "uploading" | "done" | "error"; error?: string };
+type Upload = { id: string; name: string; status: "waiting" | "uploading" | "done" | "error" | "queued"; error?: string };
+/** Sin señal antes de enviar: el archivo no llegó al servidor y se puede guardar en la cola sin riesgo de duplicarlo. */
+const unsent = (failure: unknown) => failure instanceof Error && failure.name === "NetworkError" && (failure as Error & { kind?: string }).kind === "network";
 type Dialog =
   | { kind: "add" } | { kind: "file"; file: DriveFile } | { kind: "folder"; folder: DriveFolder }
   | { kind: "name"; folder: DriveFolder | null } | { kind: "move"; file: DriveFile }
@@ -76,8 +78,15 @@ function Thumb({ file, size }: { file: DriveFile; size: number }) {
  * Gestor de archivos genérico (como el de la web): carpetas con ruta, búsqueda, vista en cuadrícula o lista,
  * subir varias fotos o documentos con su avance, mover, renombrar y borrar. Sirve para ingresos, OT, trabajos y mantenimientos.
  */
-export function FileDrive({ api, title, subtitle, onClose, readOnly = false, canDelete = true, embedded = false, notice }: {
+export function FileDrive({ api, title, subtitle, onClose, readOnly = false, canDelete = true, embedded = false, notice, onOfflineSave, onChanged }: {
   api: DriveApi; title: string; subtitle?: string; onClose?: () => void; readOnly?: boolean; canDelete?: boolean;
+  /**
+   * Guarda en la cola sin conexión los archivos que no se pudieron enviar por falta de señal (van a la carpeta principal
+   * y se envían solos al volver la conexión). Sin él, quedan con error para reintentar.
+   */
+  onOfflineSave?: (files: Array<{ id: string; uri: string; name: string; mimeType: string; size?: number }>) => Promise<void>;
+  /** Avisa que cambió algo (subida, borrado, carpeta) para que la pantalla actualice lo que depende de los archivos. */
+  onChanged?: () => void;
   /** Dentro de una pestaña: en la carpeta principal no hay botón atrás y la tecla atrás la maneja la pantalla. */
   embedded?: boolean;
   /** Aviso fijo arriba de la lista (por ejemplo, si la evidencia es obligatoria). */
@@ -153,7 +162,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   async function run(action: () => Promise<void>, done: string) {
     if (busy) return;
     setBusy(true); setMessage(null);
-    try { await action(); setDialog(null); setMessage({ text: done, tone: "success" }); await load(); }
+    try { await action(); setDialog(null); setMessage({ text: done, tone: "success" }); onChanged?.(); await load(); }
     catch (failure) { setMessage({ text: failureText(failure, "No se pudo completar la acción."), tone: "error" }); }
     finally { setBusy(false); }
   }
@@ -167,25 +176,53 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
       return;
     }
     if (selected.length === 0) return;
-    const queue = selected.map((file) => ({ id: Crypto.randomUUID(), file }));
+    await send(selected.map((file) => ({ id: Crypto.randomUUID(), uri: file.uri, name: file.name, mimeType: file.mimeType ?? "application/octet-stream", size: file.size })));
+  }
+
+  // Archivos elegidos que fallaron: se pueden reintentar sin volver a elegirlos.
+  const retryable = useRef(new Map<string, { id: string; uri: string; name: string; mimeType: string; size?: number }>());
+  async function send(queue: Array<{ id: string; uri: string; name: string; mimeType: string; size?: number }>) {
     const target = folderId;
-    setUploads(queue.map(({ id, file }) => ({ id, name: file.name, status: "waiting" as const })));
+    setUploads(queue.map(({ id, name }) => ({ id, name, status: "waiting" as const })));
     let failed = 0;
-    for (const { id, file } of queue) {
-      setUploads((list) => list.map((item) => item.id === id ? { ...item, status: "uploading" } : item));
+    const offline: typeof queue = [];
+    for (const file of queue) {
+      setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "uploading" } : item));
       try {
         if (file.size !== undefined && file.size > MAX_UPLOAD_BYTES) throw new Error("Supera el máximo de 25 MB.");
-        await apiRef.current.upload({ id, uri: file.uri, name: file.name, mimeType: file.mimeType ?? "application/octet-stream", size: file.size }, target);
-        setUploads((list) => list.map((item) => item.id === id ? { ...item, status: "done" } : item));
+        await apiRef.current.upload(file, target);
+        retryable.current.delete(file.id);
+        setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "done" } : item));
       } catch (failure) {
+        if (onOfflineSave && unsent(failure)) { offline.push(file); continue; }
         failed += 1;
-        setUploads((list) => list.map((item) => item.id === id ? { ...item, status: "error", error: failureText(failure, "No se pudo subir.") } : item));
+        retryable.current.set(file.id, file);
+        setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "error", error: failureText(failure, "No se pudo subir.") } : item));
       }
     }
-    setMessage(failed === 0 ? { text: queue.length === 1 ? "Archivo subido." : `${queue.length} archivos subidos.`, tone: "success" }
-      : { text: `${queue.length - failed} de ${queue.length} subidos. Revisa los que fallaron.`, tone: "error" });
-    if (failed === 0) setUploads([]);
-    await load(target);
+    // Sin señal: se guardan en el teléfono y se envían solos al volver la conexión (como los demás cambios sin conexión).
+    if (offline.length > 0 && onOfflineSave) {
+      try {
+        await onOfflineSave(offline);
+        for (const file of offline) retryable.current.delete(file.id);
+        setUploads((list) => list.map((item) => offline.some((file) => file.id === item.id) ? { ...item, status: "queued" } : item));
+      } catch (failure) {
+        failed += offline.length;
+        for (const file of offline) retryable.current.set(file.id, file);
+        setUploads((list) => list.map((item) => offline.some((file) => file.id === item.id) ? { ...item, status: "error", error: failureText(failure, "No se pudo guardar en el teléfono.") } : item));
+      }
+    }
+    const queued = failed === 0 ? offline.length : 0;
+    setMessage(failed > 0 ? { text: `${queue.length - failed} de ${queue.length} listos. Revisa los que fallaron.`, tone: "error" }
+      : queued > 0 ? { text: `Sin señal: ${queued === 1 ? "1 archivo quedó guardado" : `${queued} archivos quedaron guardados`} en el teléfono y se enviará${queued === 1 ? "" : "n"} solo${queued === 1 ? "" : "s"} al volver la conexión.`, tone: "success" }
+        : { text: queue.length === 1 ? "Archivo subido." : `${queue.length} archivos subidos.`, tone: "success" });
+    if (failed === 0 && queued === 0) setUploads([]);
+    if (queue.length > failed) onChanged?.();
+    await load(target).catch(() => undefined);
+  }
+  async function retryFailed() {
+    const files = uploads.filter((item) => item.status === "error").flatMap((item) => retryable.current.get(item.id) ?? []);
+    if (files.length > 0) await send(files);
   }
 
   function open(file: DriveFile) {
@@ -246,6 +283,8 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
         <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.round((doneCount / uploads.length) * 100)}%` }]} /></View>
         {active ? <Text style={styles.hint} numberOfLines={1}>{active.name}</Text> : null}
         {uploads.filter((upload) => upload.status === "error").map((upload) => <Text key={upload.id} style={styles.uploadError} numberOfLines={2}>✕ {upload.name}: {upload.error}</Text>)}
+        {uploads.filter((upload) => upload.status === "queued").map((upload) => <Text key={upload.id} style={styles.hint} numberOfLines={1}>☁ {upload.name}: guardado, se enviará al volver la señal</Text>)}
+        {!uploading && uploads.some((upload) => upload.status === "error" && retryable.current.has(upload.id)) ? <Button title="Reintentar los que fallaron" icon="refresh" variant="secondary" onPress={() => void retryFailed()} /> : null}
       </View> : null}
       {current?.readOnly ? <View style={styles.readOnly}><Ionicons name="lock-closed" size={14} color={palette.textSecondary} accessible={false} /><Text style={styles.hint}>Carpeta del sistema: solo para ver.</Text></View> : null}
 

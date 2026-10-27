@@ -9,6 +9,13 @@ import { detectDocument, MAX_DOCUMENT_BYTES, releaseDocuments } from "../files/d
 
 export const MAX_SYNC_METADATA_BYTES = 16 * 1024;
 export const MAX_SYNC_MULTIPART_BYTES = MAX_DOCUMENT_BYTES + MAX_SYNC_METADATA_BYTES + 65536;
+/** Máximo para recibir una subida (la app espera algo más); con mala señal un archivo de 25 MB puede tardar minutos. */
+export const MAX_UPLOAD_WAIT_MS = 10 * 60_000;
+/** Tiempo para recibir una subida según su tamaño: 1 min + lo que tarda a unos 16 KB/s, entre 2 y 10 minutos. */
+export function uploadWaitMs(bytes: number): number {
+  const size = Number.isFinite(bytes) && bytes > 0 ? bytes : MAX_SYNC_MULTIPART_BYTES;
+  return Math.min(MAX_UPLOAD_WAIT_MS, Math.max(120_000, 60_000 + Math.ceil(size / 16_384) * 1000));
+}
 
 function validateFile(file: Express.Multer.File): void {
   const invalid = () => new GatewayError(415, "MOBILE_SYNC_INVALID_FILE_TYPE");
@@ -75,7 +82,7 @@ export async function readSyncDocument(req: Request, res: Response): Promise<{ m
         size += chunk.length;
         if (size > MAX_SYNC_MULTIPART_BYTES) { finish(new GatewayError(413, "DOCUMENT_TOO_LARGE")); req.destroy(); }
       };
-      const timeout = setTimeout(() => { finish(new GatewayError(408, "UPLOAD_TIMEOUT")); req.destroy(); }, 120000);
+      const timeout = setTimeout(() => { finish(new GatewayError(408, "UPLOAD_TIMEOUT")); req.destroy(); }, uploadWaitMs(Number(req.headers["content-length"] ?? 0)));
       timeout.unref();
       req.once("aborted", abort);
       req.on("data", count);

@@ -48,6 +48,8 @@ const subscribeNothing = (): (() => void) => () => {};
 const emptyOfflineSnapshot = (): null => null;
 const alwaysAllowed = (): boolean => true;
 
+import { cancelPendingReminder, schedulePendingReminder } from "../offline/pendingReminder";
+
 function remoteRepository(repo: TechnicianRepository | null): TechnicianRepository | null {
   return repo instanceof OfflineTechnicianRepository ? repo.remote : repo;
 }
@@ -180,7 +182,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const pausesPending = useRef(0);
   const manualRefresh = useRef<{ session: Session; range: DateRange } | null>(null);
   const appliedRefresh = useRef<{ repo: OfflineTechnicianRepository; revision: string } | null>(null);
-  const baselinePrepared = useRef<OfflineTechnicianRepository | null>(null);
+  const baselinePrepared = useRef<{ controller: OfflineTechnicianRepository; day: string } | null>(null);
   const state = useRef({ session, data, range, gatewayUrl, selected, selectedOrder, selectedCreationKind, tab });
   state.current = { session, data, range, gatewayUrl, selected, selectedOrder, selectedCreationKind, tab };
   const renderVersion = sessionVersion.current;
@@ -455,7 +457,12 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
 
   useEffect(() => {
     if (!offlineController || repository.current !== offlineController || !session) return;
-    const detachForeground = bindForeground({ setForeground: (active) => offlineController.setForeground(active && isAccessAllowed()) });
+    const detachForeground = bindForeground({ setForeground: (active) => {
+      offlineController.setForeground(active && isAccessAllowed());
+      // Al salir con cambios sin enviar se programa un recordatorio (la cola solo se envía con la app abierta).
+      const pending = offlineController.getSnapshot().pending;
+      if (active) void cancelPendingReminder(); else void schedulePendingReminder(pending);
+    } });
     return detachForeground;
   }, [offlineController, session, accessAllowed, isAccessAllowed]);
 
@@ -963,15 +970,27 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     void refreshAssignments(true).catch(() => undefined);
   }, [offlineController, session, appliedRevision, offline?.syncing, offline?.authBlocked, busy, selectedCreationKind, refreshAssignments, accessAllowed]);
 
+  // La semana para trabajar sin señal se prepara al iniciar y otra vez cada vez que cambia el día (la app puede quedar abierta).
+  const timezone = session?.user.system.timezone;
+  const [preparationDay, setPreparationDay] = useState(() => dateKey());
   useEffect(() => {
-    if (!accessAllowed || loading || assignmentRead.current || !offlineController || !session?.branchId || !offline?.online || offline.authBlocked || busy || actionLock.current || selected || selectedOrder || selectedCreationKind || baselinePrepared.current === offlineController) return;
-    baselinePrepared.current = offlineController;
+    if (!offlineController) return;
+    const tick = () => setPreparationDay(scheduleClock(timezone)?.day ?? dateKey());
+    tick();
+    if (typeof setInterval !== "function") return;
+    const timer = setInterval(tick, 5 * 60_000);
+    return () => clearInterval(timer);
+  }, [timezone, offlineController]);
+  useEffect(() => {
+    if (!accessAllowed || loading || assignmentRead.current || !offlineController || !session?.branchId || !offline?.online || offline.authBlocked || busy || actionLock.current || selected || selectedOrder || selectedCreationKind
+      || (baselinePrepared.current?.controller === offlineController && baselinePrepared.current.day === preparationDay)) return;
+    baselinePrepared.current = { controller: offlineController, day: preparationDay };
     const controller = new AbortController();
     baselineRead.current = controller;
     const version = sessionVersion.current;
     const branchId = session.branchId;
     void (async () => {
-      const day = scheduleClock(session.user.system.timezone)?.day ?? dateKey();
+      const day = preparationDay;
       await offlineController.assignments(weekRange(day), branchId, { signal: controller.signal });
       if (controller.signal.aborted || version !== sessionVersion.current || repository.current !== offlineController) return;
       await offlineController.creationOptions({ companyBranchId: branchId, search: "", page: 0 });
@@ -980,7 +999,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       if (version === sessionVersion.current && repository.current === offlineController) setOfflineSetupError(`La semana no quedó preparada completamente. Reintenta desde Sin conexión. ${errorText(caught)}`);
     }).finally(() => { if (baselineRead.current === controller) baselineRead.current = null; });
     return () => controller.abort();
-  }, [offlineController, session, offline?.online, offline?.authBlocked, busy, selected, selectedOrder, selectedCreationKind, accessAllowed, loading]);
+  }, [offlineController, session, offline?.online, offline?.authBlocked, busy, selected, selectedOrder, selectedCreationKind, accessAllowed, loading, preparationDay]);
 
   async function refresh(): Promise<void> {
     if (!currentContext() || actionLock.current || selectedCreationKind) return;
@@ -1185,10 +1204,11 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     try {
       if (repo instanceof OfflineTechnicianRepository) {
         if (!repo.getSnapshot().online || repo.getSnapshot().authBlocked) throw new Error("Necesitas conexión y una sesión vigente para cambiar de sucursal.");
-        repo.stop();
+        // Primero se envía lo pendiente y después se detiene: detenido, el envío no se hace.
         await repo.syncNow();
+        repo.stop();
         await repo.engine.refresh();
-        if (repo.getSnapshot().pending > 0) throw new Error("Hay cambios sin confirmar en la sucursal actual. Sincroniza o revisa su cola antes de cambiar; no se borrará ningún pendiente.");
+        if (repo.getSnapshot().pending > 0) throw new Error("Hay cambios sin enviar en esta sucursal. Abre «Sin conexión» para enviarlos o, si ya no se pueden aplicar, respaldarlos y descartarlos antes de cambiar.");
       } else if (current.user.workerId !== null && offlineSetupError) {
         throw new Error("No se pudo comprobar la cola de la sucursal actual. Recupera el almacenamiento offline antes de cambiar de sucursal.");
       }
@@ -1239,9 +1259,9 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const expectedVersion = sessionVersion.current;
     const action = beginAction();
     try {
-      if (await pendingOfflineChanges(repo)) throw new Error("No se cerró la sesión: hay cambios sin confirmar en este dispositivo, posiblemente en otra sucursal o cuenta. Sincroniza o revisa la cola. Se conservan tu sesión, archivos y borradores.");
-      if (repo instanceof OfflineTechnicianRepository) { repo.stop(); await repo.syncNow(); }
-      if (await pendingOfflineChanges(repo)) throw new Error("Hay cambios pendientes. La sesión y la cola se conservan; revisa Sin conexión antes de salir.");
+      // Se intenta enviar lo pendiente antes de revisar (y solo después se detiene el envío).
+      if (repo instanceof OfflineTechnicianRepository) { await repo.syncNow().catch(() => undefined); repo.stop(); }
+      if (await pendingOfflineChanges(repo)) throw new Error("No se cerró la sesión: hay cambios sin enviar en este teléfono. Abre «Sin conexión» para enviarlos o, si ya no se pueden aplicar, respaldarlos y descartarlos. Se conservan tu sesión, archivos y borradores.");
       if (expectedVersion !== sessionVersion.current || repository.current !== repo) { logoutInProgress.current = false; endAction(action); return; }
       const remote = remoteRepository(repo);
       const tenant = current?.tenant ?? sessionSetup.current?.tenant ?? selectedTenant;
@@ -1822,7 +1842,10 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (group?.type !== "internal_maintenance" || group.status === "completed" || group.status === "delivered") return;
     const others = group.works.filter(work => work.id !== value.workId && !["Productos (supervisor)", "Productos utilizados"].includes(work.title.trim()));
     if (!others.every(work => work.status === "delivered" || work.status === "completed")) return;
-    const next: SelectedOrder = { id: value.groupId, queryDate: value.startDate, initialTab: "works", deliveryIntent: "ready" };
+    // La entrega del mantenimiento (con firma) se carga del servidor: sin señal solo se abre el mantenimiento, sin quedar esperando.
+    const repo = repository.current;
+    const online = !(repo instanceof OfflineTechnicianRepository) || (repo.getSnapshot().online && !repo.getSnapshot().authBlocked);
+    const next: SelectedOrder = { id: value.groupId, queryDate: value.startDate, initialTab: "works", ...(online ? { deliveryIntent: "ready" as const } : {}) };
     state.current = { ...state.current, selected: null, selectedOrder: next };
     setSelected(null); setSelectedOrder(next);
   }

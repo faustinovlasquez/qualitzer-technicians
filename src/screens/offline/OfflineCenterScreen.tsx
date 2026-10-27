@@ -17,6 +17,9 @@ import { canRetryOperation, coverageDates, dependencyInfo, operationErrorReason,
 import { PENDING_CHANGES_MESSAGE, syncUserError, userErrorText } from "./syncUserPresentation";
 import { captureSyncAttempt, deploymentPendingCount, requestManualSync, syncAttemptMessage, syncAttemptPresentation, syncSnapshotKey, type SyncAttempt } from "./syncAttemptPresentation";
 import { animateNextLayout } from "../../ui/motion";
+import { palette } from "../../ui/theme";
+import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
+import { DISCARDABLE_STATUSES, discardSet } from "../../offline/discard";
 
 export interface OfflineCenterScreenProps {
   controller: OfflineController;
@@ -26,6 +29,8 @@ export interface OfflineCenterScreenProps {
   branchName?: string;
   onBack: () => void;
   onPrepare?: () => Promise<void>;
+  /** Diferencia medida entre la hora del servidor y la del teléfono (ms). */
+  clockOffsetMs?: number;
 }
 
 function OperationDetails({ operation, title = "Ver detalles técnicos" }: { operation: OfflineOperation; title?: string }) {
@@ -55,11 +60,15 @@ function OperationDetails({ operation, title = "Ver detalles técnicos" }: { ope
   </View>;
 }
 
-export function OfflineCenterScreen({ controller, snapshot, range, branchId, branchName, onBack, onPrepare }: OfflineCenterScreenProps) {
+export function OfflineCenterScreen({ controller, snapshot, range, branchId, branchName, onBack, onPrepare, clockOffsetMs = 0 }: OfflineCenterScreenProps) {
+  const skewMinutes = Math.round(Math.abs(clockOffsetMs) / 60_000);
   const lock = useRef(false);
   const [action, setAction] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [technicalDetails, setTechnicalDetails] = useState(false);
+  const [discarding, setDiscarding] = useState<OfflineOperation | null>(null);
+  const [discarded, setDiscarded] = useState<string | null>(null);
+  const [discardingQuarantine, setDiscardingQuarantine] = useState(false);
   const [syncResult, setSyncResult] = useState<{ attempt: SyncAttempt; key: string } | null>(null);
   const [now, setNow] = useState(Date.now);
   const syncKey = syncSnapshotKey(snapshot);
@@ -111,6 +120,7 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         <BodyText>{snapshot ? `${snapshot.pending} operación(es) pendientes · ${snapshot.conflicts} requieren atención` : "No se ha verificado la cola; no se presume vacía."}</BodyText>
         <BodyText>Datos locales al: {snapshot?.cachedAt ? new Date(snapshot.cachedAt).toLocaleString("es-CL") : "No disponible"}</BodyText>
         <BodyText>Última confirmación: {snapshot?.lastSyncedAt ? new Date(snapshot.lastSyncedAt).toLocaleString("es-CL") : "No disponible"}</BodyText>
+        {skewMinutes >= 2 ? <Notice message={`La hora del teléfono está ${clockOffsetMs > 0 ? "atrasada" : "adelantada"} unos ${skewMinutes} min. La app la corrige con la hora de Qualitzer, pero conviene activar «Fecha y hora automáticas» en los ajustes del teléfono.`} tone="warning" /> : null}
         {snapshot?.authBlocked ? <Notice message="La sincronización está bloqueada hasta verificar de nuevo la sesión. Los pendientes se conservan; esta pantalla no cambia la autenticación." tone="warning" /> : null}
         {snapshot && snapshot.pending > 0 ? <BodyText>{PENDING_CHANGES_MESSAGE}</BodyText> : null}
         {!feedback && awaitingDeployment > 0 ? <BodyText>{awaitingDeployment} {awaitingDeployment === 1 ? "cambio requiere" : "cambios requieren"} actualizar el servicio. Contacta a soporte.</BodyText> : null}
@@ -142,6 +152,34 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         <BodyText>Incluye archivos guardados y reservados por todos los perfiles en este teléfono. Máximo {fileSizeLabel(OFFLINE_LIMITS.fileBytes)} por archivo. La caché de datos usa hasta {fileSizeLabel(OFFLINE_LIMITS.cacheBytes)} por perfil, separada de los pendientes.</BodyText>
         <Notice message="No se borran pendientes para liberar espacio. Borrar los datos del navegador, desinstalar o perder el dispositivo puede destruir las copias locales aún no sincronizadas." tone="warning" />
       </View> : null}
+      {/* Copias de lo ya enviado: se limpian solas a los 14 días; aquí se pueden liberar de inmediato. */}
+      {controller.freeSpace ? <Card style={styles.stack}>
+        <SectionTitle title="Espacio del teléfono" subtitle={snapshot?.storage ? `${storageBytesLabel(snapshot.storage.usedBytes)} usados por la app` : undefined} />
+        <BodyText>Las fotos y archivos ya enviados se borran solos del teléfono a los 14 días. Puedes liberarlos ahora; lo pendiente nunca se borra.</BodyText>
+        <Button title="Liberar espacio" icon="trash-bin-outline" variant="secondary" loading={action === "free"} disabled={!!action}
+          onPress={() => void run("free", async () => { const bytes = await controller.freeSpace!(); setDiscarded(bytes > 0 ? `Se liberaron ${storageBytesLabel(bytes)}.` : "No había copias para liberar."); })} />
+      </Card> : null}
+      {(snapshot?.quarantined ?? 0) > 0 ? <Card style={styles.stack}>
+        <Notice message={`${snapshot!.quarantined === 1 ? "Hay 1 cambio guardado" : `Hay ${snapshot!.quarantined} cambios guardados`} por otra versión de la app que no se puede leer. Se conserva aparte: compártelo como respaldo y, si ya no sirve, descártalo.`} tone="warning" />
+        {controller.quarantineText ? <Button title="Compartir respaldo" icon="share-outline" variant="secondary" loading={action === "share:quarantine"} disabled={!!action}
+          onPress={() => void run("share:quarantine", async () => {
+            const { Share } = await import("react-native");
+            await Share.share({ message: `Respaldo Qualitzer (cambios no legibles)\n\n${controller.quarantineText!()}` });
+          })} /> : null}
+        {controller.discardQuarantine ? <Button title="Descartar estos cambios" icon="trash-outline" variant="secondary" iconColor={palette.danger} textStyle={{ color: palette.danger }} disabled={!!action}
+          onPress={() => setDiscardingQuarantine(true)} /> : null}
+      </Card> : null}
+      {discardingQuarantine && controller.discardQuarantine ? <Modal visible transparent animationType="fade" onRequestClose={() => setDiscardingQuarantine(false)}>
+        <View style={styles.modalOverlay}><View style={[styles.modalCard, styles.modalContent]} accessibilityViewIsModal>
+          <SectionTitle title="¿Descartar los cambios no legibles?" />
+          <BodyText>No se enviarán a Qualitzer y no se pueden recuperar desde la app. Comparte antes un respaldo si lo necesitas.</BodyText>
+          <View style={styles.row}>
+            <View style={styles.grow}><Button title="Cancelar" variant="secondary" onPress={() => setDiscardingQuarantine(false)} /></View>
+            <View style={styles.grow}><Button title="Descartar" variant="danger" loading={action === "quarantine"} disabled={!!action}
+              onPress={() => void run("quarantine", async () => { const count = await controller.discardQuarantine!(); setDiscardingQuarantine(false); setDiscarded(`Se descartaron ${count} cambios no legibles.`); })} /></View>
+          </View>
+        </View></View>
+      </Modal> : null}
       {message ? <Notice message={userErrorText(message)} tone="error" onDismiss={() => setMessage(null)} /> : null}
       <SectionTitle title="Registro de operaciones" subtitle="El texto local, la base y los recibos se conservan para revisión." />
       {[...(snapshot?.operations ?? [])].sort((a, b) => b.createdAt - a.createdAt).map((operation) => {
@@ -160,9 +198,62 @@ export function OfflineCenterScreen({ controller, snapshot, range, branchId, bra
         </View> : null}
         <OperationDetails operation={operation} />
         {operation.kind === "document" ? <OfflineFileCard file={{ ...pendingDocumentAttachment(operation), offline: { ...pendingDocumentAttachment(operation).offline, confirmed: operation.status === "applied" } }} readLocalFile={(id) => controller.readLocalFile(id)} /> : null}
-        {dependency.status === "ready" && canRetryOperation(operation) ? <Button title="Reintentar misma operación" variant="secondary" loading={action === operation.id} disabled={!presentation.canSync || !!action} onPress={() => void run(operation.id, () => controller.retry(operation.id))} /> : operation.status === "pending" && dependency.status === "ready" ? <BodyText>Guardado. Se reintentará automáticamente respetando el tiempo de espera.</BodyText> : dependency.status === "ready" && operation.status !== "applied" && operation.status !== "syncing" ? <BodyText>Se conserva para revisión. No se reenvía a ciegas ni se descarta desde aquí.</BodyText> : null}
+        {dependency.status === "ready" && canRetryOperation(operation) ? <Button title="Reintentar misma operación" variant="secondary" loading={action === operation.id} disabled={!presentation.canSync || !!action} onPress={() => void run(operation.id, () => controller.retry(operation.id))} /> : operation.status === "pending" && dependency.status === "ready" ? <BodyText>Guardado. Se reintentará automáticamente respetando el tiempo de espera.</BodyText> : null}
+        {/* Choque de checklist: el técnico decide qué respuesta queda. */}
+        {operation.kind === "answer" && operation.status === "conflict" && controller.resolveAnswerConflict ? <View style={styles.tight}>
+          <BodyText>Otra persona cambió este paso del checklist en Qualitzer. Elige qué respuesta queda.</BodyText>
+          <Button title="Mantener mi respuesta" icon="checkmark-done-outline" loading={action === `keep:${operation.id}`} disabled={!!action || !presentation.canSync}
+            onPress={() => void run(`keep:${operation.id}`, () => controller.resolveAnswerConflict!(operation.id, true))} />
+          <Button title="Usar la de Qualitzer" icon="cloud-download-outline" variant="secondary" loading={action === `drop:${operation.id}`} disabled={!!action}
+            onPress={() => void run(`drop:${operation.id}`, () => controller.resolveAnswerConflict!(operation.id, false))} />
+        </View> : null}
+        {/* Lo que ya terminó mal no queda atascado: se respalda (compartir) y se puede descartar con doble confirmación. */}
+        {controller.discard && DISCARDABLE_STATUSES.includes(operation.status) && !(operation.kind === "answer" && operation.status === "conflict" && controller.resolveAnswerConflict) ? <View style={styles.tight}>
+          <BodyText>No se pudo aplicar en Qualitzer. Puedes guardar un respaldo y descartarlo para seguir trabajando.</BodyText>
+          <Button title="Compartir respaldo" icon="share-outline" variant="secondary" loading={action === `share:${operation.id}`} disabled={!!action}
+            onPress={() => void run(`share:${operation.id}`, async () => {
+              const uri = operation.kind === "document" ? (await controller.readLocalFile(operation.file.id).catch(() => null))?.uri : undefined;
+              // Se carga al usarlo: compartir depende del teléfono.
+              const { shareOperationBackup } = await import("../../offline/shareBackup");
+              if (!await shareOperationBackup(operation, operationTitle(operation), uri)) throw new Error("Este dispositivo no permite compartir. Copia el texto desde los detalles.");
+            })} />
+          <Button title="Descartar…" icon="trash-outline" variant="secondary" iconColor={palette.danger} textStyle={{ color: palette.danger }} disabled={!!action}
+            onPress={() => setDiscarding(operation)} />
+        </View> : null}
       </Card>; })}
       {snapshot && snapshot.operations.length === 0 ? <BodyText>No hay operaciones registradas en esta sesión y sucursal.</BodyText> : null}
     </ScrollView>
+    {discarding && controller.discard ? <DiscardDialog operation={discarding} affected={discardSet(snapshot?.operations ?? [], discarding.id)} busy={action === "discard"}
+      onClose={() => { if (action !== "discard") setDiscarding(null); }}
+      onConfirm={() => void run("discard", async () => {
+        const removed = await controller.discard!(discarding.id);
+        setDiscarding(null);
+        setMessage(null);
+        setDiscarded(removed.length === 1 ? "Se descartó 1 operación." : `Se descartaron ${removed.length} operaciones.`);
+      })} /> : null}
+    {discarded ? <View style={styles.tight}><Notice message={discarded} tone="success" onDismiss={() => setDiscarded(null)} /></View> : null}
   </SafeAreaView>;
+}
+
+/** Doble confirmación: primero se ve qué se descarta (también lo que depende de ello) y después se confirma de nuevo. */
+function DiscardDialog({ operation, affected, busy, onClose, onConfirm }: { operation: OfflineOperation; affected: OfflineOperation[]; busy: boolean; onClose: () => void; onConfirm: () => void }) {
+  const [sure, setSure] = useState(false);
+  const others = affected.filter((entry) => entry.id !== operation.id);
+  return <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <View style={styles.modalOverlay}><View style={[styles.modalCard, styles.modalContent]} accessibilityViewIsModal>
+      <SectionTitle title={sure ? "¿Seguro? No se puede deshacer" : "¿Descartar esta operación?"} subtitle={operationTitle(operation)} />
+      <BodyText>{sure ? "Lo descartado no se enviará a Qualitzer y se borran sus archivos de este teléfono. Si no guardaste un respaldo, compártelo antes."
+        : "No se enviará a Qualitzer. Úsalo solo si ya no se puede aplicar (por ejemplo, el trabajo cambió o se eliminó)."}</BodyText>
+      {others.length > 0 ? <View style={styles.tight}>
+        <Text style={styles.label}>También se descartan {others.length === 1 ? "1 operación que depende de esta" : `${others.length} operaciones que dependen de esta`}:</Text>
+        {others.slice(0, 8).map((entry) => <BodyText key={entry.id}>• {operationTitle(entry)}</BodyText>)}
+        {others.length > 8 ? <BodyText>…y {others.length - 8} más.</BodyText> : null}
+      </View> : null}
+      <View style={styles.row}>
+        <View style={styles.grow}><Button title="Cancelar" variant="secondary" disabled={busy} onPress={onClose} /></View>
+        <View style={styles.grow}>{sure ? <Button title="Descartar definitivamente" icon="trash-outline" variant="danger" loading={busy} disabled={busy} onPress={onConfirm} />
+          : <Button title="Continuar" variant="danger" onPress={() => setSure(true)} />}</View>
+      </View>
+    </View></View>
+  </Modal>;
 }

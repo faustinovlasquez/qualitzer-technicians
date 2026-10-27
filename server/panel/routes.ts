@@ -37,7 +37,10 @@ export function createPanelRouter(upstream: Upstream, uploadLimiter: RequestHand
   router.post(`${work}/comments`, async (req, res) => {
     const input = panelRequest(req, "work");
     const { text } = commentInputSchema.parse(req.body);
-    await service.mutate(input, (scope) => service.addComment(input, scope, text));
+    await service.mutate(input, async (scope) => {
+      await assertAppPermission(upstream, scope.token, scope.range.companyBranchId, "commentsWrite");
+      await service.addComment(input, scope, text);
+    });
     res.status(201).json({ success: true });
   });
 
@@ -48,6 +51,8 @@ export function createPanelRouter(upstream: Upstream, uploadLimiter: RequestHand
     uploads.active += 1;
     try {
       await service.mutate(input, async (scope) => {
+        // La evidencia de un paso del checklist es parte de ejecutar el trabajo; los archivos generales piden el permiso.
+        if (target !== "step") await assertAppPermission(upstream, scope.token, scope.range.companyBranchId, "filesUpload");
         const files = await readDocuments(req, res);
         await service.upload(input, scope, files);
       });
@@ -61,7 +66,10 @@ export function createPanelRouter(upstream: Upstream, uploadLimiter: RequestHand
   const remove = (target: PanelTarget): RequestHandler => async (req, res) => {
     const input = panelRequest(req, target, { deleting: true });
     emptySchema.parse(req.body ?? {});
-    await service.mutate(input, (scope) => service.deleteFile(input, scope));
+    await service.mutate(input, async (scope) => {
+      if (target !== "step") await assertAppPermission(upstream, scope.token, scope.range.companyBranchId, "filesDelete");
+      await service.deleteFile(input, scope);
+    });
     res.json({ success: true });
   };
   router.delete("/:groupId/files/:fileId", remove("group"));

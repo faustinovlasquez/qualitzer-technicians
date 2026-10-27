@@ -32,6 +32,17 @@ export function syncUserError(code: string | null | undefined): string {
       return "No se pudo confirmar el envío. Se reintentará cuando haya conexión.";
     case "MOBILE_SYNC_IN_PROGRESS":
       return "Envío en proceso.";
+    case "MOBILE_SYNC_REQUIRES_REVIEW":
+      return "Qualitzer no lo aceptó: puede faltar una foto o respuesta obligatoria, o la hora del teléfono no calza. Corrígelo y vuelve a hacerlo; puedes descartar este intento en «Sin conexión».";
+    case "OFFLINE_WORK_COMPLETED_ELSEWHERE":
+      return "Otra persona ya dejó este trabajo como finalizado, así que tu entrega no se aplicó. Revísalo y descarta este intento si ya no corresponde.";
+    case "OFFLINE_TIMER_CLOCK_CHANGED":
+      return "La hora del teléfono retrocedió. Activa «Fecha y hora automáticas» en los ajustes del teléfono y vuelve a intentarlo.";
+    case "MOBILE_SYNC_STATUS_CONFLICT":
+    case "MOBILE_SYNC_INVALID_STATUS":
+      return "El estado del trabajo cambió en Qualitzer. Se está ajustando solo al estado real.";
+    case "MOBILE_SYNC_WORK_NOT_FOUND":
+      return "El trabajo ya no existe o no está asignado a ti. Descarta este cambio en «Sin conexión».";
     case "MOBILE_SYNC_OPERATION_REUSED":
     case "MOBILE_CREATION_REQUEST_CONFLICT":
       return "Conflicto de envío. Requiere revisión; no vuelvas a enviarlo.";

@@ -177,7 +177,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["./src/receipts/useMaterialReceipts", { useMaterialReceipts: () => receipts }],
     ["./src/receipts/MaterialReceiptsScreen", { MaterialReceiptsScreen: "MaterialReceiptsScreen" }],
     ["./src/workshop/useWorkshopBoard", { useWorkshopBoard: () => ({ workshops: null, workshopId: null, board: null, loading: false, error: "", refresh: async () => {}, selectWorkshop: () => {} }) }],
-    ["./src/workshop/WorkshopScreen", { WorkshopScreen: "WorkshopScreen" }], ["./src/workshop/orders/QuickOrderCreator", { QuickOrderCreator: "QuickOrderCreator" }], ["./src/domain/fileDrive", { fileDrivePort: () => null }], ["./src/domain/deletion", { deletionPort: () => null }], ["./src/domain/threads", { threadPort: () => null }], ["./src/workshop/demoWorkshop", { createDemoWorkshopPort: () => ({}) }],
+    ["./src/workshop/WorkshopScreen", { WorkshopScreen: "WorkshopScreen" }], ["./src/workshop/orders/QuickOrderCreator", { QuickOrderCreator: "QuickOrderCreator" }], ["./src/domain/fileDrive", { fileDrivePort: () => null }], ["./src/domain/deletion", { deletionPort: () => null }], ["./src/offline/serverClock", { clockOffsetMs: () => 0 }], ["./src/domain/threads", { threadPort: () => null }], ["./src/workshop/demoWorkshop", { createDemoWorkshopPort: () => ({}) }],
     ["./src/screens/notifications/ActiveTimersBanner", { ActiveTimersBanner: "ActiveTimersBanner" }],
     ["./src/notifications/runningTimers", { snapshotActiveTimers: () => [] }],
     ["./src/diagnostics/nativeCrashReporter", { recordNonFatal: () => {}, setCrashContext: () => {}, setCrashScreen: () => {} }],

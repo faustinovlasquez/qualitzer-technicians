@@ -205,7 +205,7 @@ function OrderRow({ order, works, actions, hasLoose, onOpenWork, onOpenOrder, on
 }) {
   const editable = Boolean(actions && order.kind === "workOrder" && !order.sentToCommercial && (actions.onSend || actions.onDelete || actions.onAddWorks));
   const detail = onOpenOrder && order.kind !== "maintenance" ? () => onOpenOrder(order) : undefined;
-  // Archivos y comentarios (generales) de la OT en una ventana, sin entrar al detalle.
+  // Archivos y comentarios (generales) de la OT en una ventana, sin entrar al detalle (el borrador del chat se guarda por OT).
   const files = onFiles && order.kind !== "maintenance" ? () => onFiles(order) : undefined;
   const comments = onComments && order.kind !== "maintenance" ? () => onComments(order) : undefined;
   const tone = !order.sentToCommercial ? { color: palette.orange, soft: palette.orangeSoft } : order.finished ? { color: palette.success, soft: palette.successSoft } : STAGE_TONE[order.stage];

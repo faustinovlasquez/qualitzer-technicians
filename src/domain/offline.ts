@@ -92,6 +92,8 @@ export interface OfflineSnapshot {
   authBlocked: boolean;
   pending: number;
   conflicts: number;
+  /** Cambios guardados que esta versión no puede leer: se conservan aparte hasta que el técnico decida. */
+  quarantined?: number;
   lastSyncedAt: number | null;
   lastError: string | null;
   cachedAt?: number;
@@ -117,6 +119,14 @@ export interface OfflineController {
   syncNow(): Promise<void>;
   requestSync?(): Promise<void>;
   retry(operationId: string): Promise<void>;
+  /** Descarta una operación rechazada/en revisión/en conflicto y lo que depende de ella (borra sus archivos locales). */
+  discard?(operationId: string): Promise<OfflineOperation[]>;
+  /** Borra copias de lo ya enviado y descargado (nunca lo pendiente). Devuelve bytes liberados. */
+  freeSpace?(): Promise<number>;
+  /** Choque de checklist: mantener la respuesta del técnico sobre la actual de Qualitzer, o descartarla. */
+  resolveAnswerConflict?(operationId: string, keep: boolean): Promise<void>;
+  quarantineText?(): string;
+  discardQuarantine?(): Promise<number>;
   hasPendingChanges(): Promise<boolean>;
   prepareWeek(range: DateRange, branchId: number, options?: OfflinePreparationOptions): Promise<void>;
   localAssignments?(range: DateRange, branchId: number): Promise<Assignments>;

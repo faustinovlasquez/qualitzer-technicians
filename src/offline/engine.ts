@@ -2,15 +2,19 @@ import { syncCapabilitiesSchema, syncCommandSchema, syncScopeSchema } from "../d
 import { creationInputSchema, creationResultSchema } from "../domain/creation";
 import type { LocalPhoto, User, WorkScope } from "../domain/models";
 import { sameTenant } from "../domain/tenantSession";
-import { OfflineUnavailableError, type OfflineCommand, type OfflineConnection, type OfflineOperation, type OfflineReceipt, type OfflineScope, type OfflineSnapshot } from "../domain/offline";
+import { OfflineUnavailableError, type OfflineCommand, type OfflineConnection, type OfflineFile, type OfflineOperation, type OfflineReceipt, type OfflineScope, type OfflineSnapshot } from "../domain/offline";
 import { ApiError, NetworkError } from "../infrastructure/errors";
 import { OFFLINE_LIMITS, type EngineDependencies, type OfflineState } from "./contracts";
-import { cloneState, emptyState, hasPendingChanges, pendingOperation, receiptSchema, updateState } from "./state";
+import { cloneState, emptyState, hasPendingChanges, pendingOperation, pruneApplied, receiptSchema, updateState } from "./state";
 import { resourceCacheKey, sameResource } from "./cacheSchemas";
 import { connectionErrorCode as errorCode, failedConnection, isServiceFailure, requiresDeployment } from "./connection";
 import { prepareQueuedActivity, prepareQueuedIntention } from "./queueIntentions";
+import { DISCARDABLE_STATUSES, discardSet } from "./discard";
 import { awaitingDeploymentCounts, canAdvanceManualRetry, deploymentKinds, deploymentWaits, protectDeploymentCooldown, runnableOperations } from "./syncScheduling";
 
+/** Reservas de envío tomadas por esta ejecución de la app (las demás quedaron de un cierre forzado). */
+const liveLeaseOwners = new Set<string>();
+export { DISCARDABLE_STATUSES, discardSet } from "./discard";
 export function canUseCache(error: unknown): boolean { return error instanceof NetworkError; }
 export function backoffMs(attempts: number): number { return Math.min(OFFLINE_LIMITS.maxBackoffMs, 2_000 * 2 ** Math.min(8, Math.max(0, attempts - 1))); }
 export function sameOfflineUser(expected: User, actual: User, branchId: number): boolean {
@@ -102,6 +106,7 @@ export class OfflineEngine {
       online: !this.state.authBlocked && this.connection.status === "ready",
       authBlocked: this.state.authBlocked,
       pending: this.state.operations.filter(pendingOperation).length,
+      quarantined: this.state.quarantine?.length ?? 0,
       conflicts: this.state.operations.filter((op) => ["blocked", "conflict", "needs_review", "auth_required"].includes(op.status)).length,
       lastSyncedAt: this.state.lastSyncedAt,
       cachedAt: this.state.cache.length ? Math.max(...this.state.cache.map((entry) => entry.fetchedAt)) : undefined,
@@ -262,6 +267,55 @@ export class OfflineEngine {
     this.publish();
     await this.syncNow();
   }
+  /**
+   * Descarta una operación que ya terminó mal (rechazada, en conflicto o en revisión) y lo que depende de ella, y borra sus
+   * archivos locales. Es la salida para que nada quede atascado; la pantalla ofrece antes compartir un respaldo.
+   */
+  async discard(id: string): Promise<OfflineOperation[]> {
+    let removed: OfflineOperation[] = [];
+    this.state = await updateState(this.dependencies.store, this.dependencies.namespace, (state) => {
+      removed = [];
+      if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
+      const target = state.operations.find((entry) => entry.id === id);
+      if (!target) throw new OfflineUnavailableError("OFFLINE_OPERATION_NOT_FOUND");
+      if (!DISCARDABLE_STATUSES.includes(target.status)) throw new OfflineUnavailableError("OFFLINE_DISCARD_NOT_ALLOWED");
+      const set = discardSet(state.operations, id);
+      if (set.some((op) => op.status === "syncing")) throw new OfflineUnavailableError("OFFLINE_DISCARD_BUSY");
+      const ids = new Set(set.map((op) => op.id));
+      removed = set;
+      state.operations = state.operations.filter((op) => !ids.has(op.id));
+    });
+    for (const op of removed) if (op.kind === "document") await this.dependencies.fileStore.remove(op.file).catch(() => undefined);
+    this.publish();
+    return removed;
+  }
+  /**
+   * Libera espacio: archiva todo lo ya confirmado y borra las copias locales de archivos que ninguna operación pendiente
+   * necesita (también las descargadas para ver sin conexión). Nunca toca lo pendiente. Devuelve los bytes liberados.
+   */
+  async freeSpace(): Promise<number> {
+    let files: OfflineFile[] = [];
+    this.state = await updateState(this.dependencies.store, this.dependencies.namespace, (state) => {
+      files = pruneApplied(state, Number.POSITIVE_INFINITY);
+      const needed = new Set(state.operations.filter((op) => op.status !== "applied" && op.kind === "document").map((op) => op.kind === "document" ? op.file.id : ""));
+      const downloaded = state.attachments.filter((entry) => !needed.has(entry.file.id));
+      state.attachments = state.attachments.filter((entry) => needed.has(entry.file.id));
+      files = [...files, ...downloaded.map((entry) => entry.file)];
+    });
+    const unique = [...new Map(files.map((file) => [file.id, file])).values()];
+    for (const file of unique) await this.dependencies.fileStore.remove(file).catch(() => undefined);
+    await this.refresh();
+    return unique.reduce((total, file) => total + file.size, 0);
+  }
+  /** Lo apartado por no poder leerse, como texto para respaldarlo. */
+  quarantineText(): string { return JSON.stringify(this.state.quarantine ?? [], null, 2); }
+  /** Descarta lo apartado (después de respaldarlo). */
+  async discardQuarantine(): Promise<number> {
+    let count = 0;
+    this.state = await updateState(this.dependencies.store, this.dependencies.namespace, (state) => { count = state.quarantine?.length ?? 0; delete state.quarantine; });
+    this.publish();
+    return count;
+  }
   hasPendingChanges(): Promise<boolean> { return hasPendingChanges(this.dependencies.store); }
   async readLocalFile(id: string): Promise<LocalPhoto> {
     await this.refresh();
@@ -360,7 +414,9 @@ export class OfflineEngine {
     const retryTransport = this.retryTransportOnWake;
     this.state = await updateState(store, namespace, (state) => {
       acquired = false;
-      if (generation !== this.generation || state.authBlocked || (state.lease && state.lease.until > now())) return;
+      // En el teléfono, una reserva que no es de esta ejecución quedó de un cierre forzado: no se espera a que venza.
+      const stale = state.lease !== null && this.dependencies.exclusiveProcess === true && !liveLeaseOwners.has(state.lease.owner);
+      if (generation !== this.generation || state.authBlocked || (state.lease && state.lease.until > now() && !stale)) return;
       state.lease = { owner, until: now() + OFFLINE_LIMITS.leaseMs };
       for (const op of state.operations) {
         if (manualRetry && canAdvanceManualRetry(op)) op.nextAttemptAt = 0;
@@ -379,6 +435,7 @@ export class OfflineEngine {
       acquired = true;
     });
     if (!acquired) return;
+    liveLeaseOwners.add(owner);
     this.retryTransportOnWake = false;
     this.publish({ syncing: true, lastError: null });
     const connectionRevision = this.connectionRevision;
@@ -464,7 +521,9 @@ export class OfflineEngine {
             const interruptedUpload = error instanceof ApiError && (error.status === 408 || ["UPLOAD_TIMEOUT", "UPLOAD_ABORTED"].includes(error.code));
             const deployment = error instanceof ApiError && requiresDeployment(error.code);
             const invalidDocumentReceipt = (current.kind === "document" || current.kind === "activity") && error instanceof ApiError && error.code === "OFFLINE_INVALID_RECEIPT";
-            current.status = invalidDocumentReceipt || error instanceof ApiError && error.code === "MOBILE_SYNC_OPERATION_REUSED" ? "needs_review"
+            // Crear en el servidor se puede repetir sin duplicar (clientRequestId): una respuesta inesperada se reintenta unas veces.
+            const retryableCreation = current.kind === "create" && !(error instanceof ApiError) && current.attempts < 10;
+            current.status = retryableCreation ? "pending" : invalidDocumentReceipt || error instanceof ApiError && error.code === "MOBILE_SYNC_OPERATION_REUSED" ? "needs_review"
               : deployment || inProgress || interruptedUpload || error instanceof NetworkError || (error instanceof OfflineUnavailableError && error.code === "OFFLINE_CYCLE_INTERRUPTED") || (error instanceof ApiError && (error.status >= 500 || error.status === 429)) ? "pending"
               : error instanceof ApiError && error.status === 409 ? "conflict"
                 : error instanceof ApiError && [400, 403, 404, 422].includes(error.status) ? "blocked" : "needs_review";
@@ -480,6 +539,10 @@ export class OfflineEngine {
           if (error instanceof NetworkError || isServiceFailure(error)) break;
         }
       }
+      // Lo confirmado hace más de 14 días se archiva y se borran sus copias de archivos (nada pendiente se toca).
+      let pruned: OfflineFile[] = [];
+      this.state = await updateState(store, namespace, (state) => { pruned = state.lease?.owner === owner ? pruneApplied(state, now() - OFFLINE_LIMITS.retainAppliedMs) : []; });
+      for (const file of pruned) await this.dependencies.fileStore.remove(file).catch(() => undefined);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) await this.blockAuth();
       else if (generation === this.generation && !(error instanceof NetworkError && connectionRevision !== this.connectionRevision && this.connection.status === "ready")) {
@@ -487,7 +550,8 @@ export class OfflineEngine {
         this.noteConnectionFailure(error, generation);
       }
     } finally {
-      this.state = await updateState(store, namespace, (state) => { if (state.lease?.owner === owner) state.lease = null; });
+      try { this.state = await updateState(store, namespace, (state) => { if (state.lease?.owner === owner) state.lease = null; }); }
+      finally { liveLeaseOwners.delete(owner); }
       this.publish();
     }
   }
@@ -505,6 +569,7 @@ export class OfflineEngine {
     const previous = await upstream.offlineReceipt(operation.id, scope.companyBranchId);
     if (previous) {
       const receipt = this.checkedReceipt(operation.id, previous);
+      // Un recibo «aplicado» no prueba que el contenido sea el mismo (choque de identificador): se confirma con un envío idéntico.
       if (receipt.state !== "applied") return { kind: "receipt", receipt };
     }
     let receipt: OfflineReceipt;

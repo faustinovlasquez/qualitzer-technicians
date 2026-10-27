@@ -8,6 +8,7 @@ import { createFileStore } from "./FileStore";
 import { createConnectivity } from "./connectivity";
 import { disableOfflineProfile, restoreOfflineProfile, saveOfflineProfile } from "./profiles";
 import { OfflineTechnicianRepository } from "./OfflineTechnicianRepository";
+import { loadServerClock, serverNow } from "./serverClock";
 import { offlineUserSchema, putCache, updateState } from "./state";
 import type { Connectivity, DurableFileStore, DurableStore } from "./contracts";
 
@@ -32,11 +33,15 @@ export async function createOfflineRepository(remote: TechnicianRepository, sess
   const storageKeyHash = options.storageKey ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, options.storageKey) : "";
   const namespace = JSON.stringify(["offline-v1", tenantStorageNamespace(session, options.gatewayUrl, session.branchId), session.user.workerId, storageKeyHash]);
   const store = options.store ?? await createDurableStore();
+  await loadServerClock();
   const stored = { token: session.token, tenant: session.tenant, branchId: session.branchId, gatewayUrl: options.gatewayUrl };
   const disableProfile = () => disableOfflineProfile(stored, store);
   const repository = new OfflineTechnicianRepository(remote, session, {
     namespace, store, fileStore: options.fileStore ?? createFileStore(store), connectivity: options.connectivity ?? createConnectivity(), upstream: remote,
-    branchId: session.branchId, user: session.user, now: Date.now, uuid: Crypto.randomUUID,
+    // Hora corregida con la del servidor: un reloj del teléfono desajustado no manda a revisión lo guardado sin conexión.
+    branchId: session.branchId, user: session.user, now: serverNow, uuid: Crypto.randomUUID,
+    // En el teléfono corre una sola copia de la app; en la web puede haber varias pestañas con el mismo almacenamiento.
+    exclusiveProcess: (globalThis as { navigator?: { product?: string } }).navigator?.product === "ReactNative",
     onVerified: (user) => saveOfflineProfile({ ...session, user }, options.gatewayUrl, store),
     onAuthBlocked: disableProfile,
     canAccessLocal: session.mode === "demo" ? undefined : async () => {

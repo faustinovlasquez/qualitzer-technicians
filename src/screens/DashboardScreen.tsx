@@ -11,6 +11,7 @@ import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconNam
 import { palette, radius, theme, typography } from "../ui/theme";
 import { AssignmentOrderCard } from "./orders/AssignmentOrderCard";
 import { OrderQuickSheet, type OrderQuickKind } from "./orders/OrderQuickSheet";
+import { pendingRecordChanges } from "../domain/deletion";
 import type { FileDrivePort } from "../domain/fileDrive";
 import type { ThreadPort } from "../domain/threads";
 import { AssignmentWorkCard } from "./orders/AssignmentWorkCard";
@@ -135,13 +136,20 @@ function Kpi({ title, value, note, icon, tone, inline = false }: { title: string
 
 export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange, onScrolledChange, drivePort, threadPort }: DashboardScreenProps) {
   const [quick, setQuick] = useState<{ group: AssignmentGroup; work?: AssignmentWork; kind: OrderQuickKind } | null>(null);
-  const quickAvailable = Boolean(drivePort && threadPort) && companyBranchId !== undefined && offline?.online !== false && offline?.authBlocked !== true;
-  // Archivos y comentarios en ventana cuando hay conexión; si no, el detalle de siempre (guarda lo pendiente sin señal).
+  // Mientras se recupera el estado local (offline null) no se sabe si hay conexión: se usa el detalle de siempre.
+  const quickAvailable = Boolean(drivePort && threadPort) && companyBranchId !== undefined && (offline === undefined || (offline !== null && offline.online && !offline.authBlocked));
+  // Archivos y comentarios en ventana cuando hay conexión y nada pendiente de ese registro; si no, el detalle de siempre
+  // (es el que guarda y muestra lo pendiente sin señal).
   const openGroupFromCard = (group: AssignmentGroup, initialTab?: "works" | "files" | "comments" | "deliver") => {
-    if (!busy && quickAvailable && (initialTab === "files" || initialTab === "comments") && group.type !== "direct_assignment") { setQuick({ group, kind: initialTab }); return; }
+    if (!busy && quickAvailable && (initialTab === "files" || initialTab === "comments") && group.type !== "direct_assignment"
+      && pendingRecordChanges(offline?.operations, group.id) === 0) { setQuick({ group, kind: initialTab }); return; }
     onOpenGroup(group, initialTab);
   };
-  const openWorkQuick = quickAvailable ? (group: AssignmentGroup, work: AssignmentWork, kind: OrderQuickKind) => { if (!busy) setQuick({ group, work, kind }); } : undefined;
+  const openWorkQuick = quickAvailable ? (group: AssignmentGroup, work: AssignmentWork, kind: OrderQuickKind) => {
+    if (busy) return;
+    if (pendingRecordChanges(offline?.operations, group.id, work.id) > 0) { onOpenWork(group, work, { tab: kind === "files" ? "evidence" : "comments" }); return; }
+    setQuick({ group, work, kind });
+  } : undefined;
   const compact = useWindowDimensions().width < 600;
   const [agendaLayout, setAgendaLayout] = useState<"timeline" | "schedule" | "list">("timeline");
   const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");

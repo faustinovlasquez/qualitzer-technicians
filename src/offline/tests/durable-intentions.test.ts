@@ -298,7 +298,12 @@ test("new kinds decode additively in version one while existing commands, file b
   const malformed = structuredClone(state);
   const timer = malformed.operations.find((op) => op.kind === "timer"); assert.ok(timer?.kind === "timer");
   timer.scope.workId = "local-work";
-  assert.throws(() => decodeState(JSON.stringify(malformed)));
+  // Una operación ilegible ya no deja ilegible toda la cola: se aparta sin borrarse y el resto sigue disponible.
+  const recovered = decodeState(JSON.stringify(malformed));
+  assert.equal(recovered.operations.some((op) => op.kind === "timer"), false);
+  assert.equal(recovered.operations.length, state.operations.length - 1);
+  assert.equal(recovered.quarantine?.length, 1);
+  assert.deepEqual(decodeState(JSON.stringify(recovered)).quarantine, recovered.quarantine);
 });
 
 for (const failure of ["missing", "revoked", "auth", "worker", "permission", "final", "coverageDate", "branch", "coverageBranch", "duplicateGroup", "duplicateWork", "otherGroup", "otherWork"] as const) test(`cached ${failure} rejects timer and checklist before acceptance`, async () => {

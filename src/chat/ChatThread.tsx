@@ -17,6 +17,10 @@ type IconName = ComponentProps<typeof Ionicons>["name"];
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const POLL_MS = 20_000;
 const failureText = (failure: unknown, fallback: string) => failure instanceof Error && failure.message ? failure.message : fallback;
+const networkKind = (failure: unknown) => failure instanceof Error && failure.name === "NetworkError" ? (failure as Error & { kind?: string }).kind : undefined;
+/** El borrador vive en el teléfono (se carga al usarlo: el chat también corre en pruebas sin almacenamiento). */
+const draftStore = async () => (await import("@react-native-async-storage/async-storage")).default;
+const DRAFT_PREFIX = "@qualitzer/chat-draft/v1:";
 const chatDate = threadDate;
 const dayLabel = threadDayLabel;
 const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
@@ -68,8 +72,12 @@ function SheetAction({ icon, label, detail, onPress }: { icon: IconName; label: 
  * Chat genérico (como los comentarios de la web): burbujas propias a la derecha, separadores por día, fotos y archivos,
  * editar lo propio, pestañas Técnico/General y escribir con adjuntos. Sirve para ingresos, OT, trabajos y mantenimientos.
  */
-export function ChatThread({ api, title, subtitle, onClose, embedded = false, readOnly = false }: {
+export function ChatThread({ api, title, subtitle, onClose, embedded = false, readOnly = false, draftKey, onOfflineSend }: {
   api: ThreadApi; title: string; subtitle?: string; onClose?: () => void; embedded?: boolean; readOnly?: boolean;
+  /** Clave para guardar en el teléfono lo que se está escribiendo (no se pierde si se corta la señal o se cierra la app). */
+  draftKey?: string;
+  /** Sin señal: guarda el texto en la cola sin conexión para enviarlo solo después (solo texto, sin adjuntos). */
+  onOfflineSend?: (text: string) => Promise<void>;
 }) {
   const [tab, setTab] = useState<ThreadTab | null>(null);
   const [pages, setPages] = useState<ThreadPage[]>([]);
@@ -210,15 +218,50 @@ export function ChatThread({ api, title, subtitle, onClose, embedded = false, re
     }
   }
 
+  // Borrador: se recupera al abrir y se guarda mientras se escribe.
+  const draftLoaded = useRef(false);
+  useEffect(() => {
+    if (!draftKey) return;
+    let active = true;
+    void draftStore().then((store) => store.getItem(DRAFT_PREFIX + draftKey)).then((saved) => {
+      if (active && saved) setDraft((current) => current || saved);
+    }).catch(() => undefined).finally(() => { draftLoaded.current = true; });
+    return () => { active = false; };
+  }, [draftKey]);
+  useEffect(() => {
+    if (!draftKey || !draftLoaded.current) return;
+    const timer = setTimeout(() => {
+      void draftStore().then((store) => draft.trim() ? store.setItem(DRAFT_PREFIX + draftKey, draft) : store.removeItem(DRAFT_PREFIX + draftKey)).catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [draft, draftKey]);
+  const [notice, setNotice] = useState("");
+
   async function send() {
     const text = draft.trim();
     if (sending || (!text && files.length === 0)) return;
-    setSending(true); setSendError(""); stopTyping();
+    setSending(true); setSendError(""); setNotice(""); stopTyping();
+    const sent = () => { setDraft(""); setFiles([]); setMentions([]); stickToEnd.current = true; };
     try {
       await api.send(tab, text, files, mentions);
-      setDraft(""); setFiles([]); setMentions([]); stickToEnd.current = true;
+      sent();
       await loadLatest(true);
-    } catch (failure) { setSendError(failureText(failure, "No se pudo enviar. Tu mensaje sigue aquí para reintentar.")); }
+    } catch (failure) {
+      const kind = networkKind(failure);
+      // Se cortó a mitad de camino: puede que sí haya llegado. Se revisa antes de reintentar para no duplicarlo.
+      if (kind === "timeout" && text) {
+        try {
+          const latest = await apiRef.current.list(tab, 0);
+          if (latest.messages.some((message) => message.mine && message.text.trim() === text)) { sent(); await loadLatest(true); return; }
+        } catch { /* Sin respuesta: queda el error para reintentar. */ }
+      }
+      // Sin señal antes de enviar: solo texto se guarda en la cola y se envía solo después.
+      if (kind === "network" && onOfflineSend && text && files.length === 0) {
+        try { await onOfflineSend(text); sent(); setNotice("Sin señal: tu mensaje quedó guardado en el teléfono y se enviará solo al volver la conexión."); return; }
+        catch (queueFailure) { setSendError(failureText(queueFailure, "No se pudo guardar el mensaje en el teléfono.")); return; }
+      }
+      setSendError(failureText(failure, "No se pudo enviar. Tu mensaje sigue aquí para reintentar."));
+    }
     finally { setSending(false); }
   }
 
@@ -310,6 +353,7 @@ export function ChatThread({ api, title, subtitle, onClose, embedded = false, re
           <Text style={styles.suggestionName} numberOfLines={1}>{person.name}</Text>
         </Pressable>)}
       </View> : mentionQuery !== null && people === null ? <View style={styles.suggestions}><ActivityIndicator size="small" color={palette.primary} /></View> : null}
+      {notice ? <View style={styles.sendError}><Ionicons name="cloud-upload-outline" size={16} color={palette.success} accessible={false} /><Text style={[styles.sendErrorText, { color: palette.success }]}>{notice}</Text></View> : null}
       {sendError ? <View style={styles.sendError}><Ionicons name="alert-circle" size={16} color={palette.danger} accessible={false} /><Text style={styles.sendErrorText}>{sendError}</Text></View> : null}
       {files.length > 0 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pending}>
         {files.map((file) => <View key={file.id} style={styles.pendingItem}>

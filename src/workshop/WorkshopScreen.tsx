@@ -185,7 +185,7 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
     })() : null}
     {view?.kind === "comments" ? (() => {
       const api = workshop.threads.entry(view.ref.entry.id);
-      return api ? <ChatThread key={view.ref.entry.id} api={api} title="Comentarios del ingreso" subtitle={view.ref.entry.code} onClose={() => showEntry(view.ref)} /> : null;
+      return api ? <ChatThread key={view.ref.entry.id} api={api} title="Comentarios del ingreso" subtitle={view.ref.entry.code} onClose={() => showEntry(view.ref)} draftKey={`${memoryKey}:entry:${view.ref.entry.id}`} /> : null;
     })() : null}
     {view?.kind === "resume" ? <View style={styles.resume}>
       <ActivityIndicator color={palette.primary} />

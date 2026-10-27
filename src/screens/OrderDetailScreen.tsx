@@ -6,7 +6,7 @@ import { assignmentWorkOrderCode } from "../domain/assignmentCodes";
 import { assignmentWorkQueryRange } from "../domain/assignmentSchedule";
 import { plainText, STATUS_LABELS } from "../domain/format";
 import type { AssignmentGroup, AssignmentWork, Attachment, DateRange, LocalPhoto, StatusInput, Tenant, WorkOpenOptions } from "../domain/models";
-import type { OfflineController, OfflineSnapshot } from "../domain/offline";
+import { isOfflineQueuedError, type OfflineController, type OfflineSnapshot } from "../domain/offline";
 import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconName } from "../ui/components";
 import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
 import { SessionContextBar } from "../ui/SessionContextBar";
@@ -30,7 +30,7 @@ import type { UserSignatureAccess } from "../domain/userSignatures";
 import { CreationScreen, type CreationScreenProps } from "./creation/CreationScreen";
 import { CreationFloatingButton } from "./creation/CreationQuickMenu";
 import { DeleteRecordDialog } from "../deletion/DeleteRecordDialog";
-import type { DeletionPort } from "../domain/deletion";
+import { pendingRecordChanges, type DeletionPort } from "../domain/deletion";
 import { useAppPermission } from "../application/appPermissions";
 
 export interface OrderDetailScreenProps {
@@ -307,6 +307,11 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
         {/* Con conexión: gestor con carpetas de la web. Sin conexión o con envíos en cola sigue la lista que los reenvía. */}
         {props.drivePort && mode === "live" && !direct && online && !localGroup && !props.staleReadOnly && props.range && props.companyBranchId !== undefined && pendingDocuments.length === 0
           ? <FileDrive key={group.id} embedded title={group.type === "internal_maintenance" ? "Archivos del mantenimiento" : "Archivos de la OT"} subtitle={plainText(group.code)}
+            // Sin señal a mitad de una subida: los archivos pasan a la cola de siempre y se envían solos después.
+            onOfflineSave={async (documents) => {
+              try { await latest.current.onUploadFiles(documents); }
+              catch (failure) { if (!isOfflineQueuedError(failure)) throw failure; }
+            }}
             api={driveApi(props.drivePort, { kind: "assignment", groupId: group.id, range: { startDate: props.range.startDate, endDate: props.range.endDate, companyBranchId: props.companyBranchId } })} />
           : <FileWorkspace
           compact
@@ -350,6 +355,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
       </ScrollView></View>
     </Modal> : null}
     {deleting && deletion ? <DeleteRecordDialog port={deletion.port} scope={deletion.scope} kind={group.type === "internal_maintenance" ? "maintenance" : "order"} name={plainText(group.title)}
+      pendingCount={pendingRecordChanges(props.offline?.operations, group.id)}
       onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); props.onDeleted?.(); }} /> : null}
   </SafeAreaView>;
 }

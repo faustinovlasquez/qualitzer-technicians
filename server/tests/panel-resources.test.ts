@@ -621,6 +621,27 @@ test("eliminar: si la sucursal quitó el permiso, la eliminación no llega al se
   assert.equal(state.calls.some((call) => call.method === "DELETE"), false);
 });
 
+test("comentar: si la sucursal quitó el permiso, el comentario no llega al servidor", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group()]);
+  state.failures.set("GET /api/branches/1/mobileAppConfig", { status: 200, body: { mobileAppConfig: { commentsWrite: false } } });
+  const denied = await request(workPath("direct-11"), "POST", { text: "Observación" });
+  assert.equal(denied.response.status, 403);
+  assert.equal(writes(state.calls).length, 0);
+});
+
+test("archivos: sin permiso de subir ni de borrar, los archivos generales se rechazan y la evidencia del paso sigue", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group()]);
+  state.assignments.groups[0]!.works[0]!.checklists[0]!.steps = [step({ attachments: [file] })];
+  state.failures.set("GET /api/branches/1/mobileAppConfig", { status: 200, body: { mobileAppConfig: { filesUpload: false, filesDelete: false } } });
+  assert.equal((await request(workPath("direct-11", "11", "/documents"), "POST", document())).response.status, 403);
+  assert.equal((await request(workPath("direct-11", "11", "/files/7"), "DELETE")).response.status, 403);
+  assert.equal(writes(state.calls).length, 0);
+  const evidence = await request(workPath("direct-11", "11", "/steps/101/files/7"), "DELETE");
+  assert.equal(evidence.response.status, 200);
+});
+
 test("eliminar: una asignación que no es del técnico no se consulta ni se elimina", async (t) => {
   const { request, state } = await harness(t);
   state.assignments = assignments([group()]);

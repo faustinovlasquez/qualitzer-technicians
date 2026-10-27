@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { OfflineOperation } from "./offline";
 
 /** Íconos de las consecuencias (nombres de Ionicons); el dominio no depende de la interfaz. */
 type IconName = "layers-outline" | "calendar-outline" | "folder-open-outline" | "alert-circle-outline";
@@ -69,6 +70,12 @@ export function deletionConsequences(check: Pick<DeletionCheck, "kind" | "worksC
     { icon: "folder-open-outline", text: "Sus archivos, checklist y comentarios dejan de estar disponibles." },
     { icon: "alert-circle-outline", text: "No se puede deshacer desde la app." }
   ];
+}
+
+/** Cambios guardados en el teléfono (sin confirmar) de un grupo o de uno de sus trabajos. */
+export function pendingRecordChanges(operations: readonly OfflineOperation[] | undefined, groupId: string, workId?: string): number {
+  return (operations ?? []).filter((op) => op.status !== "applied" && op.kind !== "create" && op.scope.groupId === groupId
+    && (workId === undefined || op.scope.workId === workId)).length;
 }
 
 export interface DeletionPort {

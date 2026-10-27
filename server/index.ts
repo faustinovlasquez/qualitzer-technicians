@@ -10,7 +10,8 @@ async function start(): Promise<void> {
   configureRealtime(process.env.GATEWAY_SOCKET_TOKEN ?? (process.env.GATEWAY_REALTIME === "on" ? "" : undefined));
   if (config.tenantResolution === "legacy") process.stderr.write("GATEWAY_LEGACY_TENANT_CONFIGURATION_DEPRECATED\n");
   const server = createServer(await createConfiguredApp(config));
-  server.requestTimeout = 120_000;
+  // Las subidas sin conexión con mala señal pueden tardar hasta 10 minutos (cada ruta limita su propio tiempo).
+  server.requestTimeout = 11 * 60_000;
   server.headersTimeout = 15_000;
   server.keepAliveTimeout = 5_000;
   server.maxHeadersCount = 50;

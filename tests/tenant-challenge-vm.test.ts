@@ -25,7 +25,7 @@ async function appFixture(options: Parameters<typeof httpFixture>[0] = {}) {
     if (id === "../infrastructure/HttpTechnicianRepository") return { HttpTechnicianRepository: http.HttpRepository };
     if (id === "../infrastructure/gatewayConfig") return { gatewayConfiguration: { locked: true, url: http.repo.baseUrl, error: null } };
     if (id === "../infrastructure/gatewayConnection") return connection;
-    if (id === "../infrastructure/errors") return errors;
+    if (id === "../infrastructure/errors") return errors; if (id === "../offline/serverClock") return { noteServerDate: () => undefined };
     if (id === "../domain/tenantSession") return tenantSession;
     if (id === "../infrastructure/tenantSchemas") return schemas;
     if (id === "../domain/format") return { dateKey: () => "2026-09-10" };
@@ -36,7 +36,7 @@ async function appFixture(options: Parameters<typeof httpFixture>[0] = {}) {
       OfflineTechnicianRepository: class {}, saveOfflineProfile: async () => {},
       hasPendingChanges: block("queue"), disableOfflineProfile: block("disable-profile"), createOfflineRepository: block("create-offline"),
     };
-    if (id === "../offline/DurableStore") return { createDurableStore: block("durable-store") };
+    if (id === "../offline/pendingReminder") return { schedulePendingReminder: async () => undefined, cancelPendingReminder: async () => undefined }; if (id === "../offline/DurableStore") return { createDurableStore: block("durable-store") };
     if (id === "../infrastructure/sessionStorage") return {
       loadSession: async () => null, saveSession: async (value: unknown) => { storage.push(value); },
       saveGateway: async () => {}, removeSession: block("remove-session"),
