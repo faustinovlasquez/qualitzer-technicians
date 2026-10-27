@@ -43,7 +43,7 @@ export const customerTypeSchema = z.enum(["company", "person", "consignment"]);
 /** Nuevo cliente con los campos del formulario rápido de la web. */
 export const workshopNewCustomerSchema = z.object({
   companyBranchId: id, requestId, customerType: customerTypeSchema, identificationTypeId: id,
-  number: z.string().trim().min(1).max(30), name: z.string().trim().min(1).max(255),
+  number: optionalText(30), name: z.string().trim().min(1).max(255),
   fantasyName: optionalText(255), businessActivity: optionalText(255)
 }).strict();
 /** Nueva sucursal del cliente (la web no guarda correo ni teléfono de la sucursal). */
@@ -78,6 +78,43 @@ export const workshopNewEquipmentSchema = z.object({
 export const workshopNewEquipmentResultSchema = workshopEquipmentOptionSchema;
 export type WorkshopEquipmentMasters = z.infer<typeof workshopEquipmentMastersSchema>;
 export type WorkshopNewEquipment = z.input<typeof workshopNewEquipmentSchema>;
+export const equipmentMasterKindSchema = z.enum(["types", "manufacturers", "models", "classifications"]);
+export type EquipmentMasterKind = z.infer<typeof equipmentMasterKindSchema>;
+export const workshopNewEquipmentMasterSchema = z.object({ companyBranchId: id, requestId, name: z.string().trim().min(1).max(255) }).strict();
+export const workshopNewEquipmentMasterResultSchema = z.object({ id, name: z.string().max(300) }).strict();
+export type WorkshopNewEquipmentMaster = z.input<typeof workshopNewEquipmentMasterSchema>;
+
+/** Nombre comparable: sin tildes, mayúsculas, espacios ni signos ("Caterpillar-320 D" = "caterpillar320d"). */
+export function normalizeMasterName(value: string): string {
+  return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, (previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = current;
+  }
+  return previous[b.length] ?? 0;
+}
+
+/** Antes de crear un tipo, marca, modelo o clasificación: el que ya existe con el mismo nombre y los de nombre casi igual. */
+export function findSimilarMasters<T extends { id: number; name: string }>(items: readonly T[], name: string): { same: T | null; similar: T[] } {
+  const wanted = normalizeMasterName(name);
+  if (!wanted) return { same: null, similar: [] };
+  const same = items.find((item) => normalizeMasterName(item.name) === wanted) ?? null;
+  const similar = same ? [] : items.filter((item) => {
+    const current = normalizeMasterName(item.name);
+    if (!current) return false;
+    if (Math.min(current.length, wanted.length) >= 3 && (current.includes(wanted) || wanted.includes(current))) return true;
+    const allowed = Math.max(current.length, wanted.length) >= 7 ? 2 : Math.max(current.length, wanted.length) >= 4 ? 1 : 0;
+    return allowed > 0 && Math.abs(current.length - wanted.length) <= allowed && editDistance(current, wanted) <= allowed;
+  }).slice(0, 8);
+  return { same, similar };
+}
 
 export const workshopNewCustomerResultSchema = workshopCustomerOptionSchema;
 export const workshopNewBranchResultSchema = workshopBranchOptionSchema;
@@ -88,11 +125,54 @@ export type WorkshopNewCustomer = z.input<typeof workshopNewCustomerSchema>;
 export type WorkshopNewBranch = z.input<typeof workshopNewBranchSchema>;
 export type WorkshopNewContact = z.input<typeof workshopNewContactSchema>;
 
+/** Registro parecido que ya existe: "strong" casi seguro el mismo (RUT, correo o teléfono), "possible" conviene revisar. */
+export const workshopDuplicateMatchSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string().max(300),
+  detail: z.string().max(500).nullable(),
+  strength: z.enum(["strong", "possible"]),
+  reasons: z.array(z.enum(["SAME_DOCUMENT", "SAME_NAME", "SIMILAR_NAME", "SAME_EMAIL", "SAME_PHONE", "SAME_ADDRESS"])).max(6)
+}).strict();
+export const workshopDuplicatesSchema = z.object({ matches: z.array(workshopDuplicateMatchSchema).max(20) }).strict();
+export type WorkshopDuplicateMatch = z.infer<typeof workshopDuplicateMatchSchema>;
+export const DUPLICATE_REASON_LABELS: Record<WorkshopDuplicateMatch["reasons"][number], string> = {
+  SAME_DOCUMENT: "Mismo RUT", SAME_NAME: "Mismo nombre", SIMILAR_NAME: "Nombre casi igual",
+  SAME_EMAIL: "Mismo correo", SAME_PHONE: "Mismo teléfono", SAME_ADDRESS: "Misma dirección"
+};
+/** Equipo que ya existe con la misma patente o serie (de cualquier cliente o de la flota interna). "strong": misma identificación. */
+export const workshopEquipmentDuplicateSchema = z.object({
+  id: z.number().int().positive(),
+  source: z.enum(["customer", "rental"]),
+  name: z.string().max(300),
+  identification: z.string().max(120).nullable(),
+  internalNumber: z.string().max(120).nullable(),
+  owner: z.string().max(500).nullable(),
+  sameCustomer: z.boolean(),
+  strength: z.enum(["strong", "possible"]),
+  reasons: z.array(z.enum(["SAME_IDENTIFICATION", "SIMILAR_IDENTIFICATION", "SAME_INTERNAL_NUMBER"])).max(3)
+}).strict();
+export const workshopEquipmentDuplicatesSchema = z.object({ matches: z.array(workshopEquipmentDuplicateSchema).max(20) }).strict();
+export type WorkshopEquipmentDuplicate = z.infer<typeof workshopEquipmentDuplicateSchema>;
+export const EQUIPMENT_DUPLICATE_REASON_LABELS: Record<WorkshopEquipmentDuplicate["reasons"][number], string> = {
+  SAME_IDENTIFICATION: "Misma patente o serie", SIMILAR_IDENTIFICATION: "Patente o serie casi igual", SAME_INTERNAL_NUMBER: "Mismo número interno"
+};
+export interface WorkshopEquipmentDuplicateQuery { companyBranchId: number; customerId: number; identification: string; internalNumber?: string | null }
+export interface WorkshopCustomerDuplicateQuery { companyBranchId: number; documentIdentification?: string | null; name?: string | null; fantasyName?: string | null }
+export interface WorkshopContactDuplicateQuery { companyBranchId: number; name?: string | null; email?: string | null; phone?: string | null }
+export interface WorkshopBranchDuplicateQuery { companyBranchId: number; name?: string | null; address?: string | null }
+
 export interface WorkshopCustomersPort {
   workshopIdentificationTypes(branchId: number): Promise<WorkshopIdentificationTypes>;
+  /** Antes de crear: clientes, contactos o sucursales parecidos que ya existen (gateways anteriores no lo tienen). */
+  workshopCustomerDuplicates?(query: WorkshopCustomerDuplicateQuery): Promise<WorkshopDuplicateMatch[]>;
+  workshopContactDuplicates?(customerId: number, query: WorkshopContactDuplicateQuery): Promise<WorkshopDuplicateMatch[]>;
+  workshopBranchDuplicates?(customerId: number, query: WorkshopBranchDuplicateQuery): Promise<WorkshopDuplicateMatch[]>;
+  workshopEquipmentDuplicates?(query: WorkshopEquipmentDuplicateQuery): Promise<WorkshopEquipmentDuplicate[]>;
   createWorkshopCustomer(input: WorkshopNewCustomer): Promise<z.infer<typeof workshopNewCustomerResultSchema>>;
   createWorkshopCustomerBranch(customerId: number, input: WorkshopNewBranch): Promise<z.infer<typeof workshopNewBranchResultSchema>>;
   createWorkshopCustomerContact(customerId: number, input: WorkshopNewContact): Promise<z.infer<typeof workshopNewContactResultSchema>>;
   workshopEquipmentMasters(branchId: number): Promise<WorkshopEquipmentMasters>;
   createWorkshopCustomerEquipment(customerId: number, input: WorkshopNewEquipment): Promise<z.infer<typeof workshopNewEquipmentResultSchema>>;
+  /** Nuevo tipo, marca, modelo o clasificación de equipos (gateways anteriores no lo tienen). */
+  createWorkshopEquipmentMaster?(kind: EquipmentMasterKind, input: WorkshopNewEquipmentMaster): Promise<z.infer<typeof workshopNewEquipmentMasterResultSchema>>;
 }

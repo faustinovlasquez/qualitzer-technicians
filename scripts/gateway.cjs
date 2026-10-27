@@ -15,6 +15,8 @@ if (shellBackendUrl === undefined && target) {
   if (target.branch === "local") {
     env.GATEWAY_SESSION_FILE = resolve(root, ".data/local/sessions.enc");
     env.GATEWAY_PORT = new URL(target.gatewayUrl).port;
+    // Comentarios en vivo contra la API local (sin SOCKET_IO_TOKEN). GATEWAY_SOCKET_TOKEN en el entorno lo reemplaza.
+    env.GATEWAY_REALTIME ??= "on";
   }
 }
 console.log(`Pasarela → ${env.BACKEND_URL}`);

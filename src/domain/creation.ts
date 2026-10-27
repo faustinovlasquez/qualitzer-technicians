@@ -13,7 +13,11 @@ export const nonProductiveReasonSchema = z.enum(["waiting_parts", "waiting_autho
 export const creationKindSchema = z.enum(["work", "maintenance", "non_productive"]);
 export const creationScheduleSchema = z.object({ date: calendarDateSchema, startTime: clockTimeSchema, endTime: clockTimeSchema, endDateOffset: z.literal(0).optional() }).strict().refine((value) => value.startTime < value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE");
 const optionalClockTimeSchema = clockTimeSchema.or(z.literal("")).default("");
-export const workCreationScheduleSchema = z.object({ date: calendarDateSchema, startTime: optionalClockTimeSchema, endTime: optionalClockTimeSchema, endDateOffset: z.literal(0).optional() }).strict().refine((value) => !value.startTime || !value.endTime || value.startTime < value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE");
+// Trabajo: las horas son opcionales; sin inicio y fin se puede indicar el tiempo asignado directo (plannedMinutes).
+export const workCreationScheduleSchema = z.object({ date: calendarDateSchema, startTime: optionalClockTimeSchema, endTime: optionalClockTimeSchema, endDateOffset: z.literal(0).optional(),
+  plannedMinutes: z.number().int().min(1).max(1439).optional() }).strict()
+  .refine((value) => !value.startTime || !value.endTime || value.startTime < value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE")
+  .refine((value) => value.plannedMinutes === undefined || !value.startTime || !value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE");
 const base = { companyBranchId: positiveCreationIdSchema, clientRequestId: mobileUuidSchema, schedule: creationScheduleSchema };
 const workSystemFields = { systemId: positiveCreationIdSchema.optional(), componentId: positiveCreationIdSchema.optional() };
 const hasValidSystem = (value: { systemId?: number; componentId?: number }): boolean => value.componentId === undefined || value.systemId !== undefined;
@@ -50,7 +54,7 @@ export const creationResultSchema = z.object({
   kind: creationKindSchema, groupId: z.string(), workId: positiveCreationIdSchema, companyBranchId: positiveCreationIdSchema,
   schedule: z.object({ date: calendarDateSchema, startTime: optionalClockTimeSchema, endTime: optionalClockTimeSchema, plannedMinutes: z.number().int().positive().max(1439).nullable(), timezone: z.string().min(1) }),
 }).refine((value) => new RegExp(value.kind === "maintenance" ? "^maintenance-[1-9]\\d*$" : value.kind === "non_productive" ? "^direct-np-[1-9]\\d*$" : "^(?:direct|maintenance)-[1-9]\\d*$").test(value.groupId), "MOBILE_CREATION_INVALID_RESULT")
-  .refine(value => value.schedule.plannedMinutes === creationPlannedMinutes(value.schedule)
+  .refine(value => (creationPlannedMinutes(value.schedule) === null ? value.kind === "work" || value.schedule.plannedMinutes === null : value.schedule.plannedMinutes === creationPlannedMinutes(value.schedule))
     && (value.kind === "work" || !!value.schedule.startTime && !!value.schedule.endTime)
     && (!value.schedule.startTime || !value.schedule.endTime || value.schedule.startTime < value.schedule.endTime), "MOBILE_CREATION_INVALID_TIME_RANGE");
 
@@ -58,6 +62,11 @@ export function creationPlannedMinutes(schedule: { startTime: string; endTime: s
   if (!clockTimeSchema.safeParse(schedule.startTime).success || !clockTimeSchema.safeParse(schedule.endTime).success || schedule.startTime >= schedule.endTime) return null;
   const minutes = (time: string): number => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
   return minutes(schedule.endTime) - minutes(schedule.startTime);
+}
+
+/** Tiempo asignado que debe quedar: el del horario si tiene inicio y fin; si no, el indicado directo. */
+export function creationExpectedMinutes(schedule: { startTime: string; endTime: string; plannedMinutes?: number }): number | null {
+  return creationPlannedMinutes(schedule) ?? schedule.plannedMinutes ?? null;
 }
 
 export type CreationInput = z.infer<typeof creationInputSchema>;

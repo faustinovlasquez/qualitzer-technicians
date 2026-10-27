@@ -14,7 +14,19 @@ export interface AssignmentOrderCardProps {
   group: AssignmentGroup;
   matchingWorkCount: number;
   busy?: boolean;
-  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files" | "deliver") => void;
+  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files" | "comments" | "deliver") => void;
+}
+
+/**
+ * Colores de la etiqueta del estado a partir del color que tiene el estado en la web (#RRGGBB): fondo suave y texto en
+ * el mismo tono, oscurecido si el color es muy claro para que se lea sobre blanco.
+ */
+export function statusPillColors(color: string | null | undefined): { soft: string; text: string; border: string } | null {
+  if (!color || !/^#[0-9a-f]{6}$/i.test(color)) return null;
+  const [r, g, b] = [1, 3, 5].map((index) => parseInt(color.slice(index, index + 2), 16));
+  const luminance = (0.299 * r! + 0.587 * g! + 0.114 * b!) / 255;
+  const darken = (value: number) => Math.round(value * (luminance > 0.6 ? 0.55 : 1)).toString(16).padStart(2, "0");
+  return { soft: `${color}1f`, border: `${color}66`, text: `#${darken(r!)}${darken(g!)}${darken(b!)}` };
 }
 
 // Colores del estado de la orden en la tarjeta oscura (misma convención que el detalle del trabajo).
@@ -126,8 +138,10 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
   const closed = group.status === "completed" || group.status === "delivered";
   const direct = group.type === "direct_assignment";
   const maintenance = group.type === "internal_maintenance";
-  const location = group.locationName.trim() ? group.locationName : group.locationAddress;
-  const address = group.locationAddress?.trim() && group.locationName.trim() && group.locationAddress !== group.locationName ? group.locationAddress : null;
+  const branch = group.customerBranchName?.trim() ? group.customerBranchName : null;
+  // El estado con su nombre y color de la web; si no llega, el estado de siempre.
+  const statusText = group.statusName?.trim() ? plainText(group.statusName) : STATUS_LABELS[group.status];
+  const statusColors = statusPillColors(group.statusColor);
   const equipment = group.equipment;
   const equipmentDetail = equipment ? [equipment.identifier, equipment.internalNumber].filter((value) => value && value !== equipment.label).join(" · ") || null : null;
   const day = assignmentDay(group.scheduledDate);
@@ -138,13 +152,17 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
   const worksTitle = group.works.length > 0 ? `Ver trabajos (${group.works.length})` : maintenance ? "Ver mantenimiento" : "Ver orden";
   const filesTitle = direct ? "Archivos de la asignación" : maintenance ? "Archivos del mantenimiento" : "Archivos de la OT";
   const canDeliver = maintenance && group.status !== "delivered" && group.status !== "completed";
+  const canComment = group.type === "external_ot";
 
   return <Card style={styles.orderCard}>
     <View style={styles.between}>
       <View style={styles.codes}>
         {codes.map((code) => <Text key={code} style={styles.code}>{code}</Text>)}
       </View>
-      <Badge label={STATUS_LABELS[group.status]} tone={statusTones[group.status]} />
+      {statusColors ? <View style={[styles.statusPill, { backgroundColor: statusColors.soft, borderColor: statusColors.border }]} accessible accessibilityLabel={`Estado: ${statusText}`}>
+        <View style={[styles.statusDot, { backgroundColor: group.statusColor! }]} />
+        <Text style={[styles.statusText, { color: statusColors.text }]} numberOfLines={1}>{statusText}</Text>
+      </View> : <Badge label={statusText} tone={statusTones[group.status]} />}
     </View>
     <View style={styles.typeLine}>
       <Ionicons name={groupTypes[group.type].icon} size={14} color={palette.textMuted} accessible={false} />
@@ -157,8 +175,8 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
     </View>
     <View style={infoStyles.list}>
       {group.customerName?.trim() ? <InfoBlock label="Cliente" value={group.customerName} /> : null}
+      {branch ? <InfoBlock label="Sucursal" icon="storefront-outline" value={branch} /> : null}
       <InfoBlock label="Equipo" value={equipment ? equipment.label || equipmentLabel(equipment) : "Sin equipo asociado"} detail={equipmentDetail} />
-      <InfoBlock label="Ubicación" icon="location-outline" value={location?.trim() ? location : "Sin ubicación"} detail={address} />
       <InfoBlock label="Horario" icon="calendar-outline" tone="blue" value={`${day ? `${shortDate(day)} ${day.slice(0, 4)}` : "Sin fecha programada"} · ${time}`} />
     </View>
     <View style={styles.orderProgress}>
@@ -177,7 +195,9 @@ export function AssignmentOrderCard({ group, matchingWorkCount, busy = false, on
     {matchingWorkCount !== group.works.length ? <Text style={styles.caption}>{matchingWorkCount} de {group.works.length} trabajos coinciden con la fecha y los filtros. Al abrir se muestran todos los trabajos asignados de esta orden.</Text> : null}
     <View style={styles.actionBar}>
       <Button stacked title="Detalle" accessibilityLabel={worksTitle} icon="document-text-outline" variant="secondary" iconColor={palette.info} disabled={busy} onPress={() => onOpenGroup(group, "works")} style={[styles.cell, styles.cellPrimary]} textStyle={styles.cellPrimaryText} />
-      <Button stacked title="Archivos" accessibilityLabel={filesTitle} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={busy} onPress={() => onOpenGroup(group, "files")} style={[styles.cell, !canDeliver && styles.cellLast]} textStyle={styles.cellText} />
+      <Button stacked title="Archivos" accessibilityLabel={filesTitle} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={busy} onPress={() => onOpenGroup(group, "files")} style={[styles.cell, !canDeliver && !canComment && styles.cellLast]} textStyle={styles.cellText} />
+      {/* Comentarios generales de la OT (los comerciales quedan en la web). */}
+      {canComment ? <Button stacked title="Comentarios" accessibilityLabel="Comentarios de la OT" icon="chatbubbles-outline" variant="secondary" iconColor={palette.textSecondary} disabled={busy} onPress={() => onOpenGroup(group, "comments")} style={[styles.cell, !canDeliver && styles.cellLast]} textStyle={styles.cellText} /> : null}
       {canDeliver ? <Button stacked title="Entregar OT" accessibilityLabel="Entregar OT" icon="checkmark-circle-outline" variant="secondary" iconColor={palette.orange} disabled={busy} onPress={() => onOpenGroup(group, "deliver")} style={[styles.cell, styles.cellLast, styles.cellDeliver]} textStyle={styles.cellDeliverText} /> : null}
     </View>
   </Card>;
@@ -214,6 +234,9 @@ const styles = StyleSheet.create({
   heroWarning: { flexDirection: "row", alignItems: "flex-start", gap: 6, padding: 8, borderRadius: radius.sm, backgroundColor: palette.amberSoft },
   heroWarningText: { fontSize: 11, lineHeight: 15, color: palette.amber, flex: 1 },
   codes: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  statusPill: { flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 180, paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 12, fontWeight: "800" },
   caption: { ...typography.caption, color: palette.textSecondary },
   between: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 },
   progressCount: { ...typography.caption, color: palette.primary, fontWeight: "700" },

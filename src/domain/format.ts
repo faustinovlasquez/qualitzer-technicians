@@ -1,7 +1,7 @@
 import type { AssignmentWork, ChecklistStep, DateRange, StepAnswer, WorkStatus } from "./models";
 
 export const STATUS_LABELS: { [K in WorkStatus]: string } = {
-  pending: "Pendiente", in_progress: "En curso", paused: "En pausa", completed: "Completado", delivered: "Entregado",
+  pending: "Pendiente", in_progress: "En curso", paused: "En pausa", completed: "Finalizado", delivered: "Entregado",
 };
 export function dateKey(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;

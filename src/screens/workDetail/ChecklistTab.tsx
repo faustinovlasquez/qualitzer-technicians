@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { checklistResumeTarget } from "../../domain/checklistResume";
 import { plainText } from "../../domain/format";
 import type { AssignmentWork, Checklist, ChecklistStep, StepAnswer } from "../../domain/models";
@@ -7,7 +7,7 @@ import { Badge, BodyText, Button, EmptyState, IconButton, SectionTitle } from ".
 import { ChecklistCatalog, ChecklistProgress } from "./checklist/ChecklistCatalog";
 import { ChecklistOverview } from "./checklist/ChecklistOverview";
 import { StepEditor } from "./checklist/StepEditor";
-import { checklistStyles } from "./checklist/styles";
+import { checklistRefreshColor, checklistStyles } from "./checklist/styles";
 import { useChecklistNavigation } from "./checklist/useChecklistNavigation";
 import { Notice } from "./DetailUi";
 import { errorMessage } from "./detailRules";
@@ -120,14 +120,15 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
 
   if (navigation.restoring) return <View style={checklistStyles.screen}><BodyText>Recuperando navegación del checklist…</BodyText></View>;
 
-  if (!checklist) return <ScrollView style={checklistStyles.screen} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled">
-    <SectionTitle title={props.labels?.catalogTitle ?? "Checklists del trabajo"} subtitle={props.labels?.catalogSubtitle ?? "Selecciona una lista para responder."} />
+  // Se actualiza deslizando la lista hacia abajo.
+  if (!checklist) return <ScrollView style={checklistStyles.screen} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled"
+    refreshControl={props.onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} enabled={!props.disabled} tintColor={checklistRefreshColor} colors={[checklistRefreshColor]} /> : undefined}>
+    <SectionTitle title={props.labels?.catalogTitle ?? "Checklists del trabajo"} subtitle={props.work.checklists.length === 0 ? undefined : props.labels?.catalogSubtitle ?? "Toca una lista para responder."} />
     {notices}
-    {navigation.selection.checklistId !== null ? <Notice message="El checklist seleccionado ya no aparece en la ficha recibida. No se ha elegido otro ni eliminado sus borradores." tone="warning" /> : null}
-    {props.work.checklists.length === 0 ? <EmptyState title="Sin checklists disponibles" message="No se recibieron listas de verificación en esta ficha. Si esperabas un checklist, actualiza la asignación; los borradores anteriores no se eliminan." icon="list-outline" /> : <ChecklistCatalog checklists={props.work.checklists} draft={props.draft} onOpen={open} />}
+    {navigation.selection.checklistId !== null ? <Notice message="El checklist que tenías abierto ya no está en este trabajo." tone="warning" /> : null}
+    {props.work.checklists.length === 0 ? <EmptyState title="Aún no hay checklists" message="Agrega uno de la empresa para empezar la revisión." icon="list-outline" /> : <ChecklistCatalog checklists={props.work.checklists} draft={props.draft} onOpen={open} />}
     {props.catalogHeader}
-    <BodyText>{props.labels ? props.labels.progressNote : props.mode === "demo" ? "Demostración local. El progreso usa las respuestas guardadas de la ficha demo, no los borradores." : "Progreso confirmado por Qualitzer. Los borradores no cuentan; una respuesta confirmada no significa aprobación."}</BodyText>
-    {props.onRefresh ? <Button title="Actualizar respuestas y archivos" icon="refresh-outline" variant="ghost" loading={refreshing} disabled={props.disabled} onPress={() => { void refresh(); }} /> : null}
+    {props.work.checklists.length > 0 ? <BodyText>{props.labels ? props.labels.progressNote : props.mode === "demo" ? "Demostración: el avance usa las respuestas de ejemplo." : "El avance cuenta solo las respuestas guardadas."}</BodyText> : null}
   </ScrollView>;
 
   return (

@@ -22,9 +22,12 @@ function Badge({ slot }: { slot: InspectionSlot }) {
 }
 
 /** Fotos de la inspección como en la web: avance, contadores que filtran, búsqueda, herramientas y la grilla de ángulos. */
-export function InspectionPhotoPanel({ slots, kind, busy, downloading, onSlot, onAdd, onGuide, onDownload, onShare }: {
+export function InspectionPhotoPanel({ slots, kind, busy, downloading, damageCounts = {}, onSlot, onCompare, onDamage, onAdd, onGuide, onDownload, onShare }: {
   slots: InspectionSlot[]; kind: InspectionKind; busy: Record<string, boolean>; downloading: boolean;
-  onSlot: (slot: InspectionSlot) => void; onAdd: () => void; onGuide: () => void; onDownload: () => void; onShare: () => void;
+  /** Daños reportados por ángulo (clave de la foto → cantidad). */
+  damageCounts?: Record<string, number>;
+  onSlot: (slot: InspectionSlot) => void; onCompare: (slot: InspectionSlot) => void; onDamage: (slot: InspectionSlot) => void;
+  onAdd: () => void; onGuide: () => void; onDownload: () => void; onShare: () => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -72,24 +75,84 @@ export function InspectionPhotoPanel({ slots, kind, busy, downloading, onSlot, o
     <View style={styles.grid}>
       {visible.map((slot) => {
         const loading = busy[`slot:${slot.key}`];
-        return <Pressable key={slot.key} accessibilityRole="button" accessibilityLabel={`Foto ${slot.name}${slot.photo ? ", cargada" : ", pendiente"}`} disabled={loading}
-          onPress={() => onSlot(slot)} style={({ pressed }) => [styles.slot, !slot.photo && slot.isRequired && styles.slotRequired, pressed && styles.pressed]}>
-          <View style={styles.slotImage}>
+        const reference = kind === "exit" ? slot.reference : null;
+        const damages = damageCounts[slot.key] ?? 0;
+        return <View key={slot.key} style={[styles.slot, !slot.photo && slot.isRequired && styles.slotRequired]}>
+          <View style={[styles.slotHeader, !slot.photo && slot.isRequired && styles.slotHeaderRequired]}>
+            <Ionicons name={slot.photo ? "checkmark-circle" : "camera-outline"} size={15} color={slot.photo ? palette.success : palette.textMuted} accessible={false} />
+            <Text style={styles.slotName} numberOfLines={1}>{slot.name}</Text>
+            <Badge slot={slot} />
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Foto ${slot.name}${slot.photo ? ", cargada" : ", pendiente"}`} disabled={loading}
+            onPress={() => onSlot(slot)} style={({ pressed }) => [styles.slotImage, pressed && styles.pressed]}>
             {loading ? <ActivityIndicator color={palette.primary} />
               : slot.photo ? <Image source={{ uri: slot.photo.url }} style={styles.slotPhoto} accessible={false} />
-              : <SvgXml xml={inspectionSilhouette(slot.key, palette.textMuted)} width={46} height={80} />}
-            {kind === "exit" && slot.reference ? <View style={styles.referenceTag}><Image source={{ uri: slot.reference.url }} style={styles.referenceImage} accessible={false} />
-              <Text style={styles.referenceText}>Ingreso</Text></View> : null}
+              : <><SvgXml xml={inspectionSilhouette(slot.key, palette.textMuted)} width={34} height={58} />
+                <Text style={styles.slotCta}><Ionicons name="camera" size={12} color={palette.primary} />  Tomar foto</Text></>}
+            {damages > 0 ? <View style={styles.damageTag}>
+              <Ionicons name="warning" size={11} color={palette.white} accessible={false} />
+              <Text style={styles.damageTagText}>{damages === 1 ? "1 daño" : `${damages} daños`}</Text>
+            </View> : null}
+          </Pressable>
+          <View style={styles.slotActions}>
+            {reference ? <Pressable accessibilityRole="button" accessibilityLabel={`Ver la foto de ingreso de ${slot.name}`} onPress={() => onCompare(slot)}
+              style={({ pressed }) => [styles.referenceThumb, pressed && styles.pressed]}>
+              <Image source={{ uri: reference.url }} style={styles.referenceImage} accessible={false} />
+              <Text style={styles.referenceText}>INGRESO</Text>
+            </Pressable> : null}
+            <View style={styles.slotButtons}>
+              {reference ? <Pressable accessibilityRole="button" accessibilityLabel={`Comparar ${slot.name} con el ingreso`} onPress={() => onCompare(slot)}
+                style={({ pressed }) => [styles.slotButton, pressed && styles.pressed]}>
+                <Ionicons name="eye-outline" size={14} color={palette.text} accessible={false} />
+                <Text style={styles.slotButtonText}>Comparar</Text>
+              </Pressable> : null}
+              <Pressable accessibilityRole="button" accessibilityLabel={damages > 0 ? `${slot.name}: ${damages} daño(s) reportado(s). Registrar otro daño` : `Registrar daño en ${slot.name}`}
+                onPress={() => onDamage(slot)} style={({ pressed }) => [styles.slotButton, damages > 0 && styles.slotButtonDamage, pressed && styles.pressed]}>
+                <Ionicons name={damages > 0 ? "warning" : "warning-outline"} size={14} color={damages > 0 ? palette.danger : palette.text} accessible={false} />
+                <Text style={[styles.slotButtonText, damages > 0 && styles.slotButtonDamageText]}>{damages > 0 ? `Daños (${damages})` : "Daños"}</Text>
+              </Pressable>
+            </View>
           </View>
-          <View style={styles.slotFooter}>
-            <Ionicons name={slot.photo ? "checkmark-circle" : "camera-outline"} size={16} color={slot.photo ? palette.success : palette.textMuted} accessible={false} />
-            <Text style={styles.slotName} numberOfLines={1}>{slot.name}</Text>
-          </View>
-          <View style={styles.slotBadge}><Badge slot={slot} /></View>
-        </Pressable>;
+        </View>;
       })}
     </View>
   </View>;
+}
+
+/** Resumen de las fotos en la portada de la inspección: avance, lo que falta y una muestra. Tocarlo abre todas las fotos. */
+export function InspectionPhotoSummary({ slots, onOpen }: { slots: InspectionSlot[]; onOpen: () => void }) {
+  const loaded = slots.filter((slot) => slot.photo);
+  const required = slots.filter((slot) => slot.isRequired);
+  const base = required.length > 0 ? required : slots;
+  const done = base.filter((slot) => slot.photo).length;
+  const percent = base.length === 0 ? 0 : Math.round((done / base.length) * 100);
+  const missingRequired = required.filter((slot) => !slot.photo);
+  const preview = [...loaded, ...slots.filter((slot) => !slot.photo)].slice(0, 5);
+  const complete = base.length > 0 && done === base.length;
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Fotos de la inspección: ${done} de ${base.length}. Abrir fotos`} onPress={onOpen}
+    style={({ pressed }) => [styles.section, pressed && styles.pressed]}>
+    <View style={styles.headRow}>
+      <View style={[styles.ring, complete && styles.ringDone]}><Text style={[styles.ringValue, complete && styles.ringValueDone]}>{percent}%</Text></View>
+      <View style={styles.grow}>
+        <Text style={styles.sectionTitle} accessibilityRole="header">Fotos de la inspección</Text>
+        <Text style={styles.hint}>{loaded.length}/{slots.length} cargadas{required.length > 0 ? ` · ${done}/${required.length} obligatorias` : ""}</Text>
+        <View style={styles.bar}><View style={[styles.barFill, complete && styles.barDone, { width: `${percent}%` }]} /></View>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color={palette.textMuted} accessible={false} />
+    </View>
+    {preview.length > 0 ? <View style={styles.previewRow}>
+      {preview.map((slot) => <View key={slot.key} style={[styles.previewTile, !slot.photo && slot.isRequired && styles.slotRequired]}>
+        {slot.photo ? <Image source={{ uri: slot.photo.url }} style={styles.previewImage} accessible={false} />
+          : <SvgXml xml={inspectionSilhouette(slot.key, palette.textMuted)} width={22} height={38} />}
+      </View>)}
+      {slots.length > preview.length ? <View style={[styles.previewTile, styles.previewMore]}><Text style={styles.previewMoreText}>+{slots.length - preview.length}</Text></View> : null}
+    </View> : <Text style={styles.hint}>Sin fotos definidas para este tipo de equipo.</Text>}
+    <Text style={[styles.hint, missingRequired.length > 0 ? styles.previewPending : styles.previewOk]}>
+      {missingRequired.length > 0 ? `Faltan ${missingRequired.length} obligatoria(s): ${missingRequired.slice(0, 3).map((slot) => slot.name).join(", ")}${missingRequired.length > 3 ? "…" : ""}`
+        : required.length > 0 ? "Todas las fotos obligatorias están cargadas." : `${slots.length - loaded.length} foto(s) por cargar.`}
+    </Text>
+    <View style={styles.openRow}><Text style={styles.openText}>Abrir fotos</Text><Ionicons name="arrow-forward" size={16} color={palette.primary} accessible={false} /></View>
+  </Pressable>;
 }
 
 function Tool({ icon, label, onPress, primary, loading }: { icon: IconName; label: string; onPress: () => void; primary?: boolean; loading?: boolean }) {
@@ -303,6 +366,17 @@ const styles = StyleSheet.create({
   headRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   ring: { width: 58, height: 58, borderRadius: 29, borderWidth: 5, borderColor: palette.primarySoft, alignItems: "center", justifyContent: "center" },
   ringValue: { fontSize: 15, fontWeight: "800", color: palette.heading },
+  ringDone: { borderColor: palette.successSoft },
+  ringValueDone: { color: palette.success },
+  previewRow: { flexDirection: "row", gap: 6 },
+  previewTile: { flex: 1, maxWidth: 64, aspectRatio: 1, borderRadius: 10, borderWidth: 1, borderColor: palette.border, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
+  previewImage: { width: "100%", height: "100%" },
+  previewMore: { backgroundColor: palette.primarySoft, borderColor: palette.primaryBorder },
+  previewMoreText: { fontSize: 13, fontWeight: "800", color: palette.primary },
+  previewPending: { color: palette.orange, fontWeight: "700" },
+  previewOk: { color: palette.success, fontWeight: "700" },
+  openRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 },
+  openText: { fontSize: 13, fontWeight: "800", color: palette.primary },
   grow: { flex: 1, minWidth: 0 },
   sectionTitle: { fontSize: 15, fontWeight: "800", color: palette.heading },
   hint: { ...typography.caption, color: palette.textSecondary },
@@ -324,15 +398,24 @@ const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   slot: { width: "47%", flexGrow: 1, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, overflow: "hidden", backgroundColor: palette.background },
   slotRequired: { borderColor: palette.orange, borderStyle: "dashed" },
-  slotImage: { height: 112, alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
-  slotPhoto: { width: "100%", height: 112 },
-  slotFooter: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8, paddingTop: 8 },
-  slotName: { flex: 1, fontSize: 13, fontWeight: "700", color: palette.text },
-  slotBadge: { flexDirection: "row", paddingHorizontal: 8, paddingBottom: 8, paddingTop: 4 },
+  slotHeader: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 7, backgroundColor: palette.surface, borderBottomWidth: 1, borderBottomColor: palette.border },
+  slotHeaderRequired: { backgroundColor: palette.orangeSoft },
+  slotImage: { height: 104, alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: palette.track },
+  slotPhoto: { width: "100%", height: 104 },
+  slotCta: { fontSize: 11, fontWeight: "800", color: palette.primary },
+  slotName: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "800", color: palette.text },
+  slotActions: { flexDirection: "row", alignItems: "center", gap: 6, padding: 6, backgroundColor: palette.surface, borderTopWidth: 1, borderTopColor: palette.border },
+  slotButtons: { flex: 1, minWidth: 0, gap: 4 },
+  slotButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, minHeight: 28, paddingHorizontal: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  slotButtonText: { fontSize: 11, fontWeight: "800", color: palette.text },
+  slotButtonDamage: { borderColor: palette.dangerBorder, backgroundColor: palette.dangerSoft },
+  slotButtonDamageText: { color: palette.danger },
+  damageTag: { position: "absolute", top: 6, right: 6, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: palette.dangerSolid },
+  damageTagText: { fontSize: 10, fontWeight: "800", color: palette.white },
   badge: { overflow: "hidden", fontSize: 10, fontWeight: "800", paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill },
-  referenceTag: { position: "absolute", left: 6, bottom: 6, flexDirection: "row", alignItems: "center", gap: 4, padding: 3, paddingRight: 7, borderRadius: 8, backgroundColor: "rgba(15,23,42,0.75)" },
-  referenceImage: { width: 26, height: 26, borderRadius: 5 },
-  referenceText: { fontSize: 10, fontWeight: "800", color: palette.white },
+  referenceThumb: { width: 60, height: 60, borderRadius: 8, overflow: "hidden", backgroundColor: palette.track },
+  referenceImage: { width: "100%", height: "100%" },
+  referenceText: { position: "absolute", left: 0, right: 0, bottom: 0, paddingVertical: 2, textAlign: "center", fontSize: 9, fontWeight: "800", color: palette.white, backgroundColor: "rgba(15,23,42,0.65)" },
   viewer: { flex: 1, backgroundColor: "rgba(2,6,23,0.94)" },
   viewerBar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: palette.surface },
   viewerTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: palette.heading },

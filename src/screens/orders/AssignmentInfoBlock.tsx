@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import type { ReactNode } from "react";
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import type { IconName } from "../../ui/components";
 import { palette, radius } from "../../ui/theme";
@@ -12,12 +13,17 @@ const tones: { [K in InfoTone]: { background: string; accent: string; value: str
 };
 
 /** Bloque de dato de las tarjetas (cliente, equipo, ubicación, horario, colación), con el formato del panel web. */
-export function InfoBlock({ label, value, detail, icon, tone = "neutral", style }: { label: string; value: string; detail?: string | null; icon?: IconName; tone?: InfoTone; style?: StyleProp<ViewStyle> }) {
+export function InfoBlock({ label, value, detail, icon, tone = "neutral", style, badge, badgeLabel }: {
+  label: string; value: string; detail?: string | null; icon?: IconName; tone?: InfoTone; style?: StyleProp<ViewStyle>;
+  /** Etiqueta a la derecha del título del bloque (por ejemplo «Atrasada» en el horario). */
+  badge?: ReactNode; badgeLabel?: string;
+}) {
   const colors = tones[tone];
-  return <View style={[styles.info, { backgroundColor: colors.background }, style]} accessible accessibilityLabel={`${label}: ${value}${detail ? `, ${detail}` : ""}`}>
+  return <View style={[styles.info, { backgroundColor: colors.background }, style]} accessible accessibilityLabel={`${label}: ${value}${detail ? `, ${detail}` : ""}${badgeLabel ? `. ${badgeLabel}` : ""}`}>
     <View style={styles.labelRow}>
       {icon ? <Ionicons name={icon} size={13} color={colors.accent} accessible={false} /> : null}
       <Text style={[styles.label, { color: colors.accent }]}>{label}</Text>
+      {badge ? <View style={styles.badge}>{badge}</View> : null}
     </View>
     <Text style={[styles.value, { color: colors.value }]}>{value}</Text>
     {detail ? <Text style={styles.detail}>{detail}</Text> : null}
@@ -33,6 +39,7 @@ export const infoStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   info: { borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 7, gap: 1 },
   labelRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  badge: { marginLeft: "auto" },
   label: { fontSize: 10, lineHeight: 14, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase" },
   value: { fontSize: 13, lineHeight: 18, fontWeight: "700" },
   detail: { fontSize: 12, lineHeight: 16, color: palette.textSecondary },

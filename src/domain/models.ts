@@ -122,10 +122,16 @@ export interface AssignmentGroup {
   workOrderNumber?: number | null;
   workOrderInternalNumber?: number | null;
   isWorkOrderInternal?: boolean | null;
+  /** Sucursal del cliente de la OT, si tiene. */
+  customerBranchName?: string | null;
+  /** Estado operativo de la OT como en la web (nombre y color #RRGGBB). */
+  statusName?: string | null;
+  statusColor?: string | null;
 }
 export interface Assignments {
   generatedAt: string;
-  technician: { id: number | null; name: string; allowEditExecutionTime: boolean; supportsWorkedDates?: boolean; supportsRecordedTimer?: boolean; supportsOfflineCompletion?: boolean; supportsOfflineActivities?: boolean; avatarThumbnail?: string | null };
+  /** showWorkTimer en false: la sucursal registra horas manuales al entregar, sin cronómetro. */
+  technician: { id: number | null; name: string; allowEditExecutionTime: boolean; showWorkTimer?: boolean; supportsWorkedDates?: boolean; supportsRecordedTimer?: boolean; supportsOfflineCompletion?: boolean; supportsOfflineActivities?: boolean; avatarThumbnail?: string | null };
   summary: { totalGroups: number; totalWorks: number; activeWorks: number; overdueWorks: number; plannedMinutes: number };
   groups: AssignmentGroup[];
   /** Huella del contenido de un día que entrega el gateway; permite preguntar después si cambió sin descargarlo de nuevo. */

@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { CreationCatalogResource, CreationKind, CreationOptions } from "../../domain/creation";
-import { Button, Field } from "../../ui/components";
+import { Field } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { CreationForm, CreationFormErrors } from "./creationForm";
 
@@ -28,15 +29,47 @@ interface Props {
   onSelectCatalog: (resource: CreationCatalogResource) => void;
 }
 
+type IconName = ComponentProps<typeof Ionicons>["name"];
+const PRIORITY_TONES = { low: palette.success, medium: palette.orange, high: palette.danger };
+
+/** Fila para elegir de un catálogo: ícono, lo elegido (o qué falta elegir) y un botón para quitarlo. */
+export function CatalogPicker({ label, icon, value, placeholder, disabled, locked = false, onPress, onClear }: {
+  label: string; icon: IconName; value: string | null; placeholder: string; disabled: boolean; locked?: boolean; onPress: () => void; onClear?: () => void;
+}) {
+  return <View style={styles.pickerField}>
+    <Text style={styles.label}>{label}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${value ?? "sin elegir"}`} accessibilityState={{ disabled: disabled || locked }} disabled={disabled || locked} onPress={onPress}
+      style={({ pressed }) => [styles.picker, value !== null && styles.pickerChosen, (disabled || locked) && styles.disabled, pressed && styles.pressed]}>
+      <View style={[styles.pickerIcon, value !== null && styles.pickerIconChosen]}>
+        <Ionicons name={icon} size={18} color={value !== null ? palette.white : palette.primary} accessible={false} />
+      </View>
+      <Text style={[styles.pickerValue, value === null && styles.pickerPlaceholder]} numberOfLines={2}>{value ?? placeholder}</Text>
+      {value !== null && onClear && !locked ? <Pressable accessibilityRole="button" accessibilityLabel={`Quitar ${label.toLowerCase()}`} hitSlop={10} disabled={disabled} onPress={onClear} style={styles.pickerClear}>
+        <Ionicons name="close" size={16} color={palette.textSecondary} accessible={false} />
+      </Pressable> : <Ionicons name={locked ? "lock-closed-outline" : "chevron-forward"} size={18} color={palette.textMuted} accessible={false} />}
+    </Pressable>
+  </View>;
+}
+
+/** Equipo que viene del padre (ingreso o mantenimiento): se muestra fijo, no se elige. */
+export function LinkedEquipmentCard({ title, label, detail, hint }: { title: string; label: string; detail?: string | null; hint: string }) {
+  return <View style={styles.linked}>
+    <View style={styles.linkedIcon}><Ionicons name="construct" size={20} color={palette.white} accessible={false} /></View>
+    <View style={styles.linkedText}>
+      <Text style={styles.linkedTitle}>{title}</Text>
+      <Text style={styles.linkedLabel} numberOfLines={2}>{label}</Text>
+      {detail ? <Text style={styles.hint}>{detail}</Text> : null}
+      <View style={styles.linkedHint}><Ionicons name="link-outline" size={13} color={palette.primary} accessible={false} /><Text style={styles.linkedHintText}>{hint}</Text></View>
+    </View>
+  </View>;
+}
+
 function WorkSystemFields({ form, disabled, onChange, onSelectCatalog }: Pick<Props, "form" | "disabled" | "onChange" | "onSelectCatalog">) {
   return <>
-    <Text style={styles.label}>Sistema (opcional)</Text>
-    <Button title={form.system?.label ?? "Seleccionar sistema"} variant="secondary" icon="git-network-outline" disabled={disabled} onPress={() => onSelectCatalog("systems")} />
-    {form.system ? <Button title="Quitar sistema" variant="ghost" disabled={disabled} onPress={() => { onChange("system", null); onChange("component", null); }} /> : null}
-    <Text style={styles.label}>Subsistema (opcional)</Text>
-    <Button title={form.component?.label ?? (form.system ? "Seleccionar subsistema" : "Selecciona primero un sistema")} variant="secondary" icon="layers-outline"
-      disabled={disabled || !form.system} onPress={() => onSelectCatalog("components")} />
-    {form.component ? <Button title="Quitar subsistema" variant="ghost" disabled={disabled} onPress={() => onChange("component", null)} /> : null}
+    <CatalogPicker label="Sistema (opcional)" icon="git-network-outline" value={form.system?.label ?? null} placeholder="Elegir sistema" disabled={disabled}
+      onPress={() => onSelectCatalog("systems")} onClear={() => { onChange("system", null); onChange("component", null); }} />
+    <CatalogPicker label="Subsistema (opcional)" icon="layers-outline" value={form.component?.label ?? null} placeholder={form.system ? "Elegir subsistema" : "Elige primero un sistema"}
+      disabled={disabled || !form.system} onPress={() => onSelectCatalog("components")} onClear={() => onChange("component", null)} />
   </>;
 }
 
@@ -60,11 +93,15 @@ export function CreationFields({ kind, form, errors, options, disabled, editing 
       {equipmentLookup}
       <Text style={styles.label}>Prioridad{kind === "work" ? " *" : ""}</Text>
       <View style={styles.choices} accessibilityRole="radiogroup">
-        {options.priorities.map((priority) => <CreationChoice key={priority} label={priorityLabels[priority]} selected={form.priority === priority} disabled={disabled} onPress={() => onChange("priority", priority)} />)}
+        {options.priorities.map((priority) => <Pressable key={priority} accessibilityRole="radio" accessibilityLabel={priorityLabels[priority]} accessibilityState={{ checked: form.priority === priority, disabled }}
+          disabled={disabled} onPress={() => onChange("priority", priority)}
+          style={[styles.priority, form.priority === priority && { borderColor: PRIORITY_TONES[priority], backgroundColor: PRIORITY_TONES[priority] }, disabled && styles.disabled]}>
+          <View style={[styles.priorityDot, { backgroundColor: form.priority === priority ? palette.white : PRIORITY_TONES[priority] }]} />
+          <Text style={[styles.choiceText, form.priority === priority && styles.priorityTextOn]}>{priorityLabels[priority]}</Text>
+        </Pressable>)}
       </View>
-      <Text style={styles.label}>Especialidad (opcional)</Text>
-      <Button title={form.specialty?.label ?? "Seleccionar especialidad"} variant="secondary" icon="construct-outline" disabled={disabled || specialtyLocked} onPress={() => onSelectCatalog("specialties")} />
-      {form.specialty && !specialtyLocked ? <Button title="Quitar especialidad" variant="ghost" disabled={disabled} onPress={() => onChange("specialty", null)} /> : null}
+      <CatalogPicker label="Especialidad (opcional)" icon="hammer-outline" value={form.specialty?.label ?? null} placeholder="Elegir especialidad" disabled={disabled} locked={specialtyLocked}
+        onPress={() => onSelectCatalog("specialties")} onClear={() => onChange("specialty", null)} />
       {showWorkSystem ? <WorkSystemFields form={form} disabled={disabled} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
       {kind === "maintenance" ? <>
         <Text style={styles.label}>Tipo de daño (opcional)</Text>
@@ -94,4 +131,23 @@ const styles = StyleSheet.create({
   selected: { borderColor: palette.primary, backgroundColor: palette.primarySoft }, selectedText: { color: palette.primary, fontWeight: "700" },
   disabled: { opacity: 0.55 }, choiceText: { ...typography.label, color: palette.text }, label: { ...typography.label, color: palette.text },
   hint: { ...typography.caption, color: palette.textSecondary }, error: { ...typography.caption, color: palette.danger },
+  pressed: { opacity: 0.8 },
+  priority: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  priorityDot: { width: 9, height: 9, borderRadius: 5 },
+  priorityTextOn: { color: palette.white, fontWeight: "800" },
+  pickerField: { gap: 6 },
+  picker: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
+  pickerChosen: { borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
+  pickerIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  pickerIconChosen: { backgroundColor: palette.primary },
+  pickerValue: { flex: 1, fontSize: 15, fontWeight: "700", color: palette.heading },
+  pickerPlaceholder: { fontWeight: "500", color: palette.textMuted },
+  pickerClear: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface },
+  linked: { flexDirection: "row", gap: 12, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
+  linkedIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary },
+  linkedText: { flex: 1, minWidth: 0, gap: 3 },
+  linkedTitle: { ...typography.overline, color: palette.primary },
+  linkedLabel: { fontSize: 16, fontWeight: "800", color: palette.heading },
+  linkedHint: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  linkedHintText: { flex: 1, ...typography.caption, color: palette.textSecondary },
 });

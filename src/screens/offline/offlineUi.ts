@@ -18,7 +18,7 @@ export type PendingCompletion = Extract<OfflineOperation, { kind: "completion" }
 
 export function completionStatusLabel(completion: PendingCompletion): string {
   if (["conflict", "blocked", "needs_review", "auth_required"].includes(completion.status)) return "Entrega por revisar";
-  const status = completion.payload.input.status === "delivered" ? "Entregado" : "Completado";
+  const status = completion.payload.input.status === "delivered" ? "Entregado" : "Finalizado";
   return completion.status === "applied" ? `${status} · actualizando` : `${status} local · pendiente`;
 }
 

@@ -263,7 +263,7 @@ test("CompletionDialog shows an automatic summary and manual interval selectors 
   const outputs: StatusInput[] = [];
   const module = uiModule<typeof import("../src/screens/workDetail/CompletionDialog")>("screens/workDetail/CompletionDialog.tsx", hooks, {
     "../../ui/time/TimeField": { TimeField: "TimeField" }, "../../ui/time/NumericSelectField": { DayOffsetField: "DayOffsetField", NumericSelectField: "NumericSelectField" },
-    "./DetailUi": { ChoiceButton: "ChoiceButton", Notice: "Notice" },
+    "./DetailUi": { ChoiceButton: "ChoiceButton", Notice: "Notice", SegmentOption: "SegmentOption" },
   });
   const date = "2026-09-14";
   const props: CompletionDialogProps = { maintenance: false, work: work({ status: "paused", elapsedSeconds: 1200, scheduledDate: date, plannedDates: [date], missingRequiredInfo: [] }),
@@ -273,9 +273,9 @@ test("CompletionDialog shows an automatic summary and manual interval selectors 
   let tree = render(); assert.equal(elements<TimeFieldProps>(tree, "TimeField").length, 0);
   assert.equal(elements(tree, "NumericSelectField").length, 0);
   assert.ok(JSON.stringify(tree).includes("Tiempo trabajado"));
-  elements<Chip>(tree, "ChoiceButton").find(chip => chip.props.label === "Editar horas de ejecución manualmente")!.props.onPress();
+  elements<Chip>(tree, "SegmentOption").find(chip => chip.props.label === "Manual")!.props.onPress();
   tree = render();
-  elements<Chip>(tree, "ChoiceButton").find(chip => chip.props.label === "Inicio y término")!.props.onPress();
+  elements<Chip>(tree, "SegmentOption").find(chip => chip.props.label === "Inicio y término")!.props.onPress();
   tree = render(); const fields = elements<TimeFieldProps>(tree, "TimeField"); assert.equal(fields.length, 2);
   fields[0].props.onChange("23:59"); fields[1].props.onChange("00:07");
   elements<SelectionFieldProps>(tree, "DayOffsetField")[0].props.onChange("1");

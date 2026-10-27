@@ -114,6 +114,7 @@ export const styles = StyleSheet.create({
   avatarStack: { flexDirection: "row" },
   avatar: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary, borderWidth: 2, borderColor: palette.navy, overflow: "hidden" },
   avatarOverlap: { marginLeft: -10 },
+  avatarAdd: { backgroundColor: palette.white },
   avatarImage: { width: "100%", height: "100%" },
   avatarText: { fontSize: 11, fontWeight: "800", color: palette.white },
   heroTimer: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6, marginLeft: 8, paddingLeft: 8, borderLeftWidth: 1, borderLeftColor: "rgba(255,255,255,0.14)" },

@@ -11,11 +11,15 @@ import { useWorkshopEntry } from "./useWorkshopEntry";
 import { DeliveredBanner, IntakeProgress, Notice, WorkAndOrders } from "./entry/EntrySections";
 import { LinkWorksSheet } from "./works/LinkWorksSheet";
 import { AddWorksSheet, ConfirmOrderSheet, CreateOrderSheet } from "./orders/OrderSheets";
+import { OrderSentSuccess } from "./orders/OrderSentSuccess";
 import type { WorkshopOrder } from "../domain/workshopEntry";
 import { EstimatedDateSheet, ManageBar, MoveAreaSheet, StatusSheet } from "./manage/ManageSheets";
 import type { useWorkshopBoard } from "./useWorkshopBoard";
 import { useAppPermission } from "../application/appPermissions";
 import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
+import { ResourceSheet } from "../screens/orders/OrderQuickSheet";
+import type { DriveApi } from "../domain/fileDrive";
+import type { ThreadApi } from "../domain/threads";
 
 const longDate = (iso: string) => new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
 
@@ -43,10 +47,18 @@ function headerOf(entry: WorkshopEntry, area: WorkshopArea, detail: WorkshopEntr
 }
 
 /** Ficha del ingreso abierta desde el tablero. Atrás (botón o el del teléfono) vuelve al tablero. */
-export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChange, entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, onOpenOrder, works, orders, onDeliver, manage, workshopId, initialNotice }: {
+export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard, rememberedTab, onTabChange, entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, onOpenOrder, works, orders, onDeliver, manage, workshopId, initialNotice, onOpenFiles, onOpenComments, orderDrive, orderThread }: {
   onOpenOrder?: (orderId: number, entryCode: string) => void;
+  /** Archivos y comentarios de una OT del ingreso (null si no están disponibles): se abren en una ventana desde su tarjeta. */
+  orderDrive?: (orderId: number) => DriveApi | null; orderThread?: (orderId: number) => ThreadApi | null;
+  /** Archivos con carpetas del ingreso (mismo gestor de la web). */
+  onOpenFiles?: () => void;
+  /** Comentarios del ingreso como chat (los mismos de la web). */
+  onOpenComments?: () => void;
   /** Búsqueda del encabezado de la app dentro del ingreso. */
   query?: string;
+  /** Vista de los trabajos: compacta o extendida. */
+  workLayout?: "compact" | "extended"; onWorkLayout?: (layout: "compact" | "extended") => void;
   /** Última pestaña Trabajos/OTs usada en cada ingreso, para volver a ella. */
   rememberedTab?: (entryId: number) => string | undefined; onTabChange?: (entryId: number, tab: string) => void;
   workCard?: (workId: number) => import("react").ReactNode | null;
@@ -65,6 +77,8 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
   const [heroCollapsed, setHeroCollapsed] = useState(false);
   const [orderSheet, setOrderSheet] = useState<{ kind: "create" } | { kind: "send" | "delete" | "add"; order: WorkshopOrder } | null>(null);
   const [orderNotice, setOrderNotice] = useState("");
+  const [orderQuick, setOrderQuick] = useState<{ order: WorkshopOrder; kind: "files" | "comments" } | null>(null);
+  const [sentSuccess, setSentSuccess] = useState<{ orderId: number; title: string | null; worksCount: number; created: boolean } | null>(null);
   const orderAttempt = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const [manageSheet, setManageSheet] = useState<"status" | "move" | "date" | null>(null);
   const [manageNotice, setManageNotice] = useState("");
@@ -94,7 +108,8 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
   async function pull() { setRefreshing(true); try { await refresh(); } finally { setRefreshing(false); } }
   const header = headerOf(entry, area, detail);
   const [deliveryBlocked, setDeliveryBlocked] = useState(false);
-  const pendingDelivery = detail ? workshopDeliveryConditions(detail).filter((condition) => !condition.met) : [];
+  const deliveryConditions = detail ? workshopDeliveryConditions(detail) : [];
+  const pendingDelivery = deliveryConditions.filter((condition) => !condition.met);
   const overdue = header.estimatedDeliveryAt !== null && !header.delivered && isWorkshopEntryOverdue({ ...entry, estimatedDeliveryAt: header.estimatedDeliveryAt });
 
   return <View style={styles.screen} pointerEvents={openingWork !== null ? "none" : "auto"}>
@@ -166,6 +181,22 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
         {!detail.delivery ? <ManageBar
           onStatus={can.manage ? () => openManage("status") : undefined} onMove={can.manage ? () => openManage("move") : undefined} onDate={can.manage ? () => openManage("date") : undefined} /> : null}
         {manageNotice ? <Notice tone="success" icon="checkmark-circle-outline" message={manageNotice} /> : null}
+        {onOpenFiles || onOpenComments ? <View style={styles.quickRow}>
+          {onOpenFiles ? <Pressable accessibilityRole="button" accessibilityLabel="Archivos del ingreso" onPress={onOpenFiles} style={({ pressed }) => [styles.filesCard, pressed && { opacity: 0.8 }]}>
+            <View style={styles.filesIcon}><Ionicons name="folder-open" size={20} color={palette.amber} accessible={false} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.filesTitle}>Archivos</Text>
+              <Text style={styles.filesHint} numberOfLines={1}>Fotos y carpetas</Text>
+            </View>
+          </Pressable> : null}
+          {onOpenComments ? <Pressable accessibilityRole="button" accessibilityLabel="Comentarios del ingreso" onPress={onOpenComments} style={({ pressed }) => [styles.filesCard, pressed && { opacity: 0.8 }]}>
+            <View style={[styles.filesIcon, { backgroundColor: palette.primarySoft }]}><Ionicons name="chatbubbles" size={20} color={palette.primary} accessible={false} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.filesTitle}>Comentarios</Text>
+              <Text style={styles.filesHint} numberOfLines={1}>Chat del equipo</Text>
+            </View>
+          </Pressable> : null}
+        </View> : null}
         <IntakeProgress detail={detail} actions={detail.delivery ? [] : [
           ...(can.entries ? [!detail.reception.signed
             ? { icon: "arrow-forward-circle-outline" as const, label: "Continuar ingreso", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true), strong: true }
@@ -176,7 +207,8 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
         {linkNotice ? <Notice tone="success" icon="link-outline" message={linkNotice} /> : null}
         {workError ? <Notice tone="warning" icon="information-circle-outline" message={workError} /> : null}
         {orderNotice ? <Notice tone="success" icon="document-text-outline" message={orderNotice} /> : null}
-        <WorkAndOrders query={query} detail={detail} workCard={workCard} initialTab={rememberedTab?.(entry.id) as "works" | "orders" | undefined} onTabChange={(tab) => onTabChange?.(entry.id, tab)} onOpenOrder={onOpenOrder ? (order) => onOpenOrder(order.id, detail.code) : undefined} onAddWork={detail.delivery || !onAddWork || !can.works ? undefined : () => onAddWork(detail.code, detail.equipmentLabel)}
+        <WorkAndOrders query={query} workLayout={workLayout} onWorkLayout={onWorkLayout} detail={detail} workCard={workCard} initialTab={rememberedTab?.(entry.id) as "works" | "orders" | undefined} onTabChange={(tab) => onTabChange?.(entry.id, tab)} onOpenOrder={onOpenOrder ? (order) => onOpenOrder(order.id, detail.code) : undefined}
+          onOrderFiles={orderDrive ? (order) => setOrderQuick({ order, kind: "files" }) : undefined} onOrderComments={orderThread ? (order) => setOrderQuick({ order, kind: "comments" }) : undefined} onAddWork={detail.delivery || !onAddWork || !can.works ? undefined : () => onAddWork(detail.code, detail.equipmentLabel)}
           onAddMaintenance={detail.delivery || !detail.isInternalEntry || !onAddMaintenance || !can.maintenances ? undefined : () => onAddMaintenance(detail.code, detail.equipmentLabel)}
           onLinkWorks={detail.delivery || !can.works ? undefined : () => { setLinkNotice(""); setLinking(true); }}
           onOpenWork={(workId) => void openWork(workId)} openingWorkId={openingWork}
@@ -200,14 +232,22 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
             <Ionicons name="alert-circle" size={22} color={palette.orange} accessible={false} />
             <Text style={styles.dialogTitle}>Aún no se puede entregar</Text>
           </View>
-          <Text style={styles.dialogText}>{pendingDelivery.length === 1 ? "Falta completar esto:" : `Faltan ${pendingDelivery.length} cosas por completar:`}</Text>
-          {pendingDelivery.map((condition) => <View key={condition.id} style={styles.dialogItem}>
-            <Ionicons name="alert-circle-outline" size={16} color={palette.orange} accessible={false} />
-            <View style={styles.dialogItemText}>
-              <Text style={styles.dialogItemTitle}>{condition.title}</Text>
-              <Text style={styles.dialogItemDetail}>{condition.detail}</Text>
-            </View>
-          </View>)}
+          <Text style={styles.dialogText}>{`${deliveryConditions.length - pendingDelivery.length} de ${deliveryConditions.length} condiciones cumplidas`}</Text>
+          <View style={styles.flow}>
+            {deliveryConditions.map((condition, index) => <View key={condition.id} style={styles.flowStep}
+              accessible accessibilityLabel={`${condition.title}: ${condition.met ? "cumplida" : "pendiente"}. ${condition.detail}`}>
+              <View style={styles.flowRail}>
+                <View style={[styles.flowDot, condition.met ? styles.flowDotMet : styles.flowDotPending]}>
+                  <Ionicons name={condition.met ? "checkmark" : "alert"} size={13} color={palette.white} accessible={false} />
+                </View>
+                {index < deliveryConditions.length - 1 ? <View style={[styles.flowLine, condition.met && styles.flowLineMet]} /> : null}
+              </View>
+              <View style={[styles.flowBody, !condition.met && styles.flowBodyPending]}>
+                <Text style={[styles.dialogItemTitle, condition.met && styles.flowTitleMet]}>{condition.title}</Text>
+                <Text style={styles.dialogItemDetail}>{condition.detail}</Text>
+              </View>
+            </View>)}
+          </View>
           <Button title="Entendido" onPress={() => setDeliveryBlocked(false)} />
         </View>
       </View>
@@ -217,6 +257,7 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
       onCreate={async (input) => {
         const result = await orders.create(entry.id, input);
         setOrderSheet(null);
+        if (result.sent) setSentSuccess({ orderId: result.id, title: input.title, worksCount: input.workIds.length, created: true });
         setOrderNotice(result.sent ? "OT creada y enviada a comercial." : input.sendToCommercial ? "OT creada. No se pudo enviar a comercial: envíala desde la lista." : "OT creada sin enviar a comercial.");
         await refresh();
         return result;
@@ -231,11 +272,23 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
     {(orderSheet?.kind === "send" || orderSheet?.kind === "delete") && detail ? <ConfirmOrderSheet order={orderSheet.order} action={orderSheet.kind}
       worksCount={detail.works.items.filter((work) => work.orderId === orderSheet.order.id).length} onClose={() => setOrderSheet(null)}
       onConfirm={async () => {
-        if (orderSheet.kind === "send") { await orders.send(entry.id, orderSheet.order.id); setOrderNotice("OT enviada a comercial: quedó pendiente de cotizar."); }
+        if (orderSheet.kind === "send") {
+          await orders.send(entry.id, orderSheet.order.id);
+          setSentSuccess({ orderId: orderSheet.order.id, title: orderSheet.order.title, worksCount: detail.works.items.filter((work) => work.orderId === orderSheet.order.id).length, created: false });
+          setOrderNotice("OT enviada a comercial: quedó pendiente de cotizar.");
+        }
         else { const result = await orders.remove(entry.id, orderSheet.order.id); setOrderNotice(`OT eliminada${result.deletedWorks > 0 ? ` junto con ${result.deletedWorks} trabajo(s)` : ""}.`); }
         setOrderSheet(null);
         await refresh();
       }} /> : null}
+    {sentSuccess && detail ? (() => {
+      const order = detail.orders.items.find((item) => item.id === sentSuccess.orderId);
+      return <OrderSentSuccess code={order?.workOrderCode ?? order?.code ?? null} title={sentSuccess.title ?? order?.title ?? null} worksCount={sentSuccess.worksCount} created={sentSuccess.created}
+        onDismiss={() => setSentSuccess(null)}
+        primary={onOpenOrder ? { label: "Ver la OT", icon: "document-text-outline", onPress: () => { setSentSuccess(null); onOpenOrder(sentSuccess.orderId, detail.code); } }
+          : { label: "Listo", icon: "checkmark", onPress: () => setSentSuccess(null) }}
+        secondary={onOpenOrder ? { label: "Seguir en el ingreso", icon: "arrow-back", onPress: () => setSentSuccess(null) } : undefined} />;
+    })() : null}
     {manageSheet === "status" ? <StatusSheet load={manage.statuses} onClose={() => setManageSheet(null)}
       onSave={async (statusId, subStatusId) => { await manage.status(entry.id, statusId, subStatusId); await managed("Estado actualizado."); }} /> : null}
     {manageSheet === "move" ? <MoveAreaSheet currentAreaId={detail?.areaId ?? area.id} onClose={() => setManageSheet(null)}
@@ -243,6 +296,13 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
       onMove={async (areaId, note) => { await manage.move(entry.id, areaId, note); await managed("Equipo movido de nave."); }} /> : null}
     {manageSheet === "date" ? <EstimatedDateSheet current={header.estimatedDeliveryAt} scopeKey={String(entry.id)} onClose={() => setManageSheet(null)}
       onSave={async (iso, reason) => { await manage.estimatedDelivery(entry.id, iso, reason); await managed("Fecha de entrega actualizada."); }} /> : null}
+    {orderQuick ? (() => {
+      const code = orderQuick.order.workOrderCode ?? orderQuick.order.code;
+      const drive = orderQuick.kind === "files" ? orderDrive?.(orderQuick.order.id) ?? null : null;
+      const thread = orderQuick.kind === "comments" ? orderThread?.(orderQuick.order.id) ?? null : null;
+      return drive || thread ? <ResourceSheet sheetKey={`${orderQuick.order.id}:${orderQuick.kind}`} title={orderQuick.kind === "files" ? "Archivos de la OT" : "Comentarios de la OT"}
+        subtitle={code} drive={drive} thread={thread} onClose={() => setOrderQuick(null)} /> : null;
+    })() : null}
     {linking ? <LinkWorksSheet load={(search) => works.free(entry.id, search)} onClose={() => setLinking(false)}
       onLink={async (workIds) => {
         const result = await works.link(entry.id, workIds);
@@ -255,6 +315,11 @@ export function WorkshopEntryScreen({ query, workCard, rememberedTab, onTabChang
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
+  quickRow: { flexDirection: "row", gap: 10 },
+  filesCard: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  filesIcon: { width: 40, height: 40, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: palette.amberSoft },
+  filesTitle: { fontSize: 15, fontWeight: "800", color: palette.heading },
+  filesHint: { ...typography.caption, color: palette.textSecondary },
   bar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface },
   barText: { flexShrink: 0, maxWidth: "45%" },
   barEquipment: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
@@ -268,6 +333,17 @@ const styles = StyleSheet.create({
   dialogTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: palette.heading },
   dialogText: { ...typography.caption, color: palette.textSecondary },
   dialogItem: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: radius.md, backgroundColor: palette.orangeSoft },
+  flow: { gap: 0 },
+  flowStep: { flexDirection: "row", alignItems: "stretch", gap: 10 },
+  flowRail: { width: 22, alignItems: "center" },
+  flowDot: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  flowDotMet: { backgroundColor: palette.success },
+  flowDotPending: { backgroundColor: palette.orange },
+  flowLine: { flex: 1, width: 2, minHeight: 10, backgroundColor: palette.border },
+  flowLineMet: { backgroundColor: palette.success },
+  flowBody: { flex: 1, minWidth: 0, gap: 2, paddingBottom: 12, paddingTop: 2 },
+  flowBodyPending: { paddingHorizontal: 8, paddingTop: 6, paddingBottom: 8, marginBottom: 8, borderRadius: radius.md, backgroundColor: palette.orangeSoft },
+  flowTitleMet: { color: palette.success },
   dialogItemText: { flex: 1, minWidth: 0, gap: 2 },
   dialogItemTitle: { fontSize: 13, fontWeight: "800", color: palette.text },
   dialogItemDetail: { ...typography.caption, color: palette.textSecondary },

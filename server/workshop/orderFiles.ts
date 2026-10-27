@@ -9,6 +9,7 @@ import { emptySchema } from "../validation";
 import { loadWorkshopEntry } from "./entry";
 import { loadOrderDocument, NO_ENTRY } from "./orderDetail";
 import { workshopActor } from "./support";
+import { registerDriveRoutes } from "../drive/routes";
 
 const id = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 // Ingreso 0: OT abierta desde Mi jornada.
@@ -18,13 +19,34 @@ const fileIds = z.object({ entryId: entryRef, orderId: id, fileId: id }).strict(
 const branchQuery = z.object({ companyBranchId: id }).strict();
 
 /** La OT (no un mantenimiento) pertenece al ingreso de la sucursal. */
-async function assertOrderOfEntry(upstream: Upstream, token: string, branchId: number, entryId: number, orderId: number): Promise<void> {
+export async function assertOrderOfEntry(upstream: Upstream, token: string, branchId: number, entryId: number, orderId: number): Promise<void> {
   if (entryId === NO_ENTRY) { await loadOrderDocument(upstream, token, branchId, NO_ENTRY, orderId); return; }
   const entry = await loadWorkshopEntry(upstream, token, branchId, entryId);
   if (!entry.orders.available) throw new GatewayError(503, "WORKSHOP_ENTRY_INCOMPLETE", "No se pudieron revisar las órdenes del ingreso. Inténtalo de nuevo.");
   if (!entry.orders.items.some((item) => item.id === orderId && item.kind !== "maintenance")) {
     throw new GatewayError(404, "NEGOTIATION_NOT_FOUND", "Esa orden no pertenece a este ingreso. Actualiza la ficha.");
   }
+}
+
+/** Gestor de archivos con carpetas del ingreso y de sus OT (los mismos de la web). */
+export function registerWorkshopDriveRoutes(router: Router, upstream: Upstream): void {
+  const params = z.object({ entryId: entryRef, orderId: id.optional() }).passthrough();
+  registerDriveRoutes(router, upstream, "/drive/entries/:entryId", async (req, query) => {
+    const { entryId } = params.parse(req.params);
+    if (entryId === NO_ENTRY) throw new GatewayError(404, "ENTRY_NOT_FOUND");
+    const { companyBranchId } = branchQuery.parse(query);
+    const { token } = await workshopActor(upstream, req, companyBranchId);
+    await loadWorkshopEntry(upstream, token, companyBranchId, entryId);
+    return { token, companyBranchId, base: "operation_area_entries/files", entityId: entryId };
+  });
+  registerDriveRoutes(router, upstream, "/drive/entries/:entryId/orders/:orderId", async (req, query) => {
+    const { entryId, orderId } = params.parse(req.params);
+    if (orderId === undefined) throw new GatewayError(404, "NEGOTIATION_NOT_FOUND");
+    const { companyBranchId } = branchQuery.parse(query);
+    const { token } = await workshopActor(upstream, req, companyBranchId);
+    await assertOrderOfEntry(upstream, token, companyBranchId, entryId, orderId);
+    return { token, companyBranchId, base: "negotiation_files", entityId: orderId };
+  });
 }
 
 /** Archivos de la OT (los mismos de la pestaña Archivos de la OT en la web y en Mi jornada). */

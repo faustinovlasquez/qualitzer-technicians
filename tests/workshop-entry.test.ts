@@ -40,7 +40,8 @@ test("faltan firma, cotización o trabajos: cada condición explica qué falta",
   }));
   assert.deepEqual(conditions.map((condition) => [condition.id, condition.met, condition.detail]), [
     ["intake", false, "Falta la firma de recepción del ingreso."],
-    ["orders", false, "COT-SER-0009 sin cotizar todavía."],
+    // Una cotización en 0 también es una cotización creada.
+    ["orders", true, "COT-SER-0009 creada(s)."],
     // Toda OT del ingreso debe estar enviada a comercial para entregar.
     ["sent", false, "COT-PRO-0001 sin enviar a comercial. Ábrela desde la pestaña OTs y envíala."],
     ["works", false, "TR-00007 sin OT."]
@@ -53,10 +54,21 @@ test("con inspecciones exigidas se revisa la de ingreso y aparece la de entrega"
   const conditions = workshopDeliveryConditions(detail({ inspections: { available: true, entryRequirement: "photos", exitRequirement: "checklist", entry: inspection, exit: null, photoSlots: slots } }));
   assert.deepEqual(conditions.map((condition) => [condition.id, condition.met, condition.detail]), [
     ["intake", false, "Inspección de ingreso (fotos): Faltan fotos: Costado"],
-    ["orders", true, "1 cotización(es) con montos."],
+    ["orders", true, "COT-PRO-0001 creada(s)."],
     ["works", true, "Todos los trabajos están en una OT."],
     ["exit", false, "La inspección no se ha realizado"]
   ]);
+});
+
+test("las condiciones de entrega siguen lo que configura la sucursal", () => {
+  const unpriced = { available: true, items: [order({ code: "COT-SER-4266", quoted: false, stage: "draft" })] };
+  const withConfig = (deliveryConditions: NonNullable<WorkshopEntryDetail["inspections"]["deliveryConditions"]>) =>
+    detail({ orders: unpriced, inspections: { available: true, entryRequirement: "none", exitRequirement: "none", entry: null, exit: null, photoSlots: slots, deliveryConditions } });
+  // Por defecto una cotización en 0 no bloquea la entrega.
+  assert.deepEqual(met(detail({ orders: unpriced })), [["intake", true], ["orders", true], ["works", true]]);
+  assert.deepEqual(met(withConfig({ requireQuotes: true, requireQuotedAmounts: true, requireApprovedNegotiations: true, requireNoLooseWorks: false })),
+    [["intake", true], ["orders", true], ["amounts", false], ["approved", false]]);
+  assert.deepEqual(met(withConfig({ requireQuotes: false, requireApprovedNegotiations: false, requireNoLooseWorks: false })), [["intake", true]]);
 });
 
 test("en un equipo propio se piden mantenimientos y lo no verificable no se da por cumplido", () => {

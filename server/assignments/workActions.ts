@@ -9,6 +9,8 @@ import { AssignmentAuthorization } from "./authorization";
 import type { UploadConcurrency } from "./routes";
 import { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } from "../../src/domain/equipmentLocation";
 import { workEditDocumentSchema, workEditInputSchema, type WorkEditInput } from "../../src/domain/creation";
+import { workTeamAddInputSchema, workTeamSchema } from "../../src/domain/workTeam";
+import { assertAppPermission } from "../workshop/support";
 
 export function registerWorkActions(router: Router, upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency): void {
   const authorization = new AssignmentAuthorization(upstream);
@@ -141,6 +143,29 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
       const result = parseUpstream(workActivityResultSchema, await upstream.request(`${prefix}/activities/${id}/files`, { token: scope.token, query, method: "POST", form }));
       res.status(201).json({ success: true, id: result.id });
     } finally { releaseDocuments(req); uploads.active--; }
+  });
+  // Equipo del trabajo: la sucursal puede desactivarlo ("Asignar técnicos") y el backend revalida responsable y reglas.
+  async function team(req: Request, mutation: boolean) {
+    const assigned = await owned(req, mutation);
+    await assertAppPermission(upstream, assigned.scope.token, assigned.scope.range.companyBranchId, "workTeam");
+    return assigned;
+  }
+  router.get(`${base}/team`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const { scope, query, prefix } = await team(req, false);
+    res.json(parseUpstream(workTeamSchema, await upstream.request(`${prefix}/team`, { token: scope.token, query })));
+  });
+  router.post(`${base}/team`, async (req, res) => {
+    const input = workTeamAddInputSchema.parse(req.body);
+    const { scope, query, prefix } = await team(req, true);
+    res.json(parseUpstream(workTeamSchema, await upstream.request(`${prefix}/team`, { token: scope.token, query, method: "POST", json: input })));
+  });
+  router.delete(`${base}/team/:workerId`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const workerId = Number(resourceParamsSchema.parse(req.params).workerId);
+    if (!workerId) throw new GatewayError(400, "WORK_TEAM_INVALID_INPUT");
+    const { scope, query, prefix } = await team(req, true);
+    res.json(parseUpstream(workTeamSchema, await upstream.request(`${prefix}/team/${workerId}`, { token: scope.token, query, method: "DELETE" })));
   });
   router.post(`${base}/reopen`, async (req, res) => {
     emptySchema.parse(req.body ?? {});

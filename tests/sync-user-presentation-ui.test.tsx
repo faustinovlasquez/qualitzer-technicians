@@ -147,7 +147,7 @@ async function detailFixture(initialTab: WorkDetailScreenProps["initialTab"] = "
     "./workDetail/CompletionDialog": { CompletionDialog: "CompletionDialog" }, "./workDetail/EvidenceTab": { EvidenceTab: "EvidenceTab" },
     "./workDetail/localPhotos": { openLocalPhotoScope: () => {} }, "./workDetail/useWorkDraft": drafts,
     "./workDetail/useAttachmentFiles": { useAttachmentFiles: () => ({ files: [], error: null, loading: false, load: async () => {} }) },
-    "./workDetail/WorkInformation": { WorkTab: "WorkTab", EquipmentTab: "EquipmentTab" }, "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./workDetail/WorkInformation": { WorkTab: "WorkTab", EquipmentTab: "EquipmentTab" }, "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
     "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" }, "./offline/QueuedNotice": notices,
     "./workDetail/checklist/ChecklistAssociationPanel": vm.load("screens/workDetail/checklist/ChecklistAssociationPanel.tsx"),
   });

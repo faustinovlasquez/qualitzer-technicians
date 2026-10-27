@@ -544,3 +544,98 @@ test("document signatures support images, safe UTF-8 text and typed OOXML, not g
   assert.ok(Buffer.byteLength(documentFilename(`${"á".repeat(300)}.pdf`, "pdf")) <= 240);
   assert.throws(() => documentFilename(`file.${"x".repeat(300)}`), GatewayError);
 });
+test("el gestor de archivos usa los archivos del trabajo, del mantenimiento o de la OT asignados", async (t) => {
+  const { request, state } = await harness(t);
+  for (const [assigned, path, expected, folders] of [
+    [group(), workPath("direct-11", "11", "/drive"), "/api/work_files/11", true],
+    [group({ id: "external-300", type: "external_ot" }), groupPath("external-300", "/drive"), "/api/negotiation_files/300", true],
+    [group({ id: "maintenance-50", type: "internal_maintenance" }), groupPath("maintenance-50", "/drive"), "/api/maintenance_files/50", true],
+    [group({ id: "maintenance-50", type: "internal_maintenance" }), workPath("maintenance-50", "11", "/drive"), "/api/maintenance_files/50", false],
+  ] as const) {
+    state.assignments = assignments([assigned]);
+    state.calls.length = 0;
+    state.failures.set(`GET ${expected.replace(/\/(\d+)$/, "/folders/$1")}`, { status: 200, body: { data: [{ id: 4, name: "Informes", fileCount: 1 }] } });
+    const result = await request(path);
+    assert.equal(result.response.status, 200, path);
+    const listing = result.data as { folders: unknown[]; files: Array<{ id: string }>; capabilities: { folders: boolean } };
+    assert.equal(listing.capabilities.folders, folders);
+    assert.equal(listing.folders.length, folders ? 1 : 0);
+    assert.deepEqual(listing.files.map((entry) => entry.id), ["7"]);
+    const read = state.calls.find((call) => call.path === expected && call.method === "GET");
+    assert.ok(read, expected);
+    // El trabajo dentro de un mantenimiento vive en su carpeta fija del servidor.
+    assert.equal(JSON.parse(read.query.get("filters") ?? "{}").folderId, folders ? undefined : "maintenance_work_11");
+  }
+});
+
+test("el gestor de archivos no abre un grupo sin archivos propios ni uno que no está asignado", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group()]);
+  const direct = await request(groupPath("direct-11", "/drive"));
+  assert.equal(direct.response.status, 404);
+  const foreign = await request(workPath("direct-11", "99", "/drive"));
+  assert.equal(foreign.response.status, 404);
+  assert.equal(state.calls.some((call) => call.path.startsWith("/api/work_files/99")), false);
+});
+
+test("los comentarios del trabajo usan el trabajo real del servidor y solo la conversación técnica", async (t) => {
+  const { request, state } = await harness(t);
+  for (const assigned of [group(), group({ id: "maintenance-50", type: "internal_maintenance" })]) {
+    state.assignments = assignments([assigned]);
+    state.calls.length = 0;
+    state.failures.set(`GET /api/technician-dashboard/panel/${assigned.id}/works/11/comment-target`, { status: 200, body: { workId: 702 } });
+    state.failures.set("GET /api/works/comments/702", { status: 200, body: { total: 0, data: [] } });
+    const technical = await request(workPath(assigned.id, "11", "/thread"));
+    assert.equal(technical.response.status, 200);
+    assert.deepEqual((technical.data as { tabs: string[]; tab: string }).tabs, ["technical"]);
+    assert.equal(state.calls.find((call) => call.path === "/api/works/comments/702")?.query.get("isTechnical"), "true");
+    state.calls.length = 0;
+    const general = await request(`${workPath(assigned.id, "11", "/thread")}&tab=general`);
+    assert.equal(general.response.status, 400);
+    assert.equal(state.calls.some((call) => call.path === "/api/works/comments/702"), false);
+  }
+});
+
+test("eliminar: la app consulta si se puede y el motivo, y la OT completa se elimina con el permiso de la sucursal", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group(), group({ id: "external-300", type: "external_ot" })]);
+  const blocked = { kind: "work", allowed: false, reason: "NOT_CREATOR", createdByName: "Ana Pérez", title: "Inspección", worksCount: 1, extra: "se descarta" };
+  state.failures.set("GET /api/technician-dashboard/panel/direct-11/works/11/deletion", { status: 200, body: blocked });
+  const check = await request(workPath("direct-11", "11", "/deletion"));
+  assert.equal(check.response.status, 200);
+  assert.deepEqual(check.data, { kind: "work", allowed: false, reason: "NOT_CREATOR", createdByName: "Ana Pérez", title: "Inspección", worksCount: 1 });
+  assert.equal(state.calls.find((call) => call.path.endsWith("/works/11/deletion"))?.query.get("groupType"), "direct_assignment");
+
+  state.failures.set("DELETE /api/technician-dashboard/panel/external-300/deletion", { status: 200, body: { kind: "order", allowed: true, reason: null, createdByName: null, title: "OT", worksCount: 2, deleted: true } });
+  const removed = await request(groupPath("external-300", "/deletion"), "DELETE");
+  assert.equal(removed.response.status, 200);
+  assert.equal((removed.data as { deleted: boolean }).deleted, true);
+});
+
+test("eliminar: si la sucursal quitó el permiso, la eliminación no llega al servidor", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group({ id: "external-300", type: "external_ot" })]);
+  state.failures.set("GET /api/branches/1/mobileAppConfig", { status: 200, body: { mobileAppConfig: { deleteOwn: false } } });
+  const denied = await request(groupPath("external-300", "/deletion"), "DELETE");
+  assert.equal(denied.response.status, 403);
+  assert.equal(state.calls.some((call) => call.method === "DELETE"), false);
+});
+
+test("eliminar: una asignación que no es del técnico no se consulta ni se elimina", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group()]);
+  const foreign = await request(groupPath("external-999", "/deletion"), "DELETE");
+  assert.equal(foreign.response.status, 404);
+  assert.equal(state.calls.some((call) => call.path.endsWith("/deletion")), false);
+});
+
+test("la OT de Mi jornada comenta en la negociación; el mantenimiento sin trabajo no tiene conversación propia", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group({ id: "external-300", type: "external_ot" })]);
+  state.failures.set("GET /api/negotiations/comments/300", { status: 200, body: { total: 0, data: [] } });
+  const order = await request(groupPath("external-300", "/thread"));
+  assert.equal(order.response.status, 200);
+  state.assignments = assignments([group({ id: "maintenance-50", type: "internal_maintenance" })]);
+  const maintenance = await request(groupPath("maintenance-50", "/thread"));
+  assert.equal(maintenance.response.status, 404);
+});

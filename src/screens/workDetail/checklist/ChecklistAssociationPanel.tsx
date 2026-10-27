@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { checklistAssociationBlocked, type ChecklistAssignmentResult, type ChecklistCatalogOption, type ChecklistCatalogPage, type ChecklistCatalogQuery } from "../../../domain/checklistAssignment";
 import { plainText } from "../../../domain/format";
@@ -105,10 +106,16 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
   const disabled = Boolean(blocked) || busy || saving;
   return (
     <Card style={styles.panel}>
-      <SectionTitle title="Checklists de la empresa" subtitle="Agrega un checklist existente sin cambiar respuestas ni borradores de los demás." />
+      <View style={styles.head}>
+        <View style={styles.headIcon}><Ionicons name="library-outline" size={20} color={palette.primary} accessible={false} /></View>
+        <View style={styles.headText}>
+          <Text style={styles.headTitle} accessibilityRole="header">Checklists de la empresa</Text>
+          <Text style={styles.headHint}>Elige uno ya creado y agrégalo a este trabajo.</Text>
+        </View>
+      </View>
       {mode === "demo" ? <Badge label="Catálogo de demostración" tone="info" /> : null}
-      <Button title="Agregar checklist" icon="add-circle-outline" disabled={disabled || loading} onPress={() => { setOpened(true); setConfirmed(null); void load(0, search); }} />
-      {blocked ? <BodyText>{blocked}</BodyText> : !online && opened ? <BodyText>Solo búsquedas guardadas en el teléfono.</BodyText> : null}
+      {!opened ? <Button title="Agregar checklist" icon="add-circle-outline" disabled={disabled || loading} onPress={() => { setOpened(true); setConfirmed(null); void load(0, search); }} /> : null}
+      {blocked ? <BodyText>{blocked}</BodyText> : !online && opened ? <BodyText>Sin conexión: solo se muestran los guardados en el teléfono.</BodyText> : null}
       {pending.filter((operation) => operation.status !== "applied").map((operation) => <View key={operation.id} style={styles.panel}>
         <Badge label={`Checklist ${operation.payload.checklistId} · ${operationStatusLabels[operation.status]}`} tone="warning" />
         {operation.lastError ? <BodyText>{syncUserError(operation.lastError)}</BodyText> : null}
@@ -118,7 +125,7 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
       {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{userErrorText(error)}</Text> : null}
       {refreshPending && confirmed ? <Button title="Actualizar detalle" variant="secondary" disabled={disabled} onPress={() => { void refresh(confirmed); }} /> : null}
       {opened && !blocked ? <View style={styles.panel}>
-        <Field label="Buscar por nombre o código" clearable value={search} onChangeText={setSearch} maxLength={120} editable={!saving && !busy} onSubmitEditing={() => { void load(0, search); }} />
+        <Field label="Buscar checklist" placeholder="Nombre o código" clearable value={search} onChangeText={setSearch} maxLength={120} editable={!saving && !busy} onSubmitEditing={() => { void load(0, search); }} />
         <Button title="Buscar" icon="search-outline" variant="secondary" loading={loading} disabled={disabled} onPress={() => { void load(0, search); }} />
         {page?.items.length === 0 ? <BodyText>No hay checklists activos con pasos para esta búsqueda.</BodyText> : null}
         {page?.items.map((option) => {
@@ -138,7 +145,7 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
           <Button title="Siguiente" variant="ghost" disabled={disabled || loading || !page.hasMore || page.page >= 1000} onPress={() => { void load(page.page + 1); }} />
         </View> : null}
         {selected ? <View style={styles.panel}>
-          <BodyText>¿Agregar «{plainText(selected.name)}» a este trabajo? Se crearán respuestas nuevas en blanco; no se copiarán evidencias.</BodyText>
+          <BodyText>Se agregará «{plainText(selected.name)}» con sus preguntas en blanco.</BodyText>
           <Button title="Confirmar asociación" loading={saving} disabled={disabled || loading || alreadyQueued(selected.id)} onPress={() => { void confirm(); }} />
         </View> : null}
         <Button title="Cancelar" variant="ghost" disabled={saving} onPress={() => { generation.current++; setLoading(false); setOpened(false); setSelected(null); }} />
@@ -148,7 +155,13 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: 12 }, option: { borderWidth: 1, borderColor: palette.border, borderRadius: 12, padding: 14, gap: 6 },
+  panel: { gap: 12 },
+  head: { flexDirection: "row", alignItems: "center", gap: 12 },
+  headIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  headText: { flex: 1, minWidth: 0, gap: 2 },
+  headTitle: { fontSize: 16, fontWeight: "800", color: palette.heading },
+  headHint: { fontSize: 13, color: palette.textSecondary },
+  option: { borderWidth: 1, borderColor: palette.border, borderRadius: 12, padding: 14, gap: 6 },
   selected: { borderColor: palette.primary, backgroundColor: palette.primarySoft }, name: { fontWeight: "700", color: palette.heading },
   error: { color: palette.danger }, pagination: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
 });

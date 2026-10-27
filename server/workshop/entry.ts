@@ -1,6 +1,6 @@
 import {
-  inspectionRequirementSchema, workshopEntryDetailSchema,
-  type InspectionRequirement, type WorkshopEntryDetail, type WorkshopInspection, type WorkshopOrder, type WorkshopOrderStage, type WorkshopPhotoSlot, type WorkshopWork
+  DEFAULT_DELIVERY_CONDITIONS, inspectionRequirementSchema, workshopEntryDetailSchema,
+  type DeliveryConditionsConfig, type InspectionRequirement, type WorkshopEntryDetail, type WorkshopInspection, type WorkshopOrder, type WorkshopOrderStage, type WorkshopPhotoSlot, type WorkshopWork
 } from "../../src/domain/workshopEntry";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
@@ -9,6 +9,20 @@ import { asRecord, branchEntry, clip, count, isoDate, list, positive, text, type
 const pad = (value: number, size: number) => String(value).padStart(size, "0");
 const nameOf = (value: unknown) => text(asRecord(value).name);
 const percent = (value: unknown) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+
+/** Condiciones de entrega de la sucursal; lo no informado (servidores anteriores) vale lo que se exigía antes. */
+function deliveryConditions(raw: unknown): DeliveryConditionsConfig {
+  const config = asRecord(raw);
+  const flag = (key: keyof DeliveryConditionsConfig): boolean => typeof config[key] === "boolean" ? config[key] as boolean : DEFAULT_DELIVERY_CONDITIONS[key];
+  return { requireQuotes: flag("requireQuotes"), requireQuotedAmounts: flag("requireQuotedAmounts"), requireApprovedNegotiations: flag("requireApprovedNegotiations"), requireNoLooseWorks: flag("requireNoLooseWorks") };
+}
+
+/** Las apps anteriores validan la ficha de forma estricta: sin su aviso, se responde sin las condiciones de entrega. */
+export function entryForClient(detail: WorkshopEntryDetail, understandsDeliveryConditions: boolean): WorkshopEntryDetail {
+  if (understandsDeliveryConditions) return detail;
+  const { deliveryConditions: _deliveryConditions, ...inspections } = detail.inspections;
+  return { ...detail, inspections };
+}
 
 /** Equipo del cliente o propio: "MARCA · TIPO · MODELO" y su identificación, como en el tablero. */
 export function equipmentSummary(raw: unknown): { label: string; code: string | null; typeId: number | null; typeName: string | null } {
@@ -228,7 +242,8 @@ export async function loadWorkshopEntry(upstream: Upstream, token: string, branc
       exitRequirement: requirement(requirements.exit),
       entry: inspection(asRecord(compliance).entryInspection),
       exit: inspection(asRecord(compliance).exitInspection),
-      photoSlots: photoSlots(requiredPhotos, equipment.typeId, equipment.typeName)
+      photoSlots: photoSlots(requiredPhotos, equipment.typeId, equipment.typeName),
+      deliveryConditions: deliveryConditions(requirements.delivery)
     },
     works: { available: works !== null, items: list(works).map((item) => work(item, internal)).filter((item): item is WorkshopWork => item !== null).slice(0, 500) },
     orders: { available: orders !== null, items: list(orders).map(internal ? maintenance : order).filter((item): item is WorkshopOrder => item !== null).slice(0, 500) }

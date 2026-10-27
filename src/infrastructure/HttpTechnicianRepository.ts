@@ -2,15 +2,29 @@ import { Platform } from "react-native";
 import { materialDispositionInputSchema, materialReceiptInputSchema, materialReceiptResultSchema, materialReceiptSchema, materialReceiptsSchema, materialReceiptStatusSchema,
   type MaterialDispositionInput, type MaterialReceiptInput, type MaterialReceiptStatus } from "../domain/materialReceipts";
 import { workshopBoardSchema, workshopListSchema } from "../domain/workshopBoard";
-import { workshopEntryDetailSchema } from "../domain/workshopEntry";
+import { DELIVERY_CONDITIONS_HEADER, workshopEntryDetailSchema } from "../domain/workshopEntry";
 import type { z } from "zod";
 import { workshopFreeWorksSchema, workshopLinkWorksInputSchema, workshopLinkWorksResultSchema } from "../domain/workshopWorks";
 import { workshopDeliveryInputSchema, workshopDeliveryResultSchema, type WorkshopDeliveryInput } from "../domain/workshopDelivery";
 import { workshopIdentificationTypesSchema, workshopNewBranchResultSchema, workshopNewBranchSchema, workshopNewContactResultSchema, workshopNewContactSchema,
-  workshopNewCustomerResultSchema, workshopNewCustomerSchema, type WorkshopNewBranch, type WorkshopNewContact, type WorkshopNewCustomer } from "../domain/workshopCustomers";
+  workshopNewCustomerResultSchema, workshopNewCustomerSchema, workshopDuplicatesSchema, type WorkshopNewBranch, type WorkshopNewContact, type WorkshopNewCustomer,
+  type WorkshopBranchDuplicateQuery, type WorkshopContactDuplicateQuery, type WorkshopCustomerDuplicateQuery,
+  workshopEquipmentDuplicatesSchema, type WorkshopEquipmentDuplicateQuery } from "../domain/workshopCustomers";
 import { workshopEstimatedDateInputSchema, workshopManageResultSchema, workshopMoveInputSchema, workshopStatusesSchema, workshopStatusInputSchema } from "../domain/workshopManage";
 import { mobileAppConfigSchema } from "../domain/mobileAppConfig";
-import { workshopEquipmentMastersSchema, workshopNewEquipmentResultSchema, workshopNewEquipmentSchema, type WorkshopNewEquipment } from "../domain/workshopCustomers";
+import { deletionCheckSchema, deletionRoute, type DeletionScope } from "../domain/deletion";
+import {
+  THREAD_ATTACHMENTS_MAX, threadActiveMentions, threadEditSchema, threadLiveSchema, threadMentionsSchema, threadPageSchema, threadPeopleSchema, threadRoute,
+  threadTabSchema, threadTextSchema, type ThreadMention, type ThreadScope, type ThreadTab
+} from "../domain/threads";
+import {
+  driveFolderIdSchema, driveFolderNameSchema, driveFolderSchema, driveListingSchema, driveMoveSchema, driveRoute,
+  type DriveFolderId, type DriveScope, type DriveUpload
+} from "../domain/fileDrive";
+import {
+  equipmentMasterKindSchema, workshopEquipmentMastersSchema, workshopNewEquipmentMasterResultSchema, workshopNewEquipmentMasterSchema, workshopNewEquipmentResultSchema, workshopNewEquipmentSchema,
+  type EquipmentMasterKind, type WorkshopNewEquipment, type WorkshopNewEquipmentMaster
+} from "../domain/workshopCustomers";
 import { workshopOrderActionInputSchema,workshopOrderDeletedSchema, workshopOrderDetailSchema, workshopOrderGeneralInputSchema, workshopOrderInputSchema, workshopOrderResultSchema, workshopOrderRulesSchema, workshopOrderSentSchema,
   workshopOrderWorksInputSchema, workshopOrderWorksResultSchema, type WorkshopOrderInput,
   workshopOrderItemInputSchema, workshopOrderItemSectionSchema, workshopOrderItemUpdateSchema, workshopProductPageSchema, workshopTransportOptionsSchema,
@@ -43,6 +57,7 @@ import { ASSIGNMENTS_REVISION_PATTERN, AssignmentReadCancelledError, Assignments
 import { withAssignmentReadBatch } from "./assignmentReadBatch";
 import { workActivityInputSchema, workActivityResultSchema, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
 import { cachedAttachmentSchema } from "../offline/cacheSchemas";
+import { workTeamAddInputSchema, workTeamSchema, type WorkTeamPort } from "../domain/workTeam";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, mobileUuidSchema, positiveCreationIdSchema, type CreationInput, type CreationOptionsQuery } from "../domain/creation";
 import { activeTimersSchema, notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadAllResultSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
 
@@ -67,7 +82,7 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   /** Ficha del ingreso: recepción, inspecciones, trabajos y órdenes. */
   async workshopEntry(branchId: number, entryId: number) {
     const path = `/api/workshop/entries/${positiveCreationIdSchema.parse(entryId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`;
-    return workshopEntryDetailSchema.parse(await this.request<unknown>(path));
+    return workshopEntryDetailSchema.parse(await this.request<unknown>(path, "GET", undefined, undefined, undefined, undefined, { [DELIVERY_CONDITIONS_HEADER]: "1" }));
   }
   async workshopCustomers(branchId: number, search: string, page: number) {
     const query = new URLSearchParams({ companyBranchId: String(positiveCreationIdSchema.parse(branchId)), page: String(Math.max(0, Math.floor(page))) });
@@ -166,6 +181,18 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   async workshopIdentificationTypes(branchId: number) {
     return workshopIdentificationTypesSchema.parse(await this.request<unknown>(`/api/workshop/options/identification-types?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`));
   }
+  async workshopCustomerDuplicates(query: WorkshopCustomerDuplicateQuery) {
+    return workshopDuplicatesSchema.parse(await this.request<unknown>("/api/workshop/duplicates/customers", "POST", query)).matches;
+  }
+  async workshopContactDuplicates(customerId: number, query: WorkshopContactDuplicateQuery) {
+    return workshopDuplicatesSchema.parse(await this.request<unknown>(`/api/workshop/duplicates/customers/${positiveCreationIdSchema.parse(customerId)}/contacts`, "POST", query)).matches;
+  }
+  async workshopBranchDuplicates(customerId: number, query: WorkshopBranchDuplicateQuery) {
+    return workshopDuplicatesSchema.parse(await this.request<unknown>(`/api/workshop/duplicates/customers/${positiveCreationIdSchema.parse(customerId)}/branches`, "POST", query)).matches;
+  }
+  async workshopEquipmentDuplicates(query: WorkshopEquipmentDuplicateQuery) {
+    return workshopEquipmentDuplicatesSchema.parse(await this.request<unknown>("/api/workshop/duplicates/equipment", "POST", query)).matches;
+  }
   async createWorkshopCustomer(input: WorkshopNewCustomer) {
     return workshopNewCustomerResultSchema.parse(await this.request<unknown>("/api/workshop/customers", "POST", workshopNewCustomerSchema.parse(input)));
   }
@@ -177,6 +204,9 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   }
   async createWorkshopCustomerEquipment(customerId: number, input: WorkshopNewEquipment) {
     return workshopNewEquipmentResultSchema.parse(await this.request<unknown>(`/api/workshop/customers/${positiveCreationIdSchema.parse(customerId)}/equipment`, "POST", workshopNewEquipmentSchema.parse(input)));
+  }
+  async createWorkshopEquipmentMaster(kind: EquipmentMasterKind, input: WorkshopNewEquipmentMaster) {
+    return workshopNewEquipmentMasterResultSchema.parse(await this.request<unknown>(`/api/workshop/options/equipment-masters/${equipmentMasterKindSchema.parse(kind)}`, "POST", workshopNewEquipmentMasterSchema.parse(input)));
   }
   async createWorkshopCustomerContact(customerId: number, input: WorkshopNewContact) {
     return workshopNewContactResultSchema.parse(await this.request<unknown>(`/api/workshop/customers/${positiveCreationIdSchema.parse(customerId)}/contacts`, "POST", workshopNewContactSchema.parse(input)));
@@ -226,6 +256,80 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   async removeOrderItem(entryId: number, orderId: number, section: WorkshopOrderItemSection | "works", rowId: number, branchId: number) {
     const kind = section === "works" ? "works" : workshopOrderItemSectionSchema.parse(section);
     return workshopOrderDetailSchema.parse(await this.request<unknown>(`${this.workshopOrderPath(entryId, orderId)}/items/${kind}/${positiveCreationIdSchema.parse(rowId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`, "DELETE"));
+  }
+  private driveUrl(scope: DriveScope, suffix = "", extra: Record<string, string> = {}) {
+    const { path, query } = driveRoute(scope);
+    for (const [key, value] of Object.entries(extra)) query.set(key, value);
+    return `${path}${suffix}?${query.toString()}`;
+  }
+  async driveList(scope: DriveScope, folderId: DriveFolderId | null, search: string | null, page: number) {
+    return driveListingSchema.parse(await this.request<unknown>(this.driveUrl(scope, "", {
+      ...(folderId !== null ? { folderId: String(folderId) } : {}), ...(search ? { search: search.slice(0, 120) } : {}), page: String(Math.max(0, Math.trunc(page)))
+    })));
+  }
+  async driveUpload(scope: DriveScope, file: DriveUpload, folderId: DriveFolderId | null) {
+    const body = new FormData();
+    await appendPhoto(body, file);
+    await this.request<void>(this.driveUrl(scope, "", folderId !== null ? { folderId: String(folderId) } : {}), "POST", body);
+  }
+  async driveCreateFolder(scope: DriveScope, name: string) {
+    return driveFolderSchema.parse(await this.request<unknown>(this.driveUrl(scope, "/folders"), "POST", driveFolderNameSchema.parse({ name })));
+  }
+  async driveRenameFolder(scope: DriveScope, folderId: DriveFolderId, name: string) {
+    await this.request<void>(this.driveUrl(scope, `/folders/${encodeURIComponent(String(driveFolderIdSchema.parse(folderId)))}`), "PATCH", driveFolderNameSchema.parse({ name }));
+  }
+  async driveDeleteFolder(scope: DriveScope, folderId: DriveFolderId) {
+    await this.request<void>(this.driveUrl(scope, `/folders/${encodeURIComponent(String(driveFolderIdSchema.parse(folderId)))}`), "DELETE");
+  }
+  async driveMoveFile(scope: DriveScope, fileId: string, from: DriveFolderId | null, to: DriveFolderId | null) {
+    await this.request<void>(this.driveUrl(scope, `/files/${positiveCreationIdSchema.parse(Number(fileId))}/folder`, from !== null ? { folderId: String(from) } : {}), "PATCH", driveMoveSchema.parse({ folderId: to }));
+  }
+  async driveDeleteFile(scope: DriveScope, fileId: string, folderId: DriveFolderId | null) {
+    await this.request<void>(this.driveUrl(scope, `/files/${positiveCreationIdSchema.parse(Number(fileId))}`, folderId !== null ? { folderId: String(folderId) } : {}), "DELETE");
+  }
+  private threadUrl(scope: ThreadScope, suffix = "", tab: ThreadTab | null = null, page?: number) {
+    const { path, query } = threadRoute(scope);
+    if (tab) query.set("tab", threadTabSchema.parse(tab));
+    if (page !== undefined) query.set("page", String(Math.max(0, Math.trunc(page))));
+    return `${path}${suffix}?${query.toString()}`;
+  }
+  async threadList(scope: ThreadScope, tab: ThreadTab | null, page: number) {
+    return threadPageSchema.parse(await this.request<unknown>(this.threadUrl(scope, "", tab, page)));
+  }
+  async threadSend(scope: ThreadScope, tab: ThreadTab | null, text: string, files: DriveUpload[], mentions: ThreadMention[]) {
+    const message = threadTextSchema.parse(text);
+    const active = threadMentionsSchema.parse(threadActiveMentions(message, mentions));
+    if (files.length === 0) { await this.request<void>(this.threadUrl(scope, "", tab), "POST", { text: message, ...(active.length > 0 ? { mentions: active } : {}) }); return; }
+    if (files.length > THREAD_ATTACHMENTS_MAX) throw new Error(`Puedes adjuntar hasta ${THREAD_ATTACHMENTS_MAX} archivos por mensaje.`);
+    const body = new FormData();
+    if (message) body.append("text", message);
+    if (active.length > 0) body.append("mentions", JSON.stringify(active));
+    for (const file of files) await appendPhoto(body, file);
+    await this.request<void>(this.threadUrl(scope, "", tab), "POST", body);
+  }
+  async threadEdit(scope: ThreadScope, tab: ThreadTab | null, messageId: string, text: string, mentions: ThreadMention[]) {
+    const active = threadActiveMentions(text, mentions);
+    await this.request<void>(this.threadUrl(scope, `/messages/${positiveCreationIdSchema.parse(Number(messageId))}`, tab), "PATCH",
+      threadEditSchema.parse({ text, ...(active.length > 0 ? { mentions: active } : {}) }));
+  }
+  async threadPeople(scope: ThreadScope) {
+    return threadPeopleSchema.parse(await this.request<unknown>(this.threadUrl(scope, "/people"))).people;
+  }
+  async threadLive(scope: ThreadScope, tab: ThreadTab | null, version: number, typingSeen: string[]) {
+    const { path, query } = threadRoute(scope);
+    if (tab) query.set("tab", threadTabSchema.parse(tab));
+    query.set("version", String(Math.max(0, Math.trunc(version))));
+    if (typingSeen.length > 0) query.set("typing", typingSeen.join("|").slice(0, 700));
+    return threadLiveSchema.parse(await this.request<unknown>(`${path}/live?${query.toString()}`));
+  }
+  async threadTyping(scope: ThreadScope, tab: ThreadTab | null, typing: boolean) {
+    await this.request<unknown>(this.threadUrl(scope, "/typing", tab), "POST", { typing });
+  }
+  async deletionCheck(scope: DeletionScope) {
+    return deletionCheckSchema.parse(await this.request<unknown>(deletionRoute(scope)));
+  }
+  async deleteRecord(scope: DeletionScope) {
+    return deletionCheckSchema.parse(await this.request<unknown>(deletionRoute(scope), "DELETE"));
   }
   async workshopOrderFiles(entryId: number, orderId: number, branchId: number) {
     return (await this.request<{ data: Attachment[] }>(`${this.workshopOrderPath(entryId, orderId)}/files?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`)).data;
@@ -350,6 +454,11 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     }
   };
   reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.request<void>(this.scopePath(scope, "/reopen"), "POST", {});
+  workTeam: WorkTeamPort["workTeam"] = async scope => workTeamSchema.parse(await this.request<unknown>(this.scopePath(scope, "/team")));
+  addWorkTeamMember: WorkTeamPort["addWorkTeamMember"] = async (scope, workerId) =>
+    workTeamSchema.parse(await this.request<unknown>(this.scopePath(scope, "/team"), "POST", workTeamAddInputSchema.parse({ workerId })));
+  removeWorkTeamMember: WorkTeamPort["removeWorkTeamMember"] = async (scope, workerId) =>
+    workTeamSchema.parse(await this.request<unknown>(this.scopePath(scope, `/team/${positiveCreationIdSchema.parse(workerId)}`), "DELETE"));
 
   async checklistOptions(scope: WorkScope, input: ChecklistCatalogQuery) {
     const query = checklistCatalogQuerySchema.parse(input);

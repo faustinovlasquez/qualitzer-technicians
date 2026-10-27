@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useState, type ComponentProps, type ReactNode } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { duration, plainText } from "../../domain/format";
@@ -10,7 +10,7 @@ import { Badge, BodyText, Button, Card, EmptyState, Field, IconButton, SectionTi
 import { PrivateModal } from "../../security/DeviceSecurityContext";
 import { AttachmentList, Fact, HttpLink, Notice } from "./DetailUi";
 import { styles } from "./detailStyles";
-import { palette } from "../../ui/theme";
+import { palette, radius } from "../../ui/theme";
 import type { EquipmentLocationPort } from "../../domain/equipmentLocation";
 import { EquipmentLocationPanel } from "../../location/EquipmentLocationPanel";
 
@@ -136,14 +136,45 @@ export function WorkTab({ group, work, report, savedReport, pendingReport = fals
   );
 }
 
-function EquipmentCard({ equipment, title, children }: { equipment: Equipment; title: string; children?: ReactNode }) {
-  return <Card style={styles.stack}>
-    <SectionTitle title={title} subtitle={plainText(equipment.label)} />
-    <View style={styles.columns}>
-      <View style={styles.column}><Fact label="Identificación" value={equipment.identifier} /><Fact label="Número interno" value={equipment.internalNumber} /></View>
-      <View style={styles.column}><Fact label="Propietario" value={equipment.ownerLabel} /></View>
+type IconName = ComponentProps<typeof Ionicons>["name"];
+
+/** Dato de la ficha en un recuadro: etiqueta pequeña arriba y valor destacado (o «No informado» atenuado). */
+function Spec({ label, value }: { label: string; value: string | null | undefined }) {
+  const text = plainText(value ?? "");
+  return <View style={equipmentStyles.spec} accessible accessibilityLabel={`${label}: ${text || "No informado"}`}>
+    <Text style={equipmentStyles.specLabel} numberOfLines={1}>{label}</Text>
+    <Text selectable style={[equipmentStyles.specValue, !text && equipmentStyles.muted]} numberOfLines={2}>{text || "No informado"}</Text>
+  </View>;
+}
+
+/** Fila con ícono para el contexto del trabajo. */
+function ContextRow({ icon, label, value, last = false }: { icon: IconName; label: string; value: string | null | undefined; last?: boolean }) {
+  const text = plainText(value ?? "");
+  return <View style={[equipmentStyles.row, !last && equipmentStyles.rowDivider]} accessible accessibilityLabel={`${label}: ${text || "No informado"}`}>
+    <View style={equipmentStyles.rowIcon}><Ionicons name={icon} size={16} color={palette.primary} accessible={false} /></View>
+    <View style={styles.grow}>
+      <Text style={equipmentStyles.specLabel}>{label}</Text>
+      <Text style={[equipmentStyles.rowValue, !text && equipmentStyles.muted]} numberOfLines={2}>{text || "No informado"}</Text>
     </View>
-    {children}
+  </View>;
+}
+
+function EquipmentCard({ equipment, title, children }: { equipment: Equipment; title: string; children?: ReactNode }) {
+  const owner = plainText(equipment.ownerLabel ?? "");
+  return <Card style={equipmentStyles.card}>
+    <View style={equipmentStyles.head}>
+      <View style={equipmentStyles.headIcon}><Ionicons name="hardware-chip-outline" size={24} color={palette.primary} accessible={false} /></View>
+      <View style={styles.grow}>
+        <Text style={equipmentStyles.kicker}>{title}</Text>
+        <Text accessibilityRole="header" selectable style={equipmentStyles.name} numberOfLines={3}>{plainText(equipment.label) || "Equipo sin nombre"}</Text>
+      </View>
+      {owner ? <View style={equipmentStyles.owner}><Text style={equipmentStyles.ownerText} numberOfLines={1}>{owner}</Text></View> : null}
+    </View>
+    <View style={equipmentStyles.specs}>
+      <Spec label="Identificación" value={equipment.identifier} />
+      <Spec label="Número interno" value={equipment.internalNumber} />
+    </View>
+    {children ? <View style={equipmentStyles.section}>{children}</View> : null}
   </Card>;
 }
 
@@ -152,25 +183,56 @@ export function EquipmentTab({ group, work, locationPort, identity = "", disable
   const inherited = group.type === "internal_maintenance";
   const equipment = inherited ? group.equipment : work.workEquipment ?? group.equipment;
   const showGroupEquipment = !inherited && work.workEquipment && group.equipment && JSON.stringify(work.workEquipment) !== JSON.stringify(group.equipment);
+  const activities = (work.activities ?? []).filter(isWorkActivity);
   return <View style={styles.stack}>
-    <SectionTitle title="Ficha de la asignación" subtitle="Datos de equipo recibidos con este trabajo. No corresponde a una ficha completa del catálogo." />
     {equipment ? <EquipmentCard equipment={equipment} title={inherited ? "Equipo del mantenimiento" : work.workEquipment ? "Equipo del trabajo" : "Equipo de la asignación"}>
       {locationPort ? <EquipmentLocationPanel key={`${identity}:work`} port={locationPort} target="work" identity={identity} disabled={disabled} online={online} /> : null}
-    </EquipmentCard> : <View style={styles.stack}><EmptyState title="Sin equipo asociado" message={inherited ? "El mantenimiento no tiene un equipo informado." : ""} icon="hardware-chip-outline" />
+    </EquipmentCard> : <Card style={equipmentStyles.card}><EmptyState title="Sin equipo asociado" message={inherited ? "El mantenimiento no tiene un equipo informado." : "Asocia el equipo para ver su ficha y ubicación."} icon="hardware-chip-outline" />
       {!inherited && onAssociate ? <Button title="Asociar equipo" icon="hardware-chip-outline" variant="secondary" disabled={disabled || !online} onPress={onAssociate} /> : null}
-    </View>}
+    </Card>}
     {showGroupEquipment && group.equipment ? <EquipmentCard equipment={group.equipment} title="Equipo de la asignación general">
       {locationPort ? <EquipmentLocationPanel key={`${identity}:group`} port={locationPort} target="group" identity={identity} disabled={disabled} online={online} /> : null}
     </EquipmentCard> : null}
-    <Card style={styles.stack}>
-      <SectionTitle title="Ubicación y contexto" />
-      <View style={styles.columns}>
-        <View style={styles.column}><Fact label="Cliente" value={work.workCustomerName ?? group.customerName} /><Fact label="Ubicación" value={group.locationName} /><Fact label="Sucursal" value="No informada en esta ficha" /></View>
-        <View style={styles.column}><Fact label="Sistema" value={work.systemName} /><Fact label="Subsistema" value={work.componentName} /></View>
+    <Card style={equipmentStyles.card}>
+      <View style={equipmentStyles.sectionHead}><Ionicons name="briefcase-outline" size={18} color={palette.primary} accessible={false} /><Text accessibilityRole="header" style={equipmentStyles.sectionTitle}>Contexto del trabajo</Text></View>
+      <View>
+        <ContextRow icon="business-outline" label="Cliente" value={work.workCustomerName ?? group.customerName} />
+        <ContextRow icon="location-outline" label="Ubicación" value={group.locationName} />
+        <ContextRow icon="cog-outline" label="Sistema" value={work.systemName} />
+        <ContextRow icon="git-branch-outline" label="Subsistema" value={work.componentName} last={!group.locationAddress?.trim()} />
       </View>
-      {group.locationAddress?.trim() ? <View style={styles.tight}><Text style={styles.caption}>Dirección · toca para buscar en Maps</Text><HttpLink label={group.locationAddress} url={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(group.locationAddress)}`} onError={setLinkError} /></View> : <BodyText>No se recibió una dirección para abrir en Maps.</BodyText>}
+      {group.locationAddress?.trim() ? <View style={equipmentStyles.address}>
+        <Ionicons name="navigate-outline" size={16} color={palette.primary} accessible={false} />
+        <View style={styles.grow}><Text style={equipmentStyles.specLabel}>Dirección · toca para abrir en Maps</Text><HttpLink label={group.locationAddress} url={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(group.locationAddress)}`} onError={setLinkError} /></View>
+      </View> : null}
       {linkError ? <Notice message={linkError} tone="error" onDismiss={() => setLinkError(null)} /> : null}
     </Card>
-    <View style={styles.stack}><SectionTitle title="Actividades y documentos técnicos" /><Activities activities={(work.activities ?? []).filter(isWorkActivity)} documents /></View>
+    {activities.length > 0 ? <Card style={equipmentStyles.card}>
+      <View style={equipmentStyles.sectionHead}><Ionicons name="document-text-outline" size={18} color={palette.primary} accessible={false} /><Text accessibilityRole="header" style={equipmentStyles.sectionTitle}>Actividades y documentos técnicos</Text></View>
+      <Activities activities={activities} documents />
+    </Card> : null}
   </View>;
 }
+
+const equipmentStyles = StyleSheet.create({
+  card: { gap: 14, padding: 16 },
+  head: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  headIcon: { width: 48, height: 48, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  kicker: { fontSize: 12, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase", color: palette.textSecondary },
+  name: { marginTop: 2, fontSize: 18, lineHeight: 24, fontWeight: "800", color: palette.heading },
+  owner: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: palette.primarySoft, maxWidth: 120 },
+  ownerText: { fontSize: 12, fontWeight: "800", color: palette.primary },
+  specs: { flexDirection: "row", gap: 10 },
+  spec: { flex: 1, minWidth: 0, gap: 4, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
+  specLabel: { fontSize: 12, fontWeight: "600", color: palette.textSecondary },
+  specValue: { fontSize: 16, fontWeight: "800", color: palette.heading },
+  muted: { fontWeight: "500", color: palette.textMuted },
+  section: { paddingTop: 14, borderTopWidth: 1, borderTopColor: palette.border },
+  sectionHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: "800", color: palette.heading },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: palette.border },
+  rowIcon: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  rowValue: { fontSize: 15, fontWeight: "700", color: palette.heading },
+  address: { flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 12, borderRadius: radius.md, backgroundColor: palette.background }
+});

@@ -11,11 +11,13 @@ import { registerInspectionRoutes } from "./inspection";
 import { registerReceptionRoutes } from "./reception";
 import { registerWorkRoutes } from "./works";
 import { registerOrderRoutes } from "./orders";
-import { registerOrderFileRoutes } from "./orderFiles";
+import { registerOrderFileRoutes, registerWorkshopDriveRoutes } from "./orderFiles";
+import { registerWorkshopThreadRoutes } from "./threads";
 import { registerDeliveryRoutes } from "./delivery";
 import { registerManageRoutes } from "./manage";
 import { registerCustomerRoutes } from "./customers";
-import { equipmentSummary, loadWorkshopEntry } from "./entry";
+import { entryForClient, equipmentSummary, loadWorkshopEntry } from "./entry";
+import { DELIVERY_CONDITIONS_HEADER } from "../../src/domain/workshopEntry";
 
 /** Ingreso del tablero web (operation_area/dashboard) a la forma que muestra la app. */
 function toEntry(raw: unknown): WorkshopEntry | null {
@@ -106,6 +108,8 @@ export function createWorkshopRouter(upstream: Upstream): Router {
   registerWorkRoutes(router, upstream);
   registerOrderRoutes(router, upstream, ledger);
   registerOrderFileRoutes(router, upstream);
+  registerWorkshopDriveRoutes(router, upstream);
+  registerWorkshopThreadRoutes(router, upstream);
   registerDeliveryRoutes(router, upstream, ledger);
   registerManageRoutes(router, upstream);
   registerCustomerRoutes(router, upstream, ledger);
@@ -142,7 +146,8 @@ export function createWorkshopRouter(upstream: Upstream): Router {
     const query = z.object({ companyBranchId: z.coerce.number().int().positive() }).strict().parse(req.query);
     emptySchema.parse(req.body ?? {});
     const { token } = await workshopActor(upstream, req, query.companyBranchId);
-    res.json(await loadWorkshopEntry(upstream, token, query.companyBranchId, entryId));
+    const detail = await loadWorkshopEntry(upstream, token, query.companyBranchId, entryId);
+    res.json(entryForClient(detail, req.get(DELIVERY_CONDITIONS_HEADER) === "1"));
   });
   return router;
 }

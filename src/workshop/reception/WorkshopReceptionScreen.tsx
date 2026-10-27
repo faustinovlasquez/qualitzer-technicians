@@ -83,13 +83,24 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
     }, () => { if (chosenWorker.current === next.id) setSaved([]); });
   }
 
+  // Se propone al técnico en sesión (si es trabajador de la sucursal); se puede cambiar.
+  useEffect(() => {
+    if (api.currentUserId <= 0) return;
+    let active = true;
+    api.workers().then(({ items }) => {
+      const me = items.find((item) => item.userId === api.currentUserId);
+      if (active && me && chosenWorker.current === null) chooseWorker(me);
+    }, () => undefined);
+    return () => { active = false; };
+  }, [entryId]);
+
   const check = detail ? evaluateInspection(detail.inspections.entryRequirement, detail.inspections.entry, detail.inspections.photoSlots) : null;
   const inspectionBlocked = Boolean(detail && (!detail.inspections.available || !check?.met));
 
   async function sign() {
     if (saving || !detail) return;
     const found: Record<string, string> = {};
-    if (!worker) found.worker = "Elige quién recibe el equipo.";
+    if (!worker) found.worker = "Elige el técnico que recibe el equipo.";
     if (!name.trim()) found.name = "Escribe el nombre de quien recibe.";
     if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) found.email = "Revisa el correo.";
     if (mode.kind === "draw" && !hasSignature(strokes)) found.signature = "Falta la firma.";
@@ -139,7 +150,7 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle} accessibilityRole="header">Quién recibe el equipo</Text>
-          <SelectorTrigger label="Trabajador que recibe *" value={worker?.name ?? ""} icon="person-outline" disabled={saving} error={issues.worker} onPress={() => setPicker(true)} />
+          <SelectorTrigger label="Técnico que recibe *" value={worker?.name ?? ""} icon="person-outline" disabled={saving} error={issues.worker} onPress={() => setPicker(true)} />
           {worker ? <>
             <Field label="Nombre *" value={name} onChange={(value) => { setName(value); setIssues({}); }} error={issues.name} maxLength={255} />
             <Field label="Correo" value={email} onChange={(value) => { setEmail(value); setIssues({}); }} error={issues.email} keyboardType="email-address" maxLength={100} placeholder="Opcional" />
@@ -183,7 +194,7 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
       </ScrollView>
     </KeyboardAvoidingView>}
 
-    {picker ? <LocalPicker<WorkshopWorker> title="Trabajador que recibe" placeholder="Buscar trabajador" emptyText="No hay trabajadores en esta sucursal."
+    {picker ? <LocalPicker<WorkshopWorker> title="Técnico que recibe" placeholder="Buscar técnico" emptyText="No hay trabajadores en esta sucursal."
       load={async () => (await api.workers()).items} label={(item) => item.name} detail={(item) => [item.email, item.phone].filter(Boolean).join(" · ") || null}
       selectedId={worker?.id ?? null} onClose={() => setPicker(false)} onPick={chooseWorker} /> : null}
   </View>;

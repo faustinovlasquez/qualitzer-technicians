@@ -16,13 +16,14 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/branches/${number}/inspectionRequirementsConfig` | "/equipment_masters/required_photos" | "/works" | `/works/${number}` | "/negotiations" | "/maintenances" |
   "/operation_area_entries" | "/operation_area/select" | "/customers/select" | `/customers/${number}` | `/customer_branches/select/${number}` |
   "/customers" | `/customers/${number}/contacts` | "/customer_branches" | "/DocumentsSalesCountries/select" |
+  "/customer_duplicates/customers" | "/customer_duplicates/equipment" | `/customer_duplicates/customers/${number}/contacts` | `/customer_duplicates/customers/${number}/branches` |
   `/customers_equipments/customers/${number}` | "/rental_equipments" | "/checklists" | "/equipment_dispatches/inspections/ensure" |
   `/equipment_dispatches/inspections/${number}` | `/equipment_dispatches/inspections/${number}/${"checklists" | "patio-context" | "checklist-steps" | "photos" | "damages" | "meta" | "complete" | "public-link/extend"}` |
   `/equipment_dispatches/inspections/${number}/photos/${string}` | `/equipment_dispatches/inspections/checklist-steps/${number}/files` |
   `/equipment_dispatches/inspections/checklist-steps/files/${number}` | `/equipment_dispatches/inspections/damages/${number}/files` |
   "/select/employees" | "/user_signatures/options" | "/works/link-entry" | "/works/link-negotiation" |
   "/master_commercial/business-type-select-by-branch" | "/master_commercial/segments/selects" | "/master_commercial/taxes" | `/branches/${number}/negotiationFieldsConfig` | `/branches/${number}/mobileAppConfig` |
-  `/negotiations/${number}/send-to-commercial` | `/negotiations/${number}/work-order` | `/negotiations/${number}` | `/negotiations/${number}/update_fields` | "/commercial_transport/select" | "/products" | "/customer_origins/select" | "/master_commercial/tags/selects" | "/customers_equipments" | `/equipment_masters/${"types" | "manufacturers" | "models" | "classifications"}/select` | `/operation_area_entries/${number}/deliver` |
+  `/negotiations/${number}/send-to-commercial` | `/negotiations/${number}/work-order` | `/negotiations/${number}` | `/negotiations/${number}/update_fields` | "/commercial_transport/select" | "/products" | "/customer_origins/select" | "/master_commercial/tags/selects" | "/customers_equipments" | `/equipment_masters/${"types" | "manufacturers" | "models" | "classifications"}/select` | `/equipment_masters/${"types" | "manufacturers" | "models" | "classifications"}` | `/operation_area_entries/${number}/deliver` |
   "/operation_area_entries/move" | `/operation_area_entries/${number}/estimated-delivery-date` | "/master_commercial/get-all-status" | `/operation_area_entries/${number}/change-status` |
   "/auth/mobile/prepare" | "/auth/mobile/exchange" | "/companies/branding" | `/branches/${number}` |
   "/mobile-sync/commands" | "/mobile-sync/documents" | `/mobile-sync/receipts/${string}` |
@@ -34,7 +35,13 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/works/activity-checklist-steps/${number}` | `/maintenances/works/steps/${number}/response` |
   `/work_files/${number}` | `/maintenance_files/${number}` | `/maintenances/works/${number}/files` |
   `/maintenances/works/steps/${number}/files` | `/works/comments/${number}` |
-  `/negotiation_files/${number}` | `/files/${number}` |
+  `/negotiation_files/${number}` | `/files/${number}` | `/files/${number}/folder` |
+  `/${"operation_area_entries/files" | "negotiation_files" | "work_files" | "maintenance_files"}/${number}` |
+  `/${"operation_area_entries/files" | "negotiation_files" | "work_files" | "maintenance_files"}/folders/${number}` |
+  `/operation_area_entries/files/${number}/${number}` | `/negotiation_files/${number}/${number}` |
+  `/${"operation_area_entries/comments" | "negotiations/comments" | "works/comments"}/${number}` | `/comments/${number}` | "/users/comment/whitelist" |
+  `/technician-dashboard/panel/${string}/works/${number}/comment-target` |
+  `/technician-dashboard/panel/${string}/works/${number}/deletion` | `/technician-dashboard/panel/${string}/deletion` |
   `/maintenances/${number}` | `/maintenances/${number}/start-repair` | `/maintenances/${number}/finalize` |
   `/maintenances/${number}/technician-delivery` |
   `/technician-dashboard/panel/${string}/works/${number}/comments` |
@@ -46,6 +53,8 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/files` |
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/files/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/reopen` |
+  `/technician-dashboard/panel/${string}/works/${number}/team` |
+  `/technician-dashboard/panel/${string}/works/${number}/team/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/equipment-location/${"work" | "group"}` |
   `/technician-dashboard/panel/${string}/works/${number}/steps/${number}/files`;
 interface RequestOptions {
@@ -94,6 +103,11 @@ export class Upstream {
   /** Dirección web de la empresa (la misma que identifica a la empresa ante el backend). Sirve para armar enlaces públicos. */
   get webOrigin(): string {
     return this.config.tenantOrigin;
+  }
+
+  /** Servidor del backend sin la ruta /api (donde atiende la conexión en vivo de los comentarios). */
+  get backendOrigin(): string {
+    return new URL(this.config.backendUrl).origin;
   }
 
   /** Descarga un archivo del backend (por ejemplo, el .zip de fotos de una inspección), con tope de tamaño. */
@@ -206,6 +220,14 @@ export class Upstream {
           }
           throw new GatewayError(response.status, response.status === 401 ? "UNAUTHORIZED" : "UPSTREAM_REJECTED");
         }
+        if (/\/works\/[1-9]\d*\/team(?:\/[1-9]\d*)?$/.test(path) && [400, 404, 409].includes(response.status)) {
+          let failure: unknown;
+          try { failure = JSON.parse(await readBody(response)); } catch { failure = null; }
+          const parsed = z.object({ error: z.enum(WORK_TEAM_ERRORS) }).safeParse(failure);
+          if (parsed.success) throw new GatewayError(response.status, parsed.data.error, workTeamErrorMessage(parsed.data.error));
+          if (response.status === 404) throw new GatewayError(503, "WORK_TEAM_NOT_AVAILABLE", workTeamErrorMessage("WORK_TEAM_NOT_AVAILABLE"));
+          throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó el cambio de equipo.");
+        }
         if (WORKSHOP_BACKEND_PATH.test(path) && [400, 403, 404, 409, 413].includes(response.status)) {
           let failure: unknown;
           try { failure = JSON.parse(await readBody(response)); } catch { failure = null; }
@@ -256,6 +278,26 @@ export class Upstream {
   async reachable(): Promise<boolean> {
     try { await this.request("/auth/me"); return true; }
     catch (error) { return error instanceof GatewayError && error.status === 401; }
+  }
+}
+
+/** Rechazos del equipo de un trabajo que se muestran tal cual al técnico. */
+const WORK_TEAM_ERRORS = ["WORK_TEAM_INVALID_INPUT", "WORK_TEAM_LAST_MEMBER", "WORK_TEAM_MEMBER_HAS_PROGRESS", "WORK_TEAM_MEMBER_TIMER_RUNNING",
+  "WORK_TEAM_MEMBER_FROM_ORDER", "WORK_TEAM_WORKER_NOT_AVAILABLE", "WORK_TEAM_BRANCH_MISMATCH", "WORK_TEAM_NOT_SUPPORTED", "WORK_READ_ONLY", "PANEL_WORK_NOT_FOUND"] as const;
+
+export function workTeamErrorMessage(code: (typeof WORK_TEAM_ERRORS)[number] | "WORK_TEAM_NOT_AVAILABLE"): string {
+  switch (code) {
+    case "WORK_TEAM_LAST_MEMBER": return "El trabajo no puede quedar sin responsables. Agrega a otro técnico antes de quitar a este.";
+    case "WORK_TEAM_MEMBER_HAS_PROGRESS": return "Este técnico ya avanzó en un día del trabajo; no se puede quitar desde la app.";
+    case "WORK_TEAM_MEMBER_TIMER_RUNNING": return "Este técnico tiene el cronómetro en curso en este trabajo. Debe pausarlo antes de quitarlo.";
+    case "WORK_TEAM_MEMBER_FROM_ORDER": return "Este técnico está asignado a toda la mantención. Quítalo desde la web.";
+    case "WORK_TEAM_WORKER_NOT_AVAILABLE": return "Ese técnico no está disponible en esta sucursal.";
+    case "WORK_TEAM_BRANCH_MISMATCH": return "El trabajo pertenece a otra sucursal.";
+    case "WORK_TEAM_NOT_SUPPORTED": return "Este tipo de trabajo no tiene equipo.";
+    case "WORK_READ_ONLY": return "El trabajo ya está terminado; su equipo no se puede cambiar.";
+    case "PANEL_WORK_NOT_FOUND": return "Ya no tienes este trabajo asignado. Actualiza tu jornada.";
+    case "WORK_TEAM_NOT_AVAILABLE": return "El servidor aún no permite gestionar el equipo. Pide que lo actualicen.";
+    default: return "Revisa los datos del técnico.";
   }
 }
 

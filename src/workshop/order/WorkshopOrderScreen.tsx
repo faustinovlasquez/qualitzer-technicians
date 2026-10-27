@@ -4,8 +4,9 @@ import { ActivityIndicator, BackHandler, Pressable, RefreshControl, ScrollView, 
 import { Button, IconButton, type IconName } from "../../ui/components";
 import { palette, radius, theme, typography } from "../../ui/theme";
 import type { WorkshopOrderDetail, WorkshopOrderGeneralInput, WorkshopOrderItemInput, WorkshopOrderItemSection, WorkshopProductOption, WorkshopTransportOption } from "../../domain/workshopOrders";
-import { Notice } from "../entry/EntrySections";
+import { Notice, WorkLayoutToggle } from "../entry/EntrySections";
 import { AddWorksSheet, EditOrderGeneralSheet } from "../orders/OrderSheets";
+import { OrderSentSuccess } from "../orders/OrderSentSuccess";
 import { useAppPermission } from "../../application/appPermissions";
 import { AddOtherSheet, AddProductSheet, AddTransportSheet, EditItemSheet, RemoveWorkSheet } from "./OrderItemSheets";
 import type { WorkshopWork } from "../../domain/workshopEntry";
@@ -13,6 +14,10 @@ import type { Attachment, LocalPhoto } from "../../domain/models";
 import { matchesSearch } from "../../domain/textSearch";
 import { OrderHeroCard } from "../../screens/orders/AssignmentOrderCard";
 import { FileWorkspace } from "../../screens/workDetail/FileWorkspace";
+import { FileDrive } from "../../files/FileDrive";
+import { ChatThread } from "../../chat/ChatThread";
+import type { ThreadApi } from "../../domain/threads";
+import type { DriveApi } from "../../domain/fileDrive";
 import { useHeroCollapsed } from "../../ui/heroPreference";
 import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SectionTitle } from "../../ui/components";
@@ -28,17 +33,19 @@ type ItemSheet = { kind: "add-product" | "add-transport" | "add-other" }
   | { kind: "edit"; section: WorkshopOrderItemSection; id: number; title: string; quantity: number; unit?: string | null; note?: string | null; noteLabel?: string }
   | { kind: "remove-work"; id: number; title: string };
 
-export type Section = "general" | "works" | "products" | "transports" | "others" | "rentals" | "files";
+export type Section = "general" | "works" | "products" | "transports" | "others" | "rentals" | "files" | "comments";
 
 /** Archivos de la OT (los mismos de la web y de Mi jornada). */
 export interface OrderFilesApi {
   load: () => Promise<Attachment[]>; upload: (files: LocalPhoto[]) => Promise<void>; remove?: (fileId: string) => Promise<void>;
   mode: "live" | "demo"; scopeKey: string;
+  /** Gestor con carpetas (como la web); sin él se usa la lista simple. */
+  drive?: DriveApi | null;
 }
 
 const TAB_ICONS: Record<Section, IconName> = {
   general: "document-text-outline", works: "construct-outline", products: "cube-outline", transports: "bus-outline",
-  others: "pricetags-outline", rentals: "car-sport-outline", files: "folder-open-outline"
+  others: "pricetags-outline", rentals: "car-sport-outline", files: "folder-open-outline", comments: "chatbubbles-outline"
 };
 
 const PRIORITY: Record<string, { label: string; color: string; soft: string }> = {
@@ -89,7 +96,13 @@ function ItemCard({ icon, title, code, subtitle, quantity, meta, onPress }: { ic
 }
 
 /** Detalle de una OT o cotización del ingreso con sus secciones, sin precios (igual que el formulario web de OT). */
-export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, openingWorkId = null, notice, onSaveGeneral, onNewWork, looseWorks, onLinkWorks, items, initialSection, onSectionChange, workCard, files, onLocationHistory, workProgress, onSend, query = "" }: {
+export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, openingWorkId = null, notice, onSaveGeneral, onNewWork, looseWorks, onLinkWorks, items, initialSection, onSectionChange, workCard, files, onLocationHistory, workProgress, onSend, query = "", workLayout = "extended", onWorkLayout, comments, onDelete }: {
+  /** Eliminar la OT (abre la confirmación, que revisa en el servidor si se puede). */
+  onDelete?: () => void;
+  /** Comentarios de la OT como chat (los mismos de la web); sin él no hay pestaña. */
+  comments?: ThreadApi | null;
+  /** Vista de los trabajos: compacta (fila) o extendida (tarjeta de Mi jornada). */
+  workLayout?: "compact" | "extended"; onWorkLayout?: (layout: "compact" | "extended") => void;
   /** Búsqueda del encabezado: muestra lo que coincide en todas las secciones de la OT. */
   query?: string;
   files?: OrderFilesApi;
@@ -125,6 +138,7 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
   const [sendOpen, setSendOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
+  const [sentSuccess, setSentSuccess] = useState(false);
   const canSend = useAppPermission("ordersSend");
   async function send() {
     if (!onSend || sending) return;
@@ -132,7 +146,7 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
     try {
       await onSend();
       if (!mounted.current) return;
-      setSendOpen(false); setSaved("OT enviada a comercial: quedó pendiente de cotizar.");
+      setSendOpen(false); setSaved("OT enviada a comercial: quedó pendiente de cotizar."); setSentSuccess(true);
       await reload();
     } catch (failure) {
       if (mounted.current) setSendError(failure instanceof Error && failure.message ? failure.message : "No se pudo enviar la OT. Revisa tu conexión.");
@@ -177,7 +191,8 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
     ...(can.transports ? [{ id: "transports" as const, label: "Transporte", count: detail.transports.length }] : []),
     ...(can.others ? [{ id: "others" as const, label: "Otros", count: detail.others.length }] : []),
     ...(detail.rentals.length > 0 ? [{ id: "rentals" as const, label: "Arriendos", count: detail.rentals.length }] : []),
-    ...(files ? [{ id: "files" as const, label: "Archivos" }] : [])
+    ...(files ? [{ id: "files" as const, label: "Archivos" }] : []),
+    ...(comments ? [{ id: "comments" as const, label: "Comentarios" }] : [])
   ] : [];
   // Si la pestaña recordada quedó oculta, se vuelve a «Datos».
   useEffect(() => { if (detail && !tabs.some((tab) => tab.id === section)) setSection("general"); }, [detail, section, can.products, can.transports, can.others]);
@@ -238,10 +253,13 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
         <IconButton name="ellipsis-horizontal" label="Opciones de la OT" onPress={() => setMenuOpen(true)} />
       </View>}
       {files && filesVisited ? <View style={[styles.filePanel, (section !== "files" || searching) && styles.hidden]}>
-        <FileWorkspace compact autoSave scopeKey={`${files.scopeKey}:order-files:${detail.id}`} resourceKey={String(detail.id)} mode={files.mode} readOnly={false}
-          title="Archivos de la OT" onLoad={files.load} onUpload={files.upload} onDelete={files.remove} />
+        {files.drive ? <FileDrive embedded api={files.drive} title="Archivos de la OT" subtitle={detail.workOrderCode ?? detail.code} /> : <FileWorkspace compact autoSave scopeKey={`${files.scopeKey}:order-files:${detail.id}`} resourceKey={String(detail.id)} mode={files.mode} readOnly={false}
+          title="Archivos de la OT" onLoad={files.load} onUpload={files.upload} onDelete={files.remove} />}
       </View> : null}
-      {section === "files" && !searching ? null : <ScrollView style={styles.scroll} contentContainerStyle={styles.content}
+      {comments && section === "comments" && !searching ? <View style={styles.filePanel}>
+        <ChatThread key={detail.id} embedded api={comments} title="Comentarios de la OT" subtitle={detail.workOrderCode ?? detail.code} />
+      </View> : null}
+      {(section === "files" || section === "comments") && !searching ? null : <ScrollView style={styles.scroll} contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void reload().finally(() => setRefreshing(false)); }} tintColor={palette.primary} colors={[palette.primary]} />}>
       {notice ? <Notice tone="warning" icon="alert-circle-outline" message={notice} /> : null}
       {!detail.editable && detail.lockedReason ? <Notice tone="info" icon="lock-closed-outline" message={`${detail.lockedReason} Solo se puede ver.`} /> : null}
@@ -285,17 +303,12 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
       </View> : null}
       {section === "works" && error && detail ? <Notice tone="danger" icon="alert-circle-outline" message={error} /> : null}
       {show("works") ? head("Trabajos", shown!.works.length) : null}
+      {!searching && section === "works" && detail.works.length > 0 && onWorkLayout ? <WorkLayoutToggle value={workLayout} onChange={onWorkLayout} /> : null}
       {show("works") ? (shown!.works.length === 0 ?<Empty icon="hammer-outline" text="Esta OT todavía no tiene trabajos." />
         : shown!.works.map((work) => {
           // Si el trabajo está en Mi jornada se usa su misma tarjeta (iniciar, entregar, archivos, checklist, comentarios).
-          const card = workCard?.(work.id);
-          if (card) return <View key={work.id} style={styles.cardWrap}>
-            {card}
-            {editable && can.works ? <Pressable accessibilityRole="button" accessibilityLabel={`Quitar ${work.code} de la OT`} hitSlop={6}
-              onPress={() => { setSaved(""); setSheet({ kind: "remove-work", id: work.id, title: `${work.code} · ${work.title}` }); }} style={({ pressed }) => [styles.removeLink, pressed && styles.pressed]}>
-              <Ionicons name="remove-circle-outline" size={15} color={palette.danger} accessible={false} /><Text style={styles.removeLinkText}>Quitar de la OT</Text>
-            </Pressable> : null}
-          </View>;
+          const card = workLayout === "extended" ? workCard?.(work.id) : null;
+          if (card) return <View key={work.id} style={styles.cardWrap}>{card}</View>;
           return <Pressable key={work.id} accessibilityRole="button" accessibilityLabel={`${work.code}, ${work.title}`} disabled={!onOpenWork || openingWorkId !== null}
           onPress={() => onOpenWork?.(work.id)} style={({ pressed }) => [styles.work, pressed && styles.pressed]}>
           <View style={styles.headTop}>
@@ -351,6 +364,8 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
         <SectionTitle title="Secciones de la OT" />
         {tabs.map((tab) => <Button key={tab.id} title={tab.label} icon={TAB_ICONS[tab.id]} variant={section === tab.id ? "primary" : "secondary"} onPress={() => { setMenuOpen(false); setSection(tab.id); }} />)}
         {onLocationHistory ? <Button title="Mi historial de ubicación" icon="location-outline" variant="secondary" onPress={() => { setMenuOpen(false); onLocationHistory(); }} /> : null}
+        {onDelete && detail?.kind === "workOrder" ? <Button title="Eliminar OT" icon="trash-outline" variant="secondary" iconColor={palette.danger} textStyle={{ color: palette.danger }}
+          onPress={() => { setMenuOpen(false); onDelete(); }} /> : null}
         <Button title="Cerrar menú" icon="close-outline" variant="ghost" onPress={() => setMenuOpen(false)} />
       </ScrollView></View>
     </Modal> : null}
@@ -379,6 +394,10 @@ export function WorkshopOrderScreen({ entryCode, load, onClose, onOpenWork, open
       onClose={() => setSheet(null)} onSave={(quantity, note) => applied(items.update(sheet.section, sheet.id, quantity, note), "Cambios guardados.")}
       onRemove={() => applied(items.remove(sheet.section, sheet.id), "Ítem quitado de la OT.")} /> : null}
     {sheet?.kind === "remove-work" && items ? <RemoveWorkSheet title={sheet.title} onClose={() => setSheet(null)} onRemove={() => applied(items.remove("works", sheet.id), "El trabajo quedó suelto en el ingreso.")} /> : null}
+    {sentSuccess && detail ? <OrderSentSuccess code={detail.workOrderCode ?? detail.code} title={detail.general.title ?? null} worksCount={detail.works.length} created={false}
+      onDismiss={() => setSentSuccess(false)}
+      primary={{ label: "Ver la OT", icon: "document-text-outline", onPress: () => setSentSuccess(false) }}
+      secondary={{ label: "Volver al ingreso", icon: "arrow-back", onPress: () => { setSentSuccess(false); onClose(); } }} /> : null}
     {linking && detail && onLinkWorks ? <AddWorksSheet code={detail.code} looseWorks={linking} onClose={() => setLinking(null)} onAdd={async (workIds) => {
       const linked = await onLinkWorks(workIds);
       if (!mounted.current) return;
@@ -430,8 +449,6 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: 8 },
   actionFull: { flex: 0 },
   cardWrap: { gap: 6 },
-  removeLink: { flexDirection: "row", alignItems: "center", alignSelf: "flex-end", gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
-  removeLinkText: { fontSize: 12, fontWeight: "700", color: palette.danger },
   removeWork: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
   itemSide: { alignItems: "flex-end", justifyContent: "space-between", gap: 8 },
   action: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 42, borderRadius: radius.md, borderWidth: 1, borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },

@@ -162,9 +162,11 @@ export function assignmentWorkQueryRange(work: ScheduledAssignmentWork, range: D
 
 export function assignmentIncludesDay(work: ScheduledAssignmentWork, day: string): boolean {
   const scheduled = assignmentDay(work.scheduledDate);
+  // Con consultas por día, un atrasado solo aparece en los días en que el servidor lo devolvió (hasta hoy, nunca en días futuros);
+  // el servidor también lo devuelve el día en que se terminó o entregó, para que siga visible en ese día.
   return !scheduled || scheduled === day || (work.plannedDates ?? []).some((value) => assignmentDay(value) === day)
-    || (work.isOverdue && !isFinished(work) && scheduled < day)
-    || (work.schedules ?? []).some((item) => item.queryDates.includes(day) && assignmentDay(item.work.scheduledDate) < day && !isFinished(item.work));
+    || (!work.schedules && work.isOverdue && !isFinished(work) && scheduled < day)
+    || (work.schedules ?? []).some((item) => item.queryDates.includes(day) && assignmentDay(item.work.scheduledDate) < day);
 }
 
 export function assignmentProgress(work: AssignmentWork, liveElapsedSeconds = work.elapsedSeconds): AssignmentProgress {

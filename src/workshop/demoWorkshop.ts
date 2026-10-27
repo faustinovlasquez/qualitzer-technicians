@@ -584,11 +584,11 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
     async workshopIdentificationTypes() { return { items: [{ id: 1, label: "RUT", isRut: true }, { id: 2, label: "Pasaporte", isRut: false }] }; },
     async createWorkshopCustomer(input) {
       await delay();
-      const number = input.identificationTypeId === 1 ? formatRut(input.number) : input.number.trim();
-      if (input.identificationTypeId === 1 && !isValidRut(input.number)) throw new Error("El RUT no es válido. Revisa el número y el dígito verificador.");
+      const number = !input.number ? null : input.identificationTypeId === 1 ? formatRut(input.number) : input.number.trim();
+      if (input.number && input.identificationTypeId === 1 && !isValidRut(input.number)) throw new Error("El RUT no es válido. Revisa el número y el dígito verificador.");
       const created = { id: nextCustomerItem++, name: input.name.trim(), contacts: [], branches: [] };
       customers.push(created);
-      documents[created.id] = number;
+      if (number) documents[created.id] = number;
       return { id: created.id, name: created.name, document: number };
     },
     async createWorkshopCustomerBranch(customerId, input) {

@@ -40,7 +40,7 @@ const work: z.ZodType<AssignmentWork> = z.lazy(() => z.object({
   hasBreakTime: z.boolean().optional(), breakStartTime: nullableText.optional(), breakEndTime: nullableText.optional(),
 }));
 export const cachedAssignmentsSchema: z.ZodType<Assignments> = z.object({
-  generatedAt: z.string(), technician: z.object({ id: z.number().nullable(), name: z.string(), allowEditExecutionTime: z.boolean(), supportsWorkedDates: z.boolean().optional(), avatarThumbnail: nullableText.optional() }),
+  generatedAt: z.string(), technician: z.object({ id: z.number().nullable(), name: z.string(), allowEditExecutionTime: z.boolean(), showWorkTimer: z.boolean().optional(), supportsWorkedDates: z.boolean().optional(), avatarThumbnail: nullableText.optional() }),
   summary: z.object({ totalGroups: z.number(), totalWorks: z.number(), activeWorks: z.number(), overdueWorks: z.number(), plannedMinutes: z.number() }),
   groups: z.array(z.object({
     id: z.string(), type: z.enum(["external_ot", "internal_maintenance", "direct_assignment"]), code: z.string(), title: z.string(), status,
@@ -49,6 +49,7 @@ export const cachedAssignmentsSchema: z.ZodType<Assignments> = z.object({
     maintenanceType: nullableText.optional(), negotiationCode: nullableText.optional(), businessModality: nullableText.optional(), businessTypeName: nullableText.optional(),
     startedAt: nullableText.optional(), finalizedAt: nullableText.optional(), durationMinutes: z.number().nullable().optional(), finalizationNote: nullableText.optional(), damageType: nullableText.optional(),
     negotiationCorrelative: z.number().nullish(), workOrderNumber: z.number().nullish(), workOrderInternalNumber: z.number().nullish(), isWorkOrderInternal: z.boolean().nullish(),
+    customerBranchName: nullableText.optional(), statusName: nullableText.optional(), statusColor: z.string().regex(/^#[0-9a-f]{6}$/i).nullish(),
   })),
 });
 export const cachedCommentsSchema = z.object({

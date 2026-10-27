@@ -9,8 +9,9 @@ import type { WorkActivitiesPort } from "./workActivities";
 import type { UserSignaturesPort } from "./userSignatures";
 import type { OwnProfilePort } from "./ownProfile";
 import type { LocationPoint } from "./locationTracking";
+import type { WorkTeamPort } from "./workTeam";
 
-export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort>, Partial<OwnProfilePort> {
+export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort>, Partial<OwnProfilePort>, Partial<WorkTeamPort> {
   materialReceipts?: import("./materialReceipts").MaterialReceiptPort["materialReceipts"];
   confirmMaterialReceipts?: import("./materialReceipts").MaterialReceiptPort["confirmMaterialReceipts"];
   workshops?: import("./workshopBoard").WorkshopBoardPort["workshops"];
@@ -49,7 +50,25 @@ export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<
   createWorkshopCustomerBranch?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopCustomerBranch"];
   createWorkshopCustomerContact?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopCustomerContact"];
   workshopEquipmentMasters?: import("./workshopCustomers").WorkshopCustomersPort["workshopEquipmentMasters"];
+  workshopCustomerDuplicates?: import("./workshopCustomers").WorkshopCustomersPort["workshopCustomerDuplicates"];
+  workshopContactDuplicates?: import("./workshopCustomers").WorkshopCustomersPort["workshopContactDuplicates"];
+  workshopBranchDuplicates?: import("./workshopCustomers").WorkshopCustomersPort["workshopBranchDuplicates"];
+  workshopEquipmentDuplicates?: import("./workshopCustomers").WorkshopCustomersPort["workshopEquipmentDuplicates"];
   createWorkshopCustomerEquipment?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopCustomerEquipment"];
+  createWorkshopEquipmentMaster?: import("./workshopCustomers").WorkshopCustomersPort["createWorkshopEquipmentMaster"];
+  threadList?: import("./threads").ThreadPort["threadList"];
+  threadSend?: import("./threads").ThreadPort["threadSend"];
+  threadEdit?: import("./threads").ThreadPort["threadEdit"];
+  threadPeople?: import("./threads").ThreadPort["threadPeople"];
+  threadLive?: import("./threads").ThreadPort["threadLive"];
+  threadTyping?: import("./threads").ThreadPort["threadTyping"];
+  driveList?: import("./fileDrive").FileDrivePort["driveList"];
+  driveUpload?: import("./fileDrive").FileDrivePort["driveUpload"];
+  driveCreateFolder?: import("./fileDrive").FileDrivePort["driveCreateFolder"];
+  driveRenameFolder?: import("./fileDrive").FileDrivePort["driveRenameFolder"];
+  driveDeleteFolder?: import("./fileDrive").FileDrivePort["driveDeleteFolder"];
+  driveMoveFile?: import("./fileDrive").FileDrivePort["driveMoveFile"];
+  driveDeleteFile?: import("./fileDrive").FileDrivePort["driveDeleteFile"];
   moveWorkshopEntry?: import("./workshopManage").WorkshopManagePort["moveWorkshopEntry"];
   changeEstimatedDelivery?: import("./workshopManage").WorkshopManagePort["changeEstimatedDelivery"];
   changeEntryStatus?: import("./workshopManage").WorkshopManagePort["changeEntryStatus"];

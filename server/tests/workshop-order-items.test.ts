@@ -173,7 +173,7 @@ test("los totales de una sección siguen las fórmulas de la web (descuentos y m
   assert.equal(totals.itemDiscount, 3800);
   assert.equal(totals.discount, (34200 * 5) / 100);
   assert.equal(totals.net, 34200 - 1710);
-  applySectionDelta(raw, "products", { subtotal: 0, itemDiscount: 0, discount: 0, net: 0, tax: 0, gross: 0, estimatedMargin: 0, realMargin: 0, cost: 0 }, totals);
+  applySectionDelta(raw, "products", { subtotal: 0, itemDiscount: 0, discount: 0, net: 0, tax: 0, gross: 0, estimatedMargin: 0, realMargin: 0, cost: 0, netCost: 0 }, totals);
   assert.equal(record(raw.totalsSection).totalNet, 38000 - 3800 - 1710);
 });
 

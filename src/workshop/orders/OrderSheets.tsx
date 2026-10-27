@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Button } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { WorkshopOrder, WorkshopWork } from "../../domain/workshopEntry";
@@ -23,7 +23,6 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
   attempt: MutableRefObject<{ fingerprint: string; requestId: string } | null>;
 }) {
   const [rules, setRules] = useState<WorkshopOrderRules | null>(null);
-  const [rulesError, setRulesError] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<WorkshopOrderInput["priority"]>("medium");
@@ -35,15 +34,13 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
   const [error, setError] = useState("");
   const loader = useRef(loadRules);
   loader.current = loadRules;
-  const fetchRules = () => { setRulesError(""); setRules(null); loader.current().then(setRules, (failure: unknown) => setRulesError(failureText(failure, "No se pudieron revisar las reglas de la sucursal."))); };
-  useEffect(fetchRules, []);
+  // Las reglas solo agregan campos opcionales (centro de costo, notas internas); si fallan, la OT se crea igual.
+  useEffect(() => { loader.current().then(setRules, () => undefined); }, []);
 
   async function create(sendToCommercial: boolean) {
     if (saving) return;
+    // Solo el título es obligatorio: lo que exige la web para la OT lo completa comercial después.
     if (!title.trim()) { setError("Escribe un título para la OT."); return; }
-    if (rules?.descriptionRequired && !description.trim()) { setError("La sucursal exige una descripción para la OT."); return; }
-    const missing = (rules?.fields ?? []).filter((field) => field.key === "costCenterRelation" ? !costCenter.trim() : !notes.trim()).map((field) => field.label);
-    if (missing.length > 0) { setError(`Completa: ${missing.join(", ")}.`); return; }
     const extra = { ...(costCenter.trim() ? { costCenterRelation: costCenter.trim() } : {}), ...(notes.trim() ? { internalNotes: notes.trim() } : {}) };
     const input = { title: title.trim(), description: description.trim() || null, priority, workIds: chosen, sendToCommercial, ...(Object.keys(extra).length > 0 ? { extra } : {}) };
     const fingerprint = JSON.stringify(input);
@@ -54,15 +51,11 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
     finally { setSaving(null); }
   }
 
-  const blocked = Boolean(rules && rules.blockingFields.length > 0);
   return <PickerSheet title="Nueva orden de trabajo" onClose={saving ? () => undefined : onClose}
     footer={<View style={styles.footer}>
-      <Button title="Crear sin enviar" icon="save-outline" loading={saving === "save"} disabled={saving !== null || !rules || blocked} onPress={() => void create(false)} />
-      <Button title="Crear y enviar a comercial" variant="warning" icon="paper-plane-outline" loading={saving === "send"} disabled={saving !== null || !rules || blocked} onPress={() => void create(true)} />
+      <Button title="Crear sin enviar" icon="save-outline" loading={saving === "save"} disabled={saving !== null} onPress={() => void create(false)} />
+      <Button title="Crear y enviar a comercial" variant="warning" icon="paper-plane-outline" loading={saving === "send"} disabled={saving !== null} onPress={() => void create(true)} />
     </View>}>
-    {!rules && !rulesError ? <View style={styles.row}><ActivityIndicator color={palette.primary} /><Text style={styles.hint}>Revisando lo que exige la sucursal…</Text></View> : null}
-    {rulesError ? <View style={styles.block}><Notice tone="danger" icon="cloud-offline-outline" message={rulesError} /><Button title="Reintentar" variant="secondary" icon="refresh" onPress={fetchRules} /></View> : null}
-    {blocked ? <Notice tone="warning" icon="desktop-outline" message={`La sucursal exige completar en la OT: ${rules!.blockingFields.join(", ")}. Créala desde la web.`} /> : null}
     <View style={styles.info}>
       <Ionicons name="pricetag-outline" size={18} color={palette.info} accessible={false} />
       <Text style={styles.infoText}>La OT se crea sin precios: comercial los completa. Cliente, equipo, sucursales y contactos salen del ingreso.</Text>
@@ -74,7 +67,7 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
       <Text style={styles.counter}>{title.length}/100</Text>
     </View>
     <View style={styles.field}>
-      <Text style={styles.label}>Descripción{rules?.descriptionRequired ? " *" : ""}</Text>
+      <Text style={styles.label}>Descripción</Text>
       <TextInput value={description} onChangeText={setDescription} maxLength={5000} multiline placeholder="Qué incluye la OT" placeholderTextColor={palette.textMuted}
         style={[styles.input, styles.multiline]} textAlignVertical="top" accessibilityLabel="Descripción de la OT" />
       <Text style={styles.counter}>{description.length}/5000</Text>
@@ -87,7 +80,7 @@ export function CreateOrderSheet({ looseWorks, preselected, loadRules, onCreate,
       </Pressable>)}</View>
     </View>
     {(rules?.fields ?? []).map((field) => <View key={field.key} style={styles.field}>
-        <Text style={styles.label}>{field.label} *</Text>
+        <Text style={styles.label}>{field.label}</Text>
         <TextInput value={field.key === "costCenterRelation" ? costCenter : notes} onChangeText={field.key === "costCenterRelation" ? setCostCenter : setNotes}
           maxLength={field.key === "costCenterRelation" ? 255 : 5000} multiline={field.key === "internalNotes"} placeholderTextColor={palette.textMuted}
           style={[styles.input, field.key === "internalNotes" && styles.multiline]} textAlignVertical={field.key === "internalNotes" ? "top" : "center"} accessibilityLabel={field.label} />

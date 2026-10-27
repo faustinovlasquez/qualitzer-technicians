@@ -5,10 +5,11 @@ import { z } from "zod";
  * por defecto y lo no configurado también. Mismas claves que el backend (IMobileAppConfig).
  */
 export const MOBILE_APP_PERMISSION_KEYS = [
-  "createWorks", "createMaintenances", "createNonProductive",
+  "createWorks", "createMaintenances", "createNonProductive", "workTeam", "deleteOwn",
   "workshop", "workshopEntries", "workshopCustomers", "workshopInspections", "workshopReception", "workshopDelivery", "workshopManage",
   "workshopWorks", "workshopMaintenances",
-  "ordersCreate", "ordersSend", "ordersDelete", "ordersGeneral", "ordersWorks", "ordersProducts", "ordersTransports", "ordersOthers"
+  "ordersCreate", "ordersSend", "ordersDelete", "ordersGeneral", "ordersWorks", "ordersProducts", "ordersTransports", "ordersOthers",
+  "commentsWrite", "filesUpload", "filesFolders", "filesDelete"
 ] as const;
 export type MobileAppPermission = typeof MOBILE_APP_PERMISSION_KEYS[number];
 export type MobileAppConfig = Record<MobileAppPermission, boolean>;
@@ -25,12 +26,14 @@ export const mobileAppConfigSchema = z.object(Object.fromEntries(MOBILE_APP_PERM
 /** Nombre de cada acción para explicar al técnico qué desactivó la sucursal. */
 export const APP_PERMISSION_LABELS: Record<MobileAppPermission, string> = {
   createWorks: "crear trabajos", createMaintenances: "crear mantenimientos", createNonProductive: "registrar tiempo no productivo",
+  workTeam: "asignar técnicos a un trabajo", deleteOwn: "eliminar trabajos, mantenimientos u OT que creó",
   workshop: "usar el Taller", workshopEntries: "registrar o editar ingresos", workshopCustomers: "crear clientes, sucursales o contactos",
   workshopInspections: "hacer inspecciones", workshopReception: "firmar la recepción", workshopDelivery: "entregar equipos",
   workshopManage: "mover de nave, cambiar fecha o estado", workshopWorks: "agregar trabajos al ingreso", workshopMaintenances: "agregar mantenimientos al ingreso",
   ordersCreate: "crear OT", ordersSend: "enviar OT a comercial", ordersDelete: "eliminar OT", ordersGeneral: "editar datos generales de la OT",
   ordersWorks: "agregar o quitar trabajos de la OT", ordersProducts: "gestionar productos de la OT", ordersTransports: "gestionar transporte de la OT",
-  ordersOthers: "gestionar otros ítems de la OT"
+  ordersOthers: "gestionar otros ítems de la OT",
+  commentsWrite: "escribir comentarios", filesUpload: "subir archivos", filesFolders: "crear carpetas o mover archivos", filesDelete: "borrar archivos"
 };
 
 /** Las acciones del Taller y de sus OT exigen además que el Taller esté habilitado. */

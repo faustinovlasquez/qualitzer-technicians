@@ -132,6 +132,17 @@ export function WorkshopDeliveryScreen({ workshop, entryId, onClose, onExitInspe
   const exitRequirement = detail?.inspections.exitRequirement ?? "none";
   const exitCheck = detail ? evaluateInspection(exitRequirement, detail.inspections.exit, detail.inspections.photoSlots) : null;
   const blocked = Boolean(blockers && blockers.pending.length > 0);
+  const exitPercent = detail?.inspections.exit?.percentage ?? 0;
+  const inspectionReady = exitRequirement === "none" || Boolean(exitCheck?.met);
+  const receiverReady = Boolean(name.trim()) && hasSignature(strokes);
+  const steps = [
+    { label: "Inspección", done: inspectionReady && (exitRequirement === "none" ? true : exitPercent > 0) },
+    { label: "Quién retira", done: receiverReady },
+    { label: "Fecha", done: Boolean(date && time) }
+  ];
+  const missing = [!name.trim() ? "nombre de quien retira" : null, !hasSignature(strokes) ? "firma" : null].filter((item): item is string => item !== null);
+  const selectedContact = contacts.find((contact) => contact.id === contactId) ?? null;
+  const initials = (value: string) => value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
 
   return <View style={styles.screen}>
     <View style={styles.bar}>
@@ -149,59 +160,99 @@ export function WorkshopDeliveryScreen({ workshop, entryId, onClose, onExitInspe
       : detail.delivery ? <View style={styles.content}><Notice tone="success" icon="checkmark-done-circle-outline" message="Este equipo ya fue entregado." /><Button title="Volver" onPress={onGoEntry} /></View>
       : <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" scrollEnabled={!drawing}>
+          <View style={styles.equipment}>
+            <View style={styles.equipmentIcon}><Ionicons name="construct-outline" size={22} color={palette.primary} accessible={false} /></View>
+            <View style={styles.grow}>
+              <Text style={styles.equipmentTitle} numberOfLines={2}>{detail.equipmentLabel}</Text>
+              <Text style={styles.hint} numberOfLines={1}>{[detail.code, detail.customerName, detail.areaTitle ? `Nave ${detail.areaTitle}` : null].filter(Boolean).join(" · ")}</Text>
+            </View>
+          </View>
+
+          <View style={styles.stepper} accessibilityRole="progressbar" accessibilityLabel={`${steps.filter((step) => step.done).length} de ${steps.length} pasos listos`}>
+            {steps.map((step, index) => <View key={step.label} style={styles.stepItem}>
+              <View style={[styles.stepDot, step.done && styles.stepDotDone]}>
+                {step.done ? <Ionicons name="checkmark" size={14} color={palette.white} accessible={false} /> : <Text style={styles.stepNumber}>{index + 1}</Text>}
+              </View>
+              <Text style={[styles.stepLabel, step.done && styles.stepLabelDone]} numberOfLines={1}>{step.label}</Text>
+              {index < steps.length - 1 ? <View style={[styles.stepLine, step.done && styles.stepLineDone]} /> : null}
+            </View>)}
+          </View>
+
           {blocked ? <Notice tone="warning" icon="alert-circle-outline" message={`Falta cumplir: ${blockers!.pending.map((condition) => `${condition.title} (${condition.detail})`).join(" · ")}`} /> : null}
 
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name="clipboard-outline" size={18} color={palette.primary} accessible={false} />
-              <Text style={[styles.sectionTitle, styles.grow]} accessibilityRole="header">1. Inspección de entrega</Text>
-              <Text style={[styles.pill, { color: exitRequirement === "none" ? palette.textSecondary : exitCheck?.met ? palette.success : palette.orange }]}>
+              <View style={[styles.sectionNumber, steps[0].done && styles.sectionNumberDone]}><Text style={[styles.sectionNumberText, steps[0].done && styles.sectionNumberTextDone]}>1</Text></View>
+              <Text style={[styles.sectionTitle, styles.grow]} accessibilityRole="header">Inspección de entrega</Text>
+              <Text style={[styles.badge, exitRequirement === "none" ? styles.badgeNeutral : exitCheck?.met ? styles.badgeOk : styles.badgeWarn]}>
                 {exitRequirement === "none" ? "Opcional" : exitCheck?.met ? "Cumple" : "Exigida"}
               </Text>
             </View>
-            <Text style={styles.hint}>{detail.inspections.exit ? `Avance ${detail.inspections.exit.percentage}% · ` : "Sin realizar · "}La sucursal exige: {inspectionRequirementLabel(exitRequirement).toLowerCase()}
-              {detail.inspections.entry ? ` · En el ingreso: ${detail.inspections.entry.percentage}%` : ""}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel={`${detail.inspections.exit ? "Continuar" : "Hacer"} la inspección de entrega. Avance ${exitPercent} por ciento`}
+              onPress={onExitInspection} style={({ pressed }) => [styles.inspectionRow, pressed && styles.pressed]}>
+              <View style={[styles.inspectionRing, exitPercent >= 100 && styles.inspectionRingDone]}>
+                <Text style={[styles.inspectionPercent, exitPercent >= 100 && styles.inspectionPercentDone]}>{exitPercent}%</Text>
+              </View>
+              <View style={styles.grow}>
+                <Text style={styles.inspectionTitle}>{detail.inspections.exit ? "Continuar inspección" : "Hacer inspección"}</Text>
+                <Text style={styles.hint}>Exige: {inspectionRequirementLabel(exitRequirement).toLowerCase()}{detail.inspections.entry ? ` · Ingreso: ${detail.inspections.entry.percentage}%` : ""}</Text>
+                <View style={styles.progressTrack}><View style={[styles.progressFill, exitPercent >= 100 && styles.progressDone, { width: `${Math.min(100, exitPercent)}%` }]} /></View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={palette.textMuted} accessible={false} />
+            </Pressable>
             {blockers?.exitWarning ? <Text style={styles.warn}>{blockers.exitWarning}</Text> : null}
-            <Button title={detail.inspections.exit ? "Continuar inspección de entrega" : "Hacer inspección de entrega"} icon="camera-outline" variant="secondary" onPress={onExitInspection} />
           </View>
 
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name="person-outline" size={18} color={palette.primary} accessible={false} />
-              <Text style={styles.sectionTitle} accessibilityRole="header">2. Quién retira el equipo</Text>
+              <View style={[styles.sectionNumber, steps[1].done && styles.sectionNumberDone]}><Text style={[styles.sectionNumberText, steps[1].done && styles.sectionNumberTextDone]}>2</Text></View>
+              <Text style={[styles.sectionTitle, styles.grow]} accessibilityRole="header">Quién retira el equipo</Text>
             </View>
-            {contacts.length > 0 ? <View style={styles.chips}>
-              {contacts.map((contact) => <Pressable key={contact.id} accessibilityRole="radio" accessibilityState={{ checked: contactId === contact.id }} onPress={() => pickContact(contact)}
-                style={[styles.chip, contactId === contact.id && styles.chipOn]}>
-                <Text style={[styles.chipText, contactId === contact.id && styles.chipTextOn]}>{contact.fullName}</Text>
-              </Pressable>)}
-              <Pressable accessibilityRole="radio" accessibilityState={{ checked: contactId === null }} onPress={() => pickContact(null)} style={[styles.chip, contactId === null && styles.chipOn]}>
-                <Text style={[styles.chipText, contactId === null && styles.chipTextOn]}>Otra persona</Text>
-              </Pressable>
+            {contacts.length > 0 ? <View style={styles.contacts} accessibilityRole="radiogroup">
+              {[...contacts, null].map((contact) => {
+                const selected = contact ? contactId === contact.id : contactId === null;
+                const label = contact?.fullName ?? "Otra persona";
+                const meta = contact ? [contact.email, contact.phone].filter(Boolean).join(" · ") || "Contacto del cliente" : "Escribe sus datos";
+                return <Pressable key={contact?.id ?? "other"} accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={() => pickContact(contact)}
+                  style={({ pressed }) => [styles.contact, selected && styles.contactOn, pressed && styles.pressed]}>
+                  <View style={[styles.avatar, selected && styles.avatarOn]}>
+                    {contact ? <Text style={[styles.avatarText, selected && styles.avatarTextOn]}>{initials(contact.fullName)}</Text>
+                      : <Ionicons name="person-add-outline" size={16} color={selected ? palette.white : palette.textSecondary} accessible={false} />}
+                  </View>
+                  <View style={styles.grow}>
+                    <Text style={styles.contactName} numberOfLines={1}>{label}</Text>
+                    <Text style={styles.hint} numberOfLines={1}>{meta}</Text>
+                  </View>
+                  <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={20} color={selected ? palette.primary : palette.textMuted} accessible={false} />
+                </Pressable>;
+              })}
             </View> : <Text style={styles.hint}>El cliente no tiene contactos registrados: escribe los datos de quien retira.</Text>}
             <View style={styles.field}>
               <Text style={styles.label}>Nombre *</Text>
-              <TextInput value={name} onChangeText={(value) => { setName(value); setIssues({}); }} maxLength={255} style={[styles.input, Boolean(issues.name) && styles.invalid]} accessibilityLabel="Nombre de quien retira" />
+              <TextInput value={name} onChangeText={(value) => { setName(value); setIssues({}); }} maxLength={255} placeholder="Nombre y apellido" placeholderTextColor={palette.textMuted}
+                style={[styles.input, Boolean(issues.name) && styles.invalid]} accessibilityLabel="Nombre de quien retira" />
               {issues.name ? <Text style={styles.error}>{issues.name}</Text> : null}
             </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Correo</Text>
-              <TextInput value={email} onChangeText={(value) => { setEmail(value); setIssues({}); }} maxLength={100} keyboardType="email-address" autoCapitalize="none" placeholder="Opcional"
-                placeholderTextColor={palette.textMuted} style={[styles.input, Boolean(issues.email) && styles.invalid]} accessibilityLabel="Correo de quien retira" />
-              {issues.email ? <Text style={styles.error}>{issues.email}</Text> : null}
+            <View style={styles.pair}>
+              <View style={[styles.field, styles.grow]}>
+                <Text style={styles.label}>Correo</Text>
+                <TextInput value={email} onChangeText={(value) => { setEmail(value); setIssues({}); }} maxLength={100} keyboardType="email-address" autoCapitalize="none" placeholder="Opcional"
+                  placeholderTextColor={palette.textMuted} style={[styles.input, Boolean(issues.email) && styles.invalid]} accessibilityLabel="Correo de quien retira" />
+                {issues.email ? <Text style={styles.error}>{issues.email}</Text> : null}
+              </View>
+              <View style={[styles.field, styles.grow]}>
+                <Text style={styles.label}>Teléfono</Text>
+                <TextInput value={phone} onChangeText={setPhone} maxLength={50} keyboardType="phone-pad" placeholder="Opcional" placeholderTextColor={palette.textMuted} style={styles.input} accessibilityLabel="Teléfono de quien retira" />
+              </View>
             </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Teléfono</Text>
-              <TextInput value={phone} onChangeText={setPhone} maxLength={50} keyboardType="phone-pad" placeholder="Opcional" placeholderTextColor={palette.textMuted} style={styles.input} accessibilityLabel="Teléfono de quien retira" />
-            </View>
-            <SignatureField label="Firma de quien retira" name={name} strokes={strokes} signatureRef={signaturePad} disabled={saving} error={issues.signature}
+            <SignatureField label={selectedContact ? `Firma de ${selectedContact.fullName}` : "Firma de quien retira"} name={name} strokes={strokes} signatureRef={signaturePad} disabled={saving} error={issues.signature}
               onChange={(next) => { setStrokes(next); setIssues({}); }} onDrawingChange={setDrawing} />
           </View>
 
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name="calendar-outline" size={18} color={palette.primary} accessible={false} />
-              <Text style={styles.sectionTitle} accessibilityRole="header">3. Fecha y nota</Text>
+              <View style={[styles.sectionNumber, steps[2].done && styles.sectionNumberDone]}><Text style={[styles.sectionNumberText, steps[2].done && styles.sectionNumberTextDone]}>3</Text></View>
+              <Text style={[styles.sectionTitle, styles.grow]} accessibilityRole="header">Fecha y nota</Text>
             </View>
             <View style={styles.row}>
               <SelectorTrigger label="Fecha de entrega" value={prettyDate(date)} icon="calendar-outline" disabled={saving} error={issues.date} containerStyle={styles.grow} onPress={() => setDatePicker(true)} />
@@ -215,8 +266,13 @@ export function WorkshopDeliveryScreen({ workshop, entryId, onClose, onExitInspe
           </View>
 
           {message ? <Notice tone="danger" icon="alert-circle-outline" message={message} /> : null}
-          <Button title="Entregar equipo" icon="exit-outline" disabled={saving || blocked} onPress={() => void review()} />
         </ScrollView>
+        <View style={styles.actionBar}>
+          <Text style={[styles.actionHint, (blocked || missing.length > 0) && styles.actionHintPending]} numberOfLines={2}>
+            {blocked ? "Hay condiciones de entrega pendientes." : missing.length > 0 ? `Falta: ${missing.join(" y ")}.` : "Todo listo para entregar."}
+          </Text>
+          <Button title="Entregar equipo" icon="exit-outline" disabled={saving || blocked} onPress={() => void review()} />
+        </View>
       </KeyboardAvoidingView>}
 
     {datePicker ? <CreationDatePicker value={date} showInputHint={false} onClose={() => setDatePicker(false)} onChange={(value) => { setDate(value); setIssues({}); }} /> : null}
@@ -244,8 +300,49 @@ const styles = StyleSheet.create({
   section: { gap: 12, padding: 14, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   sectionTitle: { fontSize: 15, fontWeight: "800", color: palette.heading },
-  grow: { flex: 1 },
-  pill: { fontSize: 12, fontWeight: "800" },
+  grow: { flex: 1, minWidth: 0 },
+  pressed: { opacity: 0.8 },
+  equipment: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.lg, backgroundColor: palette.primarySoft, borderWidth: 1, borderColor: palette.primaryBorder },
+  equipmentIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface },
+  equipmentTitle: { fontSize: 15, fontWeight: "800", color: palette.heading },
+  stepper: { flexDirection: "row", paddingHorizontal: 4 },
+  stepItem: { flex: 1, alignItems: "center", gap: 4 },
+  stepDot: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: palette.border, backgroundColor: palette.surface, zIndex: 1 },
+  stepDotDone: { borderColor: palette.success, backgroundColor: palette.success },
+  stepNumber: { fontSize: 12, fontWeight: "800", color: palette.textSecondary },
+  stepLabel: { fontSize: 11, fontWeight: "700", color: palette.textSecondary },
+  stepLabelDone: { color: palette.success },
+  stepLine: { position: "absolute", top: 12, left: "62%", right: "-38%", height: 2, backgroundColor: palette.border },
+  stepLineDone: { backgroundColor: palette.success },
+  sectionNumber: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  sectionNumberDone: { backgroundColor: palette.success },
+  sectionNumberText: { fontSize: 12, fontWeight: "800", color: palette.primary },
+  sectionNumberTextDone: { color: palette.white },
+  badge: { overflow: "hidden", fontSize: 11, fontWeight: "800", paddingHorizontal: 9, paddingVertical: 3, borderRadius: radius.pill },
+  badgeNeutral: { color: palette.textSecondary, backgroundColor: palette.track },
+  badgeOk: { color: palette.success, backgroundColor: palette.successSoft },
+  badgeWarn: { color: palette.orange, backgroundColor: palette.orangeSoft },
+  inspectionRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
+  inspectionRing: { width: 48, height: 48, borderRadius: 24, borderWidth: 4, borderColor: palette.primarySoft, alignItems: "center", justifyContent: "center" },
+  inspectionRingDone: { borderColor: palette.successSoft },
+  inspectionPercent: { fontSize: 13, fontWeight: "800", color: palette.heading },
+  inspectionPercentDone: { color: palette.success },
+  inspectionTitle: { fontSize: 14, fontWeight: "800", color: palette.text },
+  progressTrack: { height: 5, marginTop: 6, borderRadius: 3, overflow: "hidden", backgroundColor: palette.track },
+  progressFill: { height: 5, borderRadius: 3, backgroundColor: palette.primary },
+  progressDone: { backgroundColor: palette.success },
+  contacts: { gap: 8 },
+  contact: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  contactOn: { borderColor: palette.primary, backgroundColor: palette.primarySoft },
+  contactName: { fontSize: 14, fontWeight: "800", color: palette.text },
+  avatar: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
+  avatarOn: { backgroundColor: palette.primary },
+  avatarText: { fontSize: 12, fontWeight: "800", color: palette.textSecondary },
+  avatarTextOn: { color: palette.white },
+  pair: { flexDirection: "row", gap: 10 },
+  actionBar: { gap: 8, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 14, borderTopWidth: 1, borderTopColor: palette.border, backgroundColor: palette.surface },
+  actionHint: { ...typography.caption, textAlign: "center", color: palette.success, fontWeight: "700" },
+  actionHintPending: { color: palette.textSecondary },
   hint: { ...typography.caption, color: palette.textSecondary },
   warn: { ...typography.caption, color: palette.orange, fontWeight: "700" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

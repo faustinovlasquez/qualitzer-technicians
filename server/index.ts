@@ -1,9 +1,13 @@
 import { createServer } from "node:http";
 import { createConfiguredApp } from "./app";
 import { loadConfig } from "./config";
+import { configureRealtime } from "./realtime/hub";
 
 async function start(): Promise<void> {
   const config = loadConfig();
+  // Comentarios en vivo: la misma clave SOCKET_IO_TOKEN del backend; sin ella el chat se actualiza por consultas.
+  // GATEWAY_REALTIME=on lo activa con clave vacía (backend local sin SOCKET_IO_TOKEN).
+  configureRealtime(process.env.GATEWAY_SOCKET_TOKEN ?? (process.env.GATEWAY_REALTIME === "on" ? "" : undefined));
   if (config.tenantResolution === "legacy") process.stderr.write("GATEWAY_LEGACY_TENANT_CONFIGURATION_DEPRECATED\n");
   const server = createServer(await createConfiguredApp(config));
   server.requestTimeout = 120_000;

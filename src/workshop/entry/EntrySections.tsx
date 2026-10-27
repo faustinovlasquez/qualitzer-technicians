@@ -22,6 +22,21 @@ export function SectionCard({ title, icon, children, trailing }: { title: string
   </View>;
 }
 
+/** Vista de los trabajos: compacta (fila pequeña) o extendida (tarjeta de Mi jornada para iniciar, entregar…). */
+export function WorkLayoutToggle({ value, onChange }: { value: "compact" | "extended"; onChange: (value: "compact" | "extended") => void }) {
+  const options = [{ id: "compact" as const, label: "Compacta", icon: "list-outline" as const }, { id: "extended" as const, label: "Extendida", icon: "albums-outline" as const }];
+  return <View style={styles.layoutToggle} accessibilityRole="radiogroup" accessibilityLabel="Vista de los trabajos">
+    {options.map((option) => {
+      const on = value === option.id;
+      return <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={`Vista ${option.label.toLowerCase()}`}
+        onPress={() => onChange(option.id)} style={[styles.layoutOption, on && styles.layoutOptionOn]}>
+        <Ionicons name={option.icon} size={14} color={on ? palette.white : palette.textSecondary} accessible={false} />
+        <Text style={[styles.layoutText, on && styles.layoutTextOn]}>{option.label}</Text>
+      </Pressable>;
+    })}
+  </View>;
+}
+
 export function Notice({ tone, icon, message }: { tone: "warning" | "danger" | "success" | "info"; icon: IconName; message: string }) {
   const color = tone === "warning" ? palette.orange : tone === "danger" ? palette.danger : tone === "success" ? palette.success : palette.info;
   const soft = tone === "warning" ? palette.orangeSoft : tone === "danger" ? palette.dangerSoft : tone === "success" ? palette.successSoft : palette.infoSoft;
@@ -184,12 +199,15 @@ function OrderInfo({ label, value, icon, tone }: { label: string; value: string;
 }
 
 /** Tarjeta de OT, cotización o mantenimiento con el mismo orden visual que las OT de Mi jornada. */
-function OrderRow({ order, works, actions, hasLoose, onOpenWork, onOpenOrder }: {
+function OrderRow({ order, works, actions, hasLoose, onOpenWork, onOpenOrder, onFiles, onComments }: {
   order: WorkshopOrder; works: WorkshopWork[]; actions?: OrderActions; hasLoose: boolean; onOpenWork?: (workId: number) => void;
-  onOpenOrder?: (order: WorkshopOrder) => void;
+  onOpenOrder?: (order: WorkshopOrder) => void; onFiles?: (order: WorkshopOrder) => void; onComments?: (order: WorkshopOrder) => void;
 }) {
   const editable = Boolean(actions && order.kind === "workOrder" && !order.sentToCommercial && (actions.onSend || actions.onDelete || actions.onAddWorks));
   const detail = onOpenOrder && order.kind !== "maintenance" ? () => onOpenOrder(order) : undefined;
+  // Archivos y comentarios (generales) de la OT en una ventana, sin entrar al detalle.
+  const files = onFiles && order.kind !== "maintenance" ? () => onFiles(order) : undefined;
+  const comments = onComments && order.kind !== "maintenance" ? () => onComments(order) : undefined;
   const tone = !order.sentToCommercial ? { color: palette.orange, soft: palette.orangeSoft } : order.finished ? { color: palette.success, soft: palette.successSoft } : STAGE_TONE[order.stage];
   const kind = order.kind === "maintenance" ? "Mantenimiento" : order.kind === "workOrder" ? "Orden de trabajo" : "Cotización";
   const kindIcon: IconName = order.kind === "maintenance" ? "build-outline" : order.kind === "workOrder" ? "document-text-outline" : "receipt-outline";
@@ -228,10 +246,18 @@ function OrderRow({ order, works, actions, hasLoose, onOpenWork, onOpenOrder }: 
       {onOpenWork ? <Ionicons name="chevron-forward" size={14} color={palette.textMuted} accessible={false} /> : null}
     </Pressable>)}
     {/* Barra inferior de acciones, como "Detalle | Archivos" en las OT de Mi jornada. */}
-    {editable || detail ? <View style={styles.orderBar}>
+    {editable || detail || files || comments ? <View style={styles.orderBar}>
       {detail ? <Pressable accessibilityRole="button" accessibilityLabel={`Ver detalle de ${order.code}`} onPress={detail}
         style={({ pressed }) => [styles.orderBarItem, styles.orderBarPrimary, pressed && styles.rowPressed]}>
         <Ionicons name="document-text-outline" size={18} color={palette.primary} accessible={false} /><Text style={styles.orderBarText}>Detalle</Text>
+      </Pressable> : null}
+      {files ? <Pressable accessibilityRole="button" accessibilityLabel={`Archivos de ${order.code}`} onPress={files}
+        style={({ pressed }) => [styles.orderBarItem, detail ? styles.orderBarDivider : styles.orderBarPrimary, pressed && styles.rowPressed]}>
+        <Ionicons name="folder-open-outline" size={18} color={palette.text} accessible={false} /><Text style={[styles.orderBarText, { color: palette.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Archivos</Text>
+      </Pressable> : null}
+      {comments ? <Pressable accessibilityRole="button" accessibilityLabel={`Comentarios de ${order.code}`} onPress={comments}
+        style={({ pressed }) => [styles.orderBarItem, styles.orderBarDivider, pressed && styles.rowPressed]}>
+        <Ionicons name="chatbubbles-outline" size={18} color={palette.text} accessible={false} /><Text style={[styles.orderBarText, { color: palette.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Comentarios</Text>
       </Pressable> : null}
       {editable && actions?.onSend ? <Pressable accessibilityRole="button" accessibilityLabel={`Enviar ${order.code} a comercial`} onPress={() => actions.onSend?.(order)}
         style={({ pressed }) => [styles.orderBarItem, detail ? styles.orderBarDivider : styles.orderBarPrimary, pressed && styles.rowPressed]}>
@@ -250,7 +276,11 @@ function OrderRow({ order, works, actions, hasLoose, onOpenWork, onOpenOrder }: 
 }
 
 /** Pestañas Trabajos / Órdenes de trabajo (o Mantenimientos en equipos propios). */
-export function WorkAndOrders({ detail, onAddWork, onAddMaintenance, onLinkWorks, onOpenWork, onOpenOrder, openingWorkId = null, orderActions, initialTab, onTabChange, workCard, query = "" }: {
+export function WorkAndOrders({ detail, onAddWork, onAddMaintenance, onLinkWorks, onOpenWork, onOpenOrder, onOrderFiles, onOrderComments, openingWorkId = null, orderActions, initialTab, onTabChange, workCard, query = "", workLayout = "extended", onWorkLayout }: {
+  /** Archivos y comentarios de una OT en una ventana, desde su tarjeta. */
+  onOrderFiles?: (order: WorkshopOrder) => void; onOrderComments?: (order: WorkshopOrder) => void;
+  /** Vista de los trabajos (compacta o extendida) y su cambio. */
+  workLayout?: "compact" | "extended"; onWorkLayout?: (layout: "compact" | "extended") => void;
   /** Búsqueda del encabezado: filtra trabajos y OTs (una OT aparece si coincide ella o uno de sus trabajos). */
   query?: string;
   /** Pestaña con la que abre (la última usada en este ingreso) y aviso al cambiarla. */
@@ -314,15 +344,17 @@ export function WorkAndOrders({ detail, onAddWork, onAddMaintenance, onLinkWorks
       </Pressable> : null}
     </View> : null}
     {!section.available ? <Notice tone="warning" icon="cloud-offline-outline" message={`No se pudo cargar ${tab === "works" ? "los trabajos" : detail.isInternalEntry ? "los mantenimientos" : "las órdenes"}. Desliza hacia abajo para reintentar.`} />
+      : tab === "works" && works.length > 0 && onWorkLayout ? <WorkLayoutToggle value={workLayout} onChange={onWorkLayout} /> : null}
+    {!section.available ? null
       : tab === "works" ? (works.length === 0 ? <Text style={styles.empty}>{searching ? `Ningún trabajo coincide con «${query.trim()}».` : "Este ingreso todavía no tiene trabajos."}</Text>
         : works.map((work) => {
-          // Si el trabajo está en Mi jornada se usa su misma tarjeta (iniciar, entregar, archivos, checklist, comentarios).
-          const card = workCard?.(work.id);
+          // Vista extendida: la misma tarjeta de Mi jornada (iniciar, entregar, archivos, checklist, comentarios). Compacta: la fila pequeña.
+          const card = workLayout === "extended" ? workCard?.(work.id) : null;
+          // La tarjeta ya muestra los códigos de la OT; afuera solo se avisa si el trabajo está suelto.
           if (card) return <View key={work.id} style={styles.cardWrap}>
-            <View style={styles.rowTop}>
-              {work.loose ? <Chip label={detail.isInternalEntry ? "Sin mantenimiento" : "Sin OT"} color={palette.orange} soft={palette.orangeSoft} />
-                : <Chip label={codeOf(work.orderId) ?? work.maintenanceCode ?? "En OT"} color={palette.info} soft={palette.infoSoft} />}
-            </View>
+            {work.loose ? <View style={styles.rowTop}>
+              <Chip label={detail.isInternalEntry ? "Sin mantenimiento" : "Sin OT"} color={palette.orange} soft={palette.orangeSoft} />
+            </View> : null}
             {card}
           </View>;
           return <WorkRow key={work.id} work={work} orderCode={codeOf(work.orderId)} internal={detail.isInternalEntry}
@@ -330,11 +362,16 @@ export function WorkAndOrders({ detail, onAddWork, onAddMaintenance, onLinkWorks
         }))
       : orders.length === 0 ? <Text style={styles.empty}>{searching ? `Ninguna ${detail.isInternalEntry ? "orden de mantenimiento" : "OT"} coincide con «${query.trim()}».` : detail.isInternalEntry ? "Este ingreso todavía no tiene mantenimientos." : "Este ingreso todavía no tiene órdenes de trabajo ni cotizaciones."}</Text>
         : orders.map((order) => <OrderRow key={order.id} order={order} works={detail.works.items.filter((work) => work.orderId === order.id)}
-          actions={orderActions} hasLoose={hasLoose} onOpenWork={onOpenWork} onOpenOrder={onOpenOrder} />)}
+          actions={orderActions} hasLoose={hasLoose} onOpenWork={onOpenWork} onOpenOrder={onOpenOrder} onFiles={onOrderFiles} onComments={onOrderComments} />)}
   </View>;
 }
 
 const styles = StyleSheet.create({
+  layoutToggle: { flexDirection: "row", alignSelf: "flex-end", padding: 2, gap: 2, borderRadius: radius.pill, backgroundColor: palette.track },
+  layoutOption: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill },
+  layoutOptionOn: { backgroundColor: palette.primary },
+  layoutText: { fontSize: 12, fontWeight: "700", color: palette.textSecondary },
+  layoutTextOn: { color: palette.white },
   card: { padding: 12, gap: 8, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
   cardHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   cardTitle: { flex: 1, fontSize: 14, fontWeight: "800", color: palette.heading },
@@ -385,7 +422,7 @@ const styles = StyleSheet.create({
   tabActionStrongText: { fontSize: 13, fontWeight: "800", color: palette.white },
   disabledAction: { opacity: 0.5 },
   orderBar: { flexDirection: "row", marginHorizontal: -12, marginBottom: -12, marginTop: 4, borderTopWidth: 1, borderTopColor: palette.border, overflow: "hidden", borderBottomLeftRadius: radius.md, borderBottomRightRadius: radius.md },
-  orderBarItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3, paddingVertical: 9 },
+  orderBarItem: { flex: 1, minWidth: 0, alignItems: "center", justifyContent: "center", gap: 3, paddingVertical: 9, paddingHorizontal: 2 },
   orderBarPrimary: { backgroundColor: palette.primarySoft },
   orderBarDivider: { borderLeftWidth: 1, borderLeftColor: palette.border },
   orderBarText: { fontSize: 12, fontWeight: "800", color: palette.primary },

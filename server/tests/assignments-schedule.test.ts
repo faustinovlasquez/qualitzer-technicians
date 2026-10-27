@@ -111,6 +111,18 @@ test("agenda day selection retains overdue works and all actual planned dates", 
   assert.deepEqual(assignmentWorkRange(work({ scheduledDate: "2026-08-31" }), "2026-09-07"), dailyRange("2026-09-07"));
 });
 
+test("an unfinished productive work is carried only to the days the server returned it, never to later days", () => {
+  // Planificado el viernes de la semana anterior; lunes y martes (hoy) vuelve como atrasado; miércoles (futuro) ya no.
+  const daily = [snapshot("2026-09-07", "2026-09-04"), snapshot("2026-09-08", "2026-09-04"), { date: "2026-09-09", data: assignments([]) }];
+  const item = mergeDailyAssignments(daily).groups[0]!.works[0]!;
+  assert.equal(item.isOverdue, true);
+  for (const day of ["2026-09-07", "2026-09-08"]) {
+    assert.equal(assignmentIncludesDay(item, day), true, day);
+    assert.equal(assignmentWorkForDay(item, day).isOverdue, true, day);
+  }
+  assert.equal(assignmentIncludesDay(item, "2026-09-09"), false);
+});
+
 test("total execution progress displays 300 percent while its visual bar stays at 100 percent", () => {
   const timing = assignmentProgress(work({ plannedMinutes: 60, executedMinutes: 30, totalPlannedMinutes: 120, totalExecutedMinutes: 330, elapsedSeconds: 3600 }));
   assert.equal(timing.executedMinutes, 60);

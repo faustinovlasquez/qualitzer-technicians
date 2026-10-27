@@ -20,6 +20,8 @@ export const creationFormSchema = z.object({
   damageType: z.enum(["", "operacional", "desgaste"]), reason: nonProductiveReasonSchema,
   reasonText: draftText(500), initialComment: draftText(5000),
   date: z.string().max(10).regex(/^[0-9-]*$/), startTime: z.string().max(5).regex(/^[0-9:]*$/), endTime: z.string().max(5).regex(/^[0-9:]*$/),
+  /** Tiempo asignado sin horario (solo trabajos): se usa cuando no hay inicio y fin. */
+  plannedMinutes: z.number().int().min(0).max(1439).nullable().default(null),
 }).strict();
 export type CreationForm = z.infer<typeof creationFormSchema>;
 export type CatalogItem = NonNullable<CreationForm["equipment"]>;
@@ -35,11 +37,12 @@ export function applyCatalogSelection(form: CreationForm, resource: CreationCata
 
 export function emptyCreationForm(initialDate: string): CreationForm {
   return { title: "", summary: "", motive: "", priority: "medium", maintenanceType: "correctivo", equipment: null, specialty: null, system: null, component: null,
-    damageType: "", reason: "waiting_parts", reasonText: "", initialComment: "", date: calendarDateSchema.safeParse(initialDate).success ? initialDate : "", startTime: "", endTime: "" };
+    damageType: "", reason: "waiting_parts", reasonText: "", initialComment: "", date: calendarDateSchema.safeParse(initialDate).success ? initialDate : "", startTime: "", endTime: "", plannedMinutes: null };
 }
 
 export function creationPayload(kind: CreationKind, form: CreationForm, companyBranchId: number, clientRequestId: string): CreationInput {
-  const base = { companyBranchId, clientRequestId, schedule: { date: form.date, startTime: form.startTime, endTime: form.endTime } };
+  const assigned = kind === "work" && !(form.startTime && form.endTime) && form.plannedMinutes ? { plannedMinutes: form.plannedMinutes } : {};
+  const base = { companyBranchId, clientRequestId, schedule: { date: form.date, startTime: form.startTime, endTime: form.endTime, ...assigned } };
   const specialty = form.specialty ? { specialtyId: form.specialty.id } : {};
   const workSystem = form.system ? { systemId: form.system.id, ...(form.component ? { componentId: form.component.id } : {}) } : {};
   if (kind === "work") return creationInputSchema.parse({ ...base, kind, ...(form.maintenanceId ? { maintenanceId: form.maintenanceId } : {}), work: {
@@ -87,6 +90,13 @@ export function creationDuration(form: Pick<CreationForm, "startTime" | "endTime
   const start = scheduleTimeMinutes(form.startTime);
   const end = scheduleTimeMinutes(form.endTime);
   return start !== null && end !== null && end > start ? end - start : null;
+}
+
+export const durationText = (minutes: number): string => minutes < 60 ? `${minutes} min` : minutes % 60 === 0 ? `${minutes / 60} h` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+
+/** Tiempo asignado del trabajo: el del horario si tiene inicio y fin; si no, el elegido directo. */
+export function creationAssignedMinutes(form: Pick<CreationForm, "startTime" | "endTime" | "plannedMinutes">): number | null {
+  return creationDuration(form) ?? (form.plannedMinutes || null);
 }
 
 const common = { version: z.literal(1), kind: creationKindSchema, form: creationFormSchema };

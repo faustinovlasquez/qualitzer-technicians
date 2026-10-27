@@ -31,13 +31,14 @@ export function pickerAppRootFixture(security: () => DeviceSecurityUi) {
     ["./src/receipts/receiptTimeline", { pendingMaterialCount: () => 0 }], ["./src/ui/BranchSwitcher", { BranchSwitcher: "BranchSwitcher" }], ["./src/receipts/demoReceipts", { createDemoMaterialReceiptPort: () => ({}) }],
     ["./src/notifications/runningTimers", { snapshotActiveTimers: () => [] }],
     ["./src/workshop/useWorkshopBoard", { useWorkshopBoard: () => ({ workshops: null, workshopId: null, board: null, loading: false, error: "", refresh: async () => {}, selectWorkshop: () => {} }) }],
-    ["./src/workshop/WorkshopScreen", { WorkshopScreen: "WorkshopScreen" }], ["./src/workshop/demoWorkshop", { createDemoWorkshopPort: () => ({}) }],
+    ["./src/workshop/WorkshopScreen", { WorkshopScreen: "WorkshopScreen" }], ["./src/workshop/orders/QuickOrderCreator", { QuickOrderCreator: "QuickOrderCreator" }], ["./src/domain/fileDrive", { fileDrivePort: () => null }], ["./src/domain/deletion", { deletionPort: () => null }], ["./src/domain/threads", { threadPort: () => null }], ["./src/workshop/demoWorkshop", { createDemoWorkshopPort: () => ({}) }],
   ]);
   for (const leaf of ["screens/LoginScreen", "screens/TenantSelectionScreen", "screens/DashboardScreen", "screens/WorkDetailScreen", "screens/OrderDetailScreen", "screens/workDetail/DetailUi", "screens/ProfileScreen", "screens/ForcedPasswordScreen", "screens/SessionSetupScreen", "ui/SessionContextBar", "ui/DevelopmentQrPanel", "screens/creation", "notifications", "screens/notifications/NotificationSettingsScreen", "screens/offline/OfflineStatusBar", "screens/offline/OfflineCenterScreen", "domain/format", "domain/assignmentSchedule", "branding/useCompanyBranding", "branding/companyBrandingContext", "security/DeviceSecurityProvider",
     "location/useLocationTracking", "location/LocationHistoryPanel", "location/LocationSettingsPanel", "receipts/useMaterialReceipts", "receipts/MaterialReceiptsScreen", "screens/notifications/ActiveTimersBanner", "diagnostics/errorReporter", "diagnostics/nativeCrashReporter", "screens/creation/CreationSuccess", "screens/creation/CreationModal", "notifications/useNotificationPermissionPrompt", "offline/connectionPresentation"]) imports.set(`./src/${leaf}`, {});
   imports.set("./src/domain/weeklySchedule", { scheduleClock: () => null });
   imports.set("./src/screens/orders/OrderFullDetail", { OrderFullDetail: () => null, assignmentOrderId: () => null });
   imports.set("./src/application/appPermissions",{ AppPermissionsProvider: ({ children }: { children: unknown }) => children, useBranchAppPermissions: () => ({}) });
+  imports.set("./src/screens/workTeam/WorkTeamSheet", { WorkTeamProvider: ({ children }: { children: unknown }) => children });
   imports.set("./src/domain/mobileAppConfig", { isAppPermissionAllowed: () => true });
   const filename = new URL("../../App.tsx", import.meta.url);
   const source = readFileSync(filename, "utf8");

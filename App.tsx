@@ -23,6 +23,7 @@ import { BranchSwitcher } from "./src/ui/BranchSwitcher";
 import { DevelopmentQrPanel } from "./src/ui/DevelopmentQrPanel";
 import { CreationQuickMenu, CreationScreen } from "./src/screens/creation";
 import { AppPermissionsProvider, useBranchAppPermissions } from "./src/application/appPermissions";
+import { WorkTeamProvider } from "./src/screens/workTeam/WorkTeamSheet";
 import { assignmentOrderId, OrderFullDetail } from "./src/screens/orders/OrderFullDetail";
 import { isAppPermissionAllowed } from "./src/domain/mobileAppConfig";
 import { NotificationCenterScreen } from "./src/notifications";
@@ -49,6 +50,10 @@ import { MaterialReceiptsScreen } from "./src/receipts/MaterialReceiptsScreen";
 import { pendingMaterialCount } from "./src/receipts/receiptTimeline";
 import { createDemoMaterialReceiptPort } from "./src/receipts/demoReceipts";
 import { useWorkshopBoard } from "./src/workshop/useWorkshopBoard";
+import { QuickOrderCreator } from "./src/workshop/orders/QuickOrderCreator";
+import { fileDrivePort } from "./src/domain/fileDrive";
+import { threadPort } from "./src/domain/threads";
+import { deletionPort } from "./src/domain/deletion";
 import { WorkshopScreen } from "./src/workshop/WorkshopScreen";
 import { createDemoWorkshopPort } from "./src/workshop/demoWorkshop";
 import { flushAppErrors, installAppErrorReporting, recordAppError, setAppErrorScreen } from "./src/diagnostics/errorReporter";
@@ -83,6 +88,9 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const [workshopDetail, setWorkshopDetail] = useState(false);
   // Lo abierto en Taller (ficha del ingreso) se conserva mientras se abre la ficha normal de un trabajo y se vuelve.
   const workshopMemory = useRef<{ key: string; view: unknown } | null>(null);
+  // Nueva OT desde el menú Crear; al ir a la OT creada se reabre el Taller directo en ella.
+  const [quickOrder, setQuickOrder] = useState(false);
+  const [workshopOpening, setWorkshopOpening] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [workshopQuery, setWorkshopQuery] = useState("");
   // Búsqueda dentro del ingreso u OT abierta en el Taller; se limpia al cambiar de pantalla.
@@ -108,6 +116,9 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const appPermissions = useBranchAppPermissions(demoMode || !(app.session?.mode === "live" && app.liveVerified) ? null : app.receiptPort, app.session?.branchId ?? 0, app.session?.token ?? "", app.tab);
   const workshopAllowed = isAppPermissionAllowed(appPermissions, "workshop");
   useEffect(() => { if (!workshopAllowed && app.tab === "workshop") app.setTab("today"); }, [workshopAllowed, app.tab]);
+  // Equipo del trabajo: con sesión real verificada, conexión y el permiso «Asignar técnicos» de la sucursal.
+  const workTeamActions = app.session?.mode === "live" && app.liveVerified && isAppPermissionAllowed(appPermissions, "workTeam")
+    && (!app.offline || (app.offline.online && !app.offline.authBlocked)) ? app.workTeam : null;
   const brandingContext = companyBrandingContext(app);
   const companyBranding = useCompanyBranding(brandingContext.input, app.busy || security.blocked, allowAutomaticPin && brandingContext.automaticPinEligible && !security.blocked);
   useEffect(() => { setNotificationSettings(false); }, [app.session?.token, app.session?.branchId]);
@@ -195,9 +206,14 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       onQueued={app.onOfflineQueuedCreate}
     /></FadeIn>;
   }
-  if (app.selected) {
-    if (!app.canonicalDetailGroup || !app.canonicalDetailWork || !app.data) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Asignación no disponible" message="Puede haber cambiado de responsable, estado o período. Vuelve al listado y actualiza las asignaciones." /><Button title={app.selectedOrder ? "Volver a la orden" : "Volver a mi jornada"} disabled={app.busy} onPress={app.closeWork} /></SafeAreaView>;
-    return <FadeIn key={`work:${app.canonicalDetailGroup.id}:${app.canonicalDetailWork.id}`} style={styles.app}><WorkDetailScreen
+  // «Entregar» desde la tarjeta abre solo la ventana de entrega sobre la lista, sin ir al detalle.
+  const deliveryFromCard = app.selected?.initialAction === "deliver" && !app.selectedOrder && Boolean(app.canonicalDetailGroup && app.canonicalDetailWork && app.data);
+  const workDetail = (deliveryOnly: boolean) => app.session && app.selected && app.canonicalDetailGroup && app.canonicalDetailWork && app.data ? <WorkDetailScreen
+      deliveryOnly={deliveryOnly}
+      drivePort={app.session.mode === "live" ? fileDrivePort(app.receiptPort) : null}
+      threadPort={app.session.mode === "live" ? threadPort(app.receiptPort) : null}
+      deletionPort={app.session.mode === "live" && app.liveVerified ? deletionPort(app.receiptPort) : null}
+      onDeleted={() => { app.closeWork(); void app.refresh().catch(() => undefined); }}
       timezone={app.session.user.system.timezone}
       equipmentLocation={app.equipmentLocation}
       workEditor={app.session.mode === "live" ? { ...app.workEditor, user: app.session.user } : undefined}
@@ -215,6 +231,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       initialTab={app.selected.initialTab}
       initialAction={app.selected.initialAction}
       allowEditExecutionTime={app.data.technician.allowEditExecutionTime}
+      showWorkTimer={app.data.technician.showWorkTimer !== false}
       onBack={app.closeWork}
       onHome={app.closeDetails}
       onLocationHistory={() => setLocationHistoryKey(locationViewKey)}
@@ -237,9 +254,12 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       offline={app.offlineController ? app.offline : undefined}
       companyBranchId={app.session.branchId ?? undefined}
       readLocalFile={app.offlineController?.readLocalFile}
-    />
+    /> : null;
+  if (app.selected && !deliveryFromCard) {
+    if (!app.canonicalDetailGroup || !app.canonicalDetailWork || !app.data) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Asignación no disponible" message="Puede haber cambiado de responsable, estado o período. Vuelve al listado y actualiza las asignaciones." /><Button title={app.selectedOrder ? "Volver a la orden" : "Volver a mi jornada"} disabled={app.busy} onPress={app.closeWork} /></SafeAreaView>;
+    return <WorkTeamProvider value={workTeamActions}><FadeIn key={`work:${app.canonicalDetailGroup.id}:${app.canonicalDetailWork.id}`} style={styles.app}>{workDetail(false)}
       {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
-    </FadeIn>;
+    </FadeIn></WorkTeamProvider>;
   }
   if (app.selectedOrder) {
     if (!app.orderGroup) return <SafeAreaView style={styles.center}>{connectionStatus}<EmptyState title="Orden no disponible" message="Puede haber cambiado de responsable o período. Vuelve a tu jornada y actualiza las asignaciones." /><Button title="Volver a mi jornada" disabled={app.busy} onPress={app.closeOrder} /></SafeAreaView>;
@@ -247,17 +267,21 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     const fullOrderId = assignmentOrderId(app.orderGroup);
     const fullOrderOnline = !app.offline || (app.offline.online && !app.offline.authBlocked);
     if (fullOrderId !== null && app.session.mode === "live" && app.liveVerified && workshopAllowed && fullOrderOnline && app.session.branchId && app.selectedOrder.deliveryIntent === undefined) {
-      return <FadeIn key={`order-full:${app.orderGroup.id}`} style={styles.app}>
+      return <WorkTeamProvider value={workTeamActions}><FadeIn key={`order-full:${app.orderGroup.id}`} style={styles.app}>
         <OrderFullDetail group={app.orderGroup} orderId={fullOrderId} port={app.receiptPort ?? {}} branchId={app.session.branchId} mode={app.session.mode} storageKey={app.storageKey}
           permissions={appPermissions} tenant={app.session.tenant} branchName={branchName} connectionStatus={connectionStatus} range={app.range} generatedAt={app.data?.generatedAt}
           workerId={app.session.user.workerId} offline={app.offlineController ? app.offline : undefined} busy={app.busy} initialTab={app.selectedOrder.initialTab}
           onBack={() => { app.closeOrder(); void app.refresh().catch(() => undefined); }} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus}
+          deletionPort={deletionPort(app.receiptPort)} onDeleted={() => { app.closeOrder(); void app.refresh().catch(() => undefined); }}
           onLocationHistory={() => setLocationHistoryKey(locationViewKey)} />
         {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
-      </FadeIn>;
+      </FadeIn></WorkTeamProvider>;
     }
-    return <FadeIn key={`order:${app.orderGroup.id}`} style={styles.app}>
+    return <WorkTeamProvider value={workTeamActions}><FadeIn key={`order:${app.orderGroup.id}`} style={styles.app}>
       <OrderDetailScreen
+        drivePort={app.session.mode === "live" ? fileDrivePort(app.receiptPort) : null}
+        deletionPort={app.session.mode === "live" && app.liveVerified ? deletionPort(app.receiptPort) : null}
+        onDeleted={() => { app.closeOrder(); void app.refresh().catch(() => undefined); }}
         creation={app.session.mode === "live" ? { ...app.orderCreation, user: app.session.user } : undefined}
         group={app.orderGroup}
         tenant={app.session.tenant}
@@ -265,7 +289,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         connectionStatus={connectionStatus}
         mode={app.session.mode}
         busy={app.busy}
-        initialTab={app.selectedOrder.initialTab}
+        initialTab={app.selectedOrder.initialTab === "comments" ? "works" : app.selectedOrder.initialTab}
         deliveryIntent={app.selectedOrder.deliveryIntent}
         onDeliveryIntentConsumed={app.consumeOrderDeliveryIntent}
         onBack={app.closeOrder}
@@ -291,13 +315,14 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       />
       {app.error ? <View style={styles.orderError}><Notice message={app.error} tone="warning" /></View> : null}
       {app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}
-    </FadeIn>;
+    </FadeIn></WorkTeamProvider>;
   }
   const navigation: { id: "today" | "agenda" | "materials" | "workshop"; label: string; icon: IconName }[] = [{ id: "today", label: "Mi jornada", icon: "grid-outline" }, { id: "agenda", label: "Agenda", icon: "calendar-outline" }, { id: "materials", label: "Materiales", icon: "cube-outline" }, { id: "workshop", label: "Taller", icon: "construct-outline" }];
   const visibleNavigation = navigation.filter((item) => item.id !== "workshop" || workshopAllowed);
   const creatable = ([["work", "createWorks"], ["maintenance", "createMaintenances"], ["non_productive", "createNonProductive"]] as const)
     .filter(([, key]) => appPermissions[key]).map(([kind]) => kind);
   const navBusy = app.busy || materialReceipts.busy;
+  const canCreateOrder = app.session.mode === "live" && workshopAllowed && appPermissions.ordersCreate;
   const navTab = (item: (typeof navigation)[number]) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.id === "materials" && pendingMaterials > 0 ? `${item.label}, ${pendingMaterials} por confirmar` : item.label} accessibilityState={{ selected: app.tab === item.id, disabled: navBusy }} disabled={navBusy} onPress={() => app.setTab(item.id)} style={styles.navItem}>
     <View style={[styles.navIcon, app.tab === item.id && styles.navActive]}><Ionicons name={app.tab === item.id && item.id === "materials" ? "cube" : app.tab === item.id && item.id === "workshop" ? "construct" : item.icon} size={20} color={app.tab === item.id ? palette.primary : palette.textSecondary} />
       {item.id === "materials" && pendingMaterials > 0 ? <View style={styles.navBadge}><Text style={styles.unreadText}>{pendingMaterials > 99 ? "99+" : pendingMaterials}</Text></View> : null}
@@ -305,7 +330,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
     <Text style={[styles.navText, app.tab === item.id && { color: palette.primary, fontWeight: "800" }]}>{item.label}</Text>
   </Pressable>;
   const canCreate = Boolean(app.session.branchId && app.session.user.workerId && app.session.user.accessBranchs.some((branch) => branch.id === app.session?.branchId && branch.isEnabled !== false && branch.isDeleted !== true));
-  return <AppPermissionsProvider value={appPermissions}><SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
+  return <AppPermissionsProvider value={appPermissions}><WorkTeamProvider value={workTeamActions}><SafeAreaView style={styles.app} edges={["top", "left", "right", "bottom"]}>
     <View style={styles.top}>
       {app.tab !== "today" && !(app.tab === "workshop" && workshopDetail) ? <IconButton name="arrow-back-outline" label="Volver a la vista anterior" disabled={app.busy} onPress={app.backTab} /> : null}
       <BranchSwitcher session={app.session} busy={app.busy} error={app.error} onSelect={(id) => void app.branch(id)}
@@ -345,11 +370,11 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         <View style={styles.body} pointerEvents={app.busy ? "none" : "auto"} accessibilityElementsHidden={app.busy} importantForAccessibility={app.busy ? "no-hide-descendants" : "auto"}>
           <NotificationCenterScreen notifications={app.notifications} onBack={app.backTab} />
         </View>
-      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopScreen key={`${app.storageKey}:${app.session.branchId ?? 0}`} memoryKey={`${app.storageKey}:${app.session.branchId ?? 0}`} memory={workshopMemory}
+      </> : app.tab === "materials" ? <MaterialReceiptsScreen receipt={materialReceipts} focus={app.materialReceiptFocus} /> : app.tab === "workshop" ? <WorkshopScreen key={`${app.storageKey}:${app.session.branchId ?? 0}:${workshopOpening}`} memoryKey={`${app.storageKey}:${app.session.branchId ?? 0}`} memory={workshopMemory}
             workshop={workshop} onSectionChange={setWorkshopDetail} onOpenWork={app.openWorkshopWork} query={workshopQuery} mode={app.session.mode} detailQuery={detailQuery} onViewChange={setWorkshopView}
             onLocationHistory={() => setLocationHistoryKey(locationViewKey)}
             assignments={{ data: app.data, range: app.range, openWork: app.openWork, refresh: () => { void app.refresh().catch(() => undefined); }, onWorkStatus: app.onWorkStatus, busy: app.busy, workerId: app.session.user.workerId,
-              companyBranchId: app.session.branchId, offline: app.offlineController ? app.offline : undefined }}
+              companyBranchId: app.session.branchId, offline: app.offlineController ? app.offline : undefined, loadWide: app.workshopAssignments, wideStatus: app.workshopWorkStatus }}
             creation={app.session.branchId && app.session.user.workerId ? { ...app.workshopCreation, user: app.session.user, tenant: app.session.tenant, companyBranchId: app.session.branchId,
               initialDate: scheduleClock(app.session.user.system.timezone)?.day ?? app.range.startDate, mode: app.session.mode, storageKey: app.storageKey, offline: app.offlineController ? app.offline : undefined, busy: app.busy } : undefined} /> : app.tab === "profile" ? <>{app.noticeError ? <View style={styles.orderError}><Notice message={app.noticeError} tone="warning" onDismiss={app.dismissNoticeError} /></View> : null}<ProfileScreen session={app.session} profileAccess={app.profileAccess} locationTracking={locationTracking} signatureAccess={app.signatureAccess} onNotificationSettings={() => { if (security.isUnlocked() && !app.busy) setNotificationSettings(true); }} deviceSecurity={security} companyBranding={companyBranding} gatewayUrl={app.gatewayUrl} busy={app.busy} error={app.error} health={app.health} offline={app.offline} offlineVerifiedAt={app.offlineVerifiedAt} onOffline={app.openOffline} onBranch={(id) => void app.branch(id)} onLogout={() => void app.logout()} onCheck={() => void app.checkConnection()} onSectionChange={setProfileDetail} onEnableNotifications={app.notifications.client ? () => app.notifications.client!.retryEnable() : undefined} /></> : app.session.branchId === null ? <EmptyState title="Sin sucursal asignada" message="Tu usuario no tiene acceso a una sucursal habilitada. Solicita que lo configuren en Qualitzer." /> : <>
         <ActiveTimersBanner timers={app.activeTimers ?? []} disabled={app.busy} compact={timerBannerCompact} onOpen={(timer) => app.openActiveTimer(timer)}
@@ -360,16 +385,23 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
             const work = group?.works.find((item) => item.id === timer.workId);
             if (group && work) app.openWork(group, work);
           }} />
-        <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} view={app.tab} onScrolledChange={setTimerBannerCompact} />
+        <DashboardScreen query={searchQuery} onQueryChange={setSearchQuery} pendingDates={app.agendaPendingDates} data={app.data} user={app.session.user} range={app.range} focusDate={app.agendaFocusDate} onFocusDate={app.focusAgendaDay} loading={app.loading} busy={app.busy} error={app.error} offline={app.offlineController ? app.offline : undefined} companyBranchId={app.session.branchId} onRefresh={() => void app.refresh().catch(() => undefined)} onRangeChange={app.changeRange} onOpenGroup={app.openGroup} onOpenWork={app.openWork} onWorkStatus={app.onWorkStatus} view={app.tab} onScrolledChange={setTimerBannerCompact}
+          drivePort={app.session.mode === "live" && app.liveVerified ? fileDrivePort(app.receiptPort) : null} threadPort={app.session.mode === "live" && app.liveVerified ? threadPort(app.receiptPort) : null} />
       </>}
     </FadeIn>
     {/* Dentro del Taller (ingreso, OT, inspección…) se oculta el menú inferior: se vuelve con la flecha de cada pantalla. */}
     {app.tab === "workshop" && workshopDetail ? null : <View style={styles.nav}>
       <View style={styles.navSide}>{visibleNavigation.slice(0, 2).map(navTab)}</View>
-      {canCreate && creatable.length > 0 ? <View style={styles.navCreate}><CreationQuickMenu inline onCreate={app.openCreate} disabled={navBusy} allowed={creatable} /></View> : null}
+      {canCreate && (creatable.length > 0 || canCreateOrder) ? <View style={styles.navCreate}><CreationQuickMenu inline onCreate={app.openCreate} disabled={navBusy} allowed={creatable}
+        onCreateOrder={canCreateOrder ? () => setQuickOrder(true) : undefined} /></View> : null}
       <View style={styles.navSide}>{visibleNavigation.slice(2).map(navTab)}</View>
     </View>}
-  </SafeAreaView></AppPermissionsProvider>;
+    {quickOrder ? <QuickOrderCreator workshop={workshop} onClose={() => setQuickOrder(false)} onOpenOrder={(picked, orderId) => {
+      workshopMemory.current = { key: `${app.storageKey}:${app.session?.branchId ?? 0}`, view: { kind: "order", ref: picked, orderId, entryCode: picked.entry.code } };
+      setQuickOrder(false); setWorkshopOpening((value) => value + 1); app.setTab("workshop");
+    }} /> : null}
+    {deliveryFromCard ? workDetail(true) : null}
+  </SafeAreaView></WorkTeamProvider></AppPermissionsProvider>;
 }
 function ApplicationRoot() {
   const security = useDeviceSecurity();

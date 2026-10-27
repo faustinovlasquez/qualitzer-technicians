@@ -30,6 +30,7 @@ test("checklist and evidence routes are separate from parent scroll and inside k
   const ast = ts.createSourceFile("WorkDetailScreen.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const branches = new Map<string, ts.Expression>();
   let evidence: ts.Expression | undefined;
+  let workspace: ts.Expression | undefined;
   const checklistTabs: ts.JsxSelfClosingElement[] = [];
   const assertHosted = (node: ts.Node) => {
     const ancestors: string[] = [];
@@ -42,6 +43,7 @@ test("checklist and evidence routes are separate from parent scroll and inside k
   };
   function visit(node: ts.Node): void {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "evidenceContent") evidence = node.initializer;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "workspaceContent") workspace = node.initializer;
     // The checklist stays mounted after its first visit (hidden, not unmounted, on other tabs) so it is rendered outside the tab ternary.
     if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "ChecklistTab") { checklistTabs.push(node); assertHosted(node); }
     if (ts.isConditionalExpression(node) && ts.isBinaryExpression(node.condition)
@@ -76,8 +78,12 @@ test("checklist and evidence routes are separate from parent scroll and inside k
   assert.ok(host.openingElement.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === "style"
     && attribute.initializer?.getText(ast) === '{tab === "checklist" ? styles.screen : styles.hidden}'));
   assert.ok(files && ts.isIdentifier(files) && files.text === "evidenceContent");
-  assert.ok(evidence && ts.isJsxSelfClosingElement(evidence) && evidence.tagName.getText(ast) === "FileWorkspace");
-  assert.ok(evidence.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === "compact" && attribute.initializer === undefined));
+  // Con conexión, el gestor con carpetas; si no (sin señal, cola o evidencia de un paso), la lista compacta que guarda lo pendiente.
+  assert.ok(evidence && ts.isConditionalExpression(evidence));
+  assert.ok(ts.isJsxSelfClosingElement(evidence.whenTrue) && evidence.whenTrue.tagName.getText(ast) === "FileDrive");
+  assert.ok(ts.isIdentifier(evidence.whenFalse) && evidence.whenFalse.text === "workspaceContent");
+  assert.ok(workspace && ts.isJsxSelfClosingElement(workspace) && workspace.tagName.getText(ast) === "FileWorkspace");
+  assert.ok(workspace.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === "compact" && attribute.initializer === undefined));
   assert.match(text, /behavior=\{Platform.OS === "ios" \? "padding" : undefined\}/);
   assert.match(text, /keyboardVerticalOffset=\{insets.top\}/);
   assert.match(text, /colors=\{\[palette.primary\]\}/);

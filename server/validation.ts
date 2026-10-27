@@ -14,7 +14,7 @@ export type RangeQuery = z.infer<typeof rangeQuerySchema>;
 export const branchQuerySchema = z.object({ companyBranchId: positiveId.transform(Number).optional() }).strict();
 export const resourceParamsSchema = z.object({
   target: z.enum(["work", "group"]).optional(),
-  groupId: z.string().regex(/^(?:external|maintenance|direct|direct-np)-[1-9]\d*$/), workId: positiveId, stepId: positiveId.optional(), activityId: positiveId.optional(), fileId: positiveId.optional(),
+  groupId: z.string().regex(/^(?:external|maintenance|direct|direct-np)-[1-9]\d*$/), workId: positiveId, stepId: positiveId.optional(), activityId: positiveId.optional(), fileId: positiveId.optional(), workerId: positiveId.optional(),
 }).strict();
 export const emptySchema = z.object({}).strict();
 export const healthQuerySchema = z.object({ tenantId: tenantIdSchema.optional() }).strict();

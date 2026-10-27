@@ -183,7 +183,7 @@ async function detailFixture() {
     "./workDetail/ChecklistTab": { ChecklistTab: "ChecklistTab" }, "./workDetail/CompletionDialog": { CompletionDialog: "CompletionDialog" },
     "./workDetail/EvidenceTab": { EvidenceTab: "EvidenceTab" }, "./workDetail/localPhotos": { openLocalPhotoScope: () => {} },
     "./workDetail/useAttachmentFiles": { useAttachmentFiles: () => attachments }, "./workDetail/useWorkDraft": drafts,
-    "./workDetail/WorkInformation": { EquipmentTab: "EquipmentTab", WorkTab: "WorkTab" }, "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./workDetail/WorkInformation": { EquipmentTab: "EquipmentTab", WorkTab: "WorkTab" }, "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
     "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" }, "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },
   });

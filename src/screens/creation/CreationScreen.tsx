@@ -15,10 +15,11 @@ import { CreationCatalogSelector, type CreationCatalogCache } from "./CreationCa
 import { CreationScheduleFields } from "./CreationScheduleFields";
 import { WorkEditScreen, type WorkEditScreenProps } from "./WorkEditScreen";
 import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
-import { CreationFields, creationLabels, priorityLabels } from "./CreationFields";
+import { CreationFields, LinkedEquipmentCard, creationLabels, priorityLabels } from "./CreationFields";
 import { CreationModal } from "./CreationModal";
+import { CreationDone, CreationReview, CreationStepper } from "./CreationUi";
 import { creationDraftKey, openCreationDraftStore } from "./creationDrafts";
-import { applyCatalogSelection, catalogFormField, creationConflictPreview, creationDuration, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
+import { applyCatalogSelection, catalogFormField, creationAssignedMinutes, creationConflictPreview, creationDuration, durationText, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
 
 export { clearCreationDrafts } from "./creationDrafts";
 export type { CreationInput, CreationKind, CreationOptions, CreationOptionsQuery, CreationResult } from "../../domain/creation";
@@ -43,6 +44,8 @@ export interface CreationScreenProps {
   onSubmit: (input: CreationInput) => Promise<CreationResult>;
   onCreated?: (result: CreationResult) => void | Promise<void>;
   onQueued?: (outcome: OfflineQueuedOutcome) => void | Promise<void>;
+  /** Al confirmar, en vez de abrir el trabajo se muestra la ventana de éxito: ver los trabajos, crear otro o abrir el creado. */
+  successFlow?: { viewLabel: string; onConfirmed?: (result: CreationResult) => void; onView: (result: CreationResult) => void; subtitle?: string; hideOpen?: boolean };
 }
 
 export function CreationScreen(props: CreationScreenProps | WorkEditScreenProps) {
@@ -52,7 +55,8 @@ export function CreationScreen(props: CreationScreenProps | WorkEditScreenProps)
   return <CreationScreenContent key={scope} {...props} draftKey={scope} />;
 }
 
-const steps = ["Datos", "Horario", "Revisar"];
+const steps = [{ label: "Datos", icon: "document-text-outline" as const }, { label: "Horario", icon: "time-outline" as const }, { label: "Revisar", icon: "checkmark-done-outline" as const }];
+const stepTitles = ["Datos del trabajo", "Fecha y horario", "Revisar y crear"];
 const serverMessages = new Map<string, string>([
   ["MOBILE_CREATION_INVALID_LOCAL_TIME", "Esa hora local no existe por el cambio de horario. Elige otra franja."],
   ["MOBILE_CREATION_AMBIGUOUS_LOCAL_TIME", "La franja contiene una hora ambigua por cambio de horario."],
@@ -73,7 +77,7 @@ function submissionError(error: unknown): string {
   return error instanceof Error ? serverMessages.get(error.message) ?? "No se confirmó la creación. Puede haberse recibido en el servidor." : "No se confirmó la creación. Puede haberse recibido en el servidor.";
 }
 
-function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, draftKey, parentMaintenance, parentEntry }: CreationScreenProps & { draftKey: string }) {
+function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, successFlow, draftKey, parentMaintenance, parentEntry }: CreationScreenProps & { draftKey: string }) {
   const security = useDeviceSecurity();
   const store = useMemo(() => openCreationDraftStore(draftKey, kind, companyBranchId), [draftKey, kind, companyBranchId]);
   const catalogCache = useMemo<CreationCatalogCache>(() => new Map(), [draftKey]);
@@ -96,14 +100,14 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const [catalog, setCatalog] = useState<CreationCatalogResource | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
-  const latest = useRef({ busy, offline, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked });
-  latest.current = { busy, offline, onBack, onSubmit, onCreated, onQueued, isUnlocked: security.isUnlocked };
+  const latest = useRef({ busy, offline, onBack, onSubmit, onCreated, onQueued, successFlow, isUnlocked: security.isUnlocked });
+  latest.current = { busy, offline, onBack, onSubmit, onCreated, onQueued, successFlow, isUnlocked: security.isUnlocked };
   const changed = useRef(false);
   const loadOptionsRef = useRef(onLoadOptions);
   loadOptionsRef.current = onLoadOptions;
   const form = draft.form;
   const frozen = draft.phase !== "editing" || !ready || busy || sending;
-  const minutes = creationDuration(form);
+  const minutes = kind === "work" ? creationAssignedMinutes(form) : creationDuration(form);
   const preview = useMemo(() => creationConflictPreview(data, { date: form.date, startTime: form.startTime, endTime: form.endTime }), [data, form.date, form.startTime, form.endTime]);
   const branch = user.accessBranchs.find((item) => item.id === companyBranchId);
   const queuedState = draft.phase === "queued" ? queuedCreationState(draft, offline) : null;
@@ -289,6 +293,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     if (!mounted.current || current.current !== saved) return;
     setSaveError("");
     if (!latest.current.isUnlocked()) return;
+    if (automatic && saved.phase === "confirmed" && latest.current.successFlow) { latest.current.successFlow.onConfirmed?.(saved.result); return; }
     if (automatic && !(saved.phase === "queued" ? latest.current.onQueued : latest.current.onCreated)) return;
     try {
       if (saved.phase === "queued" && latest.current.onQueued) await latest.current.onQueued(saved.outcome);
@@ -319,14 +324,16 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <View style={styles.header}>
         <IconButton name="arrow-back" label="Volver conservando borrador" disabled={busy || sending} onPress={requestBack} />
-        <View style={styles.headerText}><Text style={styles.eyebrow}>CREACIÓN MÓVIL</Text><Text accessibilityRole="header" style={styles.title}>{creationLabels[kind]}</Text></View>
+        <View style={styles.headerText}>
+          <Text accessibilityRole="header" style={styles.headerTitle}>{creationLabels[kind]}</Text>
+          <Text style={styles.headerStep} numberOfLines={1}>{draft.phase === "editing" ? `Paso ${step + 1} de 3 · ${stepTitles[step]}` : draft.phase === "pending" ? "Por confirmar" : "Creación lista"}
+            {parentEntry ? ` · Ingreso ${parentEntry.code}` : parentMaintenance ? ` · ${parentMaintenance.code}` : ""}</Text>
+        </View>
         <IconButton name="list-outline" label="Volver a mis asignaciones" disabled={busy || sending} onPress={requestExit} />
       </View>
       {connectionStatus}
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <Text style={styles.context}>{tenant.name} · {branch?.name ?? `Sucursal ${companyBranchId}`} · {user.name} {user.lastnames}</Text>
-        {parentMaintenance ? <Text style={styles.heading}>{parentMaintenance.code}</Text> : null}
-        {parentEntry ? <Text style={styles.heading}>Ingreso {parentEntry.code}</Text> : null}
         {mode === "demo" ? <Badge label="Demostración · no crea registros reales" tone="warning" /> : null}
         {draft.phase === "queued" ? <Card style={styles.card}>
           <Badge label="Creación anterior" tone="neutral" />
@@ -348,9 +355,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
           <Button title={kind === "maintenance" ? "Gestionar mantenimiento" : "Gestionar trabajo"} loading={sending} disabled={busy} onPress={() => void openSaved()} />
           <Button title="Crear otro" variant="secondary" disabled={sending || busy} onPress={() => void editAsNew(true)} />
         </Card> : <>
-          <View style={styles.steps} accessibilityLabel={`Paso ${step + 1} de 3: ${steps[step]}`}>
-            {steps.map((label, index) => <View key={label} style={[styles.step, index === step && styles.activeStep]}><Text style={[styles.stepText, index === step && styles.activeStepText]}>{index + 1}. {label}</Text></View>)}
-          </View>
+          <CreationStepper steps={steps} current={step} onPick={draft.phase === "editing" && !frozen ? (index) => { setStep(index); setError(""); } : undefined} />
           {draftError ? <Card style={styles.card}><Text accessibilityRole="alert" style={styles.warning}>{draftError}</Text><Button title="Descartar borrador no recuperable" variant="secondary" onPress={() => setDialog("invalid")} /></Card> : null}
           {!ready && !draftError ? <ActivityIndicator accessibilityLabel="Recuperando borrador" color={palette.primary} /> : null}
           {loadingOptions ? <ActivityIndicator accessibilityLabel="Cargando opciones de creación" color={palette.primary} /> : null}
@@ -361,36 +366,40 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar creación. Crear otro registro puede duplicar uno ya guardado.</Text>
             </Card> : null}
             {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={kind === "maintenance" || !!parentMaintenance} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
-              equipmentLookup={parentEntry ? <View style={styles.card}><Text style={styles.heading}>Equipo del ingreso</Text><Text style={styles.body}>{parentEntry.equipmentLabel}</Text><Text style={styles.hint}>{kind === "maintenance" ? "El mantenimiento queda unido al ingreso con su equipo propio." : "El trabajo queda unido al ingreso con su cliente y equipo."}</Text></View>
-                : parentMaintenance ? <View style={styles.card}><Text style={styles.heading}>Equipo del mantenimiento</Text><Text style={styles.body}>{parentMaintenance.equipment?.label ?? "No informado"}</Text><Text style={styles.hint}>{parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier}</Text></View> : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
+              equipmentLookup={parentEntry ? <LinkedEquipmentCard title={`EQUIPO DEL INGRESO ${parentEntry.code}`} label={parentEntry.equipmentLabel}
+                  hint={kind === "maintenance" ? "El mantenimiento queda unido al ingreso con su equipo propio." : "El trabajo queda unido al ingreso con su cliente y equipo."} />
+                : parentMaintenance ? <LinkedEquipmentCard title="EQUIPO DEL MANTENIMIENTO" label={parentMaintenance.equipment?.label ?? "No informado"}
+                  detail={parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier} hint={`El trabajo queda dentro de ${parentMaintenance.code}.`} /> : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
                 required={kind === "maintenance"} disabled={frozen} selected={form.equipment} error={errors.equipment} cache={catalogCache}
                 onLoadOptions={onLoadOptions} onSelect={(item) => change("equipment", item)} />} /></Card> : null}
             {step === 1 ? <Card style={styles.card}>
-              <CreationScheduleFields form={form} errors={errors} disabled={frozen} optionalTimes={kind === "work"} scopeKey={JSON.stringify([draftKey, form.date])} onChange={change} />
-              <Text accessibilityLiveRegion="polite" style={styles.body}>Duración prevista: {minutes === null ? kind === "work" ? "sin definir" : "completa un horario válido" : `${minutes} min (${Math.floor(minutes / 60)} h ${minutes % 60} min)`}</Text>
-              <Text style={styles.body}>Zona horaria de la sucursal: {options.timezone}</Text>
-              <Text style={styles.hint}>Un solo día, sin pausas automáticas. Para cruzar medianoche o repetir, divide la planificación desde la web. El servidor verifica los cambios de horario.</Text>
+              <CreationScheduleFields form={form} errors={errors} disabled={frozen} optionalTimes={kind === "work"} scopeKey={JSON.stringify([draftKey, form.date])} today={initialDate} onChange={change} />
+              {kind !== "work" ? <Text accessibilityLiveRegion="polite" style={styles.body}>Duración: {minutes === null ? "completa un horario válido" : durationText(minutes)}</Text> : null}
+              <Text style={styles.hint}>Un solo día, en hora de {options.timezone}. Para cruzar la medianoche o repetir, planifícalo desde la web.</Text>
             </Card> : null}
-            {step === 2 ? <Card style={styles.card}>
-              <Text accessibilityRole="header" style={styles.heading}>Revisa antes de crear</Text>
-              {kind !== "non_productive" ? <>
-                <Text style={styles.reviewTitle}>{form.title.trim()}</Text>
-                <Text style={styles.body}>{kind === "work" ? form.summary.trim() : form.motive.trim()}</Text>
-                {kind === "maintenance" ? <Text style={styles.body}>Tipo: {form.maintenanceType === "correctivo" ? "Correctivo" : "Detención"}</Text> : null}
-                <Text style={styles.body}>Prioridad: {priorityLabels[form.priority]}</Text>
-                <Text style={styles.body}>{parentEntry ? `Ingreso ${parentEntry.code}: ${parentEntry.equipmentLabel}` : parentMaintenance ? `Equipo del mantenimiento: ${parentMaintenance.equipment?.label ?? "No informado"}` : form.equipment ? `Equipo: ${form.equipment.label} · ID ${form.equipment.id}` : "Sin equipo asociado"}</Text>
-                {form.specialty ? <Text style={styles.body}>Especialidad: {form.specialty.label}</Text> : null}
-                {form.system && (kind === "maintenance" || parentMaintenance) ? <Text style={styles.body}>Sistema: {form.system.label}{form.component ? ` · Subsistema: ${form.component.label}` : ""}</Text> : null}
-                {kind === "maintenance" && form.damageType ? <Text style={styles.body}>Daño: {form.damageType === "desgaste" ? "Desgaste" : "Operacional"}</Text> : null}
-              </> : <>
-                <Text style={styles.reviewTitle}>{options.nonProductiveReasons.find((item) => item.value === form.reason)?.label ?? form.reason}</Text>
-                {form.reasonText.trim() ? <Text style={styles.body}>{form.reasonText.trim()}</Text> : null}
-                {form.initialComment.trim() ? <Text style={styles.body}>Comentario: {form.initialComment.trim()}</Text> : null}
-              </>}
-              <Text style={styles.body}>{form.date} · {form.startTime || "Sin inicio"}–{form.endTime || "Sin fin"}</Text>
-              <Text style={styles.body}>{minutes === null ? "Sin duración prevista" : `${minutes} min`} · {options.timezone}</Text>
-              <Text style={styles.hint}>Se asignará a tu trabajador activo en esta sucursal, sin iniciar su ejecución.</Text>
-            </Card> : null}
+            {step === 2 ? <CreationReview disabled={frozen || draft.phase !== "editing"} onEdit={(index) => { setStep(index); setError(""); }}
+              note="Se asignará a ti en esta sucursal, sin iniciar su ejecución."
+              sections={[
+                kind !== "non_productive" ? { title: "Datos del trabajo", icon: "document-text-outline" as const, step: 0, rows: [
+                  { icon: "text-outline" as const, label: "Título", value: form.title.trim(), strong: true },
+                  ...((kind === "work" ? form.summary : form.motive).trim() ? [{ icon: "reader-outline" as const, label: kind === "work" ? "Resumen" : "Motivo", value: (kind === "work" ? form.summary : form.motive).trim() }] : []),
+                  ...(kind === "maintenance" ? [{ icon: "build-outline" as const, label: "Tipo", value: form.maintenanceType === "correctivo" ? "Correctivo" : "Detención" }] : []),
+                  { icon: "flag-outline" as const, label: "Prioridad", value: priorityLabels[form.priority] },
+                  { icon: "construct-outline" as const, label: "Equipo", value: parentEntry ? `${parentEntry.equipmentLabel} · Ingreso ${parentEntry.code}` : parentMaintenance ? parentMaintenance.equipment?.label ?? "No informado" : form.equipment ? form.equipment.label : "Sin equipo asociado" },
+                  ...(form.specialty ? [{ icon: "hammer-outline" as const, label: "Especialidad", value: form.specialty.label }] : []),
+                  ...(form.system && (kind === "maintenance" || parentMaintenance) ? [{ icon: "git-network-outline" as const, label: "Sistema", value: `${form.system.label}${form.component ? ` · ${form.component.label}` : ""}` }] : []),
+                  ...(kind === "maintenance" && form.damageType ? [{ icon: "warning-outline" as const, label: "Daño", value: form.damageType === "desgaste" ? "Desgaste" : "Operacional" }] : [])
+                ] } : { title: "Motivo", icon: "pause-circle-outline" as const, step: 0, rows: [
+                  { icon: "pause-outline" as const, label: "Motivo", value: options.nonProductiveReasons.find((item) => item.value === form.reason)?.label ?? form.reason, strong: true },
+                  ...(form.reasonText.trim() ? [{ icon: "reader-outline" as const, label: "Detalle", value: form.reasonText.trim() }] : []),
+                  ...(form.initialComment.trim() ? [{ icon: "chatbubble-outline" as const, label: "Comentario", value: form.initialComment.trim() }] : [])
+                ] },
+                { title: "Fecha y horario", icon: "time-outline" as const, step: 1, rows: [
+                  { icon: "calendar-outline" as const, label: "Día", value: form.date },
+                  { icon: "hourglass-outline" as const, label: kind === "work" ? "Tiempo asignado" : "Duración", value: minutes === null ? "Sin tiempo asignado" : durationText(minutes), strong: true },
+                  { icon: "time-outline" as const, label: "Horario", value: form.startTime || form.endTime ? `${form.startTime || "Sin inicio"} – ${form.endTime || "Sin fin"}` : "Sin hora fija" }
+                ] }
+              ]} /> : null}
             {step > 0 && preview.overlaps.length > 0 ? <Card style={styles.card}>
               <Text style={styles.warning}>Este horario coincide con otros trabajos de tu agenda. Puedes continuar.</Text>
               {preview.overlaps.map((title) => <Text key={title} style={styles.body}>• {title}</Text>)}
@@ -407,6 +416,19 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
         {saveError ? <Text accessibilityRole="alert" style={styles.error}>{saveError}</Text> : null}
       </ScrollView>
     </KeyboardAvoidingView>
+    {confirmedResult && successFlow ? <CreationDone busy={sending || busy}
+      title={mode === "demo" ? "¡Simulación lista!" : kind === "maintenance" ? "¡Mantenimiento creado!" : "¡Trabajo creado!"}
+      code={confirmedResult.kind === "maintenance" ? null : assignmentWorkCode({ id: String(confirmedResult.workId) })}
+      subtitle={successFlow.subtitle ?? (parentEntry ? `Quedó en el ingreso ${parentEntry.code} y asignado a ti.` : parentMaintenance ? `Quedó en ${parentMaintenance.code} y asignado a ti.` : "Quedó en tu agenda y asignado a ti.")}
+      details={[
+        { icon: "document-text-outline", label: draft.form.title.trim() || creationLabels[kind] },
+        { icon: "calendar-outline", label: `${confirmedResult.schedule.date}${confirmedResult.schedule.startTime ? ` · ${confirmedResult.schedule.startTime}–${confirmedResult.schedule.endTime || "sin fin"}` : " · sin hora fija"}` },
+        ...(confirmedResult.schedule.plannedMinutes ? [{ icon: "hourglass-outline" as const, label: `Tiempo asignado: ${durationText(confirmedResult.schedule.plannedMinutes)}` }] : []),
+        ...(draft.form.specialty ? [{ icon: "hammer-outline" as const, label: draft.form.specialty.label }] : [])
+      ]}
+      primary={{ label: successFlow.viewLabel, icon: "list-outline", onPress: () => successFlow.onView(confirmedResult) }}
+      secondary={{ label: kind === "maintenance" ? "Crear otro mantenimiento" : "Crear otro trabajo", icon: "add-circle-outline", onPress: () => void editAsNew(true) }}
+      tertiary={successFlow.hideOpen ? undefined : { label: kind === "maintenance" ? "Abrir el mantenimiento" : "Abrir el trabajo creado", onPress: () => void openSaved() }} /> : null}
     {catalog && !frozen ? <CreationCatalogSelector resource={catalog} systemId={form.system?.id} companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId} cache={catalogCache}
       selected={form[catalogFormField[catalog]]} onLoadOptions={onLoadOptions} onClose={() => setCatalog(null)}
       onSelect={(item) => selectCatalog(catalog, item)} /> : null}
@@ -421,11 +443,10 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: palette.background }, fill: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: palette.surface, borderBottomWidth: 1, borderColor: palette.border },
-  headerText: { flex: 1, gap: 3 }, eyebrow: { ...typography.overline, color: palette.primary }, title: { ...typography.heading, color: palette.text },
+  headerText: { flex: 1, gap: 2, minWidth: 0 }, title: { ...typography.heading, color: palette.text },
+  headerTitle: { fontSize: 17, fontWeight: "800", color: palette.heading }, headerStep: { ...typography.caption, color: palette.textSecondary },
   content: { width: "100%", maxWidth: 720, alignSelf: "center", padding: 20, paddingBottom: 40, gap: 16 },
   context: { ...typography.caption, color: palette.textSecondary }, card: { gap: 14 },
-  steps: { flexDirection: "row", gap: 6 }, step: { flex: 1, minHeight: 44, borderRadius: radius.sm, backgroundColor: palette.track, justifyContent: "center", alignItems: "center", padding: 8 },
-  activeStep: { backgroundColor: palette.primarySoft }, stepText: { ...typography.caption, color: palette.textSecondary }, activeStepText: { color: palette.primary, fontWeight: "800" },
   heading: { ...typography.heading, color: palette.text }, body: { ...typography.body, color: palette.text }, reviewTitle: { ...typography.heading, color: palette.text },
   warning: { ...typography.body, color: palette.amber }, hint: { ...typography.caption, color: palette.textSecondary }, error: { ...typography.body, color: palette.danger },
 });

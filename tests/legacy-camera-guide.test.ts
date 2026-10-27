@@ -88,7 +88,7 @@ function legacyFixture() {
       useWorkDraft: () => ({ data, hydrated: control.hydrated, saving: false, error: null, store }),
     },
     "./workDetail/WorkInformation": { EquipmentTab: "EquipmentTab", WorkTab: "WorkTab" },
-    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
     "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
     "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },

@@ -20,6 +20,8 @@ import { Notice } from "./workDetail/DetailUi";
 import { DeliverySuccess } from "./workDetail/DeliverySuccess";
 import { errorMessage } from "./workDetail/detailRules";
 import { FileWorkspace } from "./workDetail/FileWorkspace";
+import { FileDrive } from "../files/FileDrive";
+import { driveApi, type FileDrivePort } from "../domain/fileDrive";
 import { OrderLifecyclePanel } from "./orders/OrderLifecyclePanel";
 import { OfflineOrderLifecyclePanel } from "./offline/OfflineOrderLifecyclePanel";
 import { offlineAttachment, operationsForWork, type PendingDocument } from "./offline/offlineUi";
@@ -27,8 +29,16 @@ import type { MaintenanceDeliveryContext, MaintenanceDeliveryInput } from "../do
 import type { UserSignatureAccess } from "../domain/userSignatures";
 import { CreationScreen, type CreationScreenProps } from "./creation/CreationScreen";
 import { CreationFloatingButton } from "./creation/CreationQuickMenu";
+import { DeleteRecordDialog } from "../deletion/DeleteRecordDialog";
+import type { DeletionPort } from "../domain/deletion";
+import { useAppPermission } from "../application/appPermissions";
 
 export interface OrderDetailScreenProps {
+  /** Eliminar el mantenimiento o la OT si los creó el técnico y siguen pendientes (con conexión). */
+  deletionPort?: DeletionPort | null;
+  onDeleted?: () => void;
+  /** Gestor de archivos con carpetas (como la web) del mantenimiento o la OT, con conexión. */
+  drivePort?: FileDrivePort | null;
   group: AssignmentGroup;
   tenant: Tenant;
   branchName: string;
@@ -80,6 +90,8 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const { group, tenant, branchName, mode, busy, initialTab = "works", onBack, onOpenWork, onWorkStatus, onRefresh } = props;
   const [tab, setTab] = useState<OrderTab>(initialTab);
   const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const canDeleteOwn = useAppPermission("deleteOwn");
   // El usuario decide si minimiza la tarjeta; la decisión se conserva al salir y volver a entrar.
   const [heroCollapsed, toggleHero] = useHeroCollapsed("order");
   const [creating, setCreating] = useState(false);
@@ -111,6 +123,10 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   latest.current = props;
   const workOrderCode = assignmentWorkOrderCode(group);
   const direct = group.type === "direct_assignment";
+  // Eliminar el mantenimiento o la OT si los creó el técnico y siguen pendientes (lo revisa el servidor).
+  const deletion = props.deletionPort && canDeleteOwn && mode === "live" && !localGroup && !direct && props.range && props.companyBranchId !== undefined
+    ? { port: props.deletionPort, scope: { groupId: group.id, range: { startDate: props.range.startDate, endDate: props.range.endDate, companyBranchId: props.companyBranchId } } }
+    : null;
   const filesScope = JSON.stringify(["order-files", props.storageKey, mode, tenant.id, tenant.portalOrigin, tenant.environment, branchName, group.type, group.id]);
 
   useEffect(() => {
@@ -207,7 +223,13 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     tenant={tenant} connectionStatus={props.connectionStatus} companyBranchId={props.companyBranchId} initialDate={props.range?.startDate ?? group.scheduledDate}
     data={null} offline={props.offline} mode={mode} busy={busy} storageKey={props.storageKey}
     parentMaintenance={{ id: Number(group.id.slice("maintenance-".length)), code: workOrderCode ?? group.code, equipment: group.equipment }}
-    onBack={() => setCreating(false)} onCreated={async result => { await props.creation?.onCreated?.(result); if (mounted.current) { setTab("works"); history.current = []; setCreating(false); } }} />;
+    onBack={() => setCreating(false)} onCreated={async result => { await props.creation?.onCreated?.(result); if (mounted.current) { setTab("works"); history.current = []; setCreating(false); } }}
+    // Al crear: ventana de éxito; la lista del mantenimiento se actualiza de inmediato y el técnico elige si verla o crear otro.
+    successFlow={{
+      viewLabel: "Ver trabajos del mantenimiento", hideOpen: true,
+      onConfirmed: (result) => { void Promise.resolve(props.creation?.onCreated?.(result)).catch(() => undefined); },
+      onView: () => { if (mounted.current) { setTab("works"); history.current = []; setCreating(false); } }
+    }} />;
   return <SafeAreaView style={styles.safe}>
     {deliverySucceeded ? <DeliverySuccess title="Mantenimiento entregado" name={plainText(group.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
     <SessionContextBar tenant={tenant} branchName={branchName}>{props.connectionStatus}</SessionContextBar>
@@ -282,7 +304,11 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     </ScrollView>
     </View>
       {filesVisited ? <View style={[styles.filePanel, showCreateWork && styles.createSpace, tab !== "files" && styles.hidden]}>
-        <FileWorkspace
+        {/* Con conexión: gestor con carpetas de la web. Sin conexión o con envíos en cola sigue la lista que los reenvía. */}
+        {props.drivePort && mode === "live" && !direct && online && !localGroup && !props.staleReadOnly && props.range && props.companyBranchId !== undefined && pendingDocuments.length === 0
+          ? <FileDrive key={group.id} embedded title={group.type === "internal_maintenance" ? "Archivos del mantenimiento" : "Archivos de la OT"} subtitle={plainText(group.code)}
+            api={driveApi(props.drivePort, { kind: "assignment", groupId: group.id, range: { startDate: props.range.startDate, endDate: props.range.endDate, companyBranchId: props.companyBranchId } })} />
+          : <FileWorkspace
           compact
           autoSave
           backHandler={tab === "files" ? childBack : undefined}
@@ -307,7 +333,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           }}
           onUpload={(files: LocalPhoto[]) => runOperation("upload", () => props.onUploadFiles(files))}
           onDelete={(fileId: string) => runOperation("delete", () => props.onDeleteFile(fileId))}
-        />
+        />}
       </View> : null}
     {group.type === "internal_maintenance" ? <View style={styles.actionDock} testID="maintenance-action-dock">
       {showCreateWork ? <View style={styles.createDock} testID="maintenance-create-fab"><CreationFloatingButton label="Crear trabajo" disabled={createDisabled} onPress={createWork} /></View> : null}
@@ -318,9 +344,13 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
         <SectionTitle title="Secciones de la orden" />
         {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); selectTab(item.id); }} />)}
         {props.onLocationHistory ? <Button title="Mi historial de ubicación" icon="location-outline" variant="secondary" disabled={locked} onPress={() => { setSectionsOpen(false); props.onLocationHistory?.(); }} /> : null}
+        {deletion ? <Button title={group.type === "internal_maintenance" ? "Eliminar mantenimiento" : "Eliminar OT"} icon="trash-outline" variant="secondary" iconColor={palette.danger} textStyle={{ color: palette.danger }}
+          disabled={locked || !online} onPress={() => { setSectionsOpen(false); setDeleting(true); }} /> : null}
         <Button title="Cerrar menu" icon="close-outline" variant="ghost" onPress={() => setSectionsOpen(false)} />
       </ScrollView></View>
     </Modal> : null}
+    {deleting && deletion ? <DeleteRecordDialog port={deletion.port} scope={deletion.scope} kind={group.type === "internal_maintenance" ? "maintenance" : "order"} name={plainText(group.title)}
+      onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); props.onDeleted?.(); }} /> : null}
   </SafeAreaView>;
 }
 

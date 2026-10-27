@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { creationCatalogResourceSchema, creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, creationPlannedMinutes } from "../../src/domain/creation";
+import { creationCatalogResourceSchema, creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, creationExpectedMinutes } from "../../src/domain/creation";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
@@ -50,7 +50,7 @@ export function createCreationRouter(upstream: Upstream): Router {
       replayed = metadata.idempotencyReplayed ?? (status === 200 ? "true" : "false");
     } }));
     const expectedGroup = input.kind === "work" && input.maintenanceId !== undefined ? `maintenance-${input.maintenanceId}` : input.kind !== "maintenance" ? `${input.kind === "work" ? "direct" : "direct-np"}-${result.workId}` : undefined;
-    if (![200, 201].includes(status) || result.kind !== input.kind || result.companyBranchId !== input.companyBranchId || result.schedule.date !== input.schedule.date || result.schedule.startTime !== input.schedule.startTime || result.schedule.endTime !== input.schedule.endTime || result.schedule.plannedMinutes !== creationPlannedMinutes(input.schedule) || expectedGroup !== undefined && result.groupId !== expectedGroup) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    if (![200, 201].includes(status) || result.kind !== input.kind || result.companyBranchId !== input.companyBranchId || result.schedule.date !== input.schedule.date || result.schedule.startTime !== input.schedule.startTime || result.schedule.endTime !== input.schedule.endTime || result.schedule.plannedMinutes !== creationExpectedMinutes(input.schedule) || expectedGroup !== undefined && result.groupId !== expectedGroup) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.set("Idempotency-Replayed", replayed === "true" ? "true" : "false").status(status).json(result);
   });
   return router;

@@ -113,7 +113,7 @@ function fixture() {
     "branding/useCompanyBranding": { useCompanyBranding: () => ({}) }, "branding/companyBrandingContext": { companyBrandingContext: () => ({ input: null, automaticPinEligible: false }) },
     "infrastructure/gatewayConfig": { gatewayConfiguration: { locked: true } },
     "screens/workDetail/DetailUi": { Notice: "Notice", AttachmentList: "AttachmentList" },
-    "screens/workDetail/WorkInformation": { WorkTab: "WorkTab", EquipmentTab: "EquipmentTab" },
+    "screens/workDetail/WorkInformation": { WorkTab: "WorkTab", EquipmentTab: "EquipmentTab", WorkDescription: "WorkDescription" },
     "screens/workDetail/files/WorkspaceFileList": { PendingFileList: "PendingFileList", SavedFileList: "SavedFileList" },
     "screens/workDetail/ChecklistTab": { ChecklistTab: "ChecklistTab" }, "screens/workDetail/CompletionDialog": { CompletionDialog: "CompletionDialog" },
     "screens/workDetail/CommentsTab": { CommentsTab: "CommentsTab" }, "screens/workDetail/EvidenceTab": { EvidenceTab: "EvidenceTab" },
@@ -124,12 +124,13 @@ function fixture() {
     // Los permisos al iniciar sesión tienen su propia prueba; aquí no deben consultar la cámara ni la ubicación reales.
     "notifications/useNotificationPermissionPrompt": { useNotificationPermissionPrompt: () => {} },
     "screens/workDetail/WorkActivities": { WorkActivities: "WorkActivities" }, "screens/creation/CreationScreen": { CreationScreen: "CreationScreen" },
+    "screens/workTeam/WorkTeamSheet": { WorkTeamProvider: ({ children }: { children: unknown }) => children, useWorkTeamSheet: () => ({ open: null, sheet: null }) },
     "screens/creation/CreationSuccess": { CreationSuccess: "CreationSuccess" }, "screens/creation/CreationModal": { CreationModal: "CreationModal" },
     "location/useLocationTracking": { useLocationTracking: () => locationTracking },
     "location/LocationHistoryPanel": { LocationHistoryPanel: "LocationHistoryPanel" }, "location/LocationSettingsPanel": { LocationSettingsPanel: "LocationSettingsPanel" },
     "receipts/useMaterialReceipts": { useMaterialReceipts: () => materialReceipts }, "receipts/MaterialReceiptsScreen": { MaterialReceiptsScreen: "MaterialReceiptsScreen" },
     "workshop/useWorkshopBoard": { useWorkshopBoard: () => ({ workshops: null, workshopId: null, board: null, loading: false, error: "", refresh: async () => {}, selectWorkshop: () => {} }) },
-    "workshop/WorkshopScreen": { WorkshopScreen: "WorkshopScreen" }, "screens/orders/OrderFullDetail": { OrderFullDetail: "OrderFullDetail", assignmentOrderId: () => null }, "workshop/demoWorkshop": { createDemoWorkshopPort: () => ({}) },
+    "workshop/WorkshopScreen": { WorkshopScreen: "WorkshopScreen" }, "workshop/orders/QuickOrderCreator": { QuickOrderCreator: "QuickOrderCreator" }, "files/FileDrive": { FileDrive: "FileDrive" }, "chat/ChatThread": { ChatThread: "ChatThread" }, "deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "screens/orders/OrderFullDetail": { OrderFullDetail: "OrderFullDetail", assignmentOrderId: () => null }, "workshop/demoWorkshop": { createDemoWorkshopPort: () => ({}) },
     "diagnostics/nativeCrashReporter": { recordNonFatal: () => {}, setCrashContext: () => {}, setCrashScreen: () => {} },
     "diagnostics/errorReporter": { flushAppErrors: async () => {}, installAppErrorReporting: () => {}, recordAppError: async () => {}, setAppErrorScreen: () => {} },
   };

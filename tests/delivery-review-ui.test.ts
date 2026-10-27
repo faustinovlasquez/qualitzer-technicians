@@ -36,12 +36,12 @@ async function detailFixture(initialAction?: "deliver", storedAnswer?: StepAnswe
     "./workDetail/EvidenceTab": { EvidenceTab: "EvidenceTab" }, "./workDetail/localPhotos": { openLocalPhotoScope: () => {} },
     "./workDetail/useAttachmentFiles": { useAttachmentFiles: () => ({ ...fileState, loading: false, load: async () => {} }) },
     "./workDetail/useWorkDraft": drafts, "./workDetail/WorkInformation": { WorkTab: "WorkTab", EquipmentTab: "EquipmentTab" },
-    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
+    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true }, "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
     "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },
   });
   const dialog = uiModule<{ CompletionDialog: (props: CompletionDialogProps) => ReactNode }>("screens/workDetail/CompletionDialog.tsx", dialogHooks, {
-    "./DetailUi": { ChoiceButton: "ChoiceButton", Notice: "Notice" },
+    "./DetailUi": { ChoiceButton: "ChoiceButton", Notice: "Notice", SegmentOption: "SegmentOption" },
   });
   const calls: StatusInput[] = []; const refresh = deferred<void>(); let refreshes = 0;
   const candidate = readyWork();
@@ -321,7 +321,7 @@ test("actual order-to-card callback retains delivery review action for offline, 
     "../ui/SessionContextBar": { SessionContextBar: "SessionContextBar" }, "./orders/AssignmentOrderCard": { AssignmentOrderSummary: "AssignmentOrderSummary" },
     "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" }, "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" },
     "./orders/OrderLifecyclePanel": { OrderLifecyclePanel: "OrderLifecyclePanel" }, "./offline/OfflineOrderLifecyclePanel": { OfflineOrderLifecyclePanel: "OfflineOrderLifecyclePanel" },
-    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
   });
   const card = uiModule<{ AssignmentWorkCard: Wrapped<AssignmentWorkCardProps> }>("screens/orders/AssignmentWorkCard.tsx", cardHooks, { "./AssignmentMetadataRow": { AssignmentMetadataRow: "AssignmentMetadataRow" } });
   const opened: { id: string; options?: WorkOpenOptions }[] = []; let mutations = 0;
@@ -352,7 +352,7 @@ test("manual duration prefills timer total, preserves corrections on refresh and
   f.props.allowEditExecutionTime = true;
   f.props.work = { ...f.props.work, elapsedSeconds: 37 * 3600 + 29 * 60, firstInProgressTime: "08:00" };
   f.renderReview();
-  elements<{ label: string; onPress(): void }>(f.renderReview(), "ChoiceButton").find(({ props }) => props.label === "Editar horas de ejecución manualmente")!.props.onPress();
+  elements<{ label: string; onPress(): void }>(f.renderReview(), "SegmentOption").find(({ props }) => props.label === "Manual")!.props.onPress();
   f.renderReview();
   const fields = () => elements<{ label: string; value: string; onChange(value: string): void }>(f.renderReview(), "NumericSelectField");
   assert.deepEqual(fields().map(({ props }) => props.value), ["37", "29"]);
@@ -396,7 +396,7 @@ for (const type of ["internal_maintenance", "external_ot"] as const) test(`${typ
     "../ui/SessionContextBar": { SessionContextBar: "SessionContextBar" }, "./orders/AssignmentOrderCard": { AssignmentOrderSummary: "AssignmentOrderSummary" },
     "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" }, "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" },
     "./orders/OrderLifecyclePanel": { OrderLifecyclePanel: "OrderLifecyclePanel" }, "./offline/OfflineOrderLifecyclePanel": { OfflineOrderLifecyclePanel: "OfflineOrderLifecyclePanel" },
-    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
   });
   let exits = 0;
   const props: OrderDetailScreenProps = { tenant, branchName: "UI", group: group({ type, products: [] }), mode: "live", busy: false, storageKey: "navigation-order", technicianName: "UI", onBack: () => { exits++; }, onOpenWork() {}, onWorkStatus: unused, onRefresh: unused, onLoadFiles: async () => [], onUploadFiles: unused, onDeleteFile: unused, onLoadDelivery: unused, onStart: unused, onDeliver: unused };
@@ -436,10 +436,10 @@ test("offline untimed work can save a manual delivery without a downloaded start
   fixture.props.offline = uiSnapshot([start, pause]);
   const render = fixture.renderReview;
   render();
-  elements<{ label: string; onPress(): void }>(render(), "ChoiceButton").find(node => node.props.label === "Editar horas de ejecución manualmente")!.props.onPress();
+  elements<{ label: string; onPress(): void }>(render(), "SegmentOption").find(node => node.props.label === "Manual")!.props.onPress();
   const fields = elements<{ label: string; onChange(value: string): void }>(render(), "NumericSelectField");
-  fields.find(node => node.props.label === "Horas trabajadas")!.props.onChange("1");
-  fields.find(node => node.props.label === "Minutos trabajados")!.props.onChange("30");
+  fields.find(node => node.props.label === "Horas")!.props.onChange("1");
+  fields.find(node => node.props.label === "Minutos")!.props.onChange("30");
   const button = action(render(), "Guardar entrega");
   assert.equal(button.disabled, false);
   button.onPress(); button.onPress();

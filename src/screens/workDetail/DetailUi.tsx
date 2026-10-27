@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
-import { Image, Linking, Platform, Pressable, Text, View } from "react-native";
+import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { Attachment } from "../../domain/models";
-import { BodyText, Button, IconButton } from "../../ui/components";
-import { palette } from "../../ui/theme";
+import { BodyText, Button, IconButton, type IconName } from "../../ui/components";
+import { palette, radius, spacing, typography } from "../../ui/theme";
 import { errorMessage, httpUrl } from "./detailRules";
 import { styles } from "./detailStyles";
 
@@ -28,6 +28,25 @@ export function ChoiceButton({ label, selected, disabled = false, multiple = fal
     </Pressable>
   );
 }
+
+/** Opción de un selector segmentado (va dentro de una fila con fondo gris). */
+export function SegmentOption({ label, icon, selected, disabled = false, onPress }: { label: string; icon?: IconName; selected: boolean; disabled?: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{ checked: selected, disabled }} aria-checked={selected}
+      style={({ pressed }) => [segmentStyles.segment, selected && segmentStyles.selected, (disabled || pressed) && segmentStyles.dimmed]}>
+      {icon ? <Ionicons name={icon} size={16} color={selected ? palette.primary : palette.textMuted} accessible={false} /> : null}
+      <Text style={[segmentStyles.text, selected && segmentStyles.textSelected]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const segmentStyles = StyleSheet.create({
+  segment: { flex: 1, minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: radius.sm, paddingHorizontal: spacing.sm },
+  selected: { backgroundColor: palette.surface, boxShadow: "0px 1px 3px rgba(18, 44, 58, 0.12)" },
+  dimmed: { opacity: 0.6 },
+  text: { ...typography.label, color: palette.textSecondary },
+  textSelected: { color: palette.primary },
+});
 
 export function Fact({ label, value }: { label: string; value: string | null | undefined }) {
   return <View style={styles.tight}><Text style={styles.caption}>{label}</Text><Text selectable style={styles.label}>{value?.trim() ? value : "No informado"}</Text></View>;

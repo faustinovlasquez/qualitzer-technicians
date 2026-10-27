@@ -51,7 +51,7 @@ function orderFixture() {
     "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" },
     "./orders/OrderLifecyclePanel": { OrderLifecyclePanel: "OrderLifecyclePanel" },
     "./offline/OfflineOrderLifecyclePanel": { OfflineOrderLifecyclePanel: "OfflineOrderLifecyclePanel" },
-    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
   });
   const candidate = work({ status: "pending" });
   const commits = deferred<void>();

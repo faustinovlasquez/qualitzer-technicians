@@ -12,6 +12,8 @@ import { agendaReactFixture } from "./agenda-load-lifecycle";
 export const motionStub = { MOTION: { fast: 0, base: 0, slow: 0 }, FadeIn: "FadeIn", animateNextLayout: () => {} };
 /** Preferencia de la tarjeta minimizada (ui/heroPreference) en pruebas: expandida y sin almacenamiento. */
 export const heroPreferenceStub = { useHeroCollapsed: () => [false, () => {}] };
+/** Equipo del trabajo en pruebas: sin gestión (como en demostración o sin permiso). */
+export const workTeamSheetStub = { useWorkTeamSheet: () => ({ open: null, sheet: null }), WorkTeamProvider: ({ children }: { children: ReactNode }) => children, canManageWorkTeam: () => false };
 export const uiScope = { groupId: "direct-11", workId: "11", companyBranchId: 1, startDate: "2026-09-01", endDate: "2026-09-01" };
 export const uiOperation = { id: "00000000-0000-4000-8000-000000000001", createdAt: 1000, attempts: 0, nextAttemptAt: 0, status: "pending" as const, scope: uiScope };
 export function uiSnapshot(operations: OfflineOperation[] = []): OfflineSnapshot {
@@ -77,6 +79,7 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id.endsWith("/creation/CreationScreen")) return { CreationScreen: "CreationScreen" };
     if (id.endsWith("/creation/CreationQuickMenu")) return { CreationQuickMenu: "CreationQuickMenu", CreationFloatingButton: "CreationFloatingButton" };
     if (id.endsWith("/location/EquipmentLocationPanel")) return { EquipmentLocationPanel: "EquipmentLocationPanel" };
+    if (id.endsWith("/orders/OrderQuickSheet")) return { OrderQuickSheet: "OrderQuickSheet" };
     if (id.endsWith("/DetailUi")) return { Notice: "Notice", AttachmentList: "AttachmentList" };
     if (id.endsWith("/DeliverySuccess")) return { DeliverySuccess: "DeliverySuccess" };
     if (id.endsWith("/WorkActivities")) return { WorkActivities: "WorkActivities" };
@@ -89,6 +92,7 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id.endsWith("/files/CameraPermissionGuide")) return { CameraPermissionGuide: "CameraPermissionGuide" };
     if (id.endsWith("/security/useTrustedNativePicker")) return { useTrustedNativePicker: () => <T>(operation: () => Promise<T>) => operation() };
     if (id.endsWith("/OfflineFileCard")) return { OfflineFileCard: "OfflineFileCard" };
+    if (id.endsWith("/workTeam/WorkTeamSheet")) return workTeamSheetStub;
     if (id === "./fileRules" || id === "./files/fileRules") return uiModule("screens/workDetail/files/fileRules.ts", hooks, {
       "expo-file-system": {}, "../localPhotos": { MAX_PHOTO_BYTES: 25 * 1024 * 1024, MAX_TOTAL_BYTES: 40 * 1024 * 1024 },
     });

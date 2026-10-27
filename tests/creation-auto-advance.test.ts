@@ -109,8 +109,9 @@ async function creationFixture(initial?: CreationDraft, parentMaintenance?: Crea
     "./CreationScheduleFields": { CreationScheduleFields: "CreationScheduleFields" },
     "./WorkEditScreen": { WorkEditScreen: "WorkEditScreen" },
     "./CreationEquipmentLookup": { CreationEquipmentLookup: "CreationEquipmentLookup" },
-    "./CreationFields": { CreationFields: "CreationFields", creationLabels: { work: "Trabajo", maintenance: "Mantenimiento", non_productive: "Tiempo no productivo" }, priorityLabels: { medium: "Media" } },
+    "./CreationFields": { CreationFields: "CreationFields", LinkedEquipmentCard: "LinkedEquipmentCard", creationLabels: { work: "Trabajo", maintenance: "Mantenimiento", non_productive: "Tiempo no productivo" }, priorityLabels: { medium: "Media" } },
     "./CreationModal": { CreationModal: "CreationModal" },
+    "./CreationUi": { CreationStepper: "CreationStepper", CreationReview: "CreationReview", CreationDone: "CreationDone" },
   });
   let backs = 0;
   const props: CreationScreenProps = { kind: initial?.kind ?? "work", user: user(), tenant, companyBranchId: 1, initialDate: date, data: null,

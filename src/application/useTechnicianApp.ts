@@ -11,6 +11,7 @@ const ASSIGNMENT_CACHE_FRESH_MS = 5 * 60_000;
 const initialsOf = (firstNames: string, lastNames: string): string => `${firstNames.trim()[0] ?? ""}${lastNames.trim()[0] ?? ""}`.toUpperCase() || "?";
 import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { workActions, type WorkActivityInput } from "../domain/workActivities";
+import type { WorkTeam, WorkTeamPort } from "../domain/workTeam";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
 import { dateKey, monthRange, shiftDate, weekRange } from "../domain/format";
@@ -66,7 +67,7 @@ interface SelectedWork {
   initialTab?: WorkDetailTab;
   initialAction?: "deliver";
 }
-interface SelectedOrder { id: string; draftGroupId?: string; queryDate: string; initialTab: "works" | "files"; deliveryIntent?: "deliver" | "ready"; }
+interface SelectedOrder { id: string; draftGroupId?: string; queryDate: string; initialTab: "works" | "files" | "comments"; deliveryIntent?: "deliver" | "ready"; }
 interface PendingLogin {
   readonly repo: HttpTechnicianRepository;
   readonly pendingLoginGateway: string;
@@ -813,7 +814,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     return true;
   }
 
-  async function openWorkshopWork(workId: number): Promise<string | null> {
+  async function openWorkshopWork(workId: number, options?: WorkOpenOptions): Promise<string | null> {
     const current = state.current.session;
     const repo = repository.current;
     if (!current || current.branchId === null || !repo || actionLock.current || state.current.selected || state.current.selectedOrder || state.current.selectedCreationKind) {
@@ -841,7 +842,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       const located = locateNotice(fresh, target, day);
       if (!located?.work) return "No se pudo abrir el trabajo en tu agenda. Actualiza y vuelve a intentarlo.";
       const nextRange = dailyRange(day);
-      const nextWork: SelectedWork = { groupId: located.group.id, workId: located.work.id, queryDate: day, scheduledDate: located.scheduledDate ?? day, initialTab: "work" };
+      const nextWork: SelectedWork = { groupId: located.group.id, workId: located.work.id, queryDate: day, scheduledDate: located.scheduledDate ?? day, initialTab: options?.tab ?? "work", initialAction: options?.action };
       manualRefresh.current = { session: current, range: nextRange };
       // Se queda en la pestaña Taller: al cerrar el trabajo se vuelve a la ficha del ingreso y a los días que se veían antes.
       workshopReturnRange.current = state.current.range;
@@ -851,6 +852,32 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     } catch (caught) {
       return still() ? errorText(caught) : null;
     } finally { endAction(action); }
+  }
+
+  /**
+   * Taller: asignaciones de 15 días atrás a 15 adelante, sin cambiar los días de Mi jornada. Sirven para mostrar la tarjeta
+   * completa de un trabajo del ingreso aunque no esté en los días que se están viendo en Mi jornada.
+   */
+  async function workshopAssignments(): Promise<Assignments> {
+    const current = state.current.session;
+    const repo = repository.current;
+    if (!current || current.branchId === null || !repo || !isAccessAllowed()) throw new Error("La sesión no está disponible.");
+    const today = scheduleClock(current.user.system.timezone)?.day;
+    if (!today) throw new Error("La sucursal no tiene una zona horaria válida configurada.");
+    const version = sessionVersion.current;
+    const all = normalizeAssignmentsChecklistProgress(await repo.assignments({ startDate: shiftDate(today, -15), endDate: shiftDate(today, 15) }, current.branchId));
+    if (version !== sessionVersion.current || repository.current !== repo || state.current.session !== current) throw new Error("La sesión cambió durante la consulta.");
+    if (all.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
+    return all;
+  }
+
+  /** Taller: iniciar, pausar o entregar un trabajo de esas asignaciones (su día puede no estar cargado en Mi jornada). */
+  async function workshopWorkStatus(group: AssignmentGroup, work: AssignmentWork, input: StatusInput): Promise<void> {
+    if (!currentContext() || !session?.branchId || selected || selectedOrder || selectedCreationKind || tab !== "workshop") throw new Error("La selección cambió. Vuelve a abrir el ingreso.");
+    const day = assignmentDay(work.scheduledDate) ?? scheduleClock(session.user.system.timezone)?.day;
+    if (!day) throw new Error("El trabajo no tiene una fecha válida. Actualiza la información.");
+    const value: WorkScope = { ...dailyRange(day), groupId: group.id, workId: work.id, companyBranchId: session.branchId };
+    await performMutation(value, (repo, scope) => repo.status(scope, { ...input, executionDates: input.executionDates ?? [scope.startDate] }), true, statusLocationAction(input, work.status));
   }
 
   /** Crear un trabajo (o un mantenimiento, si el equipo es propio) de un ingreso con el formulario normal de creación (solo con conexión). */
@@ -1716,12 +1743,12 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       ...(creation?.kind === "create" ? { draftGroupId: creation.localGroupId, draftWorkId: creation.localWorkId } : {}) };
   }
 
-  function openGroup(group: AssignmentGroup, initialTab: "works" | "files" | "deliver" = "works"): void {
+  function openGroup(group: AssignmentGroup, initialTab: "works" | "files" | "comments" | "deliver" = "works"): void {
     if (!currentContext() || actionLock.current || selected || selectedOrder || selectedCreationKind || (tab !== "today" && tab !== "agenda")) return;
     const canonical = canonicalGroup(group);
     const scheduledDate = assignmentDay(canonical.scheduledDate);
     const queryDate = canonical.works[0] ? workQueryRange(canonical.works[0]).startDate : scheduledDate && scheduledDate >= range.startDate && scheduledDate <= range.endDate ? scheduledDate : range.startDate;
-    const next: SelectedOrder = { id: canonical.id, initialTab: initialTab === "files" ? "files" : "works", queryDate, deliveryIntent: initialTab === "deliver" ? "deliver" : undefined };
+    const next: SelectedOrder = { id: canonical.id, initialTab: initialTab === "files" || initialTab === "comments" ? initialTab : "works", queryDate, deliveryIntent: initialTab === "deliver" ? "deliver" : undefined };
     state.current = { ...state.current, selected: null, selectedOrder: next };
     setSelected(null); setSelectedOrder(next); setError(null);
   }
@@ -1746,6 +1773,27 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       if (input.status === "delivered" && work.status !== "delivered") await guideOrderDelivery(repo, scope);
     }, true, statusLocationAction(input, work.status));
   }
+
+  /** Alcance del trabajo para su equipo: el día abierto en la ficha o el de la tarjeta de la jornada. */
+  function teamScope(group: AssignmentGroup, work: AssignmentWork): WorkScope {
+    if (!currentContext() || !session?.branchId || !repository.current) throw new Error("La sesión no está disponible.");
+    const selection = selected && selected.groupId === group.id && selected.workId === work.id ? selected : workSelection(group, work);
+    return { ...dailyRange(selection.queryDate), groupId: selection.groupId, workId: selection.workId, companyBranchId: session.branchId };
+  }
+  const workTeamPortOf = (repo: TechnicianRepository): WorkTeamPort => {
+    if (!repo.workTeam || !repo.addWorkTeamMember || !repo.removeWorkTeamMember) throw new Error("Actualiza el servidor para gestionar el equipo del trabajo.");
+    return { workTeam: repo.workTeam.bind(repo), addWorkTeamMember: repo.addWorkTeamMember.bind(repo), removeWorkTeamMember: repo.removeWorkTeamMember.bind(repo) };
+  };
+  async function loadWorkTeam(group: AssignmentGroup, work: AssignmentWork): Promise<WorkTeam> {
+    const value = teamScope(group, work); const repo = repository.current!;
+    const version = sessionVersion.current;
+    const result = await workTeamPortOf(repo).workTeam(value);
+    if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la consulta.");
+    return result;
+  }
+  // Tras agregar o quitar se recargan las asignaciones (responsables visibles y, si uno se quita a sí mismo, la jornada).
+  const changeWorkTeam = (group: AssignmentGroup, work: AssignmentWork, workerId: number, add: boolean): Promise<WorkTeam> =>
+    performMutation(teamScope(group, work), (repo, value) => add ? workTeamPortOf(repo).addWorkTeamMember(value, workerId) : workTeamPortOf(repo).removeWorkTeamMember(value, workerId), true);
 
   async function guideOrderDelivery(repo: TechnicianRepository, value: WorkScope): Promise<void> {
     const owner = state.current.session;
@@ -1909,9 +1957,14 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     bindLocationActions,
     equipmentLocation: { load: loadEquipmentLocation, save: saveEquipmentLocation },
     workEditor: { load: loadWorkEdit, options: workEditOptions, save: saveWorkEdit, saved: onWorkEdited },
+    workTeam: {
+      load: loadWorkTeam,
+      add: (group: AssignmentGroup, work: AssignmentWork, workerId: number) => changeWorkTeam(group, work, workerId, true),
+      remove: (group: AssignmentGroup, work: AssignmentWork, workerId: number) => changeWorkTeam(group, work, workerId, false),
+    },
     orderCreation: { onLoadOptions: orderCreationOptions, onSubmit: createOrderWork, onCreated: onOrderWorkCreated },
     workshopCreation: { onLoadOptions: workshopCreationOptions, onSubmit: createWorkshopWork },
-    openWorkshopWork,
+    openWorkshopWork, workshopAssignments, workshopWorkStatus,
     creationNotice: visibleCreationNotice,
     dismissCreationNotice: () => setCreationNotice(null),
     locationPort: remoteRepository(repository.current),

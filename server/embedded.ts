@@ -5,6 +5,7 @@ import { assembleApp } from "./gateway-runtime";
 import { prepareEmbeddedSessionStorage } from "./session-persistence";
 import { SessionManager } from "./sessions";
 import { TenantRegistry } from "./tenants";
+import { configureRealtime } from "./realtime/hub";
 import type { EmbeddedGatewayHandler, EmbeddedGatewayOptions } from "./embedded-contract";
 
 export type { EmbeddedGatewayHandler, EmbeddedGatewayOptions } from "./embedded-contract";
@@ -14,14 +15,17 @@ const optionsSchema = z.object({
   sessionFile: z.string(),
   trustedProxyIps: z.array(z.string()),
   corsOrigins: z.array(z.string()).optional(),
+  socketToken: z.string().max(500).optional(),
 }).strict();
 
 export async function createEmbeddedGateway(options: EmbeddedGatewayOptions): Promise<EmbeddedGatewayHandler> {
   const parsed = optionsSchema.safeParse(options);
   if (!parsed.success) throw new Error("GATEWAY_CONFIGURATION_ERROR");
+  const { socketToken, ...gateway } = parsed.data;
+  configureRealtime(socketToken);
   const config = resolveConfig({
-    ...parsed.data,
-    corsOrigins: parsed.data.corsOrigins ?? [],
+    ...gateway,
+    corsOrigins: gateway.corsOrigins ?? [],
     tenantResolution: "backend",
     environment: "production",
   }, { nativeOnly: true });

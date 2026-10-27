@@ -94,11 +94,18 @@ function EquipmentAvatar({ item }: { item: WorkshopEquipmentOption }) {
   </View>;
 }
 
-function TextField({ label, value, onChange, error, multiline, placeholder, maxLength }: {
+function TextField({ label, value, onChange, error, multiline, placeholder, maxLength, showCount }: {
   label: string; value: string; onChange: (value: string) => void; error?: string; multiline?: boolean; placeholder?: string; maxLength: number;
+  /** Muestra cuántos caracteres van de los permitidos. */
+  showCount?: boolean;
 }) {
   return <View style={styles.field}>
-    <Text style={styles.label}>{label}</Text>
+    <View style={styles.labelRow}>
+      <Text style={[styles.label, styles.labelText]}>{label}</Text>
+      {showCount ? <Text style={[styles.counter, value.length >= maxLength && styles.counterFull]} accessibilityLabel={`${value.length} de ${maxLength} caracteres`}>
+        {value.length}/{maxLength}
+      </Text> : null}
+    </View>
     <TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={palette.textMuted} maxLength={maxLength} multiline={multiline}
       style={[styles.input, multiline && styles.inputMultiline, Boolean(error) && styles.inputInvalid]} accessibilityLabel={label} textAlignVertical={multiline ? "top" : "center"} />
     {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
@@ -293,23 +300,45 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
             <Pressable accessibilityRole="button" onPress={() => void discardDraft()} hitSlop={8}><Text style={styles.draftAction}>Descartar</Text></Pressable>
           </View> : null}
 
-          <Section title="Foto del equipo" icon="camera-outline" hint="Opcional. Se guarda cuadrada, como en la web.">
+          <Section title="Foto del equipo" icon="camera-outline">
             <View style={styles.photoRow}>
-              <View style={styles.photo}>
+              <Pressable accessibilityRole="button" accessibilityLabel={shownImage ? "Cambiar la foto del equipo con la cámara" : "Tomar la foto del equipo"}
+                disabled={imageBusy || saving} onPress={() => void chooseImage("camera")}
+                style={({ pressed }) => [styles.photo, !shownImage && styles.photoEmpty, pressed && styles.photoPressed]}>
                 {imageBusy ? <ActivityIndicator color={palette.primary} />
-                  : shownImage ? <Image source={{ uri: shownImage }} style={styles.photoImage} accessibilityLabel="Foto del equipo" />
-                  : <Ionicons name="image-outline" size={32} color={palette.textMuted} accessible={false} />}
-              </View>
+                  : shownImage ? <>
+                    <Image source={{ uri: shownImage }} style={styles.photoImage} accessibilityLabel="Foto del equipo" />
+                    <View style={styles.photoEdit}><Ionicons name="camera" size={14} color={palette.white} accessible={false} /></View>
+                  </> : <>
+                    <Ionicons name="camera-outline" size={28} color={palette.primary} accessible={false} />
+                    <Text style={styles.photoEmptyText}>Agregar</Text>
+                  </>}
+              </Pressable>
               <View style={styles.photoActions}>
-                <Button title="Tomar foto" icon="camera" variant="secondary" disabled={imageBusy || saving} onPress={() => void chooseImage("camera")} />
-                <Button title="Elegir de la galería" icon="images-outline" variant="ghost" disabled={imageBusy || saving} onPress={() => void chooseImage("library")} />
+                {shownImage ? <View style={styles.photoStatus}>
+                  <Ionicons name="checkmark-circle" size={16} color={palette.success} accessible={false} />
+                  <Text style={styles.photoStatusText}>Foto lista</Text>
+                </View> : <Text style={styles.photoTitle}>Foto principal del equipo</Text>}
+                <Text style={styles.photoHint}>{shownImage ? "Se mostrará en el tablero y en la ficha del ingreso." : "Opcional. Ayuda a reconocer el equipo en el tablero."}</Text>
+                <View style={styles.photoButtons}>
+                  <Pressable accessibilityRole="button" disabled={imageBusy || saving} onPress={() => void chooseImage("camera")}
+                    style={({ pressed }) => [styles.photoButton, styles.photoButtonPrimary, (imageBusy || saving) && styles.photoButtonDisabled, pressed && styles.photoPressed]}>
+                    <Ionicons name="camera-outline" size={16} color={palette.white} accessible={false} />
+                    <Text style={[styles.photoButtonText, styles.photoButtonTextPrimary]}>{shownImage ? "Cambiar" : "Cámara"}</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" disabled={imageBusy || saving} onPress={() => void chooseImage("library")}
+                    style={({ pressed }) => [styles.photoButton, (imageBusy || saving) && styles.photoButtonDisabled, pressed && styles.photoPressed]}>
+                    <Ionicons name="images-outline" size={16} color={palette.primary} accessible={false} />
+                    <Text style={styles.photoButtonText}>Galería</Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
           </Section>
 
           <Section title="Datos del ingreso" icon="create-outline">
-            <TextField label="Título *" value={values.title} onChange={(title) => update({ title })} error={issues.title} maxLength={255} placeholder="Ej.: Reparación de bomba con fuga" />
-            <TextField label="Observaciones" value={values.notes} onChange={(notes) => update({ notes })} error={issues.notes} multiline maxLength={2000} placeholder="Estado en que llega el equipo, accesorios, etc." />
+            <TextField label="Título (descripción breve) *" value={values.title} onChange={(title) => update({ title })} error={issues.title} maxLength={255} showCount placeholder="Ej.: Reparación de bomba con fuga" />
+            <TextField label="Observaciones" value={values.notes} onChange={(notes) => update({ notes })} error={issues.notes} multiline maxLength={2000} showCount placeholder="Estado en que llega el equipo, accesorios, etc." />
             <View style={styles.switchRow}>
               <View style={styles.switchText}>
                 <Text style={styles.label}>Equipo propio de la empresa</Text>
@@ -424,6 +453,8 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
       selectedId={values.equipment?.id ?? null} onClose={() => setOpen(null)} onPick={(equipment) => { setOpen(null); update({ equipment }); }} /> : null}
     {open === "newEquipment" && values.customer ? <NewEquipmentSheet customerName={values.customer.name} onClose={() => setOpen("equipment")}
       loadMasters={() => intake.equipmentMasters()} create={(input) => intake.createEquipment(values.customer!.id, input)}
+      findDuplicates={(identification, internalNumber) => intake.equipmentDuplicates({ customerId: values.customer!.id, identification, internalNumber })}
+      createMaster={intake.canCreateEquipmentMaster ? (kind, name, requestId) => intake.createEquipmentMaster(kind, { name, requestId }) : undefined}
       onCreated={(equipment) => { setOpen(null); update({ equipment }); }} /> : null}
     {open === "area" && workshopId !== null ? <LocalPicker<{ id: number; title: string }> title="Elegir nave" placeholder="Buscar nave" emptyText="No hay naves con espacio en este taller."
       load={async () => (await intake.areas(workshopId)).items} label={(item) => item.title} selectedId={values.areaId} onClose={() => setOpen(null)}
@@ -435,10 +466,16 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
       detail={(item) => [item.position, item.email, item.phone].filter(Boolean).join(" · ") || null} selected={values.contactIds}
       emptyText="El cliente no tiene contactos registrados." onClose={() => setOpen(null)} onConfirm={(contactIds) => { setOpen(null); update({ contactIds }); }}
       action={canCreateCustomers ? { label: "Nuevo contacto", onPress: () => setOpen("newContact") } : undefined} /> : null}
-    {open === "newCustomer" ? <NewCustomerSheet loadTypes={intake.identificationTypes} create={intake.createCustomer} onClose={() => setOpen("customer")}
+    {open === "newCustomer" ? <NewCustomerSheet loadTypes={intake.identificationTypes} create={intake.createCustomer} findDuplicates={intake.customerDuplicates} onClose={() => setOpen("customer")}
       onCreated={(customer) => { setOpen(null); update({ customer: { id: customer.id, name: customer.name, document: customer.document }, equipment: null, branchIds: [], contactIds: [] }); }} /> : null}
     {open === "newBranch" && values.customer ? <NewBranchSheet customerName={values.customer.name} onClose={() => setOpen(null)}
       create={(input) => intake.createBranch(values.customer!.id, input)}
+      findDuplicates={(query) => intake.branchDuplicates(values.customer!.id, query)}
+      onUseExisting={(branch) => {
+        setOpen(null);
+        setKnown((current) => current.branches.some((item) => item.id === branch.id) ? current : { ...current, branches: [...current.branches, branch] });
+        if (!values.branchIds.includes(branch.id)) update({ branchIds: [...values.branchIds, branch.id] });
+      }}
       onCreated={(branch) => {
         setOpen(null);
         setCustomerDetail((detail) => detail && { ...detail, branches: [...detail.branches, branch] });
@@ -447,6 +484,12 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
       }} /> : null}
     {open === "newContact" && values.customer ? <NewContactSheet customerName={values.customer.name} onClose={() => setOpen(null)}
       create={(input) => intake.createContact(values.customer!.id, input)}
+      findDuplicates={(query) => intake.contactDuplicates(values.customer!.id, query)}
+      onUseExisting={(contact) => {
+        setOpen(null);
+        setKnown((current) => current.contacts.some((item) => item.id === contact.id) ? current : { ...current, contacts: [...current.contacts, contact] });
+        if (!values.contactIds.includes(contact.id)) update({ contactIds: [...values.contactIds, contact.id] });
+      }}
       onCreated={(contact) => {
         setOpen(null);
         setCustomerDetail((detail) => detail && { ...detail, contacts: [...detail.contacts, contact] });
@@ -482,6 +525,10 @@ const styles = StyleSheet.create({
   sectionHint: { ...typography.caption, color: palette.textSecondary, marginTop: -6 },
   field: { gap: 6 },
   label: { ...typography.label, color: palette.text },
+  labelRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  labelText: { flex: 1, minWidth: 0 },
+  counter: { ...typography.caption, color: palette.textMuted, fontVariant: ["tabular-nums"] },
+  counterFull: { color: palette.danger, fontWeight: "800" },
   input: { minHeight: 48, paddingHorizontal: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background, fontSize: 15, color: palette.text },
   inputMultiline: { minHeight: 96, paddingTop: 12 },
   inputInvalid: { borderColor: palette.danger },
@@ -492,7 +539,21 @@ const styles = StyleSheet.create({
   photoRow: { flexDirection: "row", gap: 14, alignItems: "center" },
   photo: { width: 104, height: 104, borderRadius: 18, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
   photoImage: { width: 104, height: 104 },
-  photoActions: { flex: 1, gap: 8 },
+  photoActions: { flex: 1, gap: 6 },
+  photoEmpty: { borderWidth: 1.5, borderStyle: "dashed", borderColor: palette.primary, backgroundColor: palette.primarySoft, gap: 4 },
+  photoEmptyText: { fontSize: 12, fontWeight: "700", color: palette.primary },
+  photoPressed: { opacity: 0.75 },
+  photoEdit: { position: "absolute", right: 6, bottom: 6, width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.55)" },
+  photoTitle: { fontSize: 14, fontWeight: "700", color: palette.text },
+  photoStatus: { flexDirection: "row", alignItems: "center", gap: 6 },
+  photoStatusText: { fontSize: 14, fontWeight: "700", color: palette.success },
+  photoHint: { fontSize: 12, lineHeight: 16, color: palette.textMuted },
+  photoButtons: { flexDirection: "row", gap: 8, marginTop: 4 },
+  photoButton: { flex: 1, minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 999, borderWidth: 1, borderColor: palette.primary, paddingHorizontal: 10 },
+  photoButtonPrimary: { backgroundColor: palette.primary },
+  photoButtonDisabled: { opacity: 0.5 },
+  photoButtonText: { fontSize: 13, fontWeight: "700", color: palette.primary },
+  photoButtonTextPrimary: { color: palette.white },
   equipment: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 64, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
   linkRow: { flexDirection: "row", alignItems: "stretch", gap: 8 },
   customerRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },

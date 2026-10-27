@@ -11,7 +11,11 @@ import type { LocalPhoto } from "../domain/models";
 import type { WorkshopOrderGeneralInput, WorkshopOrderInput, WorkshopOrderItemInput, WorkshopOrderItemSection, WorkshopOrdersPort } from "../domain/workshopOrders";
 import type { WorkshopDeliveryInput, WorkshopDeliveryPort } from "../domain/workshopDelivery";
 import type { WorkshopManagePort } from "../domain/workshopManage";
-import type { WorkshopCustomersPort, WorkshopNewBranch, WorkshopNewContact, WorkshopNewCustomer, WorkshopNewEquipment } from "../domain/workshopCustomers";
+import type { WorkshopBranchDuplicateQuery, WorkshopContactDuplicateQuery, WorkshopCustomerDuplicateQuery, WorkshopCustomersPort, WorkshopDuplicateMatch,
+  WorkshopNewBranch, WorkshopNewContact, WorkshopNewCustomer, WorkshopNewEquipment, EquipmentMasterKind, WorkshopNewEquipmentMaster,
+  WorkshopEquipmentDuplicate, WorkshopEquipmentDuplicateQuery } from "../domain/workshopCustomers";
+import { driveApi, fileDrivePort, type DriveApi, type FileDrivePort } from "../domain/fileDrive";
+import { threadApi, threadPort, type ThreadApi, type ThreadPort } from "../domain/threads";
 
 /**
  * Tablero del taller (naves e ingresos), solo lectura. Recuerda el último taller elegido por usuario y sucursal,
@@ -25,7 +29,7 @@ function bound<T extends object, K extends keyof T>(port: T | null | undefined, 
   return typeof method === "function" ? (method as (...args: unknown[]) => unknown).bind(port) as T[K] : undefined;
 }
 
-export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort> | null, userId: number, branchId: number, storageKey: string, sessionIdentity: string, enabled: boolean) {
+export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort & FileDrivePort & ThreadPort> | null, userId: number, branchId: number, storageKey: string, sessionIdentity: string, enabled: boolean) {
   const key = `workshop-board:${storageKey}:${userId}:${branchId}`;
   const [workshops, setWorkshops] = useState<WorkshopOption[] | null>(null);
   const [workshopId, setWorkshopId] = useState<number | null>(null);
@@ -149,7 +153,30 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     createBranch: (customerId: number, input: Omit<WorkshopNewBranch, "companyBranchId">) => needCustomers("createWorkshopCustomerBranch")(customerId, { ...input, companyBranchId: branchId }),
     createContact: (customerId: number, input: Omit<WorkshopNewContact, "companyBranchId">) => needCustomers("createWorkshopCustomerContact")(customerId, { ...input, companyBranchId: branchId }),
     equipmentMasters: () => needCustomers("workshopEquipmentMasters")(branchId),
-    createEquipment: (customerId: number, input: Omit<WorkshopNewEquipment, "companyBranchId">) => needCustomers("createWorkshopCustomerEquipment")(customerId, { ...input, companyBranchId: branchId })
+    // Búsqueda de parecidos antes de crear: si el gateway no la tiene o falla, no se bloquea la creación.
+    customerDuplicates: async (query: Omit<WorkshopCustomerDuplicateQuery, "companyBranchId">): Promise<WorkshopDuplicateMatch[]> => {
+      const action = bound(port, "workshopCustomerDuplicates");
+      if (!enabled || !action || branchId <= 0) return [];
+      return await action({ ...query, companyBranchId: branchId }).catch(() => []);
+    },
+    contactDuplicates: async (customerId: number, query: Omit<WorkshopContactDuplicateQuery, "companyBranchId">): Promise<WorkshopDuplicateMatch[]> => {
+      const action = bound(port, "workshopContactDuplicates");
+      if (!enabled || !action || branchId <= 0) return [];
+      return await action(customerId, { ...query, companyBranchId: branchId }).catch(() => []);
+    },
+    branchDuplicates: async (customerId: number, query: Omit<WorkshopBranchDuplicateQuery, "companyBranchId">): Promise<WorkshopDuplicateMatch[]> => {
+      const action = bound(port, "workshopBranchDuplicates");
+      if (!enabled || !action || branchId <= 0) return [];
+      return await action(customerId, { ...query, companyBranchId: branchId }).catch(() => []);
+    },
+    equipmentDuplicates: async (query: Omit<WorkshopEquipmentDuplicateQuery, "companyBranchId">): Promise<WorkshopEquipmentDuplicate[]> => {
+      const action = bound(port, "workshopEquipmentDuplicates");
+      if (!enabled || !action || branchId <= 0) return [];
+      return await action({ ...query, companyBranchId: branchId }).catch(() => []);
+    },
+    createEquipment: (customerId: number, input: Omit<WorkshopNewEquipment, "companyBranchId">) => needCustomers("createWorkshopCustomerEquipment")(customerId, { ...input, companyBranchId: branchId }),
+    canCreateEquipmentMaster: enabled && branchId > 0 && Boolean(bound(port, "createWorkshopEquipmentMaster")),
+    createEquipmentMaster: (kind: EquipmentMasterKind, input: Omit<WorkshopNewEquipmentMaster, "companyBranchId">) => needCustomers("createWorkshopEquipmentMaster")(kind, { ...input, companyBranchId: branchId })
   };
   /** Crear clientes, sucursales y contactos desde el ingreso. Solo con conexión. */
   function needCustomers<K extends keyof WorkshopCustomersPort>(name: K): NonNullable<Partial<WorkshopCustomersPort>[K]> {
@@ -198,6 +225,8 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
   }
   const reception = {
     branchId,
+    /** Usuario en sesión: si es trabajador de la sucursal, se propone como técnico que recibe. */
+    currentUserId: userId,
     workers: () => needReception("workshopWorkers")(branchId),
     savedSignatures: (userId: number) => needReception("workshopSavedSignatures")(branchId, userId),
     sign: (entryId: number, input: Omit<WorkshopReceptionInput, "companyBranchId">) => needReception("signWorkshopReception")(entryId, { ...input, companyBranchId: branchId })
@@ -264,5 +293,19 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     status: (entryId: number, statusId: number, subStatusId: number | null) => needManage("changeEntryStatus")(entryId, { companyBranchId: branchId, statusId, subStatusId })
   };
 
-  return { workshops, workshopId, board, loading, error, refresh: () => loadBoard(), selectWorkshop, pinned, togglePin, layout, setLayout, loadEntry, intake, inspection, reception, works, orders, delivery, manage };
+  /** Archivos con carpetas del ingreso y de sus OT. Solo con conexión. */
+  const drivePort: FileDrivePort | null = enabled && branchId > 0 ? fileDrivePort(port) : null;
+  const drive = {
+    available: drivePort !== null,
+    entry: (entryId: number): DriveApi | null => drivePort && driveApi(drivePort, { kind: "entry", companyBranchId: branchId, entryId }),
+    order: (entryId: number, orderId: number): DriveApi | null => drivePort && driveApi(drivePort, { kind: "order", companyBranchId: branchId, entryId, orderId })
+  };
+  /** Comentarios (chat) del ingreso y de sus OT. Solo con conexión. */
+  const chatPort: ThreadPort | null = enabled && branchId > 0 ? threadPort(port) : null;
+  const threads = {
+    available: chatPort !== null,
+    entry: (entryId: number): ThreadApi | null => chatPort && threadApi(chatPort, { kind: "entry", companyBranchId: branchId, entryId }),
+    order: (entryId: number, orderId: number): ThreadApi | null => chatPort && threadApi(chatPort, { kind: "order", companyBranchId: branchId, entryId, orderId })
+  };
+  return { workshops, workshopId, board, loading, error, refresh: () => loadBoard(), selectWorkshop, pinned, togglePin, layout, setLayout, loadEntry, intake, inspection, reception, works, orders, delivery, manage, drive, threads };
 }

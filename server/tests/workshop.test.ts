@@ -591,14 +591,12 @@ test("crear una OT sin precios une los trabajos sueltos, usa los valores de la s
   assert.deepEqual(asRecordForTest(asRecordForTest(state.calls.filter(call => call.path === "/api/negotiations" && call.method === "POST").at(-1)?.json).workSection).works, []);
 });
 
-test("si la sucursal exige campos que el técnico no puede completar, la OT no se crea y se explica", async context => {
+test("desde el taller solo el título es obligatorio: los campos que exige la web no bloquean la OT", async context => {
   const { state, baseUrl } = await harness(context);
-  setOrderBackend(state, [{ fieldName: "departments", visible: true, required: true }, { fieldName: "salesExecutiveId", visible: true, required: true }, { fieldName: "contacts", visible: true, required: true }]);
-  const rules = await jsonRequest(baseUrl, "/api/workshop/entries/12/order-rules?companyBranchId=1");
-  assert.deepEqual(rules.data, { blockingFields: ["Departamentos"], descriptionRequired: false, fields: [] });
-  const blocked = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders", "POST", newOrder);
-  assert.equal(errorCode(blocked.data), "WORKSHOP_ORDER_FIELDS_REQUIRED");
-  assert.equal(state.calls.filter(call => call.path === "/api/negotiations" && call.method === "POST").length, 0);
+  setOrderBackend(state, [{ fieldName: "departments", visible: true, required: true }, { fieldName: "description", visible: true, required: true }, { fieldName: "contacts", visible: true, required: true }]);
+  const created = await jsonRequest(baseUrl, "/api/workshop/entries/12/orders", "POST", { ...newOrder, description: null });
+  assert.equal(created.response.status, 201);
+  assert.equal(state.calls.filter(call => call.path === "/api/negotiations" && call.method === "POST").length, 1);
 });
 
 test("origen del cliente y etiquetas exigidos en la web no se piden en la app: la OT se crea igual", async context => {

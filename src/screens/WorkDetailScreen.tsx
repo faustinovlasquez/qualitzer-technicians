@@ -25,6 +25,10 @@ import { useAttachmentFiles } from "./workDetail/useAttachmentFiles";
 import { useWorkDraft, workDetailDraftKey } from "./workDetail/useWorkDraft";
 import { EquipmentTab, WorkDescription, WorkTab } from "./workDetail/WorkInformation";
 import { FileWorkspace } from "./workDetail/FileWorkspace";
+import { FileDrive } from "../files/FileDrive";
+import { driveApi, type FileDrivePort } from "../domain/fileDrive";
+import { ChatThread } from "../chat/ChatThread";
+import { threadApi, type ThreadPort } from "../domain/threads";
 import { CommentsTab } from "./workDetail/CommentsTab";
 import { automaticExecutionTiming, canTransitionExecution, executionElapsedSeconds, isExecutionFinalization, executionDateAllowed, executionDatesAllowed } from "../domain/workExecution";
 import { isOfflineQueuedError, type OfflineController, type OfflineSnapshot } from "../domain/offline";
@@ -44,10 +48,22 @@ import { CreationScreen } from "./creation/CreationScreen";
 import { workEditDocumentSchema, type WorkEditDocument, type WorkEditInput, type CreationOptionsQuery, type CreationOptions } from "../domain/creation";
 import { FadeIn } from "../ui/motion";
 import { useHeroCollapsed } from "../ui/heroPreference";
+import { useWorkTeamSheet } from "./workTeam/WorkTeamSheet";
+import { DeleteRecordDialog } from "../deletion/DeleteRecordDialog";
+import type { DeletionPort } from "../domain/deletion";
+import { useAppPermission } from "../application/appPermissions";
 
 export { clearWorkDetailDrafts, workDetailDraftKey } from "./workDetail/useWorkDraft";
 
 export interface WorkDetailScreenProps {
+  /** Eliminar el trabajo si lo creó el técnico y sigue pendiente (con conexión). */
+  deletionPort?: DeletionPort | null;
+  /** Se eliminó el trabajo: volver y actualizar la jornada. */
+  onDeleted?: () => void;
+  /** Gestor de archivos con carpetas (como la web) para los archivos generales del trabajo, con conexión. */
+  drivePort?: FileDrivePort | null;
+  /** Comentarios como chat (como la web), con conexión. */
+  threadPort?: ThreadPort | null;
   workEditor?: {
     user: import("../domain/models").User;
     load(): Promise<WorkEditDocument>;
@@ -82,6 +98,10 @@ export interface WorkDetailScreenProps {
   initialTab?: WorkDetailTab;
   initialAction?: "deliver";
   allowEditExecutionTime: boolean;
+  /** En false la sucursal trabaja con horas manuales: no se ofrece iniciar el cronómetro. */
+  showWorkTimer?: boolean;
+  /** Solo muestra la ventana de entrega sobre la pantalla actual (entrega desde la tarjeta). */
+  deliveryOnly?: boolean;
   onUploadDocuments: (files: LocalPhoto[], stepId?: string) => Promise<void>;
   onDeleteFile: (fileId: string, stepId?: string) => Promise<void>;
   onLoadComments: (page: number) => Promise<CommentPage>;
@@ -204,6 +224,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   // El técnico decide si minimiza la tarjeta; la decisión se conserva al salir y volver a entrar.
   const [heroCollapsed, toggleHero] = useHeroCollapsed("work");
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const canDeleteOwn = useAppPermission("deleteOwn");
   const [target, setTarget] = useState<string | undefined>();
   const viewHistory = useRef<Array<{ tab: Tab; target?: string; checklistId?: number }>>([]);
   const childBack = useRef<((home?: boolean) => boolean) | null>(null);
@@ -242,6 +264,10 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const [exitWarning, setExitWarning] = useState(false);
   const [completing, setCompleting] = useState(props.initialAction === "deliver");
   const [awaitingStatus, setAwaitingStatus] = useState<WorkStatus | null>(null);
+  // Entrega abierta desde la tarjeta: al cerrar la ventana se vuelve a la lista sin pasar por el detalle.
+  useEffect(() => {
+    if (props.deliveryOnly && !completing && !deliverySucceeded) onBack();
+  }, [props.deliveryOnly, completing, deliverySucceeded]);
   const mounted = useRef(true);
   const running = useRef(false);
   const operationEpoch = useRef(0);
@@ -262,6 +288,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const awaitingConfirmation = awaitingStatus !== null && awaitingStatus !== work.status;
   const locked = busy || action !== null;
   const disabled = locked || !draft.hydrated || !offlineReady || awaitingConfirmation;
+  // Equipo del trabajo: solo con conexión y sin cambios locales pendientes de este trabajo.
+  const team = useWorkTeamSheet(group, work, locked || !online || localWork || staleReadOnly);
   const executionGates = useRef({ readOnly, disabled, online, hasPendingOperations, desiredStatus, timerNeedsAttention });
   executionGates.current = { readOnly, disabled, online, hasPendingOperations, desiredStatus, timerNeedsAttention };
   const selectedDate = executionDate(work, range);
@@ -602,6 +630,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     });
   }
 
+  // Mantenimientos siempre usan cronómetro; con horas manuales solo se puede pausar un trabajo ya iniciado.
+  const timerEnabled = maintenance || props.showWorkTimer !== false || !props.allowEditExecutionTime;
   // Datos de la tarjeta superior: equipo, ubicación, fotos y el mismo inicio/pausa del pie (con sus mismas condiciones).
   const heroEquipment = maintenance ? group.equipment : work.workEquipment ?? group.equipment;
   // Sistema y subsistema del trabajo (los define el mantenimiento en la web): a la vista en la tarjeta.
@@ -611,7 +641,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const heroPhotos = (savedFiles ?? []).filter(file => /^image\//i.test(file.type ?? "") || /\.(jpe?g|png|webp|heic)$/i.test(file.name)).filter(file => Boolean(file.thumbnailUrl || file.url)).slice(0, 3);
   const heroExecution: { label: string; icon: IconName; disabled: boolean; onPress: () => void } | null = readOnly ? null
     : desiredStatus === "in_progress" ? { label: "Pausar trabajo desde la tarjeta", icon: "pause", disabled: disabled || timerNeedsAttention || !withinRange(selectedDate, range), onPress: () => updateStatus({ status: "paused", executionDates: [selectedDate] }) }
-      : desiredStatus === "pending" || desiredStatus === "paused" ? { label: desiredStatus === "paused" ? "Reanudar trabajo desde la tarjeta" : "Iniciar trabajo desde la tarjeta", icon: "play",
+      : timerEnabled && (desiredStatus === "pending" || desiredStatus === "paused") ? { label: desiredStatus === "paused" ? "Reanudar trabajo desde la tarjeta" : "Iniciar trabajo desde la tarjeta", icon: "play",
         disabled: disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range), onPress: () => updateStatus({ status: "in_progress", executionDates: [selectedDate] }) } : null;
   const snapshotDate = new Date(generatedAt);
   const loadedAt = Number.isFinite(snapshotDate.getTime()) ? snapshotDate.toLocaleString("es-CL") : "Fecha de actualización no disponible";
@@ -635,7 +665,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   </View>;
 
   const evidenceStep = work.checklists.flatMap((checklist) => checklist.steps).find((step) => String(step.stepId) === target);
-  const evidenceContent = <FileWorkspace
+  const workspaceContent = <FileWorkspace
     backHandler={childBack}
     compact
     scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:${target ?? "files"}`}
@@ -665,6 +695,23 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     onDelete={async (fileId) => { await props.onDeleteFile(fileId, target); await refreshAfterSave(); if (mounted.current) await files.load(); }}
     listFooter={draft.data.photos.length > 0 ? <Card style={styles.stack}><SectionTitle title="Fotos pendientes anteriores" subtitle="Conservamos las fotos que preparaste antes de esta actualización." /><EvidenceTab work={work} maintenance={maintenance} mode={mode} files={files.files} loading={files.loading} filesError={files.error} photos={draft.data.photos} target={target} disabled={disabled} readOnly={false} preparing={action === "photos"} uploading={action === "upload"} onTarget={setTarget} onPick={choosePhotos} onCancelPick={cancelWebPicker} onRemove={removePhoto} onUpload={uploadPhotos} onCleanup={() => { void runAction("cleanup", cleanUploadedPhotos); }} onLoad={() => { void runAction("files", files.load); }} /></Card> : undefined}
   />;
+  // Archivos generales con conexión: el gestor con carpetas de la web. Sin conexión, con envíos en cola o para la
+  // evidencia de un paso, sigue la lista anterior (es la que guarda y reenvía lo pendiente).
+  const drive = props.drivePort && mode === "live" && target === undefined && online && !localWork && !staleReadOnly && props.companyBranchId !== undefined
+    && allPendingDocuments.length === 0 && draft.data.photos.length === 0
+    ? driveApi(props.drivePort, { kind: "assignment", groupId: group.id, workId: work.id, range: { startDate: range.startDate, endDate: range.endDate, companyBranchId: props.companyBranchId } })
+    : null;
+  // Comentarios con conexión: el chat de la web (pestañas Técnico y General). Sin conexión o con mensajes en cola
+  // sigue la lista anterior, que los guarda y reenvía.
+  const chat = props.threadPort && mode === "live" && online && !localWork && !staleReadOnly && props.companyBranchId !== undefined
+    && pendingComments.filter((operation) => operation.status !== "applied").length === 0
+    ? threadApi(props.threadPort, { kind: "assignment", groupId: group.id, workId: work.id, range: { startDate: range.startDate, endDate: range.endDate, companyBranchId: props.companyBranchId } })
+    : null;
+  const deletion = props.deletionPort && canDeleteOwn && mode === "live" && !localWork && props.companyBranchId !== undefined
+    ? { port: props.deletionPort, scope: { groupId: group.id, workId: work.id, range: { startDate: range.startDate, endDate: range.endDate, companyBranchId: props.companyBranchId } } }
+    : null;
+  const evidenceContent = drive ? <FileDrive key={`${group.id}:${work.id}`} embedded api={drive} title="Archivos del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled}
+    notice={work.isFilesRequired ? <Notice message="Evidencia obligatoria del trabajo." tone="warning" /> : null} /> : workspaceContent;
 
   // Tarjeta superior compacta, fija arriba de las pestañas (diseño de referencia).
   const heroCard = <LinearGradient colors={[palette.navy, palette.navyLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
@@ -721,14 +768,18 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       </Pressable>
     </View>
     <View style={styles.heroBottom}>
-      <View style={styles.heroResponsibles}>
+      <Pressable testID="work-hero-team" accessibilityRole={team.open ? "button" : undefined} disabled={!team.open} onPress={team.open ?? undefined}
+        accessibilityLabel={`Responsables: ${work.responsibles.length === 0 ? "sin responsables" : work.responsibles.map(person => person.name).join(", ")}${team.open ? ". Gestionar equipo" : ""}`}
+        style={({ pressed }) => [styles.heroResponsibles, pressed && styles.heroCellPressed]}>
         <View style={styles.avatarStack}>{work.responsibles.slice(0, 3).map((responsible, index) => <View key={responsible.id} style={[styles.avatar, index > 0 && styles.avatarOverlap]}>
           {responsible.avatarThumbnail ? <Image source={{ uri: responsible.avatarThumbnail }} style={styles.avatarImage} accessible={false} />
             : <Text style={styles.avatarText}>{initialsOf(responsible.name)}</Text>}
-        </View>)}{work.responsibles.length === 0 ? <View style={styles.avatar}><Ionicons name="person-outline" size={16} color={palette.onDark} accessible={false} /></View> : null}</View>
-        <View style={styles.heroFactText}><Text style={styles.heroFactLabel}>Responsables</Text>
+        </View>)}{work.responsibles.length === 0 ? <View style={styles.avatar}><Ionicons name="person-outline" size={16} color={palette.onDark} accessible={false} /></View> : null}
+          {team.open ? <View style={[styles.avatar, styles.avatarOverlap, styles.avatarAdd]}><Ionicons name="add" size={16} color={palette.navy} accessible={false} /></View> : null}</View>
+        <View style={styles.heroFactText}><Text style={styles.heroFactLabel}>{team.open ? "Responsables · Gestionar" : "Responsables"}</Text>
           <Text style={styles.heroCellValue} numberOfLines={1}>{work.responsibles.length === 0 ? "Sin responsables" : work.responsibles.length === 1 ? work.responsibles[0]!.name : `${work.responsibles[0]!.name} +${work.responsibles.length - 1}`}</Text></View>
-      </View>
+      </Pressable>
+      {team.sheet}
       <View style={styles.heroTimer}>
         <ElapsedTimer work={work} generatedAt={generatedAt} online={online && !localWork && !staleReadOnly} pending={timerPending || Boolean(queuedCompletion)} localTimer={pendingTimer} completion={queuedCompletion} />
         {heroExecution ? <Pressable accessibilityRole="button" accessibilityLabel={heroExecution.label} accessibilityState={{ disabled: heroExecution.disabled }} disabled={heroExecution.disabled} onPress={heroExecution.onPress}
@@ -740,22 +791,15 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     </>}
   </LinearGradient>;
 
+  const deliverySuccess = deliverySucceeded ? <DeliverySuccess title="Trabajo entregado" name={plainText(work.title)} demo={mode === "demo"}
+    onClose={props.deliveryOnly ? onBack : () => setDeliverySucceeded(false)} onBack={props.deliveryOnly ? onBack : goBack} /> : null;
+  const completionDialog = completing ? <CompletionDialog work={pendingTimer?.localClock ? { ...evidenceWork, status: pendingTimer.payload.status, elapsedSeconds: pendingTimer.localClock.elapsedSeconds, firstInProgressTime: completionStartTime(evidenceWork, pendingTimer, scopedOperations, props.timezone) } : evidenceWork} durable={durableDelivery} allowEditExecutionTime={props.allowEditExecutionTime} timerEnabled={timerEnabled} generatedAt={pendingTimer?.payload.recordedAt ?? generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} canSubmit={canSubmitDelivery && canReviewDelivery} error={operationError} busy={locked} mode={mode} onRefresh={online ? refreshDeliveryReview : undefined} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null;
+  if (props.deliveryOnly) return <>{deliverySuccess}{completionDialog}</>;
+
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={insets.top}>
-      {compactDetail ? <>
-        {props.connectionStatus}
-        <View style={styles.header} testID="compact-work-header">
-          <IconButton name="arrow-back-outline" label="Volver conservando el borrador" disabled={locked} onPress={goBack} />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.headerCodes} contentContainerStyle={styles.headerCodeRow}>
-            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{localWork ? "Local" : codes.workCode ?? "Trabajo"}</Text>
-            {codes.workOrderCode ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerCode}>{codes.workOrderCode}</Text> : null}
-            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.headerStatus}>{statusLabel}</Text>
-          </ScrollView>
-          <IconButton name="home-outline" label="Ir al inicio del trabajo" disabled={locked} onPress={workHome} />
-          <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
-        </View>
-      </> : <>
+      {/* Encabezado y tarjeta del trabajo fijos en todas las pestañas (la tarjeta se minimiza con su flecha). */}
       <SessionContextBar tenant={props.tenant} branchName={props.branchName}>{props.connectionStatus}</SessionContextBar>
       <View style={styles.header}>
         <IconButton name="arrow-back-outline" label="Volver conservando el borrador" disabled={locked} onPress={goBack} />
@@ -768,8 +812,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <IconButton name="home-outline" label="Ir al inicio del trabajo" disabled={locked} onPress={workHome} />
         <IconButton name="refresh-outline" label="Actualizar asignación y evidencias" disabled={locked} onPress={refresh} />
       </View>
-      </>}
-      {!compactDetail ? heroCard : null}
+      {heroCard}
       <View style={styles.detailNavigation}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.grow} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones del trabajo">
           {tabs.map(item => <Pressable key={item.id} accessibilityRole="tab" accessibilityState={{ selected: tab === item.id, disabled: locked }} accessibilityLabel={item.label} disabled={locked} onPress={() => navigateTab(item.id)} style={[styles.tab, tab === item.id && styles.activeTab]}>
@@ -785,7 +828,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => navigateTab("evidence", id)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /></View> : null}
-      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : <FadeIn key={tab} style={styles.screen}><ScrollView ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
+      {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : tab === "comments" && chat ? <ChatThread key={`${group.id}:${work.id}`} embedded api={chat} title="Comentarios del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled} /> : <FadeIn key={tab} style={styles.screen}><ScrollView ref={detailScroll} onScroll={event => { scrollPositions.current[tab] = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={100} onContentSizeChange={() => detailScroll.current?.scrollTo({ y: scrollPositions.current[tab] ?? 0, animated: false })} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={action === "refresh"} onRefresh={refresh} enabled={!locked} tintColor={palette.primary} colors={[palette.primary]} progressBackgroundColor={palette.surface} />}>
           {mode === "demo" ? <Notice message="Modo demostración · los cambios y confirmaciones son locales, no se envían a Qualitzer." /> : null}
           {props.workEditor && !readOnly && tab !== "work" ? <Button title="Editar trabajo" icon="create-outline" variant="secondary" disabled={locked || !online || hasPendingOperations} onPress={() => void openEditor()} /> : null}
           {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
@@ -795,7 +838,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <Button title="Volver sin copia duradera" variant="danger" disabled={locked} onPress={onBack} />
           </Card> : null}
           {message ? <Notice message={message} tone={props.offline !== undefined ? "info" : "success"} onDismiss={() => setMessage(null)} /> : null}
-          {readOnly ? <Notice message={queuedCompletion ? queuedCompletion.status === "applied" ? "Entrega confirmada. Actualizando ficha." : "Entrega guardada en este dispositivo · pendiente de sincronización." : localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o completado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
+          {readOnly ? <Notice message={queuedCompletion ? queuedCompletion.status === "applied" ? "Entrega confirmada. Actualizando ficha." : "Entrega guardada en este dispositivo · pendiente de sincronización." : localWork ? "Trabajo guardado en este dispositivo, pendiente de sincronizar. Puedes añadir archivos y comentarios. La ejecución se habilitará solo después de la confirmación y autorización del servidor." : staleReadOnly ? "La ficha actual aún no está verificada. Actualiza para confirmar los datos y permisos del trabajo antes de ejecutar o responder; los borradores se conservan. Esto no indica que la OT esté cerrada." : "Trabajo entregado o finalizado. La ejecución y las respuestas son de solo lectura; puedes consultar o agregar archivos y comentarios autorizados."} /> : null}
           {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
           {!compactDetail ? <>
           {tab === "work" ? <View style={[styles.detailSection, styles.filesSection]} testID="work-files-section">
@@ -831,7 +874,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         </ScrollView></FadeIn>}
         {tab !== "checklist" && tab !== "evidence" && !activityPanelOpen ? <View style={styles.executionFooter} testID="work-execution-footer">
           <View style={styles.executionButtons}>
-            {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : desiredStatus === "pending" || desiredStatus === "paused" ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
+            {!readOnly && (desiredStatus === "in_progress" ? <Button title="Pausar trabajo" accessibilityLabel="Pausar trabajo" variant="secondary" icon="pause-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "paused", executionDates: [selectedDate] })} /> : timerEnabled && (desiredStatus === "pending" || desiredStatus === "paused") ? <Button title={desiredStatus === "paused" ? "Reanudar trabajo" : "Iniciar trabajo"} icon="play-outline" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={disabled || timerNeedsAttention || !work.canExecute || !withinRange(selectedDate, range)} onPress={() => updateStatus({ status: "in_progress", executionDates: [selectedDate] })} /> : null)}
             <Button title={queuedCompletion ? "Entrega pendiente" : work.status === "delivered" || work.status === "completed" ? "Revisar entrega" : "Entregar trabajo"} icon="checkmark-circle-outline" variant="secondary" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={!canReviewDelivery} onPress={openDeliveryReview} />
             {work.status === "delivered" && props.onReopen ? <Button title={reopened ? "Reabierto · actualizando" : "Reabrir trabajo"} icon="refresh-outline" variant="secondary" style={styles.executionButton} textStyle={styles.executionButtonText} disabled={reopened || disabled || !online || staleReadOnly || hasPendingOperations} onPress={() => setReopening(true)} /> : null}
           </View>
@@ -844,11 +887,16 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             <View style={styles.between}><SectionTitle title="Secciones del trabajo" /><IconButton name="close-outline" label="Cerrar secciones" onPress={() => setSectionsOpen(false)} /></View>
             {tabs.map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); navigateTab(item.id); }} />)}
             {props.onLocationHistory ? <Button title="Mi historial de ubicación" icon="location-outline" variant="secondary" disabled={locked} onPress={() => { setSectionsOpen(false); props.onLocationHistory?.(); }} /> : null}
+            {/* Eliminar lo que el técnico creó y sigue pendiente; el servidor revisa si se puede y explica por qué no. */}
+            {deletion ? <Button title="Eliminar trabajo" icon="trash-outline" variant="secondary" iconColor={palette.danger} textStyle={{ color: palette.danger }} disabled={locked || !online}
+              onPress={() => { setSectionsOpen(false); setDeleting(true); }} /> : null}
             <Button title="Volver a mis asignaciones" icon="list-outline" variant="ghost" disabled={locked} onPress={() => { setSectionsOpen(false); leaveDetails(); }} />
           </ScrollView>
         </View></View>
       </PrivateModal> : null}
       <CameraPermissionGuide guide={cameraGuide} />
+      {deleting && deletion ? <DeleteRecordDialog port={deletion.port} scope={deletion.scope} kind="work" name={plainText(work.title)}
+        onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); props.onDeleted?.(); }} /> : null}
       {editing && props.workEditor ? <PrivateModal visible animationType="slide" onRequestClose={() => editorBack.current?.()}>
         <CreationScreen editing={editing} backHandler={editorBack} user={props.workEditor.user} tenant={props.tenant} storageKey={storageKey} busy={busy} online={online && !hasPendingOperations}
           onBack={() => setEditing(null)} onLoadOptions={props.workEditor.options} onSave={props.workEditor.save} onSaved={async result => { await callbacks.current.workEditor?.saved(result); if (mounted.current) { setEditing(null); setMessage("Trabajo actualizado."); } }} />
@@ -865,8 +913,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <Button title="Cancelar" variant="ghost" disabled={locked} onPress={() => setReopening(false)} />
         {operationError ? <Notice message={operationError} tone="error" /> : null}
       </View></View></PrivateModal> : null}
-      {deliverySucceeded ? <DeliverySuccess title="Trabajo entregado" name={plainText(work.title)} demo={mode === "demo"} onClose={() => setDeliverySucceeded(false)} onBack={goBack} /> : null}
-      {completing ? <CompletionDialog work={pendingTimer?.localClock ? { ...evidenceWork, status: pendingTimer.payload.status, elapsedSeconds: pendingTimer.localClock.elapsedSeconds, firstInProgressTime: completionStartTime(evidenceWork, pendingTimer, scopedOperations, props.timezone) } : evidenceWork} durable={durableDelivery} allowEditExecutionTime={props.allowEditExecutionTime} generatedAt={pendingTimer?.payload.recordedAt ?? generatedAt} maintenance={maintenance} initialDate={selectedDate} range={range} reasons={reasons} canSubmit={canSubmitDelivery && canReviewDelivery} error={operationError} busy={locked} mode={mode} onRefresh={online ? refreshDeliveryReview : undefined} onClose={() => setCompleting(false)} onSubmit={updateStatus} /> : null}
+      {deliverySuccess}
+      {completionDialog}
     </SafeAreaView>
   );
 }

@@ -31,7 +31,7 @@ async function detailFixture() {
     "./workDetail/useAttachmentFiles": { useAttachmentFiles: () => attachments },
     "./workDetail/useWorkDraft": drafts,
     "./workDetail/WorkInformation": { EquipmentTab: "EquipmentTab", WorkTab: "WorkTab" },
-    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" },
+    "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
     "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
     "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },

@@ -10,6 +10,9 @@ import type { OfflineSnapshot } from "../domain/offline";
 import { Badge, Button, Card, EmptyState, IconButton, SectionTitle, type IconName } from "../ui/components";
 import { palette, radius, theme, typography } from "../ui/theme";
 import { AssignmentOrderCard } from "./orders/AssignmentOrderCard";
+import { OrderQuickSheet, type OrderQuickKind } from "./orders/OrderQuickSheet";
+import type { FileDrivePort } from "../domain/fileDrive";
+import type { ThreadPort } from "../domain/threads";
 import { AssignmentWorkCard } from "./orders/AssignmentWorkCard";
 import { fullDate } from "./orders/assignmentPresentation";
 import { WeeklySchedule } from "./schedule/WeeklySchedule";
@@ -27,7 +30,7 @@ export interface DashboardScreenProps {
   onRefresh: () => void;
   onRangeChange: (range: DateRange) => void;
   onOpenWork: (group: AssignmentGroup, work: AssignmentWork, options?: WorkOpenOptions) => void;
-  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files" | "deliver") => void;
+  onOpenGroup: (group: AssignmentGroup, initialTab?: "works" | "files" | "comments" | "deliver") => void;
   onWorkStatus: (group: AssignmentGroup, work: AssignmentWork, input: StatusInput) => Promise<void>;
   busy?: boolean;
   offline?: OfflineSnapshot | null;
@@ -42,9 +45,12 @@ export interface DashboardScreenProps {
   onQueryChange?: (query: string) => void;
   /** Avisa si la lista de la jornada se desplazó hacia abajo (para compactar el aviso de cronómetros). */
   onScrolledChange?: (scrolled: boolean) => void;
+  /** Con conexión, Archivos y Comentarios de la tarjeta de una OT se abren en una ventana sin entrar al detalle. */
+  drivePort?: FileDrivePort | null;
+  threadPort?: ThreadPort | null;
 }
 
-type StatusFilter = "all" | "pending" | "in_progress" | "completed";
+type StatusFilter = "all" | "pending" | "in_progress" | "completed" | "delivered";
 type AssignmentListView = "works" | "maintenances" | "orders";
 interface WorkEntry { group: AssignmentGroup; work: AssignmentWork; }
 interface WorkSection { key: string; date: string | null; entries: WorkEntry[]; }
@@ -62,13 +68,15 @@ const filters: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "Todos" },
   { value: "pending", label: "Pendientes" },
   { value: "in_progress", label: "En curso" },
-  { value: "completed", label: "Completados" },
+  { value: "completed", label: "Finalizados" },
+  { value: "delivered", label: "Entregados" },
 ];
-// Punto de color de cada estado en el filtro: ámbar pendientes, verde en curso, gris completados.
+// Punto de color de cada estado en el filtro: ámbar pendientes, verde en curso, gris finalizados, azul entregados.
 const filterDots: { [key in Exclude<StatusFilter, "all">]: { dot: string; soft: string } } = {
   pending: { dot: palette.amber, soft: palette.amberSoft },
   in_progress: { dot: palette.primary, soft: palette.primarySoft },
   completed: { dot: palette.textMuted, soft: palette.track },
+  delivered: { dot: palette.info, soft: palette.infoSoft },
 };
 
 function scheduledDay(work: AssignmentWork): string {
@@ -81,7 +89,8 @@ function groupKey(group: AssignmentGroup): string {
 
 function matchesStatus(work: Pick<AssignmentWork, "status">, filter: StatusFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "completed") return work.status === "completed" || work.status === "delivered";
+  if (filter === "completed") return work.status === "completed";
+  if (filter === "delivered") return work.status === "delivered";
   if (filter === "in_progress") return work.status === "in_progress" || work.status === "paused";
   return work.status === "pending";
 }
@@ -124,7 +133,15 @@ function Kpi({ title, value, note, icon, tone, inline = false }: { title: string
   );
 }
 
-export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange, onScrolledChange }: DashboardScreenProps) {
+export function DashboardScreen({ data, user, range, loading, pendingDates, error, onRefresh, onRangeChange, onOpenWork, onOpenGroup, onWorkStatus, busy = false, offline, companyBranchId, focusDate, onFocusDate, view, searchOpen = false, query: externalQuery, onQueryChange, onScrolledChange, drivePort, threadPort }: DashboardScreenProps) {
+  const [quick, setQuick] = useState<{ group: AssignmentGroup; work?: AssignmentWork; kind: OrderQuickKind } | null>(null);
+  const quickAvailable = Boolean(drivePort && threadPort) && companyBranchId !== undefined && offline?.online !== false && offline?.authBlocked !== true;
+  // Archivos y comentarios en ventana cuando hay conexión; si no, el detalle de siempre (guarda lo pendiente sin señal).
+  const openGroupFromCard = (group: AssignmentGroup, initialTab?: "works" | "files" | "comments" | "deliver") => {
+    if (!busy && quickAvailable && (initialTab === "files" || initialTab === "comments") && group.type !== "direct_assignment") { setQuick({ group, kind: initialTab }); return; }
+    onOpenGroup(group, initialTab);
+  };
+  const openWorkQuick = quickAvailable ? (group: AssignmentGroup, work: AssignmentWork, kind: OrderQuickKind) => { if (!busy) setQuick({ group, work, kind }); } : undefined;
   const compact = useWindowDimensions().width < 600;
   const [agendaLayout, setAgendaLayout] = useState<"timeline" | "schedule" | "list">("timeline");
   const [agendaMode, setAgendaMode] = useState<"day" | "week" | "month">(() => range.startDate === monthRange(range.startDate).startDate && range.endDate === monthRange(range.startDate).endDate ? "month" : "week");
@@ -242,6 +259,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
     pending: statusItems.filter(item => matchesStatus(item, "pending")).length,
     in_progress: statusItems.filter(item => matchesStatus(item, "in_progress")).length,
     completed: statusItems.filter(item => matchesStatus(item, "completed")).length,
+    delivered: statusItems.filter(item => matchesStatus(item, "delivered")).length,
   };
   function countLabel(count: number): string {
     if (data === null || coveragePending || (partial && count === 0)) return "—";
@@ -310,7 +328,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       if (value === "all") return ["all"];
       const selected = current.filter(status => status !== "all");
       const next = selected.includes(value) ? selected.filter(status => status !== value) : [...selected, value];
-      return next.length === 0 || next.length === 3 ? ["all"] : next;
+      return next.length === 0 || next.length === filters.length - 1 ? ["all"] : next;
     });
   }
 
@@ -514,7 +532,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
       ) : null}
 
       {hasData && visibleCount > 0 ? listView !== "works" ? <View style={styles.section}>
-        {visibleOrders.map((group) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={group.works.length} busy={busy} onOpenGroup={onOpenGroup} />)}
+        {visibleOrders.map((group) => <AssignmentOrderCard key={groupKey(group)} group={group} matchingWorkCount={group.works.length} busy={busy} onOpenGroup={openGroupFromCard} />)}
       </View> : sections.map((section) => (
         <View key={section.key} style={styles.section}>
           {section.date !== null ? (
@@ -524,7 +542,7 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
               {section.date === today ? <Badge label="Hoy" tone="teal" /> : null}
             </View>
           ) : null}
-          {section.entries.map(({ group, work }) => <AssignmentWorkCard key={JSON.stringify([group.type, group.id, work.workType, work.id, work.scheduledDate])} currentWorkerId={user.workerId} group={group} work={work} queryDate={assignmentWorkQueryRange(work, range).startDate} companyBranchId={companyBranchId} onOpenWork={onOpenWork} onWorkStatus={onWorkStatus} busy={busy} generatedAt={data.generatedAt} offline={offline} online={offline?.online ?? !coveragePending} staleReadOnly={coveragePending || offline?.authBlocked === true || isPendingLocalWork(work)} />)}
+          {section.entries.map(({ group, work }) => <AssignmentWorkCard key={JSON.stringify([group.type, group.id, work.workType, work.id, work.scheduledDate])} currentWorkerId={user.workerId} manualHours={data.technician.showWorkTimer === false && data.technician.allowEditExecutionTime} group={group} work={work} queryDate={assignmentWorkQueryRange(work, range).startDate} companyBranchId={companyBranchId} onOpenWork={onOpenWork} onWorkStatus={onWorkStatus} busy={busy} generatedAt={data.generatedAt} offline={offline} online={offline?.online ?? !coveragePending} staleReadOnly={coveragePending || offline?.authBlocked === true || isPendingLocalWork(work)} onQuickOpen={openWorkQuick} />)}
         </View>
       )) : hasData && !loading && !error ? (
         <Card>
@@ -544,6 +562,8 @@ export function DashboardScreen({ data, user, range, loading, pendingDates, erro
         <Ionicons name="chevron-down" size={20} color={palette.textSecondary} accessible={false} />
       </Pressable> : null}
     </View> : null}
+    {quick && drivePort && threadPort && companyBranchId !== undefined ? <OrderQuickSheet group={quick.group} work={quick.work} kind={quick.kind} range={range} companyBranchId={companyBranchId}
+      drivePort={drivePort} threadPort={threadPort} onClose={() => setQuick(null)} /> : null}
     </View>
   );
 }

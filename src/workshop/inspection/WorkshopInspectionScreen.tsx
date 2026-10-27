@@ -16,8 +16,8 @@ import type { useWorkshopBoard } from "../useWorkshopBoard";
 import { MultiPicker, OptionRow, PickerSheet } from "../intake/IntakePickers";
 import { Notice } from "../entry/EntrySections";
 import { StepAnswerControl } from "./StepAnswerControl";
-import { DamageEditor } from "./DamageEditor";
-import { AddPhotoSheet, GuidedCapture, InspectionChecklistPanel, InspectionPhotoPanel, PhotoActionsSheet, PhotoViewer, ShareSheet } from "./InspectionPhotos";
+import { DamageEditor, type DamagePhoto } from "./DamageEditor";
+import { AddPhotoSheet, GuidedCapture, InspectionChecklistPanel, InspectionPhotoPanel, InspectionPhotoSummary, PhotoActionsSheet, PhotoViewer, ShareSheet } from "./InspectionPhotos";
 import { InspectionChecklistScreen } from "./InspectionChecklistScreen";
 
 type InspectionApi = ReturnType<typeof useWorkshopBoard>["inspection"];
@@ -54,6 +54,8 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
   const [sharing, setSharing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [openChecklist, setOpenChecklist] = useState<number | null>(null);
+  // La portada muestra el resumen de fotos y listas; las fotos se trabajan en su propia vista.
+  const [photosOpen, setPhotosOpen] = useState(false);
   const [comments, setComments] = useState<Record<number, boolean>>({});
   const [observation, setObservation] = useState("");
   const [finishing, setFinishing] = useState(false);
@@ -209,13 +211,28 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
     finally { mark("checklists", false); }
   }
 
-  async function saveDamage(input: Omit<InspectionDamageInput, "companyBranchId">) {
+  async function saveDamage(input: Omit<InspectionDamageInput, "companyBranchId">, photo: DamagePhoto | null) {
     const inspection = current.current;
     if (!inspection) return;
     mark("damage", true);
-    try { await api.saveDamage(entryId, inspection.inspectionId, input); setDamageEditor(null); await reload(); }
+    try {
+      const saved = await api.saveDamage(entryId, inspection.inspectionId, input);
+      const damageId = input.id ?? saved.id;
+      if (photo && damageId) {
+        const image = await scaledJpeg(photo.uri, 1600, INSPECTION_PHOTO_MAX_BYTES);
+        await api.uploadDamagePhoto(entryId, inspection.inspectionId, damageId, image, photo.source === "camera" ? "camera" : "gallery");
+      }
+      setDamageEditor(null); await reload();
+    }
     catch (failure) { setDamageEditor((editor) => editor && { ...editor, error: failureText(failure, "No se pudo guardar el daño.") }); }
     finally { mark("damage", false); }
+  }
+  async function pickDamagePhoto(source: DamagePhoto["source"]): Promise<string | null> {
+    try { return await pickAvatar(source, picker, () => true, { camera: "back", square: false }) ?? null; }
+    catch (failure) {
+      setDamageEditor((editor) => editor && { ...editor, error: failure instanceof CameraPermissionError ? "La app no tiene permiso para usar la cámara. Actívalo en los ajustes del teléfono." : failureText(failure, "No se pudo obtener la foto.") });
+      return null;
+    }
   }
   async function deleteDamage(damageId: number) {
     const inspection = current.current;
@@ -241,7 +258,11 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
   }
 
   // Atrás (flecha o botón del teléfono) guarda lo pendiente y la observación antes de salir; si aún no abre, solo sale.
-  leave.current = () => { if (finishing) return; if (current.current) void finish("leave"); else onClose(); };
+  leave.current = () => {
+    if (finishing) return;
+    if (photosOpen) { setPhotosOpen(false); return; }
+    if (current.current) void finish("leave"); else onClose();
+  };
 
   const title = kind === "entry" ? "Inspección de ingreso" : "Inspección de entrega";
   const pending = state ? inspectionPending(state) : [];
@@ -252,10 +273,11 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
 
   return <View style={styles.screen}>
     <View style={styles.bar}>
-      <IconButton name="arrow-back" label="Salir de la inspección" disabled={finishing} onPress={() => leave.current()} />
+      <IconButton name="arrow-back" label={photosOpen ? "Volver al resumen de la inspección" : "Salir de la inspección"} disabled={finishing} onPress={() => leave.current()} />
       <View style={styles.barText}>
-        <Text style={styles.barTitle}>{title}</Text>
-        <Text style={styles.barStep}>{kind === "entry" ? "Paso 2 de 3 · Se guarda a medida que respondes" : "Paso 1 de 2 · Se guarda a medida que respondes"}</Text>
+        <Text style={styles.barTitle}>{photosOpen ? "Fotos de la inspección" : title}</Text>
+        <Text style={styles.barStep}>{photosOpen ? `${title} · Se guarda al subir cada foto`
+          : kind === "entry" ? "Paso 2 de 3 · Se guarda a medida que respondes" : "Paso 1 de 2 · Se guarda a medida que respondes"}</Text>
       </View>
       {pendingSaves > 0 ? <View style={styles.saving}><ActivityIndicator size="small" color={palette.primary} /><Text style={styles.savingText}>Guardando</Text></View> : null}
     </View>
@@ -264,7 +286,19 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
     {!state ? <View style={styles.loading}>
       {loadError ? <><Notice tone="danger" icon="cloud-offline-outline" message={loadError} /><Button title="Reintentar" icon="refresh" variant="secondary" onPress={() => void open()} /></>
         : <><ActivityIndicator color={palette.primary} /><Text style={styles.hint}>Abriendo la inspección…</Text></>}
-    </View> : <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    </View> : photosOpen ? <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <InspectionPhotoPanel slots={state.slots} kind={kind} busy={busy} downloading={downloading} onSlot={setSlotActions}
+        damageCounts={state.damages.reduce<Record<string, number>>((counts, damage) => {
+          if (!damage.isAdditional && damage.location) counts[damage.location] = (counts[damage.location] ?? 0) + 1;
+          return counts;
+        }, {})}
+        onCompare={(slot) => setViewer({ title: `Comparar: ${slot.name}`, photo: slot.photo?.fullUrl ?? slot.photo?.url ?? null, reference: slot.reference?.fullUrl ?? slot.reference?.url ?? null })}
+        onDamage={(slot) => setDamageEditor({ damage: null, error: "", location: slot.key })}
+        onAdd={() => setAdding(true)} onGuide={() => setGuiding(true)} onDownload={() => void downloadPhotos()} onShare={() => setSharing(true)} />
+      {busy.custom ? <View style={styles.saving}><ActivityIndicator size="small" color={palette.primary} /><Text style={styles.savingText}>Subiendo foto adicional…</Text></View> : null}
+      {message ? <Notice tone="danger" icon="alert-circle-outline" message={message} /> : null}
+      <Button title="Volver al resumen" icon="arrow-back" variant="secondary" onPress={() => setPhotosOpen(false)} />
+    </ScrollView> : <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={styles.summary}>
         <View style={styles.summaryRow}>
           <Ionicons name="shield-checkmark-outline" size={20} color={palette.primary} accessible={false} />
@@ -279,9 +313,7 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
           : pending.length > 0 ? <Text style={styles.pendingText}>{pending.join(" · ")}</Text> : <Text style={styles.done}>Cumple lo exigido. Ya puedes terminarla.</Text>}
       </View>
 
-      <InspectionPhotoPanel slots={state.slots} kind={kind} busy={busy} downloading={downloading} onSlot={setSlotActions}
-        onAdd={() => setAdding(true)} onGuide={() => setGuiding(true)} onDownload={() => void downloadPhotos()} onShare={() => setSharing(true)} />
-      {busy.custom ? <View style={styles.saving}><ActivityIndicator size="small" color={palette.primary} /><Text style={styles.savingText}>Subiendo foto adicional…</Text></View> : null}
+      <InspectionPhotoSummary slots={state.slots} onOpen={() => setPhotosOpen(true)} />
 
       <InspectionChecklistPanel checklists={state.checklists} managing={Boolean(busy.checklists)} onManage={() => void openChecklistPicker()} onOpen={setOpenChecklist} />
 
@@ -333,7 +365,8 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
       selected={state.checklists.map((checklist) => checklist.checklistId)} emptyText="No hay listas de revisión disponibles."
       onClose={() => setChecklistPicker(null)} onConfirm={(ids) => void saveChecklists(ids)} /> : null}
     {damageEditor && state ? <DamageEditor damage={damageEditor.damage} slots={state.slots} saving={Boolean(busy.damage)} error={damageEditor.error}
-      initialLocation={damageEditor.location} onClose={() => setDamageEditor(null)} onSave={(input) => void saveDamage(input)} /> : null}
+      initialLocation={damageEditor.location} onClose={() => setDamageEditor(null)} onSave={(input, photo) => void saveDamage(input, photo)}
+      onPickPhoto={pickDamagePhoto} /> : null}
     {slotActions ? <PhotoActionsSheet slot={slotActions} kind={kind} onClose={() => setSlotActions(null)}
       onView={() => { setSlotActions(null); setViewer({ title: slotActions.name, photo: slotActions.photo?.fullUrl ?? slotActions.photo?.url ?? null }); }}
       onCompare={() => { setSlotActions(null); setViewer({ title: `Comparar: ${slotActions.name}`, photo: slotActions.photo?.fullUrl ?? slotActions.photo?.url ?? null,

@@ -18,6 +18,7 @@ import { equipmentLabel, fullDate, safeCount, scheduleTime, statusTones } from "
 import { localTimerElapsedSeconds } from "../../offline/queueIntentions";
 import { completionForWork, completionStatusLabel } from "../offline/offlineUi";
 import { animateNextLayout } from "../../ui/motion";
+import { useWorkTeamSheet } from "../workTeam/WorkTeamSheet";
 
 export interface AssignmentWorkCardProps {
   group: AssignmentGroup;
@@ -34,6 +35,10 @@ export interface AssignmentWorkCardProps {
   pendingTimer?: PendingTimer | null;
   /** Trabajador de la sesión: se marca como «Tú» entre los técnicos asignados. */
   currentWorkerId?: number | null;
+  /** La sucursal registra horas manuales: no se ofrece iniciar el cronómetro (sí pausar uno ya iniciado). */
+  manualHours?: boolean;
+  /** Con conexión, Archivos y Comentarios se abren en una ventana sobre la lista en vez de entrar al trabajo. */
+  onQuickOpen?: (group: AssignmentGroup, work: AssignmentWork, kind: "files" | "comments") => void;
 }
 
 const priorityColors: { [K in AssignmentWork["priority"]]: string } = { low: palette.success, medium: palette.amber, high: palette.danger };
@@ -77,10 +82,9 @@ function WorkExecution({ work, generatedAt, online = true, pending = false, loca
     {timing.percentage !== null ? <View accessibilityRole="progressbar" accessibilityLabel="Tiempo ejecutado frente al planificado" accessibilityValue={{ min: 0, max: 100, now: timing.barPercentage, text: `${timing.percentage}% ejecutado` }} style={styles.progressTrack}>
       <View style={[styles.progressFill, timing.overtimeMinutes > 0 && styles.overtimeFill, { width: `${timing.barPercentage}%` }]} />
     </View> : null}
-    {timing.percentage === null ? <Text style={styles.note}>Sin tiempo planificado</Text>
+    {timing.percentage === null ? null
       : timing.overtimeMinutes > 0 ? <Text style={styles.overtime}>{duration(timing.overtimeMinutes)} sobre lo planificado</Text>
       : <Text style={styles.note}>Faltan {duration(remaining)}</Text>}
-    {running ? <Text style={styles.note}>En ejecución · el servidor confirma el tiempo final.</Text> : null}
     {pending || !online ? <Text style={styles.note}>{localTimer?.localClock || !pending ? "Tiempo local · pendiente de confirmar" : "Último tiempo recibido"}</Text> : null}
   </View>;
 }
@@ -100,11 +104,12 @@ function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
-function TeamChips({ responsibles, currentWorkerId }: { responsibles: AssignmentWork["responsibles"]; currentWorkerId?: number | null }) {
-  if (responsibles.length === 0) return null;
+function TeamChips({ responsibles, currentWorkerId, onManage }: { responsibles: AssignmentWork["responsibles"]; currentWorkerId?: number | null; onManage?: (() => void) | null }) {
+  if (responsibles.length === 0 && !onManage) return null;
   const isSelf = (id: number | string): boolean => currentWorkerId != null && String(id) === String(currentWorkerId);
   const ordered = [...responsibles].sort((a, b) => Number(isSelf(b.id)) - Number(isSelf(a.id)));
-  return <View style={styles.team} accessible accessibilityLabel={`Técnicos asignados: ${ordered.map(person => isSelf(person.id) ? "tú" : person.name).join(", ")}`}>
+  const names = ordered.map(person => isSelf(person.id) ? "tú" : person.name).join(", ");
+  const chips = <>
     <Ionicons name="people-outline" size={15} color={palette.textMuted} accessible={false} />
     {ordered.map(person => {
       const self = isSelf(person.id);
@@ -114,7 +119,17 @@ function TeamChips({ responsibles, currentWorkerId }: { responsibles: Assignment
         <Text style={[styles.memberName, self && styles.memberNameSelf]} numberOfLines={1}>{self ? "Tú" : person.name}</Text>
       </View>;
     })}
-  </View>;
+  </>;
+  if (!onManage) return <View style={styles.team} accessible accessibilityLabel={`Técnicos asignados: ${names}`}>{chips}</View>;
+  // Con gestión disponible toda la fila es un botón y termina en «Gestionar».
+  return <Pressable testID="assignment-work-team" accessibilityRole="button" accessibilityLabel={responsibles.length > 0 ? `Técnicos asignados: ${names}. Gestionar equipo` : "Asignar técnicos al trabajo"}
+    accessibilityHint="Abre el equipo para agregar o quitar técnicos." onPress={onManage} style={({ pressed }) => [styles.team, styles.teamManage, pressed && styles.pressed]}>
+    {chips}
+    <View style={styles.teamAction}>
+      <Ionicons name="person-add-outline" size={13} color={palette.primary} accessible={false} />
+      <Text style={styles.teamActionText}>{responsibles.length > 0 ? "Gestionar" : "Asignar técnicos"}</Text>
+    </View>
+  </Pressable>;
 }
 
 function hhmm(value: string | null | undefined): string | null {
@@ -136,7 +151,7 @@ export function AssignmentWorkCard(props: AssignmentWorkCardProps) {
   return <AssignmentWorkCardContent key={scopeKey} {...props} work={work ?? props.work} generatedAt={snapshot?.generatedAt ?? props.generatedAt} staleReadOnly={props.staleReadOnly || !work} />;
 }
 
-function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy = false, generatedAt, online = true, staleReadOnly = false, offline, queryDate, companyBranchId, pendingTimer: suppliedTimer, currentWorkerId }: AssignmentWorkCardProps) {
+function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy = false, generatedAt, online = true, staleReadOnly = false, offline, queryDate, companyBranchId, pendingTimer: suppliedTimer, currentWorkerId, manualHours = false, onQuickOpen }: AssignmentWorkCardProps) {
   const [acting, setActing] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [startNotice, setStartNotice] = useState<string | null>(null);
@@ -168,7 +183,7 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const codeLabels = localWork ? [] : [codes.workCode, codes.workOrderCode, codes.negotiationCode].filter((code) => code !== null);
   const plannedDates = [...new Set((work.plannedDates ?? []).map(assignmentDay).filter(Boolean))].sort();
   const customer = work.workCustomerName ?? group.customerName;
-  const location = group.locationName.trim() ? group.locationName : group.locationAddress;
+  const branch = group.customerBranchName?.trim() ? group.customerBranchName : null;
   const priority = priorities[work.priority];
   const total = safeCount(work.checklistTotal);
   const done = Math.min(total, safeCount(work.checklistDone));
@@ -179,8 +194,10 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
   const locked = busy || acting;
   const pausing = desiredStatus === "in_progress";
   const actionTitle = pausing ? "Pausar" : desiredStatus === "paused" ? "Reanudar" : "Iniciar";
+  const showTimerAction = pausing || !manualHours || group.type === "internal_maintenance";
   const canChangeStatus = executionAvailable && !finished && !completion && !timerNeedsAttention && (pausing || work.canExecute);
   const canReviewDelivery = offlineReady && offline?.connection?.foreground !== false;
+  const team = useWorkTeamSheet(group, work, locked || localWork || staleReadOnly || !verifiedOnline);
   const gates = useRef({ canChangeStatus, canReviewDelivery, desiredStatus });
   gates.current = { canChangeStatus, canReviewDelivery, desiredStatus };
 
@@ -224,6 +241,12 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
     catch (error) { setOperationError(errorMessage(error)); }
   }
 
+  // Archivos y comentarios en una ventana sobre la lista (con conexión y un trabajo ya del servidor); si no, el detalle.
+  function quick(kind: "files" | "comments", tab: "evidence" | "comments"): void {
+    if (onQuickOpen && verifiedOnline && !localWork && !staleReadOnly && !locked) { onQuickOpen(group, work, kind); return; }
+    openWork({ tab });
+  }
+
   const equipment = work.workEquipment ?? group.equipment;
   const equipmentDetail = equipment ? [equipment.identifier, equipment.internalNumber].filter((value) => value && value !== equipment.label).join(" · ") || null : null;
   const summary = plainText(work.summary);
@@ -251,33 +274,34 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
       <Ionicons name="chevron-forward-outline" size={21} color={palette.primary} accessible={false} />
     </Pressable>
     {summary ? <Description text={summary} /> : null}
-    {work.isOverdue && !finished ? <View style={styles.codes}><Badge label="Atrasada" tone="danger" /></View> : null}
     <View style={infoStyles.list}>
       {customer?.trim() ? <InfoBlock label="Cliente" value={customer} /> : null}
+      {branch ? <InfoBlock label="Sucursal" icon="storefront-outline" value={branch} /> : null}
       <InfoBlock label="Equipo" value={equipment ? equipment.label || equipmentLabel(equipment) : "Sin equipo asociado"} detail={equipmentDetail} />
-      <InfoBlock label="Ubicación" icon="location-outline" value={location?.trim() ? location : "Sin ubicación"} />
       {work.systemName?.trim() || work.componentName?.trim() ? <View style={infoStyles.row} testID="assignment-work-system">
         <InfoBlock label="Sistema" icon="cog-outline" value={work.systemName?.trim() || "Sin sistema"} style={infoStyles.half} />
         <InfoBlock label="Subsistema" icon="layers-outline" value={work.componentName?.trim() || "Sin subsistema"} style={infoStyles.half} />
       </View> : null}
       <View style={infoStyles.row} testID="assignment-work-schedule" accessibilityLabel={`${fullDate(work.scheduledDate)}. ${scheduleTime(work)}`}>
-        <InfoBlock label="Horario" icon="calendar-outline" tone="blue" value={`${scheduledLabel} · ${scheduleTime(work)}`} style={infoStyles.half} />
+        <InfoBlock label="Horario" icon="calendar-outline" tone="blue" value={`${scheduledLabel} · ${scheduleTime(work)}`} style={infoStyles.half}
+          badge={work.isOverdue && !finished ? <Badge label="Atrasada" tone="danger" /> : null} badgeLabel={work.isOverdue && !finished ? "Atrasada" : undefined} />
         {colacion ? <InfoBlock label="Colación" icon="cafe-outline" tone="orange" value={colacion} style={infoStyles.half} /> : null}
       </View>
       {plannedDates.length > 1 ? <AssignmentMetadataRow icon="calendar-outline" text={`Fechas planificadas: ${plannedDates.map(shortDate).join(" · ")}`} /> : null}
     </View>
-    <TeamChips responsibles={work.responsibles} currentWorkerId={currentWorkerId} />
+    <TeamChips responsibles={work.responsibles} currentWorkerId={currentWorkerId} onManage={team.open} />
+    {team.sheet}
     {pendingTimer && operationNeedsAttention(pendingTimer) ? <Notice message={syncUserError(pendingTimer.lastError) || timerPendingLabel(pendingTimer)} tone="error" /> : null}
     {completion ? <Notice message={completion.status === "applied" ? "Entrega confirmada · actualizando" : "Entrega guardada · pendiente de sincronizar"} /> : null}
     <WorkExecution work={completion ? { ...work, status: "paused", elapsedSeconds: completion.localClock.elapsedSeconds } : work} generatedAt={generatedAt} online={executionAvailable && verifiedOnline} pending={timerPending || Boolean(completion)} localTimer={completion ? null : pendingTimer} />
-    {finished ? <Text style={styles.note}>Trabajo {work.status === "delivered" ? "entregado" : "completado"} · archivos, checklist y comentarios disponibles para consulta.</Text> : null}
+    {finished ? <Text style={styles.note}>Trabajo {work.status === "delivered" ? "entregado" : "finalizado"} · archivos, checklist y comentarios disponibles para consulta.</Text> : null}
     {!finished && !work.canExecute ? <Text style={styles.note}>La ejecución aún no está habilitada. Pulsa Entregar para revisar los requisitos pendientes.</Text> : null}
     <View style={styles.actionBar}>
-      {!finished ? <Button stacked title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} variant="secondary" iconColor={palette.primary} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={[styles.cell, styles.cellStart]} textStyle={styles.cellStartText} /> : null}
+      {!finished && showTimerAction ? <Button stacked title={`${actionTitle}${timerPending ? ` · ${timerPendingLabel(pendingTimer)}` : ""}`} accessibilityLabel={actionTitle} icon={pausing ? "pause-outline" : "play-outline"} variant="secondary" iconColor={palette.primary} disabled={locked || !canChangeStatus} loading={acting} onPress={() => void changeStatus()} style={[styles.cell, styles.cellStart]} textStyle={styles.cellStartText} /> : null}
       {!finished ? <Button stacked title="Entregar" accessibilityLabel="Entregar: abrir revisión de requisitos, sin confirmar todavía" icon="radio-button-on-outline" variant="secondary" iconColor={palette.danger} disabled={locked || !canReviewDelivery} onPress={() => openWork({ action: "deliver" })} style={[styles.cell, styles.cellDeliver]} textStyle={styles.cellDeliverText} /> : null}
-      <Button stacked title="Archivos" badge={safeCount(work.filesCount)} accessibilityLabel={`Archivos (${safeCount(work.filesCount)})`} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "evidence" })} style={styles.cell} textStyle={styles.cellText} />
+      <Button stacked title="Archivos" badge={safeCount(work.filesCount)} accessibilityLabel={`Archivos (${safeCount(work.filesCount)})`} icon="folder-open-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => quick("files", "evidence")} style={styles.cell} textStyle={styles.cellText} />
       <Button stacked title="Checklist" badge={`${done}/${total}`} accessibilityLabel={`Checklist (${done}/${total})`} icon="checkbox-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "checklist" })} style={styles.cell} textStyle={styles.cellText} />
-      <Button stacked title="Comentarios" badge={safeCount(work.commentsCount)} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbox-ellipses-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => openWork({ tab: "comments" })} style={[styles.cell, styles.cellLast]} textStyle={styles.cellText} />
+      <Button stacked title="Comentarios" badge={safeCount(work.commentsCount)} accessibilityLabel={`Comentarios (${safeCount(work.commentsCount)})`} icon="chatbox-ellipses-outline" variant="secondary" iconColor={palette.textSecondary} disabled={locked} onPress={() => quick("comments", "comments")} style={[styles.cell, styles.cellLast]} textStyle={styles.cellText} />
     </View>
     {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
     {startNotice ? <Notice message={startNotice} tone="success" onDismiss={() => setStartNotice(null)} /> : null}
@@ -298,6 +322,9 @@ const styles = StyleSheet.create({
   descriptionText: { fontSize: 13, lineHeight: 18, color: palette.textSecondary },
   readMore: { fontSize: 12, lineHeight: 18, fontWeight: "700", color: palette.info },
   team: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  teamManage: { paddingVertical: 4, paddingHorizontal: 6, marginHorizontal: -6, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: palette.border },
+  teamAction: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: palette.primarySoft },
+  teamActionText: { fontSize: 11, lineHeight: 15, fontWeight: "800", color: palette.primary },
   member: { flexDirection: "row", alignItems: "center", gap: 5, paddingLeft: 2, paddingRight: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: palette.background, maxWidth: "100%" },
   memberSelf: { backgroundColor: palette.infoSoft, borderWidth: 1, borderColor: palette.infoBorder },
   memberAvatar: { width: 22, height: 22, borderRadius: 11 },

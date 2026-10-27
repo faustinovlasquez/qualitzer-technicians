@@ -62,6 +62,21 @@ export const workshopOrderSchema = z.object({
 
 const sectionOf = <T extends z.ZodType>(item: T) => z.object({ available: z.boolean(), items: z.array(item).max(500) }).strict();
 
+/** Condiciones de entrega que exige la sucursal (las define la web en «Condiciones de ingreso y entrega»). */
+export const deliveryConditionsConfigSchema = z.object({
+  /** Cada OT del ingreso enviada a comercial y al menos una cotización creada. */
+  requireQuotes: z.boolean(),
+  /** Cada cotización del ingreso con montos (o ya aprobada). */
+  requireQuotedAmounts: z.boolean().optional(),
+  requireApprovedNegotiations: z.boolean(),
+  requireNoLooseWorks: z.boolean()
+}).strict();
+export type DeliveryConditionsConfig = z.infer<typeof deliveryConditionsConfigSchema>;
+/** Lo que asume la app si el gateway no lo informa: una cotización en 0 también cuenta como cotización. */
+export const DEFAULT_DELIVERY_CONDITIONS: Required<DeliveryConditionsConfig> = { requireQuotes: true, requireQuotedAmounts: false, requireApprovedNegotiations: false, requireNoLooseWorks: true };
+/** Encabezado con el que la app avisa que entiende las condiciones de entrega (las apps anteriores no lo envían). */
+export const DELIVERY_CONDITIONS_HEADER = "X-Qualitzer-Delivery-Conditions";
+
 export const workshopEntryDetailSchema = z.object({
   id,
   code: label(40),
@@ -87,7 +102,8 @@ export const workshopEntryDetailSchema = z.object({
     exitRequirement: inspectionRequirementSchema,
     entry: workshopInspectionSchema.nullable(),
     exit: workshopInspectionSchema.nullable(),
-    photoSlots: z.array(workshopPhotoSlotSchema).max(200)
+    photoSlots: z.array(workshopPhotoSlotSchema).max(200),
+    deliveryConditions: deliveryConditionsConfigSchema.optional()
   }).strict(),
   works: sectionOf(workshopWorkSchema),
   orders: sectionOf(workshopOrderSchema)
@@ -128,11 +144,12 @@ export function evaluateInspection(requirement: InspectionRequirement, inspectio
   return { met: missing.length === 0, missing };
 }
 
-export interface DeliveryCondition { id: "intake" | "orders" | "sent" | "works" | "exit"; met: boolean; title: string; detail: string }
+export interface DeliveryCondition { id: "intake" | "orders" | "sent" | "amounts" | "approved" | "works" | "exit"; met: boolean; title: string; detail: string }
 
-/** Condiciones para entregar el equipo, las mismas de la ficha web. */
+/** Condiciones para entregar el equipo, las mismas de la ficha web y según lo que exige la sucursal. */
 export function workshopDeliveryConditions(detail: WorkshopEntryDetail): DeliveryCondition[] {
   const { inspections } = detail;
+  const required: Required<DeliveryConditionsConfig> = { ...DEFAULT_DELIVERY_CONDITIONS, ...inspections.deliveryConditions };
   const entryCheck = evaluateInspection(inspections.entryRequirement, inspections.entry, inspections.photoSlots);
   const requirementName = inspectionRequirementLabel(inspections.entryRequirement).toLowerCase();
   const conditions: DeliveryCondition[] = [{
@@ -156,21 +173,40 @@ export function workshopDeliveryConditions(detail: WorkshopEntryDetail): Deliver
     const unquoted = commercial.filter((order) => !order.quoted);
     // Una OT sin enviar no llega a comercial: no se cotiza y el equipo no se puede entregar.
     const unsent = detail.orders.items.filter((order) => order.kind === "workOrder" && !order.sentToCommercial);
-    conditions.push({
-      id: "orders", met: detail.orders.available && commercial.length > 0 && unquoted.length === 0, title: "Cotizaciones creadas",
+    if (required.requireQuotes) {
+      conditions.push({
+        id: "orders", met: detail.orders.available && commercial.length > 0, title: "Cotizaciones creadas",
+        detail: !detail.orders.available ? "No se pudieron revisar las cotizaciones."
+          : commercial.length === 0 && unsent.length > 0 ? "Comercial todavía no puede cotizar: la OT no se ha enviado."
+          : commercial.length === 0 ? "El ingreso aún no tiene cotizaciones."
+          : `${commercial.map((order) => order.code).join(", ")} creada(s).`
+      });
+      if (detail.orders.available && unsent.length > 0) conditions.push({
+        id: "sent", met: false, title: "OTs enviadas a comercial",
+        detail: `${unsent.map((order) => order.code).join(", ")} sin enviar a comercial. Ábrela desde la pestaña OTs y envíala.`
+      });
+    }
+    if (required.requireQuotedAmounts) conditions.push({
+      id: "amounts", met: detail.orders.available && commercial.length > 0 && unquoted.length === 0, title: "Cotizaciones con valores",
       detail: !detail.orders.available ? "No se pudieron revisar las cotizaciones."
-        : commercial.length === 0 && unsent.length > 0 ? "Comercial todavía no puede cotizar: la OT no se ha enviado."
-        : commercial.length === 0 ? "El ingreso aún no tiene cotizaciones."
-        : unquoted.length > 0 ? `${unquoted.map((order) => order.code).join(", ")} sin cotizar todavía.`
-        : `${commercial.length} cotización(es) con montos.`
+        : commercial.length === 0 ? "Aún no hay cotizaciones a las que poner valores."
+        : unquoted.length > 0 ? `${unquoted.map((order) => order.code).join(", ")} sin valores todavía.`
+        : "Todas las cotizaciones tienen valores."
     });
-    if (detail.orders.available && unsent.length > 0) conditions.push({
-      id: "sent", met: false, title: "OTs enviadas a comercial",
-      detail: `${unsent.map((order) => order.code).join(", ")} sin enviar a comercial. Ábrela desde la pestaña OTs y envíala.`
-    });
+    if (required.requireApprovedNegotiations) {
+      const negotiations = detail.orders.items.filter((order) => order.kind !== "maintenance");
+      const unapproved = negotiations.filter((order) => order.stage !== "approved");
+      conditions.push({
+        id: "approved", met: detail.orders.available && negotiations.length > 0 && unapproved.length === 0, title: "Negociaciones aprobadas",
+        detail: !detail.orders.available ? "No se pudieron revisar las negociaciones."
+          : negotiations.length === 0 ? "El ingreso aún no tiene negociaciones."
+          : unapproved.length > 0 ? `${unapproved.map((order) => order.code).join(", ")} sin aprobar por comercial.`
+          : "Todas las negociaciones están aprobadas."
+      });
+    }
   }
   const loose = detail.works.items.filter((work) => work.loose);
-  conditions.push({
+  if (required.requireNoLooseWorks) conditions.push({
     id: "works", met: detail.works.available && loose.length === 0, title: "Sin trabajos sueltos",
     detail: !detail.works.available ? "No se pudieron revisar los trabajos."
       : detail.works.items.length === 0 ? "No hay trabajos sueltos."

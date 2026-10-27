@@ -147,6 +147,19 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = (scope, id, files) => this.onlineOnly(() => workActions(this.remote).uploadActivityFiles(scope, id, files), scope);
   reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.onlineOnly(() => workActions(this.remote).reopenWork(scope), scope);
+  // El equipo del trabajo solo se gestiona con conexión: cambia la jornada de otros técnicos.
+  workTeam: NonNullable<TechnicianRepository["workTeam"]> = scope => this.onlineOnly(() => {
+    if (!this.remote.workTeam) throw new Error("Actualiza el servidor para gestionar el equipo del trabajo.");
+    return this.remote.workTeam(scope);
+  }, scope);
+  addWorkTeamMember: NonNullable<TechnicianRepository["addWorkTeamMember"]> = (scope, workerId) => this.onlineOnly(() => {
+    if (!this.remote.addWorkTeamMember) throw new Error("Actualiza el servidor para gestionar el equipo del trabajo.");
+    return this.remote.addWorkTeamMember(scope, workerId);
+  }, scope);
+  removeWorkTeamMember: NonNullable<TechnicianRepository["removeWorkTeamMember"]> = (scope, workerId) => this.onlineOnly(() => {
+    if (!this.remote.removeWorkTeamMember) throw new Error("Actualiza el servidor para gestionar el equipo del trabajo.");
+    return this.remote.removeWorkTeamMember(scope, workerId);
+  }, scope);
   equipmentLocation: NonNullable<TechnicianRepository["equipmentLocation"]> = (scope, target) => this.onlineOnly(() => {
     if (!this.remote.equipmentLocation) throw new Error("La ubicación del equipo no está disponible.");
     return this.remote.equipmentLocation(scope, target);

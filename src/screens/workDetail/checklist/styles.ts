@@ -1,6 +1,9 @@
 import { StyleSheet } from "react-native";
 import { palette, radius, typography } from "../../../ui/theme";
 
+/** Color del indicador al deslizar para actualizar la lista de checklists. */
+export const checklistRefreshColor = palette.primary;
+
 export const checklistStyles = StyleSheet.create({
   catalog: { gap: 12 },
   catalogCard: { padding: 16, gap: 12 },

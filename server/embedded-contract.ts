@@ -5,6 +5,8 @@ export interface EmbeddedGatewayOptions {
   sessionFile: string;
   trustedProxyIps: string[];
   corsOrigins?: string[];
+  /** Clave de los comentarios en vivo del backend (SOCKET_IO_TOKEN); sin ella el chat se actualiza por consultas. */
+  socketToken?: string;
 }
 
 export type EmbeddedGatewayHandler = (

@@ -54,12 +54,8 @@ async function orderRules(upstream: Upstream, token: string, branchId: number, e
 }
 
 /** Revisa que vengan los campos exigidos que se completan en la app y que las opciones elegidas existan. */
-function orderExtra(rules: WorkshopOrderRules, extra: WorkshopOrderInput["extra"]) {
+function orderExtra(extra: WorkshopOrderInput["extra"]) {
   const value = extra ?? {};
-  for (const field of rules.fields) {
-    const missing = field.key === "costCenterRelation" ? !value.costCenterRelation : !value.internalNotes;
-    if (missing) throw new GatewayError(400, "WORKSHOP_ORDER_FIELDS_REQUIRED", `La sucursal exige completar: ${field.label}.`);
-  }
   return value.costCenterRelation ? { costCenterRelation: value.costCenterRelation } : {};
 }
 
@@ -155,12 +151,8 @@ export function registerOrderRoutes(router: Router, upstream: Upstream, ledger: 
     const { result, replayed } = await ledger.run(`${actor.user.id}`, input.requestId, { entryId, input }, () => oneAtATime(entryId, async () => {
       const { detail, raw } = await entryContext(upstream, token, input.companyBranchId, entryId);
       const workIds = looseWorks(detail, input.workIds);
-      const rules = await orderRules(upstream, token, input.companyBranchId, detail, raw);
-      if (rules.blockingFields.length > 0) {
-        throw new GatewayError(409, "WORKSHOP_ORDER_FIELDS_REQUIRED", `La sucursal exige completar en la OT: ${rules.blockingFields.join(", ")}. Créala desde la web.`);
-      }
-      if (rules.descriptionRequired && !input.description) throw new GatewayError(400, "WORKSHOP_ORDER_DESCRIPTION_REQUIRED", "La sucursal exige una descripción para la OT.");
-      const extra = orderExtra(rules, input.extra);
+      // Desde el taller solo el título es obligatorio: los campos que exige la web los completa comercial después.
+      const extra = orderExtra(input.extra);
       // Valores por defecto de la web: tipo de negocio "servicio", segmento predeterminado e impuestos predeterminados de la sucursal.
       const branch = new URLSearchParams({ companyBranchId: String(input.companyBranchId) });
       const [businessTypes, segments, taxes] = await Promise.all([
