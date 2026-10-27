@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
-import { ActivityIndicator, BackHandler, Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, Image, Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
 import { useTrustedNativePicker } from "../security/useTrustedNativePicker";
 import { CameraPermissionError } from "../domain/cameraErrors";
@@ -13,7 +13,22 @@ import { Button, IconButton } from "../ui/components";
 import { palette, radius, typography } from "../ui/theme";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
-type Upload = { id: string; name: string; status: "waiting" | "uploading" | "done" | "error" | "queued"; error?: string };
+type Upload = {
+  id: string; name: string; uri: string; mimeType: string; size?: number; target: DriveFolderId | null;
+  status: "waiting" | "uploading" | "done" | "error" | "queued"; error?: string; startedAt?: number;
+};
+/** Velocidad de subida supuesta (datos móviles) para estimar el avance: el envío no informa los bytes enviados. */
+const UPLOAD_BYTES_PER_SECOND = 120 * 1024;
+/** La lista se recarga sola cada tanto para mostrar lo que otros suben desde la web o desde otro teléfono. */
+const POLL_MS = 15_000;
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+function uploadShare(upload: Upload, now: number): number {
+  if (upload.status === "done") return 1;
+  if (upload.status !== "uploading" || upload.startedAt === undefined) return 0;
+  const expected = Math.max(1500, ((upload.size ?? 600 * 1024) / UPLOAD_BYTES_PER_SECOND) * 1000);
+  // Llega al 90 % al tiempo estimado y se queda ahí hasta que el servidor confirma.
+  return Math.min(0.9, ((now - upload.startedAt) / expected) * 0.9);
+}
 /** Sin señal antes de enviar: el archivo no llegó al servidor y se puede guardar en la cola sin riesgo de duplicarlo. */
 const unsent = (failure: unknown) => failure instanceof Error && failure.name === "NetworkError" && (failure as Error & { kind?: string }).kind === "network";
 type Dialog =
@@ -67,11 +82,29 @@ function Action({ icon, label, detail, tone = palette.primary, disabled = false,
 }
 
 function Thumb({ file, size }: { file: DriveFile; size: number }) {
-  const [failed, setFailed] = useState(false);
-  const preview = httpUrl(file.thumbnailUrl) ?? (isImage(file) ? httpUrl(file.url) : null);
+  // Miniatura y, si aún no existe (el servidor la genera después de subir), la foto original.
+  const candidates = [httpUrl(file.thumbnailUrl), isImage(file) ? httpUrl(file.url) : null].filter((url, index, all): url is string => url !== null && all.indexOf(url) === index);
+  const [attempt, setAttempt] = useState(0);
+  const preview = candidates[attempt];
   const kind = fileIcon(file);
-  if (preview && !failed) return <Image source={{ uri: preview }} style={{ width: size, height: size, borderRadius: radius.md, backgroundColor: palette.track }} onError={() => setFailed(true)} accessibilityLabel={file.name} />;
+  if (preview) return <Image key={preview} source={{ uri: preview }} style={{ width: size, height: size, borderRadius: radius.md, backgroundColor: palette.track }} onError={() => setAttempt((value) => value + 1)} accessibilityLabel={file.name} />;
   return <View style={[styles.typeIcon, { width: size, height: size, backgroundColor: kind.soft }]}><Ionicons name={kind.icon} size={Math.round(size * 0.42)} color={kind.tone} accessible={false} /></View>;
+}
+
+/** Archivo que se está subiendo: la foto del teléfono con su avance y, al terminar, el visto bueno. */
+function PendingThumb({ upload, share, size }: { upload: Upload; share: number; size: number }) {
+  const image = upload.mimeType.toLowerCase().startsWith("image/");
+  const done = upload.status === "done";
+  return <View style={[styles.pendingThumb, { width: size, height: size }]}>
+    {image ? <Image source={{ uri: upload.uri }} style={{ width: size, height: size }} accessible={false} />
+      : <Ionicons name="document-attach" size={Math.round(size * 0.42)} color={palette.textSecondary} accessible={false} />}
+    <View style={[styles.pendingShade, done && styles.pendingShadeDone]}>
+      {done ? <Ionicons name="checkmark-circle" size={size > 60 ? 30 : 20} color={palette.white} accessible={false} />
+        : <ActivityIndicator size="small" color={palette.white} />}
+      {size > 60 ? <Text style={styles.pendingText}>{done ? "Subida" : upload.status === "waiting" ? "En espera" : `${Math.round(share * 100)} %`}</Text> : null}
+    </View>
+    <View style={styles.pendingTrack}><View style={[styles.pendingFill, { width: `${Math.round(share * 100)}%` }]} /></View>
+  </View>;
 }
 
 /**
@@ -104,6 +137,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [name, setName] = useState("");
   const picker = useTrustedNativePicker();
@@ -121,18 +155,41 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const canRemove = !readOnly && canDelete && listing?.capabilities.remove === true && !current?.readOnly;
   const movable = folders.filter((folder) => !folder.readOnly && typeof folder.id === "number");
 
-  async function load(nextFolder = folderId, nextSearch = search) {
+  /** `quiet`: recarga de fondo (cada tanto o al volver a la app); si falla no reemplaza la lista por un error. */
+  async function load(nextFolder = folderId, nextSearch = search, quiet = false): Promise<DriveListing | null> {
     const ticket = ++request.current;
-    setLoading(true); setError("");
+    if (!quiet) { setLoading(true); setError(""); }
     try {
       const result = await apiRef.current.list(nextFolder, nextSearch, 0);
-      if (ticket !== request.current) return;
+      if (ticket !== request.current) return null;
+      setError("");
       setListing(result); setFiles(result.files);
+      return result;
     } catch (failure) {
-      if (ticket === request.current) setError(failureText(failure, "No se pudieron cargar los archivos. Revisa tu conexión."));
-    } finally { if (ticket === request.current) setLoading(false); }
+      if (ticket === request.current && !quiet) setError(failureText(failure, "No se pudieron cargar los archivos. Revisa tu conexión."));
+      return null;
+    } finally { if (ticket === request.current) { setLoading(false); setRefreshing(false); } }
   }
   useEffect(() => { void load(folderId, search); }, [folderId, search]);
+
+  // Siempre al día: recarga cada 15 s y al volver a la app (lo subido desde la web u otro teléfono aparece solo).
+  const quietLoad = useRef(() => undefined as unknown);
+  // No se recarga si se abrió «Ver más» (volvería a la primera página) ni durante una acción.
+  quietLoad.current = () => { if (!uploading && !busy && !loadingMore && dialog === null && (listing?.page ?? 0) === 0) void load(folderId, search, true); };
+  useEffect(() => {
+    if (typeof setInterval !== "function") return;
+    const timer = setInterval(() => quietLoad.current(), POLL_MS);
+    const subscription = AppState?.addEventListener?.("change", (state) => { if (state === "active") quietLoad.current(); });
+    return () => { clearInterval(timer); subscription?.remove(); };
+  }, []);
+
+  // Avance estimado de la subida en curso.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!uploading || typeof setInterval !== "function") return;
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [uploading]);
 
   async function loadMore() {
     if (!listing || loadingMore || listing.page + 1 >= listing.totalPages) return;
@@ -183,14 +240,27 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const retryable = useRef(new Map<string, { id: string; uri: string; name: string; mimeType: string; size?: number }>());
   async function send(queue: Array<{ id: string; uri: string; name: string; mimeType: string; size?: number }>) {
     const target = folderId;
-    setUploads(queue.map(({ id, name }) => ({ id, name, status: "waiting" as const })));
+    const searching = search !== null;
+    const before = listing?.totalFiles ?? files.length;
+    setUploads(queue.map((file) => ({ ...file, target, status: "waiting" as const })));
     let failed = 0;
+    let uploaded = 0;
     const offline: typeof queue = [];
     for (const file of queue) {
-      setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "uploading" } : item));
+      setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "uploading", startedAt: Date.now(), error: undefined } : item));
       try {
         if (file.size !== undefined && file.size > MAX_UPLOAD_BYTES) throw new Error("Supera el máximo de 25 MB.");
-        await apiRef.current.upload(file, target);
+        // Un corte de señal antes de enviar no llegó al servidor: se reintenta solo (sin riesgo de duplicar) antes de rendirse.
+        for (let attempt = 0; ; attempt++) {
+          try { await apiRef.current.upload(file, target); break; }
+          catch (failure) {
+            // Con cola sin conexión se guarda de inmediato en el teléfono; sin ella se reintenta dos veces.
+            if (!unsent(failure) || attempt >= 2 || onOfflineSave) throw failure;
+            await wait(3000 * (attempt + 1));
+            setUploads((list) => list.map((item) => item.id === file.id ? { ...item, startedAt: Date.now() } : item));
+          }
+        }
+        uploaded += 1;
         retryable.current.delete(file.id);
         setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "done" } : item));
       } catch (failure) {
@@ -216,9 +286,15 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     setMessage(failed > 0 ? { text: `${queue.length - failed} de ${queue.length} listos. Revisa los que fallaron.`, tone: "error" }
       : queued > 0 ? { text: `Sin señal: ${queued === 1 ? "1 archivo quedó guardado" : `${queued} archivos quedaron guardados`} en el teléfono y se enviará${queued === 1 ? "" : "n"} solo${queued === 1 ? "" : "s"} al volver la conexión.`, tone: "success" }
         : { text: queue.length === 1 ? "Archivo subido." : `${queue.length} archivos subidos.`, tone: "success" });
-    if (failed === 0 && queued === 0) setUploads([]);
     if (queue.length > failed) onChanged?.();
-    await load(target).catch(() => undefined);
+    // El servidor puede tardar unos segundos en mostrar lo recién subido: se espera a verlo en la lista antes de quitar
+    // la foto con su visto bueno (así no «desaparece» y vuelve a aparecer después).
+    for (let check = 0; check < 6; check++) {
+      const result = await load(target, search, check > 0);
+      if (uploaded === 0 || searching || !result || result.totalFiles >= before + uploaded) break;
+      await wait(2500);
+    }
+    setUploads((list) => list.filter((item) => item.status !== "done"));
   }
   async function retryFailed() {
     const files = uploads.filter((item) => item.status === "error").flatMap((item) => retryable.current.get(item.id) ?? []);
@@ -236,6 +312,9 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const meta = (file: DriveFile) => [fileIcon(file).label, sizeText(file.size), file.createdAt, file.responsibleName].filter(Boolean).join(" · ");
   const doneCount = uploads.filter((upload) => upload.status === "done").length;
   const active = uploads.find((upload) => upload.status === "uploading");
+  const overall = uploads.length === 0 ? 0 : uploads.reduce((sum, upload) => sum + (upload.status === "error" || upload.status === "queued" ? 1 : uploadShare(upload, now)), 0) / uploads.length;
+  // Lo que se sube a esta carpeta se ve en la cuadrícula desde el primer momento, con su avance.
+  const pending = search ? [] : uploads.filter((upload) => sameFolder(upload.target, folderId) && (upload.status === "waiting" || upload.status === "uploading" || upload.status === "done"));
 
   return <View style={styles.screen}>
     <View style={[styles.bar, embedded && styles.barEmbedded]}>
@@ -267,7 +346,9 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
       </Pressable> : null}
     </View>
 
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} enabled={!uploading} colors={[palette.primary]} tintColor={palette.primary}
+        onRefresh={() => { setRefreshing(true); void load(folderId, search, true); }} />}>
       {notice}
       {message ? <View style={[styles.message, message.tone === "error" ? styles.messageError : styles.messageOk]} accessibilityLiveRegion="polite">
         <Ionicons name={message.tone === "error" ? "alert-circle" : "checkmark-circle"} size={18} color={message.tone === "error" ? palette.danger : palette.success} accessible={false} />
@@ -277,11 +358,16 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
       {uploads.length > 0 ? <View style={styles.uploads}>
         <View style={styles.uploadHead}>
           {uploading ? <ActivityIndicator size="small" color={palette.primary} /> : <Ionicons name="cloud-done-outline" size={18} color={palette.primary} accessible={false} />}
-          <Text style={styles.uploadTitle}>{uploading ? `Subiendo ${Math.min(doneCount + 1, uploads.length)} de ${uploads.length}` : "Subida terminada"}</Text>
-          {!uploading ? <Pressable accessibilityRole="button" accessibilityLabel="Ocultar" onPress={() => setUploads([])} hitSlop={8}><Ionicons name="close" size={16} color={palette.textSecondary} accessible={false} /></Pressable> : null}
+          <Text style={styles.uploadTitle}>{uploading ? `Subiendo ${Math.min(doneCount + 1, uploads.length)} de ${uploads.length}`
+            : uploads.some((upload) => upload.status === "done") ? "Subido. Actualizando la lista…" : "Subida terminada"}</Text>
+          <Text style={styles.uploadPercent}>{Math.round(overall * 100)} %</Text>
+          {!uploading && !uploads.some((upload) => upload.status === "done") ? <Pressable accessibilityRole="button" accessibilityLabel="Ocultar" onPress={() => setUploads([])} hitSlop={8}><Ionicons name="close" size={16} color={palette.textSecondary} accessible={false} /></Pressable> : null}
         </View>
-        <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.round((doneCount / uploads.length) * 100)}%` }]} /></View>
+        <View style={styles.progressTrack} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: Math.round(overall * 100) }}>
+          <View style={[styles.progressFill, { width: `${Math.round(overall * 100)}%` }]} />
+        </View>
         {active ? <Text style={styles.hint} numberOfLines={1}>{active.name}</Text> : null}
+        {uploading ? <Text style={styles.hint}>No cierres esta pantalla hasta que termine.</Text> : null}
         {uploads.filter((upload) => upload.status === "error").map((upload) => <Text key={upload.id} style={styles.uploadError} numberOfLines={2}>✕ {upload.name}: {upload.error}</Text>)}
         {uploads.filter((upload) => upload.status === "queued").map((upload) => <Text key={upload.id} style={styles.hint} numberOfLines={1}>☁ {upload.name}: guardado, se enviará al volver la señal</Text>)}
         {!uploading && uploads.some((upload) => upload.status === "error" && retryable.current.has(upload.id)) ? <Button title="Reintentar los que fallaron" icon="refresh" variant="secondary" onPress={() => void retryFailed()} /> : null}
@@ -315,15 +401,27 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
             </View>
           </> : null}
 
-          {files.length > 0 ? <>
+          {files.length > 0 || pending.length > 0 ? <>
             <Text style={styles.section}>{search ? `Archivos con «${search}»` : "Archivos"} · {listing?.totalFiles ?? files.length}</Text>
             {view === "grid" ? <View style={styles.fileGrid}>
+              {pending.map((upload) => <View key={upload.id} style={styles.tile} accessible accessibilityLabel={`${upload.name}: ${upload.status === "done" ? "subido" : "subiendo"}`}>
+                <PendingThumb upload={upload} share={uploadShare(upload, now)} size={96} />
+                <Text style={styles.tileName} numberOfLines={2}>{upload.name}</Text>
+              </View>)}
               {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
                 style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
                 <Thumb file={file} size={96} />
                 <Text style={styles.tileName} numberOfLines={2}>{file.name}</Text>
               </Pressable>)}
             </View> : <View style={styles.fileList}>
+              {pending.map((upload) => <View key={upload.id} style={styles.row} accessible accessibilityLabel={`${upload.name}: ${upload.status === "done" ? "subido" : "subiendo"}`}>
+                <PendingThumb upload={upload} share={uploadShare(upload, now)} size={44} />
+                <View style={styles.grow}>
+                  <Text style={styles.rowName} numberOfLines={1}>{upload.name}</Text>
+                  <Text style={[styles.hint, upload.status === "done" && { color: palette.success }]} numberOfLines={1}>
+                    {upload.status === "done" ? "Subido con éxito" : upload.status === "waiting" ? "En espera" : `Subiendo… ${Math.round(uploadShare(upload, now) * 100)} %`}</Text>
+                </View>
+              </View>)}
               {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
                 <Thumb file={file} size={44} />
@@ -337,7 +435,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
             {listing && listing.page + 1 < listing.totalPages ? <Button title="Ver más archivos" variant="ghost" loading={loadingMore} onPress={() => void loadMore()} /> : null}
           </> : null}
 
-          {!loading && children.length === 0 && files.length === 0 ? <View style={styles.center}>
+          {!loading && children.length === 0 && files.length === 0 && pending.length === 0 ? <View style={styles.center}>
             <View style={styles.emptyIcon}><Ionicons name={search ? "search" : "folder-open-outline"} size={34} color={palette.primary} accessible={false} /></View>
             <Text style={styles.emptyTitle}>{search ? "Sin resultados" : current ? "Esta carpeta está vacía" : "Aún no hay archivos"}</Text>
             <Text style={styles.emptyText}>{search ? "Prueba con otra palabra." : canUpload ? "Sube fotos o documentos con el botón +." : "No hay nada que mostrar aquí."}</Text>
@@ -457,6 +555,13 @@ const styles = StyleSheet.create({
   uploadHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   uploadTitle: { flex: 1, fontSize: 14, fontWeight: "800", color: palette.heading },
   uploadError: { ...typography.caption, color: palette.danger },
+  uploadPercent: { fontSize: 13, fontWeight: "800", color: palette.primary, fontVariant: ["tabular-nums"] },
+  pendingThumb: { borderRadius: radius.md, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
+  pendingShade: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "rgba(15,23,42,0.45)" },
+  pendingShadeDone: { backgroundColor: "rgba(22,163,74,0.55)" },
+  pendingText: { fontSize: 12, fontWeight: "800", color: palette.white },
+  pendingTrack: { position: "absolute", left: 0, right: 0, bottom: 0, height: 4, backgroundColor: "rgba(255,255,255,0.35)" },
+  pendingFill: { height: 4, backgroundColor: palette.white },
   progressTrack: { height: 6, borderRadius: 3, backgroundColor: palette.surface, overflow: "hidden" },
   progressFill: { height: 6, borderRadius: 3, backgroundColor: palette.primary },
   readOnly: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: palette.track },

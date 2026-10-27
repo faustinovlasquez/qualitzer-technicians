@@ -216,7 +216,8 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
       if (!uri) return;
       setImageBusy(true);
       const dataUri = await squareJpeg(uri, 1280, WORKSHOP_IMAGE_MAX_BYTES);
-      setImage({ preview: dataUri, dataUri });
+      // La vista previa usa el archivo elegido: en Android una imagen en texto (base64) tan grande a veces no se dibuja.
+      setImage({ preview: uri, dataUri });
       setImageFailed(false);
     } catch (failure) {
       setMessage(failure instanceof CameraPermissionError ? "La app no tiene permiso para usar la cámara. Actívalo en los ajustes del teléfono." : failure instanceof Error ? failure.message : "No se pudo preparar la foto.");
@@ -307,7 +308,8 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
                 style={({ pressed }) => [styles.photo, !shownImage && styles.photoEmpty, pressed && styles.photoPressed]}>
                 {imageBusy ? <ActivityIndicator color={palette.primary} />
                   : shownImage ? <>
-                    <Image source={{ uri: shownImage }} style={styles.photoImage} accessibilityLabel="Foto del equipo" />
+                    <Image source={{ uri: shownImage }} style={styles.photoImage} resizeMode="cover" accessibilityLabel="Foto del equipo"
+                      onError={() => { if (image && shownImage !== image.dataUri) setImage({ ...image, preview: image.dataUri }); }} />
                     <View style={styles.photoEdit}><Ionicons name="camera" size={14} color={palette.white} accessible={false} /></View>
                   </> : <>
                     <Ionicons name="camera-outline" size={28} color={palette.primary} accessible={false} />
