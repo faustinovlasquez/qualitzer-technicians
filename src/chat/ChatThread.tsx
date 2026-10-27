@@ -472,8 +472,9 @@ const styles = StyleSheet.create({
   input: { flex: 1, minHeight: 42, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 21, backgroundColor: palette.background, borderWidth: 1, borderColor: palette.border, fontSize: 15, color: palette.text },
   sendButton: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary },
   sendDisabled: { backgroundColor: palette.textMuted },
-  overlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15,23,42,0.5)" },
-  sheet: { gap: 6, padding: 16, paddingBottom: 28, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, backgroundColor: palette.surface },
+  // Ventana centrada: pegada abajo quedaba bajo la barra de navegación del teléfono.
+  overlay: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20, backgroundColor: "rgba(15,23,42,0.5)" },
+  sheet: { width: "100%", maxWidth: 520, maxHeight: "85%", gap: 6, padding: 16, borderRadius: radius.xl, backgroundColor: palette.surface },
   sheetHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sheetTitle: { fontSize: 17, fontWeight: "800", color: palette.heading },
   sheetAction: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 4, borderRadius: radius.md },

@@ -220,7 +220,12 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     if (busy) return;
     setBusy(true); setMessage(null);
     try { await action(); setDialog(null); setMessage({ text: done, tone: "success" }); onChanged?.(); await load(); }
-    catch (failure) { setMessage({ text: failureText(failure, "No se pudo completar la acción."), tone: "error" }); }
+    catch (failure) {
+      setDialog(null);
+      setMessage({ text: failureText(failure, "No se pudo completar la acción."), tone: "error" });
+      // Lo más común es que otro ya lo movió o borró: la lista se pone al día sola.
+      void load(folderId, search, true);
+    }
     finally { setBusy(false); }
   }
 
@@ -566,8 +571,9 @@ const styles = StyleSheet.create({
   progressFill: { height: 6, borderRadius: 3, backgroundColor: palette.primary },
   readOnly: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: palette.track },
   fab: { position: "absolute", right: 20, bottom: 24, width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary, boxShadow: "0px 6px 18px rgba(0,126,128,0.3)" },
-  overlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15,23,42,0.5)" },
-  sheet: { gap: 6, padding: 16, paddingBottom: 28, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, backgroundColor: palette.surface, maxHeight: "85%" },
+  // Ventana centrada (no pegada abajo): así los botones no quedan bajo la barra de navegación del teléfono.
+  overlay: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20, backgroundColor: "rgba(15,23,42,0.5)" },
+  sheet: { width: "100%", maxWidth: 520, gap: 6, padding: 16, borderRadius: radius.xl, backgroundColor: palette.surface, maxHeight: "85%" },
   sheetHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
   sheetTitle: { fontSize: 17, fontWeight: "800", color: palette.heading },
   action: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 4, borderRadius: radius.md },

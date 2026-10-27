@@ -410,8 +410,9 @@ const styles = StyleSheet.create({
   tags: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 3 },
   tag: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
   tagText: { fontSize: 11, fontWeight: "700" },
-  backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.45)" },
-  sheet: { gap: 4, padding: 16, paddingBottom: 28, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, backgroundColor: palette.surface },
+  // Ventana centrada: pegada abajo quedaba bajo la barra de navegación del teléfono.
+  backdrop: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20, backgroundColor: "rgba(0,0,0,0.45)" },
+  sheet: { width: "100%", maxWidth: 520, maxHeight: "85%", gap: 4, padding: 16, borderRadius: radius.lg, backgroundColor: palette.surface },
   sheetTitle: { ...typography.label, fontSize: 16, color: palette.heading, marginBottom: 6 },
   sheetOption: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, minHeight: 48, borderRadius: radius.md },
   sheetOptionOn: { backgroundColor: palette.primarySoft }, sheetText: { flex: 1, fontSize: 15, color: palette.text }, sheetTextOn: { color: palette.primary, fontWeight: "800" }

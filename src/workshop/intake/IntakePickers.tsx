@@ -160,9 +160,10 @@ export function MultiPicker<T extends { id: number }>({ title, items, label, det
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(18,44,58,0.55)" },
-  panel: { width: "100%", maxWidth: 640, alignSelf: "center", maxHeight: "92%", minHeight: "60%", gap: 10, padding: 16, paddingBottom: 20,
-    borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, backgroundColor: palette.surface },
+  // Ventana centrada: pegada abajo, el botón final quedaba bajo la barra de navegación del teléfono.
+  overlay: { flex: 1, justifyContent: "center", padding: 16, backgroundColor: "rgba(18,44,58,0.55)" },
+  panel: { width: "100%", maxWidth: 640, alignSelf: "center", maxHeight: "88%", minHeight: "60%", gap: 10, padding: 16,
+    borderRadius: radius.lg, backgroundColor: palette.surface },
   header: { flexDirection: "row", alignItems: "center", gap: 8 },
   title: { flex: 1, fontSize: 17, fontWeight: "800", color: palette.heading },
   search: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, height: 46, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },

@@ -140,7 +140,8 @@ const styles = StyleSheet.create({
   rowValue: { ...typography.label, color: palette.text, flexShrink: 1, textAlign: "right" },
   rowEmpty: { color: palette.textMuted, fontWeight: "400" },
   disabled: { opacity: 0.5 }, pressed: { opacity: 0.7 },
-  overlay: { flex: 1, justifyContent: "flex-end", alignItems: "center", backgroundColor: "rgba(18,44,58,0.55)" },
-  sheet: { width: "100%", maxWidth: 520, backgroundColor: palette.surface, padding: 20, gap: 10, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl },
+  // Ventana centrada: pegada abajo quedaba bajo la barra de navegación del teléfono.
+  overlay: { flex: 1, justifyContent: "center", alignItems: "center", padding: 20, backgroundColor: "rgba(18,44,58,0.55)" },
+  sheet: { width: "100%", maxWidth: 520, maxHeight: "85%", backgroundColor: palette.surface, padding: 20, gap: 10, borderRadius: radius.xl },
   sheetTitle: { ...typography.heading, color: palette.text },
 });
