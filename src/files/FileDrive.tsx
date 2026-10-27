@@ -91,19 +91,32 @@ function Thumb({ file, size }: { file: DriveFile; size: number }) {
   return <View style={[styles.typeIcon, { width: size, height: size, backgroundColor: kind.soft }]}><Ionicons name={kind.icon} size={Math.round(size * 0.42)} color={kind.tone} accessible={false} /></View>;
 }
 
-/** Archivo que se está subiendo: la foto del teléfono con su avance y, al terminar, el visto bueno. */
+function pendingLabel(upload: Upload, share: number): string {
+  switch (upload.status) {
+    case "done": return "Subido";
+    case "error": return "No se subió";
+    case "queued": return "En cola";
+    case "waiting": return "En espera";
+    default: return `Subiendo ${Math.round(share * 100)} %`;
+  }
+}
+
+/** Archivo que se está subiendo: la foto del teléfono con su avance y, al terminar, el visto bueno (o si falló o quedó en cola). */
 function PendingThumb({ upload, share, size }: { upload: Upload; share: number; size: number }) {
   const image = upload.mimeType.toLowerCase().startsWith("image/");
   const done = upload.status === "done";
+  const failed = upload.status === "error";
+  const queued = upload.status === "queued";
+  const icon: IconName | null = done ? "checkmark-circle" : failed ? "alert-circle" : queued ? "cloud-upload-outline" : null;
   return <View style={[styles.pendingThumb, { width: size, height: size }]}>
     {image ? <Image source={{ uri: upload.uri }} style={{ width: size, height: size }} accessible={false} />
       : <Ionicons name="document-attach" size={Math.round(size * 0.42)} color={palette.textSecondary} accessible={false} />}
-    <View style={[styles.pendingShade, done && styles.pendingShadeDone]}>
-      {done ? <Ionicons name="checkmark-circle" size={size > 60 ? 30 : 20} color={palette.white} accessible={false} />
+    <View style={[styles.pendingShade, done && styles.pendingShadeDone, failed && styles.pendingShadeError, queued && styles.pendingShadeQueued]}>
+      {icon ? <Ionicons name={icon} size={size > 60 ? 30 : 20} color={palette.white} accessible={false} />
         : <ActivityIndicator size="small" color={palette.white} />}
-      {size > 60 ? <Text style={styles.pendingText}>{done ? "Subida" : upload.status === "waiting" ? "En espera" : `${Math.round(share * 100)} %`}</Text> : null}
+      {size > 60 ? <Text style={styles.pendingText}>{pendingLabel(upload, share)}</Text> : null}
     </View>
-    <View style={styles.pendingTrack}><View style={[styles.pendingFill, { width: `${Math.round(share * 100)}%` }]} /></View>
+    {!failed && !queued ? <View style={styles.pendingTrack}><View style={[styles.pendingFill, { width: `${Math.round(share * 100)}%` }]} /></View> : null}
   </View>;
 }
 
@@ -142,6 +155,8 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const [name, setName] = useState("");
   const picker = useTrustedNativePicker();
   const request = useRef(0);
+  /** Total de archivos que debe mostrar el servidor para dar por vistas las subidas recién terminadas. */
+  const awaitingTotal = useRef<number | null>(null);
   const apiRef = useRef(api);
   apiRef.current = api;
 
@@ -164,6 +179,10 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
       if (ticket !== request.current) return null;
       setError("");
       setListing(result); setFiles(result.files);
+      if (awaitingTotal.current !== null && nextSearch === null && result.totalFiles >= awaitingTotal.current) {
+        awaitingTotal.current = null;
+        setUploads((list) => list.filter((item) => item.status !== "done"));
+      }
       return result;
     } catch (failure) {
       if (ticket === request.current && !quiet) setError(failureText(failure, "No se pudieron cargar los archivos. Revisa tu conexión."));
@@ -294,12 +313,15 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     if (queue.length > failed) onChanged?.();
     // El servidor puede tardar unos segundos en mostrar lo recién subido: se espera a verlo en la lista antes de quitar
     // la foto con su visto bueno (así no «desaparece» y vuelve a aparecer después).
-    for (let check = 0; check < 6; check++) {
+    let listed = uploaded === 0 || searching;
+    for (let check = 0; check < 6 && !listed; check++) {
       const result = await load(target, search, check > 0);
-      if (uploaded === 0 || searching || !result || result.totalFiles >= before + uploaded) break;
-      await wait(2500);
+      if (!result || result.totalFiles >= before + uploaded) listed = true;
+      else await wait(2500);
     }
-    setUploads((list) => list.filter((item) => item.status !== "done"));
+    // Si el servidor aún no lo muestra, la foto sigue a la vista como «Subido» hasta que aparezca en una recarga.
+    if (listed) setUploads((list) => list.filter((item) => item.status !== "done"));
+    else awaitingTotal.current = before + uploaded;
   }
   async function retryFailed() {
     const files = uploads.filter((item) => item.status === "error").flatMap((item) => retryable.current.get(item.id) ?? []);
@@ -319,7 +341,8 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const active = uploads.find((upload) => upload.status === "uploading");
   const overall = uploads.length === 0 ? 0 : uploads.reduce((sum, upload) => sum + (upload.status === "error" || upload.status === "queued" ? 1 : uploadShare(upload, now)), 0) / uploads.length;
   // Lo que se sube a esta carpeta se ve en la cuadrícula desde el primer momento, con su avance.
-  const pending = search ? [] : uploads.filter((upload) => sameFolder(upload.target, folderId) && (upload.status === "waiting" || upload.status === "uploading" || upload.status === "done"));
+  // También lo que falló (para reintentar) y lo que quedó en cola sin señal: nada «desaparece» mientras no esté en la lista.
+  const pending = search ? [] : uploads.filter((upload) => sameFolder(upload.target, folderId));
 
   return <View style={styles.screen}>
     <View style={[styles.bar, embedded && styles.barEmbedded]}>
@@ -409,24 +432,30 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
           {files.length > 0 || pending.length > 0 ? <>
             <Text style={styles.section}>{search ? `Archivos con «${search}»` : "Archivos"} · {listing?.totalFiles ?? files.length}</Text>
             {view === "grid" ? <View style={styles.fileGrid}>
-              {pending.map((upload) => <View key={upload.id} style={styles.tile} accessible accessibilityLabel={`${upload.name}: ${upload.status === "done" ? "subido" : "subiendo"}`}>
+              {pending.map((upload) => <Pressable key={upload.id} style={styles.tile} accessibilityRole={upload.status === "error" ? "button" : undefined}
+                accessibilityLabel={`${upload.name}: ${pendingLabel(upload, uploadShare(upload, now))}${upload.status === "error" ? ". Toca para reintentar" : ""}`}
+                disabled={upload.status !== "error" || uploading || !retryable.current.has(upload.id)} onPress={() => void retryFailed()}>
                 <PendingThumb upload={upload} share={uploadShare(upload, now)} size={96} />
-                <Text style={styles.tileName} numberOfLines={2}>{upload.name}</Text>
-              </View>)}
+                <Text style={[styles.tileName, upload.status === "error" && { color: palette.danger }]} numberOfLines={2}>
+                  {upload.status === "error" && retryable.current.has(upload.id) ? "Toca para reintentar" : upload.name}</Text>
+              </Pressable>)}
               {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
                 style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
                 <Thumb file={file} size={96} />
                 <Text style={styles.tileName} numberOfLines={2}>{file.name}</Text>
               </Pressable>)}
             </View> : <View style={styles.fileList}>
-              {pending.map((upload) => <View key={upload.id} style={styles.row} accessible accessibilityLabel={`${upload.name}: ${upload.status === "done" ? "subido" : "subiendo"}`}>
+              {pending.map((upload) => <Pressable key={upload.id} style={styles.row} accessibilityRole={upload.status === "error" ? "button" : undefined}
+                accessibilityLabel={`${upload.name}: ${pendingLabel(upload, uploadShare(upload, now))}`}
+                disabled={upload.status !== "error" || uploading || !retryable.current.has(upload.id)} onPress={() => void retryFailed()}>
                 <PendingThumb upload={upload} share={uploadShare(upload, now)} size={44} />
                 <View style={styles.grow}>
                   <Text style={styles.rowName} numberOfLines={1}>{upload.name}</Text>
-                  <Text style={[styles.hint, upload.status === "done" && { color: palette.success }]} numberOfLines={1}>
-                    {upload.status === "done" ? "Subido con éxito" : upload.status === "waiting" ? "En espera" : `Subiendo… ${Math.round(uploadShare(upload, now) * 100)} %`}</Text>
+                  <Text style={[styles.hint, upload.status === "done" && { color: palette.success }, upload.status === "error" && { color: palette.danger }]} numberOfLines={2}>
+                    {upload.status === "done" ? "Subido con éxito" : upload.status === "error" ? `${upload.error ?? "No se subió"}. Toca para reintentar.`
+                      : upload.status === "queued" ? "En cola: se enviará solo al volver la señal" : upload.status === "waiting" ? "En espera" : `Subiendo… ${Math.round(uploadShare(upload, now) * 100)} %`}</Text>
                 </View>
-              </View>)}
+              </Pressable>)}
               {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
                 <Thumb file={file} size={44} />
@@ -564,6 +593,8 @@ const styles = StyleSheet.create({
   pendingThumb: { borderRadius: radius.md, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
   pendingShade: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "rgba(15,23,42,0.45)" },
   pendingShadeDone: { backgroundColor: "rgba(22,163,74,0.55)" },
+  pendingShadeError: { backgroundColor: "rgba(220,38,38,0.6)" },
+  pendingShadeQueued: { backgroundColor: "rgba(217,119,6,0.6)" },
   pendingText: { fontSize: 12, fontWeight: "800", color: palette.white },
   pendingTrack: { position: "absolute", left: 0, right: 0, bottom: 0, height: 4, backgroundColor: "rgba(255,255,255,0.35)" },
   pendingFill: { height: 4, backgroundColor: palette.white },
