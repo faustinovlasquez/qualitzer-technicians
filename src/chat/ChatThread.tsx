@@ -11,6 +11,7 @@ import { pickWorkspaceFiles } from "../screens/workDetail/files/filePicker";
 import type { FileSource } from "../screens/workDetail/files/fileRules";
 import { httpUrl } from "../screens/workDetail/detailRules";
 import { IconButton } from "../ui/components";
+import { useKeyboardOverlap } from "../ui/useKeyboardOverlap";
 import { palette, radius, typography } from "../ui/theme";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
@@ -99,6 +100,11 @@ export function ChatThread({ api, title, subtitle, onClose, embedded = false, re
   const picker = useTrustedNativePicker();
   const scroll = useRef<ScrollView>(null);
   const stickToEnd = useRef(true);
+  const keyboard = useKeyboardOverlap();
+  // Al abrir el teclado la lista se achica: se mantiene a la vista el último mensaje.
+  useEffect(() => {
+    if (keyboard.overlap > 0 && stickToEnd.current) { const timer = setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 60); return () => clearTimeout(timer); }
+  }, [keyboard.overlap]);
   const apiRef = useRef(api);
   apiRef.current = api;
   const ticket = useRef(0);
@@ -407,7 +413,9 @@ export function ChatThread({ api, title, subtitle, onClose, embedded = false, re
     </Modal> : null}
   </>;
 
-  return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={embedded ? 120 : 0}>{content}</KeyboardAvoidingView>;
+  // Android: el espacio que tapa el teclado se deja abajo (el campo de texto queda sobre el teclado).
+  if (Platform.OS === "android") return <View ref={keyboard.ref} style={[styles.screen, { paddingBottom: keyboard.overlap }]}>{content}</View>;
+  return <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={embedded ? 120 : 0}>{content}</KeyboardAvoidingView>;
 }
 
 const styles = StyleSheet.create({

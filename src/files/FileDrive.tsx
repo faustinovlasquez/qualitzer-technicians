@@ -121,11 +121,42 @@ function PendingThumb({ upload, share, size }: { upload: Upload; share: number; 
 }
 
 /**
+ * Subidas en curso por gestor (fuera de la pantalla): si la pantalla se vuelve a armar (al volver de la cámara o la
+ * galería, o al salir y entrar) las fotos siguen a la vista con su estado, y lo que falló se puede reintentar.
+ */
+type UploadEntry = { id: string; uri: string; name: string; mimeType: string; size?: number };
+const uploadStore = new Map<string, { uploads: Upload[]; retryable: Map<string, UploadEntry>; awaitingTotal: number | null; listeners: Set<() => void> }>();
+function uploadSlot(key: string) {
+  let slot = uploadStore.get(key);
+  if (!slot) { slot = { uploads: [], retryable: new Map(), awaitingTotal: null, listeners: new Set() }; uploadStore.set(key, slot); }
+  return slot;
+}
+function useUploads(key: string) {
+  const slot = uploadSlot(key);
+  const [uploads, setLocal] = useState(slot.uploads);
+  useEffect(() => {
+    const current = uploadSlot(key);
+    const listener = () => setLocal(current.uploads);
+    current.listeners.add(listener);
+    listener();
+    return () => { current.listeners.delete(listener); };
+  }, [key]);
+  const setUploads = (next: Upload[] | ((list: Upload[]) => Upload[])) => {
+    const current = uploadSlot(key);
+    current.uploads = typeof next === "function" ? next(current.uploads) : next;
+    for (const listener of current.listeners) listener();
+  };
+  return [uploads, setUploads, slot] as const;
+}
+
+/**
  * Gestor de archivos genérico (como el de la web): carpetas con ruta, búsqueda, vista en cuadrícula o lista,
  * subir varias fotos o documentos con su avance, mover, renombrar y borrar. Sirve para ingresos, OT, trabajos y mantenimientos.
  */
-export function FileDrive({ api, title, subtitle, onClose, readOnly = false, canDelete = true, embedded = false, notice, onOfflineSave, onChanged }: {
+export function FileDrive({ api, title, subtitle, onClose, readOnly = false, canDelete = true, embedded = false, notice, onOfflineSave, onChanged, uploadKey }: {
   api: DriveApi; title: string; subtitle?: string; onClose?: () => void; readOnly?: boolean; canDelete?: boolean;
+  /** Identifica las subidas de este gestor aunque la pantalla se vuelva a armar (por defecto, título y código). */
+  uploadKey?: string;
   /**
    * Guarda en la cola sin conexión los archivos que no se pudieron enviar por falta de señal (van a la carpeta principal
    * y se envían solos al volver la conexión). Sin él, quedan con error para reintentar.
@@ -148,15 +179,13 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const [search, setSearch] = useState<string | null>(null);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [uploads, setUploads] = useState<Upload[]>([]);
+  const [uploads, setUploads, uploadState] = useUploads(uploadKey ?? `${title}:${subtitle ?? ""}`);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [name, setName] = useState("");
   const picker = useTrustedNativePicker();
   const request = useRef(0);
-  /** Total de archivos que debe mostrar el servidor para dar por vistas las subidas recién terminadas. */
-  const awaitingTotal = useRef<number | null>(null);
   const apiRef = useRef(api);
   apiRef.current = api;
 
@@ -179,8 +208,8 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
       if (ticket !== request.current) return null;
       setError("");
       setListing(result); setFiles(result.files);
-      if (awaitingTotal.current !== null && nextSearch === null && result.totalFiles >= awaitingTotal.current) {
-        awaitingTotal.current = null;
+      if (uploadState.awaitingTotal !== null && nextSearch === null && result.totalFiles >= uploadState.awaitingTotal) {
+        uploadState.awaitingTotal = null;
         setUploads((list) => list.filter((item) => item.status !== "done"));
       }
       return result;
@@ -261,7 +290,6 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   }
 
   // Archivos elegidos que fallaron: se pueden reintentar sin volver a elegirlos.
-  const retryable = useRef(new Map<string, { id: string; uri: string; name: string; mimeType: string; size?: number }>());
   async function send(queue: Array<{ id: string; uri: string; name: string; mimeType: string; size?: number }>) {
     const target = folderId;
     const searching = search !== null;
@@ -285,12 +313,12 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
           }
         }
         uploaded += 1;
-        retryable.current.delete(file.id);
+        uploadState.retryable.delete(file.id);
         setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "done" } : item));
       } catch (failure) {
         if (onOfflineSave && unsent(failure)) { offline.push(file); continue; }
         failed += 1;
-        retryable.current.set(file.id, file);
+        uploadState.retryable.set(file.id, file);
         setUploads((list) => list.map((item) => item.id === file.id ? { ...item, status: "error", error: failureText(failure, "No se pudo subir.") } : item));
       }
     }
@@ -298,11 +326,11 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     if (offline.length > 0 && onOfflineSave) {
       try {
         await onOfflineSave(offline);
-        for (const file of offline) retryable.current.delete(file.id);
+        for (const file of offline) uploadState.retryable.delete(file.id);
         setUploads((list) => list.map((item) => offline.some((file) => file.id === item.id) ? { ...item, status: "queued" } : item));
       } catch (failure) {
         failed += offline.length;
-        for (const file of offline) retryable.current.set(file.id, file);
+        for (const file of offline) uploadState.retryable.set(file.id, file);
         setUploads((list) => list.map((item) => offline.some((file) => file.id === item.id) ? { ...item, status: "error", error: failureText(failure, "No se pudo guardar en el teléfono.") } : item));
       }
     }
@@ -321,10 +349,10 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     }
     // Si el servidor aún no lo muestra, la foto sigue a la vista como «Subido» hasta que aparezca en una recarga.
     if (listed) setUploads((list) => list.filter((item) => item.status !== "done"));
-    else awaitingTotal.current = before + uploaded;
+    else uploadState.awaitingTotal = before + uploaded;
   }
   async function retryFailed() {
-    const files = uploads.filter((item) => item.status === "error").flatMap((item) => retryable.current.get(item.id) ?? []);
+    const files = uploads.filter((item) => item.status === "error").flatMap((item) => uploadState.retryable.get(item.id) ?? []);
     if (files.length > 0) await send(files);
   }
 
@@ -398,7 +426,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
         {uploading ? <Text style={styles.hint}>No cierres esta pantalla hasta que termine.</Text> : null}
         {uploads.filter((upload) => upload.status === "error").map((upload) => <Text key={upload.id} style={styles.uploadError} numberOfLines={2}>✕ {upload.name}: {upload.error}</Text>)}
         {uploads.filter((upload) => upload.status === "queued").map((upload) => <Text key={upload.id} style={styles.hint} numberOfLines={1}>☁ {upload.name}: guardado, se enviará al volver la señal</Text>)}
-        {!uploading && uploads.some((upload) => upload.status === "error" && retryable.current.has(upload.id)) ? <Button title="Reintentar los que fallaron" icon="refresh" variant="secondary" onPress={() => void retryFailed()} /> : null}
+        {!uploading && uploads.some((upload) => upload.status === "error" && uploadState.retryable.has(upload.id)) ? <Button title="Reintentar los que fallaron" icon="refresh" variant="secondary" onPress={() => void retryFailed()} /> : null}
       </View> : null}
       {current?.readOnly ? <View style={styles.readOnly}><Ionicons name="lock-closed" size={14} color={palette.textSecondary} accessible={false} /><Text style={styles.hint}>Carpeta del sistema: solo para ver.</Text></View> : null}
 
@@ -434,10 +462,10 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
             {view === "grid" ? <View style={styles.fileGrid}>
               {pending.map((upload) => <Pressable key={upload.id} style={styles.tile} accessibilityRole={upload.status === "error" ? "button" : undefined}
                 accessibilityLabel={`${upload.name}: ${pendingLabel(upload, uploadShare(upload, now))}${upload.status === "error" ? ". Toca para reintentar" : ""}`}
-                disabled={upload.status !== "error" || uploading || !retryable.current.has(upload.id)} onPress={() => void retryFailed()}>
+                disabled={upload.status !== "error" || uploading || !uploadState.retryable.has(upload.id)} onPress={() => void retryFailed()}>
                 <PendingThumb upload={upload} share={uploadShare(upload, now)} size={96} />
                 <Text style={[styles.tileName, upload.status === "error" && { color: palette.danger }]} numberOfLines={2}>
-                  {upload.status === "error" && retryable.current.has(upload.id) ? "Toca para reintentar" : upload.name}</Text>
+                  {upload.status === "error" && uploadState.retryable.has(upload.id) ? "Toca para reintentar" : upload.name}</Text>
               </Pressable>)}
               {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
                 style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
@@ -447,7 +475,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
             </View> : <View style={styles.fileList}>
               {pending.map((upload) => <Pressable key={upload.id} style={styles.row} accessibilityRole={upload.status === "error" ? "button" : undefined}
                 accessibilityLabel={`${upload.name}: ${pendingLabel(upload, uploadShare(upload, now))}`}
-                disabled={upload.status !== "error" || uploading || !retryable.current.has(upload.id)} onPress={() => void retryFailed()}>
+                disabled={upload.status !== "error" || uploading || !uploadState.retryable.has(upload.id)} onPress={() => void retryFailed()}>
                 <PendingThumb upload={upload} share={uploadShare(upload, now)} size={44} />
                 <View style={styles.grow}>
                   <Text style={styles.rowName} numberOfLines={1}>{upload.name}</Text>
