@@ -81,13 +81,19 @@ function Action({ icon, label, detail, tone = palette.primary, disabled = false,
   </Pressable>;
 }
 
-function Thumb({ file, size }: { file: DriveFile; size: number }) {
+/** `placeholder`: la foto del teléfono recién subida; se ve debajo mientras se descarga la del servidor (sin hueco gris). */
+function Thumb({ file, size, placeholder }: { file: DriveFile; size: number; placeholder?: string }) {
   // Miniatura y, si aún no existe (el servidor la genera después de subir), la foto original.
   const candidates = [httpUrl(file.thumbnailUrl), isImage(file) ? httpUrl(file.url) : null].filter((url, index, all): url is string => url !== null && all.indexOf(url) === index);
   const [attempt, setAttempt] = useState(0);
   const preview = candidates[attempt];
   const kind = fileIcon(file);
-  if (preview) return <Image key={preview} source={{ uri: preview }} style={{ width: size, height: size, borderRadius: radius.md, backgroundColor: palette.track }} onError={() => setAttempt((value) => value + 1)} accessibilityLabel={file.name} />;
+  const box = { width: size, height: size, borderRadius: radius.md };
+  if (placeholder) return <View style={[box, styles.thumbStack]}>
+    <Image source={{ uri: placeholder }} style={box} accessible={false} />
+    {preview ? <Image key={preview} source={{ uri: preview }} style={[box, styles.thumbOver]} onError={() => setAttempt((value) => value + 1)} accessibilityLabel={file.name} /> : null}
+  </View>;
+  if (preview) return <Image key={preview} source={{ uri: preview }} style={[box, { backgroundColor: palette.track }]} onError={() => setAttempt((value) => value + 1)} accessibilityLabel={file.name} />;
   return <View style={[styles.typeIcon, { width: size, height: size, backgroundColor: kind.soft }]}><Ionicons name={kind.icon} size={Math.round(size * 0.42)} color={kind.tone} accessible={false} /></View>;
 }
 
@@ -125,11 +131,31 @@ function PendingThumb({ upload, share, size }: { upload: Upload; share: number; 
  * galería, o al salir y entrar) las fotos siguen a la vista con su estado, y lo que falló se puede reintentar.
  */
 type UploadEntry = { id: string; uri: string; name: string; mimeType: string; size?: number };
-const uploadStore = new Map<string, { uploads: Upload[]; retryable: Map<string, UploadEntry>; awaitingTotal: number | null; listeners: Set<() => void> }>();
+type UploadSlot = {
+  uploads: Upload[]; retryable: Map<string, UploadEntry>; awaitingTotal: number | null; listeners: Set<() => void>;
+  /** Archivos que ya estaban antes de subir (para reconocer los nuevos en la lista del servidor). */
+  knownIds: Set<string> | null;
+  /** Archivo del servidor → foto del teléfono que se subió: se muestra debajo hasta que carga la del servidor. */
+  previews: Map<string, string>;
+};
+const uploadStore = new Map<string, UploadSlot>();
 function uploadSlot(key: string) {
   let slot = uploadStore.get(key);
-  if (!slot) { slot = { uploads: [], retryable: new Map(), awaitingTotal: null, listeners: new Set() }; uploadStore.set(key, slot); }
+  if (!slot) { slot = { uploads: [], retryable: new Map(), awaitingTotal: null, listeners: new Set(), knownIds: null, previews: new Map() }; uploadStore.set(key, slot); }
   return slot;
+}
+/** Asocia las fotos recién subidas con los archivos nuevos de la lista (primero por tamaño, luego por orden). */
+function adoptPreviews(slot: UploadSlot, listed: DriveFile[]) {
+  const known = slot.knownIds;
+  if (!known) return;
+  const fresh = listed.filter((file) => !known.has(file.id) && !slot.previews.has(file.id));
+  const done = slot.uploads.filter((upload) => upload.status === "done" && upload.mimeType.toLowerCase().startsWith("image/"));
+  for (const upload of done) {
+    const index = Math.max(0, fresh.findIndex((file) => upload.size !== undefined && file.size === upload.size));
+    const match = fresh.splice(index, 1)[0];
+    if (match) slot.previews.set(match.id, upload.uri);
+  }
+  if (slot.previews.size > 200) slot.previews.delete(slot.previews.keys().next().value!);
 }
 function useUploads(key: string) {
   const slot = uploadSlot(key);
@@ -210,6 +236,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
       setListing(result); setFiles(result.files);
       if (uploadState.awaitingTotal !== null && nextSearch === null && result.totalFiles >= uploadState.awaitingTotal) {
         uploadState.awaitingTotal = null;
+        adoptPreviews(uploadState, result.files);
         setUploads((list) => list.filter((item) => item.status !== "done"));
       }
       return result;
@@ -294,6 +321,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     const target = folderId;
     const searching = search !== null;
     const before = listing?.totalFiles ?? files.length;
+    uploadState.knownIds = new Set(files.map((file) => file.id));
     setUploads(queue.map((file) => ({ ...file, target, status: "waiting" as const })));
     let failed = 0;
     let uploaded = 0;
@@ -342,13 +370,17 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     // El servidor puede tardar unos segundos en mostrar lo recién subido: se espera a verlo en la lista antes de quitar
     // la foto con su visto bueno (así no «desaparece» y vuelve a aparecer después).
     let listed = uploaded === 0 || searching;
+    let latest: DriveListing | null = null;
     for (let check = 0; check < 6 && !listed; check++) {
-      const result = await load(target, search, check > 0);
-      if (!result || result.totalFiles >= before + uploaded) listed = true;
+      latest = await load(target, search, check > 0);
+      if (!latest || latest.totalFiles >= before + uploaded) listed = true;
       else await wait(2500);
     }
     // Si el servidor aún no lo muestra, la foto sigue a la vista como «Subido» hasta que aparezca en una recarga.
-    if (listed) setUploads((list) => list.filter((item) => item.status !== "done"));
+    if (listed) {
+      if (latest) adoptPreviews(uploadState, latest.files);
+      setUploads((list) => list.filter((item) => item.status !== "done"));
+    }
     else uploadState.awaitingTotal = before + uploaded;
   }
   async function retryFailed() {
@@ -469,7 +501,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
               </Pressable>)}
               {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
                 style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
-                <Thumb file={file} size={96} />
+                <Thumb file={file} size={96} placeholder={uploadState.previews.get(file.id)} />
                 <Text style={styles.tileName} numberOfLines={2}>{file.name}</Text>
               </Pressable>)}
             </View> : <View style={styles.fileList}>
@@ -486,7 +518,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
               </Pressable>)}
               {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
-                <Thumb file={file} size={44} />
+                <Thumb file={file} size={44} placeholder={uploadState.previews.get(file.id)} />
                 <View style={styles.grow}>
                   <Text style={styles.rowName} numberOfLines={1}>{file.name}</Text>
                   <Text style={styles.hint} numberOfLines={1}>{meta(file)}</Text>
@@ -618,6 +650,8 @@ const styles = StyleSheet.create({
   uploadTitle: { flex: 1, fontSize: 14, fontWeight: "800", color: palette.heading },
   uploadError: { ...typography.caption, color: palette.danger },
   uploadPercent: { fontSize: 13, fontWeight: "800", color: palette.primary, fontVariant: ["tabular-nums"] },
+  thumbStack: { overflow: "hidden", backgroundColor: palette.track },
+  thumbOver: { position: "absolute", top: 0, left: 0 },
   pendingThumb: { borderRadius: radius.md, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: palette.track },
   pendingShade: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "rgba(15,23,42,0.45)" },
   pendingShadeDone: { backgroundColor: "rgba(22,163,74,0.55)" },
