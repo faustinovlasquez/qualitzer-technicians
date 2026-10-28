@@ -457,7 +457,8 @@ const setReceptionBackend = (state: Awaited<ReturnType<typeof harness>>["state"]
   setEntryBackend(state);
   state.failures.set(entryPath, { status: 200, body: { ...rawEntry, status: { key: status }, contacts: [{ id: 9 }], branchesCustomer: [{ value: "7", label: "Casa" }] } });
   state.failures.set("/api/branches/1/inspectionRequirementsConfig", { status: 200, body: { inspectionRequirementsConfig: { entry: "none", exit: "none" } } });
-  state.failures.set("/api/select/employees", { status: 200, body: [{ value: 5, label: "Juan Pérez", userId: 33, profile: { phone: "+56 9 1234", user: { email: "juan@x.cl" } } }] });
+  // Técnicos = usuarios de la sucursal (como en la web).
+  state.failures.set("/api/users/select", { status: 200, body: [{ id: "5", value: "5", label: "Juan Pérez", email: "juan@x.cl", avatarThumbnail: null, avatarColor: "#2563eb" }] });
   state.failures.set("/api/equipment_dispatches/inspections/ensure", { status: 201, body: { inspectionId: 300, created: false } });
   state.failures.set("/api/equipment_dispatches/inspections/300/meta", { status: 200, body: { inspectionId: 300 } });
   state.failures.set("/api/master_commercial/get-all-status", { status: 200, body: [{ id: 50, name: "IN_PROGRESS", isPrimary: false }, { id: 2, name: "IN_PROGRESS", isPrimary: true, isEnabled: true, defaultSubStatusId: null }] });
@@ -474,11 +475,11 @@ test("firmar la recepción guarda la firma con contactos y sucursales, la observ
   assert.equal(put.contacts, JSON.stringify([{ id: 9, isNew: false }]));
   assert.equal(put.branchesCustomer, JSON.stringify([{ id: 7, value: "7" }]));
   const signature = JSON.parse(String(put.responsibleSignature)) as Record<string, unknown>;
-  assert.deepEqual({ ...signature, signedAt: "x" }, { id: "5", workerId: "5", name: "Juan Pérez", email: null, phone: "+56 9 1234", userSignatureId: null,
+  assert.deepEqual({ ...signature, signedAt: "x" }, { id: "5", userId: "5", workerId: "", name: "Juan Pérez", email: null, phone: "+56 9 1234", userSignatureId: null,
     signatureSource: "MANUAL", signatureImage: pngSignature, signedAt: "x" });
   assert.deepEqual(asRecordForTest(state.calls.find(call => call.path.endsWith("/meta"))?.json), { observation: "Llega con barro" });
   assert.deepEqual(asRecordForTest(state.calls.find(call => call.path.endsWith("/change-status"))?.json), { statusId: 2, subStatusId: null });
-  assert.equal(state.calls.find(call => call.path === "/api/select/employees")?.query.get("filterByBranch"), "1");
+  assert.equal(state.calls.find(call => call.path === "/api/users/select")?.query.get("companyBranchId"), "1");
 });
 
 test("no se firma con la inspección exigida incompleta, ni con firmas inválidas, y no se retrocede el estado", async context => {
@@ -497,7 +498,7 @@ test("no se firma con la inspección exigida incompleta, ni con firmas inválida
   assert.equal(state.calls.filter(call => call.path.endsWith("/change-status")).length, 0);
 });
 
-test("una firma guardada debe ser del trabajador que recibe", async context => {
+test("una firma guardada debe ser del técnico que recibe", async context => {
   const { state, baseUrl } = await harness(context);
   setReceptionBackend(state);
   state.failures.set("/api/user_signatures/options", { status: 200, body: { defaultSignatureId: 4, options: [{ id: 4, signatureName: "Juan", signatureImage: "https://s3.test/firma.png" }] } });
@@ -507,9 +508,28 @@ test("una firma guardada debe ser del trabajador que recibe", async context => {
   const signature = JSON.parse(String(put.responsibleSignature)) as Record<string, unknown>;
   assert.equal(signature.signatureImage, "https://s3.test/firma.png");
   assert.equal(signature.userSignatureId, 4);
-  assert.equal(state.calls.find(call => call.path === "/api/user_signatures/options")?.query.get("userId"), "33");
+  assert.equal(state.calls.find(call => call.path === "/api/user_signatures/options")?.query.get("userId"), "5");
   const other = await jsonRequest(baseUrl, "/api/workshop/entries/12/reception", "POST", { ...reception, requestId: "4f14191f-e73a-4d92-91b9-bf3fa38a2df1", signature: { source: "USER_SIGNATURE", userSignatureId: 99 } });
   assert.equal(errorCode(other.data), "WORKSHOP_SIGNATURE_INVALID");
+});
+
+test("agregar la firma del técnico la guarda en su perfil: la propia por /me y la de otro técnico por /users", async context => {
+  const { state, baseUrl } = await harness(context);
+  setReceptionBackend(state);
+  state.failures.set("/api/users/select", { status: 200, body: [{ value: "9", label: "Técnico Prueba", email: "test@example.invalid" }, { value: "5", label: "Juan Pérez", email: "juan@x.cl" }] });
+  const result = { userId: 5, companyBranchId: 1, defaultSignatureId: 70, options: [{ id: 70, signatureName: "Juan Pérez", signatureImage: pngSignature, isDefaultForBranch: true }] };
+  state.failures.set("/api/user_signatures/users/5", { status: 200, body: result });
+  state.failures.set("/api/user_signatures/me", { status: 200, body: { ...result, userId: 9 } });
+  const body = { signatureName: "Juan Pérez", signatureEmail: null, signaturePhone: "+56 9 1234", signatureImage: pngSignature, branchScope: "all" };
+  const other = await jsonRequest(baseUrl, "/api/workshop/signatures/users/5?companyBranchId=1", "POST", body);
+  assert.equal(other.response.status, 200);
+  assert.equal(asRecordForTest(other.data).items instanceof Array, true);
+  assert.equal(asRecordForTest(state.calls.find(call => call.path === "/api/user_signatures/users/5")?.json).branchScope, "all");
+  const own = await jsonRequest(baseUrl, "/api/workshop/signatures/users/9?companyBranchId=1", "POST", { ...body, branchScope: "current" });
+  assert.equal(own.response.status, 200);
+  assert.deepEqual(asRecordForTest(state.calls.find(call => call.path === "/api/user_signatures/me")?.json).branchIds, [1]);
+  const unknown = await jsonRequest(baseUrl, "/api/workshop/signatures/users/77?companyBranchId=1", "POST", body);
+  assert.equal(errorCode(unknown.data), "WORKSHOP_WORKER_NOT_FOUND");
 });
 
 test("unir trabajos libres al ingreso explica el permiso que falta y no repite trabajos", async context => {

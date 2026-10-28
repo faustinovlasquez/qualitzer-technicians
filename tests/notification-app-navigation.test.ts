@@ -190,6 +190,7 @@ function fixture(tab: FixtureApp["tab"] = "profile", unreadCount: number | null 
     ["./src/screens/ProfileScreen", profile], ["./src/ui/components", ui], ["./src/ui/theme", theme],
     ["./src/ui/motion", { FadeIn: "FadeIn", animateNextLayout: () => {} }],
     ["./src/screens/creation/CreationSuccess", { CreationSuccess: "CreationSuccess" }],
+    ["./src/screens/signatures/SignatureSetupPrompt", { SignatureSetupPrompt: "SignatureSetupPrompt" }],
     ["./src/screens/creation/CreationModal", { CreationModal: "CreationModal" }],
     ["./src/location/LocationHistoryPanel", { LocationHistoryPanel: "LocationHistoryPanel" }],
     ["./src/location/LocationSettingsPanel", { LocationSettingsPanel: "LocationSettingsPanel" }],

@@ -2,9 +2,13 @@ import { z } from "zod";
 
 const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
-/** Trabajador que recibe el equipo (lista de trabajadores de la sucursal). */
+/**
+ * Técnico que recibe el equipo: un usuario del sistema de la sucursal (igual que la web).
+ * `id` y `userId` son el mismo usuario; `avatar`/`avatarColor` para distinguirlo en la lista.
+ */
 export const workshopWorkerSchema = z.object({
-  id, name: z.string().max(300), userId: id.nullable(), email: z.string().max(200).nullable(), phone: z.string().max(60).nullable()
+  id, name: z.string().max(300), userId: id.nullable(), email: z.string().max(200).nullable(), phone: z.string().max(60).nullable(),
+  avatar: z.string().max(2000).nullable().optional(), avatarColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional()
 }).strict();
 export const workshopWorkersSchema = z.object({ items: z.array(workshopWorkerSchema).max(5000) }).strict();
 
@@ -34,7 +38,17 @@ export const workshopReceptionInputSchema = z.object({
 /** El ingreso queda firmado; la observación y el estado "En proceso" pueden quedar pendientes sin deshacer la firma. */
 export const workshopReceptionResultSchema = z.object({ id, observationSaved: z.boolean(), statusUpdated: z.boolean() }).strict();
 
+/** «Agregar firma» al técnico desde la recepción: queda en su perfil (por defecto, en todas sus sucursales). */
+export const workshopSignatureSaveInputSchema = z.object({
+  signatureName: z.string().trim().min(1).max(200),
+  signatureEmail: z.email().nullable(),
+  signaturePhone: z.string().trim().max(100).nullable(),
+  signatureImage: z.string().max(1400000).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/),
+  branchScope: z.enum(["current", "all"])
+}).strict();
+
 export type WorkshopWorker = z.infer<typeof workshopWorkerSchema>;
+export type WorkshopSignatureSaveInput = z.infer<typeof workshopSignatureSaveInputSchema>;
 export type WorkshopSavedSignature = z.infer<typeof workshopSavedSignatureSchema>;
 export type WorkshopReceptionInput = z.infer<typeof workshopReceptionInputSchema>;
 export type WorkshopReceptionResult = z.infer<typeof workshopReceptionResultSchema>;
@@ -42,6 +56,7 @@ export type WorkshopReceptionResult = z.infer<typeof workshopReceptionResultSche
 export interface WorkshopReceptionPort {
   workshopWorkers(branchId: number): Promise<{ items: WorkshopWorker[] }>;
   workshopSavedSignatures(branchId: number, userId: number): Promise<{ items: WorkshopSavedSignature[] }>;
+  saveWorkshopSignature(branchId: number, userId: number, input: WorkshopSignatureSaveInput): Promise<{ items: WorkshopSavedSignature[] }>;
   signWorkshopReception(entryId: number, input: WorkshopReceptionInput): Promise<WorkshopReceptionResult>;
 }
 

@@ -31,6 +31,7 @@ const omitted = {
   "./src/screens/WorkDetailScreen": ["WorkDetailScreen"],
   "./src/screens/OrderDetailScreen": ["OrderDetailScreen"],
   "./src/screens/LoginScreen": ["LoginScreen"],
+  "./src/screens/signatures/SignatureSetupPrompt": ["SignatureSetupPrompt"],
   "./src/screens/TenantSelectionScreen": ["TenantSelectionScreen"],
   "./src/screens/ForcedPasswordScreen": ["ForcedPasswordScreen"],
   "./src/screens/SessionSetupScreen": ["SessionSetupScreen"],

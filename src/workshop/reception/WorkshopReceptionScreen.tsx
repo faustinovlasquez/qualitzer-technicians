@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
-import { ActivityIndicator, BackHandler, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, BackHandler, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, IconButton } from "../../ui/components";
 import { palette, radius, theme, typography } from "../../ui/theme";
 import { SelectorTrigger } from "../../ui/time/SelectorUi";
@@ -9,6 +10,8 @@ import { SignatureField } from "../../screens/orders/lifecycle/SignatureField";
 import { hasSignature, requireSignaturePng, type SignaturePadHandle, type SignatureStrokes } from "../../screens/orders/lifecycle/signatureGeometry";
 import { evaluateInspection, inspectionRequirementLabel, type WorkshopEntryDetail } from "../../domain/workshopEntry";
 import type { WorkshopReceptionResult, WorkshopSavedSignature, WorkshopWorker } from "../../domain/workshopReception";
+import type { UserSignatureAccess, UserSignatureInput } from "../../domain/userSignatures";
+import { SignatureEditor } from "../../screens/signatures/SignatureEditor";
 import type { useWorkshopBoard } from "../useWorkshopBoard";
 import { LocalPicker } from "../intake/IntakePickers";
 import { Notice } from "../entry/EntrySections";
@@ -41,7 +44,8 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
   const [phone, setPhone] = useState("");
   const [observation, setObservation] = useState("");
   const [saved, setSaved] = useState<WorkshopSavedSignature[] | null>(null);
-  const [mode, setMode] = useState<{ kind: "saved"; id: number } | { kind: "draw" }>({ kind: "draw" });
+  // saved: firma guardada elegida · pick: tiene varias y falta elegir · draw: firma a mano en pantalla.
+  const [mode, setMode] = useState<{ kind: "saved"; id: number } | { kind: "pick" } | { kind: "draw" }>({ kind: "draw" });
   const [strokes, setStrokes] = useState<SignatureStrokes>([]);
   const [drawing, setDrawing] = useState(false);
   const [picker, setPicker] = useState(false);
@@ -66,33 +70,66 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
   }
   useEffect(() => { void loadDetail(); }, [entryId]);
 
-  // Al elegir quién recibe: sus datos y, si tiene, su firma guardada (igual que la web, se usa la predeterminada).
-  // Solo vale la respuesta del último trabajador elegido (si cambian rápido, no se cruza la firma de otro).
+  // Con una firma guardada elegida, nombre/correo/teléfono salen de ella (como en la web).
+  function pickSavedSignature(item: WorkshopSavedSignature, fallbackName: string) {
+    setMode({ kind: "saved", id: item.id });
+    setName((item.name || fallbackName).slice(0, 255)); setEmail((item.email ?? "").slice(0, 100)); setPhone((item.phone ?? "").slice(0, 50));
+    setIssues({});
+  }
+  function applySavedList(items: WorkshopSavedSignature[], who: WorkshopWorker) {
+    setSaved(items);
+    const usable = items.filter((item) => item.image);
+    // Se elige sola la predeterminada de la sucursal o, si tiene una sola, esa.
+    const preferred = usable.find((item) => item.isDefault) ?? (usable.length === 1 ? usable[0] : undefined);
+    if (preferred) pickSavedSignature(preferred, who.name); else setMode({ kind: usable.length > 0 ? "pick" : "draw" });
+  }
+
+  // Al elegir quién recibe: sus datos y, si tiene, su firma guardada.
+  // Solo vale la respuesta del último técnico elegido (si cambian rápido, no se cruza la firma de otro).
   const chosenWorker = useRef<number | null>(null);
   function chooseWorker(next: WorkshopWorker) {
     setPicker(false); setIssues({}); setMessage("");
     chosenWorker.current = next.id;
     setWorker(next); setName(next.name.slice(0, 255)); setEmail((next.email ?? "").slice(0, 100)); setPhone((next.phone ?? "").slice(0, 50));
-    setSaved(null); setMode({ kind: "draw" });
-    if (next.userId === null) { setSaved([]); return; }
+    setSaved(null); setMode({ kind: "pick" }); setStrokes([]);
+    if (next.userId === null) { setSaved([]); setMode({ kind: "draw" }); return; }
     api.savedSignatures(next.userId).then(({ items }) => {
       if (chosenWorker.current !== next.id) return;
-      setSaved(items);
-      const preferred = items.find((item) => item.isDefault && item.image) ?? items.find((item) => item.image);
-      if (preferred) setMode({ kind: "saved", id: preferred.id });
-    }, () => { if (chosenWorker.current === next.id) setSaved([]); });
+      applySavedList(items, next);
+    }, () => { if (chosenWorker.current === next.id) { setSaved([]); setMode({ kind: "draw" }); } });
   }
 
-  // Se propone al técnico en sesión (si es trabajador de la sucursal); se puede cambiar.
+  // Se propone al usuario en sesión como técnico que recibe; se puede cambiar.
   useEffect(() => {
     if (api.currentUserId <= 0) return;
     let active = true;
     api.workers().then(({ items }) => {
-      const me = items.find((item) => item.userId === api.currentUserId);
+      const me = items.find((item) => item.id === api.currentUserId || item.userId === api.currentUserId);
       if (active && me && chosenWorker.current === null) chooseWorker(me);
     }, () => undefined);
     return () => { active = false; };
   }, [entryId]);
+
+  // «Agregar firma»: el mismo formulario de «Mis firmas»; queda en el perfil del técnico y se usa al tiro.
+  const [adding, setAdding] = useState(false);
+  const [addingBusy, setAddingBusy] = useState(false);
+  async function saveNewSignature(input: UserSignatureInput, scope: "all" | "some") {
+    if (!worker) return;
+    if (typeof input.signatureImage !== "string") throw new Error("Dibuja la firma o carga una imagen.");
+    setAddingBusy(true);
+    try {
+      const result = await api.saveSignature(worker.id, { signatureName: input.signatureName, signatureEmail: input.signatureEmail, signaturePhone: input.signaturePhone,
+        signatureImage: input.signatureImage, branchScope: scope === "all" ? "all" : "current" });
+      if (chosenWorker.current === worker.id) applySavedList(result.items, worker);
+      setAdding(false);
+    } finally { setAddingBusy(false); }
+  }
+  const isMe = worker !== null && (worker.id === api.currentUserId || worker.userId === api.currentUserId);
+  const addAccess: UserSignatureAccess | null = worker ? {
+    scopeKey: `reception:${entryId}:${worker.id}`, userId: worker.id, branchId: api.branchId, name: worker.name, email: worker.email ?? "",
+    branches: [{ id: api.branchId, name: "Esta sucursal" }], available: true,
+    actions: { load: async () => { throw new Error("NOT_USED"); }, save: async () => { throw new Error("NOT_USED"); }, remove: async () => { throw new Error("NOT_USED"); } }
+  } : null;
 
   const check = detail ? evaluateInspection(detail.inspections.entryRequirement, detail.inspections.entry, detail.inspections.photoSlots) : null;
   const inspectionBlocked = Boolean(detail && (!detail.inspections.available || !check?.met));
@@ -104,9 +141,11 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
     if (!name.trim()) found.name = "Escribe el nombre de quien recibe.";
     if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) found.email = "Revisa el correo.";
     if (mode.kind === "draw" && !hasSignature(strokes)) found.signature = "Falta la firma.";
+    if (mode.kind === "pick") found.signature = saved && saved.some((item) => item.image) ? "Elige la firma a usar." : "Agrega la firma del técnico.";
     if (Object.keys(found).length > 0 || !worker) { setIssues(found); setMessage("Revisa los datos marcados."); return; }
     setSaving(true); setMessage("");
     try {
+      if (mode.kind === "pick") return;
       const signature = mode.kind === "saved" ? { source: "USER_SIGNATURE" as const, userSignatureId: mode.id }
         : { source: "MANUAL" as const, image: requireSignaturePng(await pad.current!.capture()) };
       const input = { workerId: worker.id, name: name.trim(), email: email.trim() || null, phone: phone.trim() || null, signature, observation: observation.trim() || null };
@@ -150,37 +189,67 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle} accessibilityRole="header">Quién recibe el equipo</Text>
-          <SelectorTrigger label="Técnico que recibe *" value={worker?.name ?? ""} icon="person-outline" disabled={saving} error={issues.worker} onPress={() => setPicker(true)} />
-          {worker ? <>
-            <Field label="Nombre *" value={name} onChange={(value) => { setName(value); setIssues({}); }} error={issues.name} maxLength={255} />
-            <Field label="Correo" value={email} onChange={(value) => { setEmail(value); setIssues({}); }} error={issues.email} keyboardType="email-address" maxLength={100} placeholder="Opcional" />
-            <Field label="Teléfono" value={phone} onChange={setPhone} keyboardType="phone-pad" maxLength={50} placeholder="Opcional" />
-          </> : null}
+          <SelectorTrigger label="Técnico que recibe *" value={worker ? `${worker.name}${isMe ? " (Tú)" : ""}` : ""} icon="person-outline" disabled={saving} error={issues.worker} onPress={() => setPicker(true)} />
+          {worker ? <View style={styles.person}>
+            {worker.avatar ? <Image source={{ uri: worker.avatar }} style={styles.avatar} accessibilityLabel={`Foto de ${worker.name}`} />
+              : <View style={[styles.avatar, { backgroundColor: worker.avatarColor ?? palette.primary }]}><Text style={styles.avatarText}>{initials(worker.name)}</Text></View>}
+            <View style={styles.grow}>
+              <Text style={styles.savedName} numberOfLines={1}>{worker.name}{isMe ? " · Tú" : ""}</Text>
+              {worker.email ? <Text style={styles.hint} numberOfLines={1}>{worker.email}</Text> : null}
+            </View>
+          </View> : null}
         </View>
 
         {worker ? <View style={styles.section}>
           <Text style={styles.sectionTitle} accessibilityRole="header">Firma de recepción *</Text>
-          {saved === null ? <View style={styles.row}><ActivityIndicator size="small" color={palette.primary} /><Text style={styles.hint}>Buscando firmas guardadas…</Text></View> : null}
-          {saved && saved.length > 0 ? <View style={styles.options}>
-            {saved.map((item) => <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: mode.kind === "saved" && mode.id === item.id, disabled: !item.image }}
-              disabled={!item.image} onPress={() => { setMode({ kind: "saved", id: item.id }); setIssues({}); }}
-              style={[styles.savedOption, mode.kind === "saved" && mode.id === item.id && styles.savedOptionOn, !item.image && styles.disabled]}>
-              <Ionicons name={mode.kind === "saved" && mode.id === item.id ? "radio-button-on" : "radio-button-off"} size={20} color={palette.primary} accessible={false} />
-              <View style={styles.grow}>
-                <Text style={styles.savedName}>Firma guardada · {item.name}{item.isDefault ? " (predeterminada)" : ""}</Text>
-                {item.image ? <Image source={{ uri: item.image }} style={styles.savedImage} resizeMode="contain" accessibilityLabel={`Firma de ${item.name}`} /> : <Text style={styles.hint}>Sin imagen</Text>}
-              </View>
-            </Pressable>)}
-            <Pressable accessibilityRole="radio" accessibilityState={{ checked: mode.kind === "draw" }} onPress={() => setMode({ kind: "draw" })}
-              style={[styles.savedOption, mode.kind === "draw" && styles.savedOptionOn]}>
-              <Ionicons name={mode.kind === "draw" ? "radio-button-on" : "radio-button-off"} size={20} color={palette.primary} accessible={false} />
-              <Text style={styles.savedName}>Firmar en pantalla</Text>
+          {saved === null ? <View style={styles.row}><ActivityIndicator size="small" color={palette.primary} /><Text style={styles.hint}>Buscando su firma…</Text></View> : null}
+
+          {saved !== null && mode.kind !== "draw" && saved.some((item) => item.image) ? <>
+            {saved.filter((item) => item.image).length > 1 ? <Text style={styles.label}>Firma *</Text> : null}
+            <View style={styles.options}>
+              {saved.filter((item) => item.image).map((item) => {
+                const on = mode.kind === "saved" && mode.id === item.id;
+                return <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: on }} onPress={() => pickSavedSignature(item, worker.name)}
+                  style={[styles.savedOption, on && styles.savedOptionOn]}>
+                  <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={20} color={palette.primary} accessible={false} />
+                  <View style={styles.grow}>
+                    <Text style={styles.savedName}>{item.name}{item.isDefault ? " · predeterminada" : ""}</Text>
+                    <Image source={{ uri: item.image ?? "" }} style={styles.savedImage} resizeMode="contain" accessibilityLabel={`Firma de ${item.name}`} />
+                  </View>
+                </Pressable>;
+              })}
+            </View>
+            {mode.kind === "pick" ? <Text style={styles.warn}>Tiene varias firmas: elige cuál usar.</Text> : null}
+            {chosenSaved ? <View style={styles.data}>
+              <Text style={styles.dataTitle}>Datos de la firma</Text>
+              {[["Nombre", chosenSaved.name || worker.name], ["Correo", chosenSaved.email], ["Teléfono", chosenSaved.phone]].map(([label, value]) =>
+                <View key={label} style={styles.dataRow}><Text style={styles.hint}>{label}</Text><Text style={value ? styles.dataValue : styles.dataMissing}>{value || "No registrado"}</Text></View>)}
+              <Text style={styles.hint}>{chosenSaved.email && chosenSaved.phone ? "Estos datos vienen de la firma elegida." : "A esta firma le faltan datos: complétalos en Perfil › Firmas."}</Text>
+            </View> : null}
+            {issues.signature ? <Text style={styles.error} accessibilityRole="alert">{issues.signature}</Text> : null}
+            <Pressable accessibilityRole="button" onPress={() => { setMode({ kind: "draw" }); setStrokes([]); setIssues({}); }} style={styles.link}>
+              <Ionicons name="create-outline" size={16} color={palette.primary} /><Text style={styles.linkText}>Firmar a mano en su lugar</Text>
             </Pressable>
+          </> : null}
+
+          {saved !== null && saved.length === 0 && mode.kind !== "draw" ? <View style={styles.empty}>
+            <View style={styles.emptyIcon}><Ionicons name="create" size={24} color={palette.orange} /></View>
+            <Text style={styles.emptyTitle}>{isMe ? "No tienes una firma configurada" : `${worker.name} no tiene una firma configurada`}</Text>
+            <Text style={styles.emptyText}>Agrégala ahora: queda guardada en {isMe ? "tu" : "su"} perfil y la próxima vez se aplicará sola.</Text>
+            <Button title="Agregar firma" icon="add-circle-outline" variant="warning" disabled={saving} onPress={() => setAdding(true)} />
+            {issues.signature ? <Text style={styles.error} accessibilityRole="alert">{issues.signature}</Text> : null}
           </View> : null}
-          {saved && saved.length === 0 && worker.userId === null ? <Text style={styles.hint}>Este trabajador no tiene usuario: firma en pantalla.</Text> : null}
-          {mode.kind === "draw" ? <SignatureField label="Firma" name={name} strokes={strokes} signatureRef={pad} disabled={saving} error={issues.signature}
-            onChange={(next) => { setStrokes(next); setIssues({}); }} onDrawingChange={setDrawing} /> : null}
-          {chosenSaved ? <Text style={styles.hint}>Se usará la firma guardada de {chosenSaved.name}.</Text> : null}
+
+          {mode.kind === "draw" ? <>
+            <Field label="Nombre *" value={name} onChange={(value) => { setName(value); setIssues({}); }} error={issues.name} maxLength={255} />
+            <Field label="Correo" value={email} onChange={(value) => { setEmail(value); setIssues({}); }} error={issues.email} keyboardType="email-address" maxLength={100} placeholder="Opcional" />
+            <Field label="Teléfono" value={phone} onChange={setPhone} keyboardType="phone-pad" maxLength={50} placeholder="Opcional" />
+            <SignatureField label="Firma" name={name} strokes={strokes} signatureRef={pad} disabled={saving} error={issues.signature}
+              onChange={(next) => { setStrokes(next); setIssues({}); }} onDrawingChange={setDrawing} />
+            {saved && saved.length > 0 ? <Pressable accessibilityRole="button" onPress={() => { if (worker) applySavedList(saved, worker); }} style={styles.link}>
+              <Ionicons name="ribbon-outline" size={16} color={palette.primary} /><Text style={styles.linkText}>Usar la firma configurada</Text>
+            </Pressable> : null}
+          </> : null}
         </View> : null}
 
         <View style={styles.section}>
@@ -194,11 +263,20 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
       </ScrollView>
     </KeyboardAvoidingView>}
 
-    {picker ? <LocalPicker<WorkshopWorker> title="Técnico que recibe" placeholder="Buscar técnico" emptyText="No hay trabajadores en esta sucursal."
-      load={async () => (await api.workers()).items} label={(item) => item.name} detail={(item) => [item.email, item.phone].filter(Boolean).join(" · ") || null}
+    {picker ? <LocalPicker<WorkshopWorker> title="Técnico que recibe" placeholder="Buscar por nombre o correo" emptyText="No hay usuarios en esta sucursal."
+      load={async () => (await api.workers()).items} label={(item) => item.id === api.currentUserId ? `${item.name} · Tú` : item.name} detail={(item) => [item.email, item.phone].filter(Boolean).join(" · ") || null}
       selectedId={worker?.id ?? null} onClose={() => setPicker(false)} onPick={chooseWorker} /> : null}
+
+    {adding && addAccess ? <Modal visible animationType="slide" onRequestClose={() => { if (!addingBusy) setAdding(false); }}>
+      <SafeAreaView style={styles.screen} edges={["top", "left", "right", "bottom"]}>
+        <SignatureEditor access={addAccess} existing={null} signatures={[]} busy={addingBusy} title={isMe ? "Agregar mi firma" : `Agregar firma de ${worker?.name ?? "el técnico"}`}
+          onSave={saveNewSignature} onCancel={() => { if (!addingBusy) setAdding(false); }} />
+      </SafeAreaView>
+    </Modal> : null}
   </View>;
 }
+
+const initials = (value: string) => value.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
@@ -230,5 +308,20 @@ const styles = StyleSheet.create({
   savedImage: { width: "100%", height: 70, marginTop: 6, backgroundColor: palette.white, borderRadius: 8 },
   grow: { flex: 1, minWidth: 0 },
   disabled: { opacity: 0.5 },
-  footnote: { ...typography.caption, color: palette.textSecondary, textAlign: "center" }
+  footnote: { ...typography.caption, color: palette.textSecondary, textAlign: "center" },
+  person: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: radius.md, backgroundColor: palette.background },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatarText: { color: palette.white, fontSize: 14, fontWeight: "800" },
+  warn: { ...typography.caption, color: palette.orange, fontWeight: "700" },
+  data: { gap: 6, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
+  dataTitle: { fontSize: 12, fontWeight: "800", color: palette.textSecondary, textTransform: "uppercase" },
+  dataRow: { flexDirection: "row", justifyContent: "space-between", gap: 10 },
+  dataValue: { fontSize: 14, fontWeight: "700", color: palette.text, flexShrink: 1, textAlign: "right" },
+  dataMissing: { fontSize: 13, fontStyle: "italic", color: palette.textMuted },
+  link: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingVertical: 6 },
+  linkText: { fontSize: 14, fontWeight: "700", color: palette.primary },
+  empty: { alignItems: "center", gap: 10, padding: 16, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: palette.orange, backgroundColor: palette.orangeSoft },
+  emptyIcon: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface },
+  emptyTitle: { fontSize: 15, fontWeight: "800", color: palette.text, textAlign: "center" },
+  emptyText: { ...typography.caption, color: palette.textSecondary, textAlign: "center" }
 });

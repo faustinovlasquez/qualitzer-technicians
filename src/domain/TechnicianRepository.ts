@@ -93,6 +93,7 @@ export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<
   linkWorkshopWorks?: import("./workshopWorks").WorkshopWorksPort["linkWorkshopWorks"];
   workshopSavedSignatures?: import("./workshopReception").WorkshopReceptionPort["workshopSavedSignatures"];
   signWorkshopReception?: import("./workshopReception").WorkshopReceptionPort["signWorkshopReception"];
+  saveWorkshopSignature?: import("./workshopReception").WorkshopReceptionPort["saveWorkshopSignature"];
   equipmentLocation?(scope: WorkScope, target: import("./equipmentLocation").EquipmentLocationTarget): Promise<import("./equipmentLocation").EquipmentLocation>;
   workEdit?(scope: WorkScope): Promise<import("./creation").WorkEditDocument>;
   updateWork?(scope: WorkScope, input: import("./creation").WorkEditInput): Promise<import("./creation").WorkEditDocument>;

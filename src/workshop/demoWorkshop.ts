@@ -321,6 +321,10 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
     async workshopSavedSignatures(_branchId, userId) {
       return { items: userId === 501 ? [{ id: 7, name: "Andrés Molina", email: "amolina@demo.cl", phone: "+56 9 5555 1111", image: demoSignature, isDefault: true }] : [] };
     },
+    async saveWorkshopSignature(_branchId, _userId, input) {
+      await delay();
+      return { items: [{ id: 99, name: input.signatureName, email: input.signatureEmail, phone: input.signaturePhone, image: input.signatureImage, isDefault: true }] };
+    },
     async signWorkshopReception(entryId, input) {
       await delay();
       const detail = detailOf(entryId);

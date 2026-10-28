@@ -1,4 +1,8 @@
-# Pasarela que no queda apagada tras una caída: gateway 1.0.49 (APK 1.0.134)
+# Firma del técnico en la recepción y aviso «Configura tu firma»: gateway 1.0.50 (APK 1.0.140)
+
+El técnico que recibe un ingreso es un usuario de la sucursal y su firma se elige sola o se agrega en el momento; al entrar sin firma la app ofrece configurarla. Desplegar junto al backend `development` con la migración de `userId` en las firmas de recepción. Ver [actualización 1.0.140](ACTUALIZACION-1.0.140.md).
+
+## Entrega anterior: pasarela que no queda apagada tras una caída: gateway 1.0.49 / APK 1.0.134
 
 La pasarela recupera el candado de sesiones que deja un proceso muerto; antes ningún técnico podía iniciar sesión hasta borrarlo a mano. Desplegar junto al backend que registra el motivo cuando la pasarela no arranca. Ver [actualización 1.0.134](ACTUALIZACION-1.0.134.md).
 

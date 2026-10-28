@@ -30,7 +30,7 @@ import { workshopOrderActionInputSchema,workshopOrderDeletedSchema, workshopOrde
   workshopOrderWorksInputSchema, workshopOrderWorksResultSchema, type WorkshopOrderInput,
   workshopOrderItemInputSchema, workshopOrderItemSectionSchema, workshopOrderItemUpdateSchema, workshopProductPageSchema, workshopTransportOptionsSchema,
   type WorkshopOrderItemInput, type WorkshopOrderItemSection } from "../domain/workshopOrders";
-import { workshopReceptionInputSchema, workshopReceptionResultSchema, workshopSavedSignaturesSchema, workshopWorkersSchema, type WorkshopReceptionInput } from "../domain/workshopReception";
+import { workshopReceptionInputSchema, workshopReceptionResultSchema, workshopSavedSignaturesSchema, workshopSignatureSaveInputSchema, workshopWorkersSchema, type WorkshopReceptionInput, type WorkshopSignatureSaveInput } from "../domain/workshopReception";
 import { inspectionAnswerInputSchema, inspectionBranchInputSchema, inspectionChecklistOptionsSchema, inspectionChecklistsInputSchema, inspectionDamageInputSchema,
   inspectionMetaInputSchema, inspectionOpenInputSchema, inspectionPhotoInputSchema, inspectionSavedSchema, inspectionShareSchema, workshopInspectionStateSchema,
   type InspectionAnswerInput, type InspectionDamageInput } from "../domain/workshopInspection";
@@ -374,6 +374,10 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   async workshopSavedSignatures(branchId: number, userId: number) {
     const query = `companyBranchId=${positiveCreationIdSchema.parse(branchId)}&userId=${positiveCreationIdSchema.parse(userId)}`;
     return workshopSavedSignaturesSchema.parse(await this.request<unknown>(`/api/workshop/options/signatures?${query}`));
+  }
+  async saveWorkshopSignature(branchId: number, userId: number, input: WorkshopSignatureSaveInput) {
+    const path = `/api/workshop/signatures/users/${positiveCreationIdSchema.parse(userId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`;
+    return workshopSavedSignaturesSchema.parse(await this.request<unknown>(path, "POST", workshopSignatureSaveInputSchema.parse(input)));
   }
   async signWorkshopReception(entryId: number, input: WorkshopReceptionInput) {
     return workshopReceptionResultSchema.parse(await this.request<unknown>(`/api/workshop/entries/${positiveCreationIdSchema.parse(entryId)}/reception`, "POST", workshopReceptionInputSchema.parse(input)));

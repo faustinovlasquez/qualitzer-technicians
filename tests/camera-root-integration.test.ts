@@ -125,7 +125,7 @@ function fixture() {
     "notifications/useNotificationPermissionPrompt": { useNotificationPermissionPrompt: () => {} },
     "screens/workDetail/WorkActivities": { WorkActivities: "WorkActivities" }, "screens/creation/CreationScreen": { CreationScreen: "CreationScreen" },
     "screens/workTeam/WorkTeamSheet": { WorkTeamProvider: ({ children }: { children: unknown }) => children, useWorkTeamSheet: () => ({ open: null, sheet: null }) },
-    "screens/creation/CreationSuccess": { CreationSuccess: "CreationSuccess" }, "screens/creation/CreationModal": { CreationModal: "CreationModal" },
+    "screens/creation/CreationSuccess": { CreationSuccess: "CreationSuccess" }, "screens/signatures/SignatureSetupPrompt": { SignatureSetupPrompt: "SignatureSetupPrompt" }, "screens/creation/CreationModal": { CreationModal: "CreationModal" },
     "location/useLocationTracking": { useLocationTracking: () => locationTracking },
     "location/LocationHistoryPanel": { LocationHistoryPanel: "LocationHistoryPanel" }, "location/LocationSettingsPanel": { LocationSettingsPanel: "LocationSettingsPanel" },
     "receipts/useMaterialReceipts": { useMaterialReceipts: () => materialReceipts }, "receipts/MaterialReceiptsScreen": { MaterialReceiptsScreen: "MaterialReceiptsScreen" },

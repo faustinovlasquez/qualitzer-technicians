@@ -71,6 +71,8 @@ const ROUTE_PERMISSIONS: Array<[string, RegExp, MobileAppPermission]> = [
   ["POST", /^\/customers(?:\/\d+\/(?:branches|contacts|equipment))?$/, "workshopCustomers"],
   ["*", /^\/entries\/\d+\/inspections(?:\/|$)/, "workshopInspections"],
   ["POST", /^\/entries\/\d+\/reception$/, "workshopReception"],
+  // Agregar la firma del técnico desde la recepción.
+  ["POST", /^\/signatures\/users\/\d+$/, "workshopReception"],
   ["POST", /^\/entries\/\d+\/delivery$/, "workshopDelivery"],
   ["POST", /^\/entries\/\d+\/(?:move|estimated-delivery|status)$/, "workshopManage"],
   ["POST", /^\/entries\/\d+\/works\/link$/, "workshopWorks"],

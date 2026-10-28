@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.49
+# @qualitzer/mobile-gateway 1.0.50
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.49. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.50. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.50 cambia la recepción del ingreso de taller: el «Técnico que recibe» es un usuario de la sucursal (`/users/select`, con foto, color y correo) y la firma se envía con `userId` (el backend deduce el trabajador). Nueva ruta `POST /api/workshop/signatures/users/:userId` para «Agregar firma» al técnico: la propia va a `/user_signatures/me`, la de otro técnico a `/user_signatures/users/:userId` (permiso de editar usuarios). Requiere el backend `development` con la migración `20261028140000-Add-UserId-To-OperationAreaEntrySignatures`.
 
 1.0.49 recupera el candado de sesiones (`.writer.lock`) que deja un proceso muerto (caída, falta de memoria, SIGKILL) o una ejecución anterior con el mismo PID (contenedores); antes la pasarela quedaba apagada (`MOBILE_GATEWAY_UNAVAILABLE`) hasta borrar el archivo a mano y ningún técnico podía iniciar sesión. Dos procesos vivos siguen sin poder compartir el archivo. El backend de la misma entrega registra en el log el motivo cuando la pasarela no arranca. Sin migración.
 

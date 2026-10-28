@@ -1,7 +1,7 @@
 import express, { Router } from "express";
 import { z } from "zod";
 import {
-  SAVED_SIGNATURE_MAX_CHARS, shouldMoveToStatus, workshopReceptionInputSchema, workshopReceptionResultSchema, workshopSavedSignaturesSchema, workshopWorkersSchema,
+  SAVED_SIGNATURE_MAX_CHARS, shouldMoveToStatus, workshopReceptionInputSchema, workshopReceptionResultSchema, workshopSavedSignaturesSchema, workshopSignatureSaveInputSchema, workshopWorkersSchema,
   type WorkshopSavedSignature, type WorkshopWorker
 } from "../../src/domain/workshopReception";
 import { evaluateInspection } from "../../src/domain/workshopEntry";
@@ -16,6 +16,22 @@ const branchQuery = z.object({ companyBranchId: z.coerce.number().int().positive
 
 export const WORKSHOP_RECEPTION_PATH = /^\/api\/workshop\/entries\/[1-9]\d*\/reception\/?$/i;
 const receptionJson = express.json({ limit: 3 * 1024 * 1024, strict: true, inflate: false });
+
+/** Técnico que recibe: usuario del sistema (lista /users/select de la sucursal), como en la web. */
+export function technician(raw: unknown): WorkshopWorker | null {
+  const row = asRecord(raw);
+  const userId = positive(row.value ?? row.id);
+  const name = text(row.label);
+  if (userId === null || name === null) return null;
+  const avatar = text(row.avatarThumbnail);
+  const color = text(row.avatarColor);
+  return { id: userId, name: name.slice(0, 300), userId, email: clip(text(row.email) ?? text(row.username), 200), phone: null,
+    avatar: avatar && /^https?:\/\//i.test(avatar) && avatar.length <= 2000 ? avatar : null, avatarColor: color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null };
+}
+
+const technicians = async (upstream: Upstream, token: string, companyBranchId: number): Promise<WorkshopWorker[]> =>
+  list(await upstream.request("/users/select", { token, query: new URLSearchParams({ companyBranchId: String(companyBranchId) }) }))
+    .map(technician).filter((item): item is WorkshopWorker => item !== null);
 
 export function worker(raw: unknown): WorkshopWorker | null {
   const row = asRecord(raw);
@@ -45,9 +61,8 @@ export function registerReceptionRoutes(router: Router, upstream: Upstream, ledg
     const { companyBranchId } = branchQuery.parse(req.query);
     emptySchema.parse(req.body ?? {});
     const { token } = await workshopActor(upstream, req, companyBranchId);
-    // El backend filtra por sucursal con filterByBranch (companyBranchId lo ignora).
-    const items = list(await upstream.request("/select/employees", { token, query: new URLSearchParams({ filterByBranch: String(companyBranchId) }) }))
-      .map(worker).filter((item) => item !== null);
+    // Técnicos = usuarios de la sucursal (igual que la web), con foto, color y correo.
+    const items = await technicians(upstream, token, companyBranchId);
     items.sort((a, b) => a.name.localeCompare(b.name, "es"));
     const parsed = workshopWorkersSchema.safeParse({ items: items.slice(0, 5000) });
     if (!parsed.success) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
@@ -59,6 +74,30 @@ export function registerReceptionRoutes(router: Router, upstream: Upstream, ledg
     emptySchema.parse(req.body ?? {});
     const { token } = await workshopActor(upstream, req, query.companyBranchId);
     const raw = await upstream.request("/user_signatures/options", { token, query: new URLSearchParams({ userId: String(query.userId), companyBranchId: String(query.companyBranchId) }) });
+    const parsed = workshopSavedSignaturesSchema.safeParse({ items: savedSignatures(raw, positive(asRecord(raw).defaultSignatureId)) });
+    if (!parsed.success) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    res.json(parsed.data);
+  });
+
+  // «Agregar firma» al técnico que recibe: queda en su perfil (por defecto, en todas sus sucursales).
+  // La propia se guarda con el permiso de cada usuario; la de otro técnico pide permiso de editar usuarios.
+  router.post("/signatures/users/:userId", receptionJson, async (req, res) => {
+    const { userId } = z.object({ userId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict().parse(req.params);
+    const { companyBranchId } = branchQuery.parse(req.query);
+    if (!req.is("application/json")) throw new GatewayError(415, "JSON_REQUIRED");
+    const input = workshopSignatureSaveInputSchema.parse(req.body);
+    if (!signatureSchema.safeParse(input.signatureImage).success) throw new GatewayError(400, "WORKSHOP_SIGNATURE_INVALID", "La firma no es válida. Vuelve a dibujarla.");
+    const { token, user } = await workshopActor(upstream, req, companyBranchId);
+    if (!(await technicians(upstream, token, companyBranchId)).some((item) => item.id === userId)) {
+      throw new GatewayError(400, "WORKSHOP_WORKER_NOT_FOUND", "El técnico elegido ya no está disponible en la sucursal.");
+    }
+    const data = { signatureName: input.signatureName, signatureEmail: input.signatureEmail, signaturePhone: input.signaturePhone, signatureImage: input.signatureImage };
+    const query = new URLSearchParams({ companyBranchId: String(companyBranchId) });
+    const ownBranches = user.accessBranchs.filter((branch) => branch.isEnabled !== false && branch.isDeleted !== true).map((branch) => branch.id);
+    const raw = userId === user.id
+      ? await upstream.request("/user_signatures/me", { token, method: "PUT", query, json: { ...data,
+        branchIds: input.branchScope === "all" ? Array.from(new Set([...ownBranches, companyBranchId])) : [companyBranchId] } })
+      : await upstream.request(`/user_signatures/users/${userId}`, { token, method: "PUT", query, json: { ...data, branchScope: input.branchScope } });
     const parsed = workshopSavedSignaturesSchema.safeParse({ items: savedSignatures(raw, positive(asRecord(raw).defaultSignatureId)) });
     if (!parsed.success) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.json(parsed.data);
@@ -83,14 +122,14 @@ export function registerReceptionRoutes(router: Router, upstream: Upstream, ledg
         throw new GatewayError(409, "WORKSHOP_INSPECTION_INCOMPLETE", `Antes de firmar completa la inspección de ingreso: ${check.missing.join(" · ") || "no se pudo verificar"}.`);
       }
 
-      const workers = list(await upstream.request("/select/employees", { token, query: new URLSearchParams({ filterByBranch: String(input.companyBranchId) }) })).map(worker);
-      const receiver = workers.find((item) => item?.id === input.workerId);
-      if (!receiver) throw new GatewayError(400, "WORKSHOP_WORKER_NOT_FOUND", "El trabajador elegido ya no está disponible en la sucursal.");
+      // input.workerId es el técnico (usuario) que recibe; el servidor deduce su trabajador.
+      const receiver = (await technicians(upstream, token, input.companyBranchId)).find((item) => item.id === input.workerId);
+      if (!receiver) throw new GatewayError(400, "WORKSHOP_WORKER_NOT_FOUND", "El técnico elegido ya no está disponible en la sucursal.");
       let signatureImage: string;
       let userSignatureId: number | null = null;
       if (input.signature.source === "USER_SIGNATURE") {
         // La firma guardada debe ser del trabajador que recibe: igual que la web, se guarda su imagen tal cual.
-        if (receiver.userId === null) throw new GatewayError(400, "WORKSHOP_SIGNATURE_INVALID", "El trabajador no tiene firmas guardadas. Firma en pantalla.");
+        if (receiver.userId === null) throw new GatewayError(400, "WORKSHOP_SIGNATURE_INVALID", "El técnico no tiene firmas guardadas. Agrega su firma.");
         const raw = await upstream.request("/user_signatures/options", { token, query: new URLSearchParams({ userId: String(receiver.userId), companyBranchId: String(input.companyBranchId) }) });
         const chosen = savedSignatures(raw, null).find((item) => item.id === input.signature.userSignatureId);
         if (!chosen?.image) throw new GatewayError(400, "WORKSHOP_SIGNATURE_INVALID", "Esa firma guardada ya no está disponible. Elige otra o firma en pantalla.");
@@ -105,7 +144,7 @@ export function registerReceptionRoutes(router: Router, upstream: Upstream, ledg
       form.set("contacts", JSON.stringify(list(raw.contacts).flatMap((item) => { const value = positive(asRecord(item).id); return value === null ? [] : [{ id: value, isNew: false }]; })));
       form.set("branchesCustomer", JSON.stringify(list(raw.branchesCustomer).flatMap((item) => { const value = positive(asRecord(item).value ?? asRecord(item).id); return value === null ? [] : [{ id: value, value: String(value) }]; })));
       form.set("responsibleSignature", JSON.stringify({
-        id: String(input.workerId), workerId: String(input.workerId), name: input.name, email: input.email || null, phone: input.phone || null,
+        id: String(input.workerId), userId: String(input.workerId), workerId: "", name: input.name, email: input.email || null, phone: input.phone || null,
         userSignatureId, signatureSource: input.signature.source, signatureImage, signedAt: new Date().toISOString()
       }));
       const saved = asRecord(await upstream.request(`/operation_area_entries/${entryId}`, { token, method: "PUT", form }));

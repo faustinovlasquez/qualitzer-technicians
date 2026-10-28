@@ -5,7 +5,7 @@ import type { WorkshopBoard, WorkshopBoardPort, WorkshopOption } from "../domain
 import type { WorkshopEntryDetail, WorkshopEntryPort } from "../domain/workshopEntry";
 import type { WorkshopEquipmentQuery, WorkshopIntakeInput, WorkshopIntakePort } from "../domain/workshopIntake";
 import type { InspectionAnswerInput, InspectionDamageInput, InspectionKind, WorkshopInspectionPort } from "../domain/workshopInspection";
-import type { WorkshopReceptionInput, WorkshopReceptionPort } from "../domain/workshopReception";
+import type { WorkshopReceptionInput, WorkshopReceptionPort, WorkshopSignatureSaveInput } from "../domain/workshopReception";
 import type { WorkshopWorksPort } from "../domain/workshopWorks";
 import type { LocalPhoto } from "../domain/models";
 import type { WorkshopOrderGeneralInput, WorkshopOrderInput, WorkshopOrderItemInput, WorkshopOrderItemSection, WorkshopOrdersPort } from "../domain/workshopOrders";
@@ -229,6 +229,8 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     currentUserId: userId,
     workers: () => needReception("workshopWorkers")(branchId),
     savedSignatures: (userId: number) => needReception("workshopSavedSignatures")(branchId, userId),
+    /** «Agregar firma» al técnico: queda guardada en su perfil. */
+    saveSignature: (userId: number, input: WorkshopSignatureSaveInput) => needReception("saveWorkshopSignature")(branchId, userId, input),
     sign: (entryId: number, input: Omit<WorkshopReceptionInput, "companyBranchId">) => needReception("signWorkshopReception")(entryId, { ...input, companyBranchId: branchId })
   };
 

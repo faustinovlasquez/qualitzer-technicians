@@ -5,6 +5,7 @@ import { ActivityIndicator, BackHandler, Image, Platform, Pressable, StyleSheet,
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { useTechnicianApp } from "./src/application/useTechnicianApp";
 import { LoginScreen } from "./src/screens/LoginScreen";
+import { SignatureSetupPrompt } from "./src/screens/signatures/SignatureSetupPrompt";
 import { TenantSelectionScreen } from "./src/screens/TenantSelectionScreen";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { WorkDetailScreen } from "./src/screens/WorkDetailScreen";
@@ -437,6 +438,9 @@ function ApplicationRoot() {
       </FadeIn>
     </View> : null}
     {app.creationNotice && app.session && !app.busy ? <CreationSuccess {...app.creationNotice} demo={app.session.mode === "demo"} onContinue={app.dismissCreationNotice} /> : null}
+    {app.session ? <SignatureSetupPrompt access={app.signatureAccess} firstName={app.session.user.name.trim().split(/\s+/)[0] ?? ""}
+      enabled={app.session.mode === "live" && Boolean(app.liveVerified) && !app.busy && !app.loading && !app.restoring && !app.finalizingSession && !app.forcePassword
+        && !app.selected && !app.selectedOrder && !app.selectedCreationKind && !app.selectedOffline && !app.notificationOpening && !security.blocked} /> : null}
     <Modal visible={Boolean(app.session && app.selectedOffline)} animationType="slide" onRequestClose={app.closeOffline}>
       <View style={styles.app}>
         {app.offlineController && app.session?.branchId ? <>
