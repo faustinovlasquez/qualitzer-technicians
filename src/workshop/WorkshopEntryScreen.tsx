@@ -196,11 +196,13 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
           </Pressable> : null}
         </View> : null}
         <IntakeProgress detail={detail} actions={detail.delivery ? [] : [
+          // Igual que la web: editar recorre los 3 pasos (datos → inspección → firma).
           ...(can.entries ? [!detail.reception.signed
             ? { icon: "arrow-forward-circle-outline" as const, label: "Continuar ingreso", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true), strong: true }
-            : { icon: "create-outline" as const, label: "Editar datos", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, false) }] : []),
+            : { icon: "create-outline" as const, label: "Editar ingreso", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true) }] : []),
           ...(can.inspections ? [{ icon: "clipboard-outline" as const, label: detail.inspections.entry ? "Ver inspección" : "Hacer inspección", onPress: () => onOpenInspection("entry") }] : []),
-          ...(!detail.reception.signed && can.reception ? [{ icon: "pencil-outline" as const, label: "Firmar", onPress: onSign }] : [])
+          // La firma siempre se puede abrir: firmada, para verla o reemplazarla.
+          ...(can.reception ? [{ icon: "pencil-outline" as const, label: detail.reception.signed ? "Ver firma" : "Firmar", onPress: onSign }] : [])
         ]} />
         {linkNotice ? <Notice tone="success" icon="link-outline" message={linkNotice} /> : null}
         {workError ? <Notice tone="warning" icon="information-circle-outline" message={workError} /> : null}
