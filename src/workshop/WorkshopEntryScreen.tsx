@@ -182,19 +182,17 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
           onStatus={can.manage ? () => openManage("status") : undefined} onMove={can.manage ? () => openManage("move") : undefined} onDate={can.manage ? () => openManage("date") : undefined} /> : null}
         {manageNotice ? <Notice tone="success" icon="checkmark-circle-outline" message={manageNotice} /> : null}
         {onOpenFiles || onOpenComments ? <View style={styles.quickRow}>
-          {onOpenFiles ? <Pressable accessibilityRole="button" accessibilityLabel="Archivos del ingreso" onPress={onOpenFiles} style={({ pressed }) => [styles.filesCard, pressed && { opacity: 0.8 }]}>
-            <View style={styles.filesIcon}><Ionicons name="folder-open" size={20} color={palette.amber} accessible={false} /></View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.filesTitle}>Archivos</Text>
-              <Text style={styles.filesHint} numberOfLines={1}>Fotos y carpetas</Text>
-            </View>
+          {onOpenFiles ? <Pressable accessibilityRole="button" accessibilityLabel="Archivos del ingreso: fotos y carpetas" onPress={onOpenFiles}
+            style={({ pressed }) => [styles.filesCard, pressed && styles.filesCardPressed]}>
+            <View style={styles.filesIcon}><Ionicons name="folder-open" size={18} color={palette.amber} accessible={false} /></View>
+            <Text style={styles.filesTitle} numberOfLines={1}>Archivos</Text>
+            <Ionicons name="chevron-forward" size={16} color={palette.textMuted} accessible={false} />
           </Pressable> : null}
-          {onOpenComments ? <Pressable accessibilityRole="button" accessibilityLabel="Comentarios del ingreso" onPress={onOpenComments} style={({ pressed }) => [styles.filesCard, pressed && { opacity: 0.8 }]}>
-            <View style={[styles.filesIcon, { backgroundColor: palette.primarySoft }]}><Ionicons name="chatbubbles" size={20} color={palette.primary} accessible={false} /></View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.filesTitle}>Comentarios</Text>
-              <Text style={styles.filesHint} numberOfLines={1}>Chat del equipo</Text>
-            </View>
+          {onOpenComments ? <Pressable accessibilityRole="button" accessibilityLabel="Comentarios del ingreso: chat del equipo" onPress={onOpenComments}
+            style={({ pressed }) => [styles.filesCard, pressed && styles.filesCardPressed]}>
+            <View style={[styles.filesIcon, { backgroundColor: palette.primarySoft }]}><Ionicons name="chatbubbles" size={18} color={palette.primary} accessible={false} /></View>
+            <Text style={styles.filesTitle} numberOfLines={1}>Comentarios</Text>
+            <Ionicons name="chevron-forward" size={16} color={palette.textMuted} accessible={false} />
           </Pressable> : null}
         </View> : null}
         <IntakeProgress detail={detail} actions={detail.delivery ? [] : [
@@ -316,10 +314,12 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
   quickRow: { flexDirection: "row", gap: 10 },
-  filesCard: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
-  filesIcon: { width: 40, height: 40, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: palette.amberSoft },
-  filesTitle: { fontSize: 15, fontWeight: "800", color: palette.heading },
-  filesHint: { ...typography.caption, color: palette.textSecondary },
+  // Botones de una línea (icono, nombre y flecha): el nombre nunca se corta en dos renglones.
+  filesCard: { flex: 1, minWidth: 0, minHeight: 52, flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, paddingLeft: 10, paddingRight: 8,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, boxShadow: "0px 1px 3px rgba(15,23,42,0.08)" },
+  filesCardPressed: { opacity: 0.8, backgroundColor: palette.background },
+  filesIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: palette.amberSoft },
+  filesTitle: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: "800", color: palette.heading },
   bar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface },
   barText: { flexShrink: 0, maxWidth: "45%" },
   barEquipment: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
