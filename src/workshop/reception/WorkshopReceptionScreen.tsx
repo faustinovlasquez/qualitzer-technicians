@@ -49,6 +49,7 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
   const [strokes, setStrokes] = useState<SignatureStrokes>([]);
   const [drawing, setDrawing] = useState(false);
   const [picker, setPicker] = useState(false);
+  const [signaturePicker, setSignaturePicker] = useState(false);
   const [issues, setIssues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -81,7 +82,7 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
     const usable = items.filter((item) => item.image);
     // Se elige sola la predeterminada de la sucursal o, si tiene una sola, esa.
     const preferred = usable.find((item) => item.isDefault) ?? (usable.length === 1 ? usable[0] : undefined);
-    if (preferred) pickSavedSignature(preferred, who.name); else setMode({ kind: usable.length > 0 ? "pick" : "draw" });
+    if (preferred) pickSavedSignature(preferred, who.name); else setMode({ kind: "pick" });
   }
 
   // Al elegir quién recibe: sus datos y, si tiene, su firma guardada.
@@ -205,19 +206,15 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
           {saved === null ? <View style={styles.row}><ActivityIndicator size="small" color={palette.primary} /><Text style={styles.hint}>Buscando su firma…</Text></View> : null}
 
           {saved !== null && mode.kind !== "draw" && saved.some((item) => item.image) ? <>
-            {saved.filter((item) => item.image).length > 1 ? <Text style={styles.label}>Firma *</Text> : null}
-            <View style={styles.options}>
-              {saved.filter((item) => item.image).map((item) => {
-                const on = mode.kind === "saved" && mode.id === item.id;
-                return <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: on }} onPress={() => pickSavedSignature(item, worker.name)}
-                  style={[styles.savedOption, on && styles.savedOptionOn]}>
-                  <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={20} color={palette.primary} accessible={false} />
-                  <View style={styles.grow}>
-                    <Text style={styles.savedName}>{item.name}{item.isDefault ? " · predeterminada" : ""}</Text>
-                    <Image source={{ uri: item.image ?? "" }} style={styles.savedImage} resizeMode="contain" accessibilityLabel={`Firma de ${item.name}`} />
-                  </View>
-                </Pressable>;
-              })}
+            {/* Como en la web: Firma (con «+» para agregar otra) → Datos de la firma → Firma de quien recibe. */}
+            <View style={styles.pickRow}>
+              <View style={styles.grow}>
+                <SelectorTrigger label="Firma *" value={chosenSaved ? `${chosenSaved.name}${chosenSaved.isDefault ? " · predeterminada" : ""}` : ""} icon="ribbon-outline"
+                  disabled={saving} error={issues.signature} onPress={() => setSignaturePicker(true)} />
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Agregar otra firma" disabled={saving} onPress={() => setAdding(true)} style={({ pressed }) => [styles.addButton, pressed && styles.addButtonPressed]}>
+                <Ionicons name="add" size={22} color={palette.primary} />
+              </Pressable>
             </View>
             {mode.kind === "pick" ? <Text style={styles.warn}>Tiene varias firmas: elige cuál usar.</Text> : null}
             {chosenSaved ? <View style={styles.data}>
@@ -226,13 +223,22 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
                 <View key={label} style={styles.dataRow}><Text style={styles.hint}>{label}</Text><Text style={value ? styles.dataValue : styles.dataMissing}>{value || "No registrado"}</Text></View>)}
               <Text style={styles.hint}>{chosenSaved.email && chosenSaved.phone ? "Estos datos vienen de la firma elegida." : "A esta firma le faltan datos: complétalos en Perfil › Firmas."}</Text>
             </View> : null}
-            {issues.signature ? <Text style={styles.error} accessibilityRole="alert">{issues.signature}</Text> : null}
+            {chosenSaved?.image ? <View style={styles.preview}>
+              <Text style={styles.dataTitle}>Firma de quien recibe</Text>
+              <View style={styles.previewBadge}><Ionicons name="checkmark-circle" size={14} color={palette.primary} /><Text style={styles.previewBadgeText}>{isMe ? "Se usará tu firma configurada" : "Se usará su firma configurada"}</Text></View>
+              <Image source={{ uri: chosenSaved.image }} style={styles.previewImage} resizeMode="contain" accessibilityLabel={`Firma de ${chosenSaved.name}`} />
+              <View style={styles.previewFooter}>
+                <Text style={styles.previewName}>{(chosenSaved.name || worker.name).toUpperCase()}</Text>
+                {chosenSaved.phone ? <Text style={styles.previewLine}>{chosenSaved.phone}</Text> : null}
+                {chosenSaved.email ? <Text style={styles.previewLine}>{chosenSaved.email}</Text> : null}
+              </View>
+            </View> : null}
             <Pressable accessibilityRole="button" onPress={() => { setMode({ kind: "draw" }); setStrokes([]); setIssues({}); }} style={styles.link}>
               <Ionicons name="create-outline" size={16} color={palette.primary} /><Text style={styles.linkText}>Firmar a mano en su lugar</Text>
             </Pressable>
           </> : null}
 
-          {saved !== null && saved.length === 0 && mode.kind !== "draw" ? <View style={styles.empty}>
+          {saved !== null && !saved.some((item) => item.image) && mode.kind !== "draw" ? <View style={styles.empty}>
             <View style={styles.emptyIcon}><Ionicons name="create" size={24} color={palette.orange} /></View>
             <Text style={styles.emptyTitle}>{isMe ? "No tienes una firma configurada" : `${worker.name} no tiene una firma configurada`}</Text>
             <Text style={styles.emptyText}>Agrégala ahora: queda guardada en {isMe ? "tu" : "su"} perfil y la próxima vez se aplicará sola.</Text>
@@ -266,6 +272,11 @@ export function WorkshopReceptionScreen({ api, load, entryId, onClose, onDone, o
     {picker ? <LocalPicker<WorkshopWorker> title="Técnico que recibe" placeholder="Buscar por nombre o correo" emptyText="No hay usuarios en esta sucursal."
       load={async () => (await api.workers()).items} label={(item) => item.id === api.currentUserId ? `${item.name} · Tú` : item.name} detail={(item) => [item.email, item.phone].filter(Boolean).join(" · ") || null}
       selectedId={worker?.id ?? null} onClose={() => setPicker(false)} onPick={chooseWorker} /> : null}
+
+    {signaturePicker && saved && worker ? <LocalPicker<WorkshopSavedSignature> title="Firma" placeholder="Buscar firma" emptyText="No tiene firmas con imagen."
+      load={async () => saved.filter((item) => item.image)} label={(item) => `${item.name}${item.isDefault ? " · predeterminada" : ""}`} detail={(item) => [item.email, item.phone].filter(Boolean).join(" · ") || null}
+      selectedId={chosenSaved?.id ?? null} onClose={() => setSignaturePicker(false)} onPick={(item) => { setSignaturePicker(false); pickSavedSignature(item, worker.name); }}
+      action={{ label: "Agregar otra firma", onPress: () => { setSignaturePicker(false); setAdding(true); } }} /> : null}
 
     {adding && addAccess ? <Modal visible animationType="slide" onRequestClose={() => { if (!addingBusy) setAdding(false); }}>
       <SafeAreaView style={styles.screen} edges={["top", "left", "right", "bottom"]}>
@@ -323,5 +334,15 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", gap: 10, padding: 16, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: palette.orange, backgroundColor: palette.orangeSoft },
   emptyIcon: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface },
   emptyTitle: { fontSize: 15, fontWeight: "800", color: palette.text, textAlign: "center" },
-  emptyText: { ...typography.caption, color: palette.textSecondary, textAlign: "center" }
+  emptyText: { ...typography.caption, color: palette.textSecondary, textAlign: "center" },
+  pickRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  addButton: { width: 48, height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background, alignItems: "center", justifyContent: "center" },
+  addButtonPressed: { backgroundColor: palette.primarySoft },
+  preview: { gap: 8, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.primary, backgroundColor: palette.background },
+  previewBadge: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: palette.primarySoft },
+  previewBadgeText: { fontSize: 12, fontWeight: "700", color: palette.primary },
+  previewImage: { width: "100%", height: 130, backgroundColor: palette.white, borderRadius: 8 },
+  previewFooter: { alignItems: "center", gap: 2, paddingTop: 8, borderTopWidth: 1, borderTopColor: palette.border },
+  previewName: { fontSize: 14, fontWeight: "800", color: palette.text },
+  previewLine: { fontSize: 12, fontWeight: "600", color: palette.textSecondary }
 });
