@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -36,6 +36,15 @@ export function EntryEmailButton({ api, contacts, entryId, entryCode }: {
     api.history(entryId).then(setHistory, () => setError(true));
   }, [api, entryId]);
   useEffect(() => { if (api.available) load(); }, [api.available, entryId]);
+  // Recién terminado el ingreso, el envío automático sale en segundo plano: mientras no haya ningún envío se vuelve a
+  // revisar unas veces, para que el estado no quede en «sin enviar» hasta reabrir la ficha.
+  const checks = useRef(0);
+  const pending = history !== null && history.summary.sent === 0 && history.summary.failed === 0;
+  useEffect(() => {
+    if (!api.available || !pending || checks.current >= 6) return;
+    const timer = setTimeout(() => { checks.current += 1; load(); }, 5_000);
+    return () => clearTimeout(timer);
+  }, [api.available, pending, history]);
 
   if (!api.available) return null;
   const status = history ? emailStatusLabel(history.summary) : null;
