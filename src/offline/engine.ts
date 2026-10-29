@@ -16,6 +16,7 @@ import { awaitingDeploymentCounts, canAdvanceManualRetry, deploymentKinds, deplo
 const liveLeaseOwners = new Set<string>();
 export { DISCARDABLE_STATUSES, discardSet } from "./discard";
 export function canUseCache(error: unknown): boolean { return error instanceof NetworkError; }
+const CONNECTION_PROBE_MAX_MS = 10_000;
 export function backoffMs(attempts: number): number { return Math.min(OFFLINE_LIMITS.maxBackoffMs, 2_000 * 2 ** Math.min(8, Math.max(0, attempts - 1))); }
 export function sameOfflineUser(expected: User, actual: User, branchId: number): boolean {
   return expected.id === actual.id && expected.workerId === actual.workerId
@@ -142,10 +143,11 @@ export class OfflineEngine {
     this.publish();
   }
   noteConnectionSuccess(generation = this.generation): void {
-    if (generation !== this.generation || this.stopped || this.state.authBlocked || this.connection.networkConnected === false) return;
+    if (generation !== this.generation || this.stopped || this.state.authBlocked) return;
     this.connectionRevision++;
     const deployment = this.state.operations.find((op) => op.status !== "applied" && requiresDeployment(op.lastError));
-    this.connection = { ...this.connection, status: deployment ? "service_error" : "ready", checkedAt: this.dependencies.now(), errorCode: deployment?.lastError };
+    // El servidor respondió: hay red aunque el aviso del teléfono siga diciendo lo contrario.
+    this.connection = { ...this.connection, networkConnected: this.connection.networkConnected === false ? true : this.connection.networkConnected, status: deployment ? "service_error" : "ready", checkedAt: this.dependencies.now(), errorCode: deployment?.lastError };
     this.publish({ lastError: deployment?.lastError ?? null });
   }
   noteConnectionFailure(error: unknown, generation = this.generation): void {
@@ -390,7 +392,8 @@ export class OfflineEngine {
       this.publish({ syncing: false });
       const pending = runnableOperations(this.state.operations);
       const waits = deploymentWaits(this.state.operations);
-      const soonest = this.probeFailures ? backoffMs(this.probeFailures) : pending.length ? Math.min(...pending.map((op) => Math.max(2_000, Math.max(op.nextAttemptAt, waits.get(op.kind) ?? 0) - this.dependencies.now()))) : 30_000;
+      // Sin conexión se vuelve a comprobar cada pocos segundos: un corte breve no deja la app minutos «sin conexión».
+      const soonest = this.probeFailures ? Math.min(CONNECTION_PROBE_MAX_MS, backoffMs(this.probeFailures)) : pending.length ? Math.min(...pending.map((op) => Math.max(2_000, Math.max(op.nextAttemptAt, waits.get(op.kind) ?? 0) - this.dependencies.now()))) : 30_000;
       this.schedule(this.wakeRequested ? 0 : Math.min(OFFLINE_LIMITS.maxBackoffMs, Math.max(2_000, soonest)));
     });
     return this.cycle;

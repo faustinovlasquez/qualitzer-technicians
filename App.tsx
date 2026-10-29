@@ -112,8 +112,10 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
   const pendingMaterials = pendingMaterialCount(materialReceipts.data);
   // Taller (naves e ingresos): se carga solo con la pestaña abierta.
   const demoWorkshopPort = useMemo(() => demoMode ? createDemoWorkshopPort() : null, [demoMode, app.session?.token]);
+  // Con la cámara o la galería abiertas la pantalla queda protegida, pero el taller sigue disponible: si no, el chat y
+  // los archivos se cerraban por detrás y se perdía lo elegido.
   const workshop = useWorkshopBoard(demoWorkshopPort ?? app.receiptPort, app.session?.user.id ?? 0, app.session?.branchId ?? 0, app.storageKey, app.session?.token ?? "",
-    app.tab === "workshop" && (demoMode || app.session?.mode === "live" && app.liveVerified) && !security.blocked);
+    app.tab === "workshop" && (demoMode || app.session?.mode === "live" && app.liveVerified) && (!security.blocked || security.nativePickerActive === true));
   // Permisos de la app configurados por la sucursal en la web (todo permitido mientras cargan o sin conexión).
   const appPermissions = useBranchAppPermissions(demoMode || !(app.session?.mode === "live" && app.liveVerified) ? null : app.receiptPort, app.session?.branchId ?? 0, app.session?.token ?? "", app.tab);
   const workshopAllowed = isAppPermissionAllowed(appPermissions, "workshop");

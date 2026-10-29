@@ -23,6 +23,17 @@ test("unknown link starts checking, not ready or falsely disconnected; authorize
   assert.equal(e.getSnapshot().online, true);
 });
 
+test("a server answer after a brief outage clears a stale 'no network' notice", async () => {
+  const f = fixture(); f.dependencies.connectivity.current = async () => null;
+  const e = new OfflineEngine(f.dependencies);
+  e.noteNetworkState(false);
+  assert.equal(e.getSnapshot().connection?.status, "offline");
+  e.noteConnectionSuccess();
+  assert.equal(e.getSnapshot().connection?.status, "ready");
+  assert.equal(e.getSnapshot().connection?.networkConnected, true);
+  assert.equal(e.getSnapshot().online, true);
+});
+
 for (const connected of [true, null, false]) test(`link ${connected} never conflates transport failure with proven internet loss`, async () => {
   const f = fixture(); f.dependencies.connectivity.current = async () => connected;
   f.upstream.verifyError = new NetworkError("network");
