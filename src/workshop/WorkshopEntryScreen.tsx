@@ -13,9 +13,10 @@ import { LinkWorksSheet } from "./works/LinkWorksSheet";
 import { AddWorksSheet, ConfirmOrderSheet, CreateOrderSheet } from "./orders/OrderSheets";
 import { OrderSentSuccess } from "./orders/OrderSentSuccess";
 import type { WorkshopOrder } from "../domain/workshopEntry";
-import { EstimatedDateSheet, ManageBar, MoveAreaSheet, StatusSheet } from "./manage/ManageSheets";
+import { EstimatedDateSheet, MoveAreaSheet, StatusSheet } from "./manage/ManageSheets";
 import type { useWorkshopBoard } from "./useWorkshopBoard";
-import { EntryEmailCard } from "./emails/EntryEmailCard";
+import { EntryEmailButton } from "./emails/EntryEmailCard";
+import { EntryToolbar, IntakeButton, ToolbarIcon, ToolDialog, ToolOption } from "./entry/EntryToolbar";
 import { useAppPermission } from "../application/appPermissions";
 import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
 import { ResourceSheet } from "../screens/orders/OrderQuickSheet";
@@ -84,6 +85,8 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
   const [sentSuccess, setSentSuccess] = useState<{ orderId: number; title: string | null; worksCount: number; created: boolean } | null>(null);
   const orderAttempt = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const [manageSheet, setManageSheet] = useState<"status" | "move" | "date" | null>(null);
+  // Ventana abierta desde la barra compacta: avance del ingreso o gestión (estado, nave y fecha).
+  const [panel, setPanel] = useState<"intake" | "manage" | null>(null);
   const [manageNotice, setManageNotice] = useState("");
   const openManage = (sheet: "status" | "move" | "date") => { setManageNotice(""); setManageSheet(sheet); };
   async function managed(notice: string) { setManageSheet(null); setManageNotice(notice); await refresh(); }
@@ -180,35 +183,16 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
       {!detail && loading ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={styles.loadingText}>Cargando la ficha…</Text></View> : null}
 
       {detail ? <>
-        {/* Acciones de gestión en una fila compacta; las del ingreso van dentro de su avance. */}
-        {!detail.delivery ? <ManageBar
-          onStatus={can.manage ? () => openManage("status") : undefined} onMove={can.manage ? () => openManage("move") : undefined} onDate={can.manage ? () => openManage("date") : undefined} /> : null}
+        {/* Todo en una fila: el avance del ingreso (con su porcentaje) y botones de ícono que abren su ventana. */}
+        <EntryToolbar>
+          <IntakeButton detail={detail} onPress={() => setPanel("intake")} />
+          {/* Correo de confirmación al cliente (como en la web): estado, enviar y envíos. */}
+          {emails && detail.reception.signed ? <EntryEmailButton api={emails} entryId={entry.id} entryCode={detail.code} /> : null}
+          {onOpenFiles ? <ToolbarIcon icon="folder-open" label="Archivos" accessibilityLabel="Archivos del ingreso: fotos y carpetas" color={palette.amber} soft={palette.amberSoft} onPress={onOpenFiles} /> : null}
+          {onOpenComments ? <ToolbarIcon icon="chatbubbles" label="Chat" accessibilityLabel="Comentarios del ingreso: chat del equipo" onPress={onOpenComments} /> : null}
+          {!detail.delivery && can.manage ? <ToolbarIcon icon="options-outline" label="Gestión" accessibilityLabel="Gestión: estado, mover de nave y fecha de entrega" color={palette.heading} soft={palette.track} onPress={() => setPanel("manage")} /> : null}
+        </EntryToolbar>
         {manageNotice ? <Notice tone="success" icon="checkmark-circle-outline" message={manageNotice} /> : null}
-        {onOpenFiles || onOpenComments ? <View style={styles.quickRow}>
-          {onOpenFiles ? <Pressable accessibilityRole="button" accessibilityLabel="Archivos del ingreso: fotos y carpetas" onPress={onOpenFiles}
-            style={({ pressed }) => [styles.filesCard, pressed && styles.filesCardPressed]}>
-            <View style={styles.filesIcon}><Ionicons name="folder-open" size={18} color={palette.amber} accessible={false} /></View>
-            <Text style={styles.filesTitle} numberOfLines={1}>Archivos</Text>
-            <Ionicons name="chevron-forward" size={16} color={palette.textMuted} accessible={false} />
-          </Pressable> : null}
-          {onOpenComments ? <Pressable accessibilityRole="button" accessibilityLabel="Comentarios del ingreso: chat del equipo" onPress={onOpenComments}
-            style={({ pressed }) => [styles.filesCard, pressed && styles.filesCardPressed]}>
-            <View style={[styles.filesIcon, { backgroundColor: palette.primarySoft }]}><Ionicons name="chatbubbles" size={18} color={palette.primary} accessible={false} /></View>
-            <Text style={styles.filesTitle} numberOfLines={1}>Comentarios</Text>
-            <Ionicons name="chevron-forward" size={16} color={palette.textMuted} accessible={false} />
-          </Pressable> : null}
-        </View> : null}
-        <IntakeProgress detail={detail} actions={detail.delivery ? [] : [
-          // Igual que la web: editar recorre los 3 pasos (datos → inspección → firma).
-          ...(can.entries ? [!detail.reception.signed
-            ? { icon: "arrow-forward-circle-outline" as const, label: "Continuar ingreso", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true), strong: true }
-            : { icon: "create-outline" as const, label: "Editar ingreso", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true) }] : []),
-          ...(can.inspections ? [{ icon: "clipboard-outline" as const, label: detail.inspections.entry ? "Ver inspección" : "Hacer inspección", onPress: () => onOpenInspection("entry") }] : []),
-          // La firma siempre se puede abrir: firmada, para verla o reemplazarla.
-          ...(can.reception ? [{ icon: "pencil-outline" as const, label: detail.reception.signed ? "Ver firma" : "Firmar", onPress: onSign }] : [])
-        ]} />
-        {/* Correo de confirmación al cliente (como en la web): estado, enviar y envíos. */}
-        {emails && detail.reception.signed ? <EntryEmailCard api={emails} entryId={entry.id} entryCode={detail.code} /> : null}
         {linkNotice ? <Notice tone="success" icon="link-outline" message={linkNotice} /> : null}
         {workError ? <Notice tone="warning" icon="information-circle-outline" message={workError} /> : null}
         {orderNotice ? <Notice tone="success" icon="document-text-outline" message={orderNotice} /> : null}
@@ -294,6 +278,26 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
           : { label: "Listo", icon: "checkmark", onPress: () => setSentSuccess(null) }}
         secondary={onOpenOrder ? { label: "Seguir en el ingreso", icon: "arrow-back", onPress: () => setSentSuccess(null) } : undefined} />;
     })() : null}
+    {panel === "intake" && detail ? <ToolDialog title="Ingreso" subtitle={detail.code} icon="git-commit-outline" onClose={() => setPanel(null)}>
+      <IntakeProgress fixed detail={detail} />
+      {(detail.delivery ? [] : [
+        // Igual que la web: editar recorre los 3 pasos (datos → inspección → firma).
+        ...(can.entries ? [!detail.reception.signed
+          ? { icon: "arrow-forward-circle-outline" as const, label: "Continuar ingreso", caption: "Datos, inspección y firma", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true), strong: true }
+          : { icon: "create-outline" as const, label: "Editar ingreso", caption: "Datos, inspección y firma", onPress: () => onEditIntake(detail.areaId, detail.areaTitle, true) }] : []),
+        ...(can.inspections ? [{ icon: "clipboard-outline" as const, label: detail.inspections.entry ? "Ver inspección" : "Hacer inspección",
+          caption: detail.inspections.entry ? `${detail.inspections.entry.percentage}% completada` : "Fotos y lista de revisión", onPress: () => onOpenInspection("entry") }] : []),
+        // La firma siempre se puede abrir: firmada, para verla o reemplazarla.
+        ...(can.reception ? [{ icon: "pencil-outline" as const, label: detail.reception.signed ? "Ver firma" : "Firmar",
+          caption: detail.reception.signed ? detail.reception.receiverName ?? "Firmado" : "Firma de recepción", onPress: onSign }] : [])
+      ]).map((action) => <ToolOption key={action.label} icon={action.icon} label={action.label} caption={action.caption} strong={"strong" in action && action.strong}
+        onPress={() => { setPanel(null); action.onPress(); }} />)}
+    </ToolDialog> : null}
+    {panel === "manage" && detail ? <ToolDialog title="Gestión del ingreso" subtitle={detail.code} icon="options-outline" onClose={() => setPanel(null)}>
+      <ToolOption icon="flag-outline" label="Cambiar estado" caption={[workshopStatusLabel(header.statusKey), header.subStatusName].filter(Boolean).join(" · ")} onPress={() => { setPanel(null); openManage("status"); }} />
+      <ToolOption icon="swap-horizontal" label="Mover de nave" caption={`Ahora en ${header.areaTitle}`} onPress={() => { setPanel(null); openManage("move"); }} />
+      <ToolOption icon="calendar-outline" label="Fecha de entrega" caption={header.estimatedDeliveryAt ? longDate(header.estimatedDeliveryAt) : "Sin fecha"} onPress={() => { setPanel(null); openManage("date"); }} />
+    </ToolDialog> : null}
     {manageSheet === "status" ? <StatusSheet load={manage.statuses} onClose={() => setManageSheet(null)}
       onSave={async (statusId, subStatusId) => { await manage.status(entry.id, statusId, subStatusId); await managed("Estado actualizado."); }} /> : null}
     {manageSheet === "move" ? <MoveAreaSheet currentAreaId={detail?.areaId ?? area.id} onClose={() => setManageSheet(null)}
@@ -320,13 +324,6 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
-  quickRow: { flexDirection: "row", gap: 10 },
-  // Botones de una línea (icono, nombre y flecha): el nombre nunca se corta en dos renglones.
-  filesCard: { flex: 1, minWidth: 0, minHeight: 52, flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, paddingLeft: 10, paddingRight: 8,
-    borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, boxShadow: "0px 1px 3px rgba(15,23,42,0.08)" },
-  filesCardPressed: { opacity: 0.8, backgroundColor: palette.background },
-  filesIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: palette.amberSoft },
-  filesTitle: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: "800", color: palette.heading },
   bar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: palette.border, backgroundColor: palette.surface },
   barText: { flexShrink: 0, maxWidth: "45%" },
   barEquipment: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },

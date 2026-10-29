@@ -71,18 +71,29 @@ function Step({ label, caption, state }: { label: string; caption: string; state
 
 export type IntakeAction = { icon: IconName; label: string; onPress: () => void; strong?: boolean };
 
-/** Avance del ingreso: datos, inspección de ingreso y firma de recepción, con sus acciones. Se puede minimizar. */
-export function IntakeProgress({ detail, actions = [] }: { detail: WorkshopEntryDetail; actions?: IntakeAction[] }) {
+/** Avance del ingreso: datos, inspección de ingreso y firma valen un tercio cada uno (la inspección suma su porcentaje). */
+export function intakeSummary(detail: WorkshopEntryDetail) {
   const { inspections } = detail;
   const requirement = inspections.entryRequirement;
   const check = evaluateInspection(requirement, inspections.entry, inspections.photoSlots);
   const inspectionState: StepState = !inspections.available ? "pending" : requirement === "none" && !inspections.entry ? "skipped" : check.met ? "done" : "pending";
+  const pending = (inspectionState === "pending" ? 1 : 0) + (detail.reception.signed ? 0 : 1);
+  const inspectionShare = inspectionState === "pending" ? Math.min(0.99, (inspections.entry?.percentage ?? 0) / 100) : 1;
+  const percent = Math.round(((1 + inspectionShare + (detail.reception.signed ? 1 : 0)) / 3) * 100);
+  return { check, inspectionState, pending, percent };
+}
+
+/** Avance del ingreso: datos, inspección de ingreso y firma de recepción, con sus acciones. Se puede minimizar (salvo `fixed`, dentro de una ventana). */
+export function IntakeProgress({ detail, actions = [], fixed = false }: { detail: WorkshopEntryDetail; actions?: IntakeAction[]; fixed?: boolean }) {
+  const { inspections } = detail;
+  const requirement = inspections.entryRequirement;
+  const { check, inspectionState, pending } = intakeSummary(detail);
   const inspectionCaption = !inspections.available ? "Sin verificar"
     : requirement === "none" && !inspections.entry ? "No exigida"
     : inspections.entry ? `${inspections.entry.percentage}% · ${inspectionRequirementLabel(requirement)}` : `Pendiente · ${inspectionRequirementLabel(requirement)}`;
-  const pending = (inspectionState === "pending" ? 1 : 0) + (detail.reception.signed ? 0 : 1);
   // Si ya está todo listo parte minimizada para ahorrar espacio.
-  const [collapsed, setCollapsed] = useState(pending === 0);
+  const [collapsedState, setCollapsed] = useState(pending === 0);
+  const collapsed = !fixed && collapsedState;
   const toggle = <Pressable accessibilityRole="button" accessibilityLabel={collapsed ? "Expandir avance del ingreso" : "Minimizar avance del ingreso"} accessibilityState={{ expanded: !collapsed }}
     hitSlop={10} onPress={() => setCollapsed((value) => !value)} style={({ pressed }) => [styles.collapseToggle, pressed && styles.pressed]}>
     <Ionicons name={collapsed ? "chevron-down" : "chevron-up"} size={16} color={palette.textSecondary} accessible={false} />
@@ -105,7 +116,7 @@ export function IntakeProgress({ detail, actions = [] }: { detail: WorkshopEntry
       <View style={[styles.pill, { backgroundColor: pending === 0 ? palette.successSoft : palette.orangeSoft }]}>
         <Text style={[styles.pillText, { color: pending === 0 ? palette.success : palette.orange }]}>{pending === 0 ? "Completo" : `Faltan ${pending}`}</Text>
       </View>
-      {toggle}
+      {fixed ? null : toggle}
     </>}>
     <View style={styles.steps}>
       <Step label="Datos" caption="Registrados" state="done" />

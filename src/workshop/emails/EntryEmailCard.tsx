@@ -8,6 +8,7 @@ import { palette, radius, typography } from "../../ui/theme";
 import { EMAIL_PROVIDER_LABEL, emailStatusLabel, type EmailHistory, type EmailHistoryItem } from "../../domain/workshopCustomerEmail";
 import type { useWorkshopBoard } from "../useWorkshopBoard";
 import { EmailSendScreen } from "./EmailSendScreen";
+import { ToolbarIcon, ToolDialog, ToolOption } from "../entry/EntryToolbar";
 
 type EmailsApi = ReturnType<typeof useWorkshopBoard>["emails"];
 
@@ -17,10 +18,14 @@ const formatDate = (value: string | null) => {
   return Number.isNaN(date.getTime()) ? "" : `${date.toLocaleDateString("es-CL")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 };
 
-/** «Correo al cliente» en la ficha del ingreso: estado de la confirmación, enviarla y ver el historial de envíos. */
-export function EntryEmailCard({ api, entryId, entryCode }: { api: EmailsApi; entryId: number; entryCode: string }) {
+/**
+ * «Correo» en la barra de la ficha del ingreso: un botón de ícono con un punto de estado
+ * (verde enviado, rojo falló, ámbar sin enviar) que abre una ventana para enviar la confirmación y ver los envíos.
+ */
+export function EntryEmailButton({ api, entryId, entryCode }: { api: EmailsApi; entryId: number; entryCode: string }) {
   const [history, setHistory] = useState<EmailHistory | null>(null);
   const [error, setError] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -34,20 +39,22 @@ export function EntryEmailCard({ api, entryId, entryCode }: { api: EmailsApi; en
   const status = history ? emailStatusLabel(history.summary) : null;
   const sent = (history?.summary.sent ?? 0) > 0;
   const total = (history?.summary.sent ?? 0) + (history?.summary.failed ?? 0);
+  const dot = !status ? undefined : status.tone === "success" ? palette.success : status.tone === "danger" ? palette.danger : palette.amber;
 
-  return <View style={styles.card}>
-    <View style={styles.head}>
-      <View style={styles.icon}><Ionicons name={sent ? "mail-open" : "mail"} size={18} color={palette.white} /></View>
-      <View style={styles.grow}>
-        <Text style={styles.title}>Correo al cliente</Text>
+  return <>
+    <ToolbarIcon icon={sent ? "mail-open" : "mail"} label="Correo" color={palette.info} soft={palette.infoSoft} dot={dot}
+      accessibilityLabel={`Correo al cliente${status ? `: ${status.label}` : ""}`} onPress={() => { setMenuOpen(true); load(); }} />
+
+    {menuOpen ? <ToolDialog title="Correo al cliente" subtitle={entryCode} icon="mail-outline" onClose={() => setMenuOpen(false)}>
+      <View style={styles.statusRow}>
         {status ? <Text style={[styles.status, status.tone === "success" ? styles.statusOk : status.tone === "danger" ? styles.statusBad : styles.statusPending]}>{status.label}</Text>
           : error ? <Text style={styles.hint}>No se pudo revisar el envío.</Text> : <ActivityIndicator size="small" color={palette.info} />}
       </View>
-    </View>
-    <View style={styles.actions}>
-      <Button title={sent ? "Reenviar" : "Enviar al cliente"} icon="send" onPress={() => setSendOpen(true)} style={styles.grow} />
-      <Button title={total > 0 ? `Envíos (${total})` : "Envíos"} icon="time-outline" variant="secondary" onPress={() => { setHistoryOpen(true); load(); }} />
-    </View>
+      <ToolOption icon="send" label={sent ? "Reenviar al cliente" : "Enviar al cliente"} caption="Confirmación de ingreso con el informe" strong
+        onPress={() => { setMenuOpen(false); setSendOpen(true); }} />
+      <ToolOption icon="time-outline" label="Ver envíos" caption={total > 0 ? `${total} ${total === 1 ? "envío" : "envíos"}${history ? ` · leído por ${history.summary.read}` : ""}` : "Aún no hay envíos"}
+        onPress={() => { setMenuOpen(false); setHistoryOpen(true); load(); }} />
+    </ToolDialog> : null}
 
     {sendOpen ? <EmailSendScreen api={api} entryId={entryId} entryCode={entryCode} onClose={() => setSendOpen(false)} onSent={() => { setSendOpen(false); load(); }} /> : null}
 
@@ -75,7 +82,7 @@ export function EntryEmailCard({ api, entryId, entryCode }: { api: EmailsApi; en
         </View>
       </SafeAreaView>
     </Modal> : null}
-  </View>;
+  </>;
 }
 
 function HistoryRow({ item }: { item: EmailHistoryItem }) {
@@ -99,18 +106,14 @@ function HistoryRow({ item }: { item: EmailHistoryItem }) {
 }
 
 const styles = StyleSheet.create({
-  card: { gap: 10, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: palette.infoBorder, backgroundColor: palette.infoSoft },
-  head: { flexDirection: "row", alignItems: "center", gap: 10 },
-  icon: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: palette.info },
+  statusRow: { flexDirection: "row", alignItems: "center", minHeight: 22 },
   grow: { flex: 1, minWidth: 0 },
-  title: { fontSize: 15, fontWeight: "800", color: palette.heading },
-  status: { alignSelf: "flex-start", marginTop: 3, fontSize: 11, fontWeight: "800", paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, overflow: "hidden" },
+  status: { alignSelf: "flex-start", fontSize: 11, fontWeight: "800", paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, overflow: "hidden" },
   statusOk: { color: palette.success, backgroundColor: palette.successSoft },
   statusBad: { color: palette.danger, backgroundColor: palette.dangerSoft },
   statusPending: { color: palette.amber, backgroundColor: palette.amberSoft },
   statusRead: { color: palette.info, backgroundColor: palette.infoSoft },
   statusMuted: { color: palette.textSecondary, backgroundColor: palette.track },
-  actions: { flexDirection: "row", gap: 8 },
   hint: { ...typography.caption, color: palette.textSecondary },
   warning: { fontSize: 12, color: palette.amber, padding: 10, borderRadius: radius.md, backgroundColor: palette.amberSoft },
   screen: { flex: 1, backgroundColor: palette.background },
