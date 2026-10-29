@@ -7,12 +7,14 @@ export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
 const NOT_SESSION_401 = ["PERMISSION_REQUIRED", "MAINTENANCE_REOPEN_UNAUTHORIZED", "MAINTENANCE_REOPEN_FORBIDDEN", "TENANT_TYPE_NOT_ALLOWED"] as const;
 type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_password" |
   `/technician-dashboard/panel/${string}/works/${number}/edit` |
-  "/user_signatures/me" | `/user_signatures/me/${number}` |
+  "/user_signatures/me" | `/user_signatures/me/${number}` | `/user_signatures/users/${number}` | "/users/select" |
   "/profiles/me" | "/profiles/me/avatar" |
   "/worker-locations/batch" | "/worker-locations/me" |
   "/inventory_consumptions_v2/my-receipts" | "/inventory_consumptions_v2/my-receipts/confirm" | `/inventory_consumptions_v2/my-receipts/${number}/dispositions` |
   "/workshops/select" | "/operation_area/dashboard" |
   `/operation_area_entries/${number}` | `/equipment_dispatches/inspections/by-entry/${number}/compliance` |
+  `/operation_area_entries/${number}/emails` | `/operation_area_entries/${number}/emails/confirmation` |
+  `/operation_area_entries/${number}/emails/confirmation/${"eligibility" | "preview"}` | "/email_templates" | "/email_template_settings/channels" |
   `/branches/${number}/inspectionRequirementsConfig` | "/equipment_masters/required_photos" | "/works" | `/works/${number}` | "/negotiations" | "/maintenances" |
   "/operation_area_entries" | "/operation_area/select" | "/customers/select" | `/customers/${number}` | `/customer_branches/select/${number}` |
   "/customers" | `/customers/${number}/contacts` | "/customer_branches" | "/DocumentsSalesCountries/select" |

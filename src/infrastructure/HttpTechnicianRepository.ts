@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { emailEligibilitySchema, emailHistorySchema, emailOptionsSchema, emailPreviewInputSchema, emailPreviewSchema, emailSendInputSchema, emailSendResultSchema, type EmailSendInput } from "../domain/workshopCustomerEmail";
 import { materialDispositionInputSchema, materialReceiptInputSchema, materialReceiptResultSchema, materialReceiptSchema, materialReceiptsSchema, materialReceiptStatusSchema,
   type MaterialDispositionInput, type MaterialReceiptInput, type MaterialReceiptStatus } from "../domain/materialReceipts";
 import { workshopBoardSchema, workshopListSchema } from "../domain/workshopBoard";
@@ -378,6 +379,24 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   async saveWorkshopSignature(branchId: number, userId: number, input: WorkshopSignatureSaveInput) {
     const path = `/api/workshop/signatures/users/${positiveCreationIdSchema.parse(userId)}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`;
     return workshopSavedSignaturesSchema.parse(await this.request<unknown>(path, "POST", workshopSignatureSaveInputSchema.parse(input)));
+  }
+  private emailPath(branchId: number, suffix: string) {
+    return `/api/workshop${suffix}?companyBranchId=${positiveCreationIdSchema.parse(branchId)}`;
+  }
+  async workshopEmailEligibility(branchId: number, entryId: number) {
+    return emailEligibilitySchema.parse(await this.request<unknown>(this.emailPath(branchId, `/entries/${positiveCreationIdSchema.parse(entryId)}/emails/eligibility`)));
+  }
+  async workshopEmailOptions(branchId: number) {
+    return emailOptionsSchema.parse(await this.request<unknown>(this.emailPath(branchId, "/emails/options")));
+  }
+  async workshopEmailPreview(branchId: number, entryId: number, input: { templateId: number | null; recipientName: string | null }) {
+    return emailPreviewSchema.parse(await this.request<unknown>(this.emailPath(branchId, `/entries/${positiveCreationIdSchema.parse(entryId)}/emails/preview`), "POST", emailPreviewInputSchema.parse(input)));
+  }
+  async sendWorkshopEmail(branchId: number, entryId: number, input: EmailSendInput) {
+    return emailSendResultSchema.parse(await this.request<unknown>(this.emailPath(branchId, `/entries/${positiveCreationIdSchema.parse(entryId)}/emails`), "POST", emailSendInputSchema.parse(input)));
+  }
+  async workshopEmailHistory(branchId: number, entryId: number) {
+    return emailHistorySchema.parse(await this.request<unknown>(this.emailPath(branchId, `/entries/${positiveCreationIdSchema.parse(entryId)}/emails`)));
   }
   async signWorkshopReception(entryId: number, input: WorkshopReceptionInput) {
     return workshopReceptionResultSchema.parse(await this.request<unknown>(`/api/workshop/entries/${positiveCreationIdSchema.parse(entryId)}/reception`, "POST", workshopReceptionInputSchema.parse(input)));

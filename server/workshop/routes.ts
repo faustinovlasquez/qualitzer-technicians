@@ -13,6 +13,7 @@ import { registerWorkRoutes } from "./works";
 import { registerOrderRoutes } from "./orders";
 import { registerOrderFileRoutes, registerWorkshopDriveRoutes } from "./orderFiles";
 import { registerWorkshopThreadRoutes } from "./threads";
+import { registerCustomerEmailRoutes } from "./customerEmails";
 import { registerDeliveryRoutes } from "./delivery";
 import { registerManageRoutes } from "./manage";
 import { registerCustomerRoutes } from "./customers";
@@ -73,6 +74,8 @@ const ROUTE_PERMISSIONS: Array<[string, RegExp, MobileAppPermission]> = [
   ["POST", /^\/entries\/\d+\/reception$/, "workshopReception"],
   // Agregar la firma del técnico desde la recepción.
   ["POST", /^\/signatures\/users\/\d+$/, "workshopReception"],
+  // Enviar la confirmación de ingreso al cliente: mismo permiso que firmar la recepción.
+  ["POST", /^\/entries\/\d+\/emails$/, "workshopReception"],
   ["POST", /^\/entries\/\d+\/delivery$/, "workshopDelivery"],
   ["POST", /^\/entries\/\d+\/(?:move|estimated-delivery|status)$/, "workshopManage"],
   ["POST", /^\/entries\/\d+\/works\/link$/, "workshopWorks"],
@@ -112,6 +115,7 @@ export function createWorkshopRouter(upstream: Upstream): Router {
   registerOrderFileRoutes(router, upstream);
   registerWorkshopDriveRoutes(router, upstream);
   registerWorkshopThreadRoutes(router, upstream);
+  registerCustomerEmailRoutes(router, upstream);
   registerDeliveryRoutes(router, upstream, ledger);
   registerManageRoutes(router, upstream);
   registerCustomerRoutes(router, upstream, ledger);

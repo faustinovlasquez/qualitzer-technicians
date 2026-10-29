@@ -15,6 +15,7 @@ import { OrderSentSuccess } from "./orders/OrderSentSuccess";
 import type { WorkshopOrder } from "../domain/workshopEntry";
 import { EstimatedDateSheet, ManageBar, MoveAreaSheet, StatusSheet } from "./manage/ManageSheets";
 import type { useWorkshopBoard } from "./useWorkshopBoard";
+import { EntryEmailCard } from "./emails/EntryEmailCard";
 import { useAppPermission } from "../application/appPermissions";
 import { PrivateModal as Modal } from "../security/DeviceSecurityContext";
 import { ResourceSheet } from "../screens/orders/OrderQuickSheet";
@@ -47,8 +48,10 @@ function headerOf(entry: WorkshopEntry, area: WorkshopArea, detail: WorkshopEntr
 }
 
 /** Ficha del ingreso abierta desde el tablero. Atrás (botón o el del teléfono) vuelve al tablero. */
-export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard, rememberedTab, onTabChange, entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, onOpenOrder, works, orders, onDeliver, manage, workshopId, initialNotice, onOpenFiles, onOpenComments, orderDrive, orderThread }: {
+export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard, rememberedTab, onTabChange, entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, onOpenOrder, works, orders, onDeliver, manage, workshopId, initialNotice, onOpenFiles, onOpenComments, orderDrive, orderThread, emails }: {
   onOpenOrder?: (orderId: number, entryCode: string) => void;
+  /** Correo de confirmación al cliente (si la sesión puede usarlo). */
+  emails?: ReturnType<typeof useWorkshopBoard>["emails"];
   /** Archivos y comentarios de una OT del ingreso (null si no están disponibles): se abren en una ventana desde su tarjeta. */
   orderDrive?: (orderId: number) => DriveApi | null; orderThread?: (orderId: number) => ThreadApi | null;
   /** Archivos con carpetas del ingreso (mismo gestor de la web). */
@@ -204,6 +207,8 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
           // La firma siempre se puede abrir: firmada, para verla o reemplazarla.
           ...(can.reception ? [{ icon: "pencil-outline" as const, label: detail.reception.signed ? "Ver firma" : "Firmar", onPress: onSign }] : [])
         ]} />
+        {/* Correo de confirmación al cliente (como en la web): estado, enviar y envíos. */}
+        {emails && detail.reception.signed ? <EntryEmailCard api={emails} entryId={entry.id} entryCode={detail.code} /> : null}
         {linkNotice ? <Notice tone="success" icon="link-outline" message={linkNotice} /> : null}
         {workError ? <Notice tone="warning" icon="information-circle-outline" message={workError} /> : null}
         {orderNotice ? <Notice tone="success" icon="document-text-outline" message={orderNotice} /> : null}

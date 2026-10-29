@@ -3,7 +3,7 @@
     "name": "Qualitzer operaciones",
     "slug": "qualitzer-tecnicos",
     "scheme": "qualitzer-field",
-    "version": "1.0.143",
+    "version": "1.0.144",
     "orientation": "portrait",
     "icon": "./assets/qualitzer-icon.png",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.qualitzer.field",
-      "versionCode": 144,
+      "versionCode": 145,
       "allowBackup": false,
       "googleServicesFile": "./config/firebase/google-services.json",
       "blockedPermissions": [

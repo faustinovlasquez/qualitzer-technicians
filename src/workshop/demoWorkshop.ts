@@ -4,6 +4,7 @@ import { customerPage, type WorkshopCustomerDetail, type WorkshopEquipmentOption
 import { CUSTOM_SLOT_KEY, isInspectionStepCompleted, type InspectionStep, type WorkshopInspectionPort, type WorkshopInspectionState } from "../domain/workshopInspection";
 
 import { shouldMoveToStatus, type WorkshopReceptionPort, type WorkshopWorker } from "../domain/workshopReception";
+import type { EmailHistory, WorkshopCustomerEmailPort } from "../domain/workshopCustomerEmail";
 import { evaluateInspection } from "../domain/workshopEntry";
 
 import type { WorkshopWorksPort } from "../domain/workshopWorks";
@@ -12,7 +13,7 @@ import { deliveryBlockers, type WorkshopDeliveryPort } from "../domain/workshopD
 import type { WorkshopManagePort } from "../domain/workshopManage";
 import { formatRut, isValidRut, type WorkshopCustomersPort } from "../domain/workshopCustomers";
 
-export type DemoWorkshopPort = WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort;
+export type DemoWorkshopPort = WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopCustomerEmailPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort;
 const structuredCopy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 /** Taller de ejemplo para el modo demostración: vive en memoria y nunca llega a Qualitzer. */
@@ -629,9 +630,41 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
       return created;
     }
   };
+  // Correo de confirmación al cliente (demo): se «envía» y queda en el historial de la sesión.
+  const sentEmails: Record<number, EmailHistory["items"]> = {};
+  const emailPort: WorkshopCustomerEmailPort = {
+    async workshopEmailEligibility(_branchId, entryId) {
+      const sent = (sentEmails[entryId] ?? []).length > 0;
+      return { mode: "manual", canSend: true, canAutoSend: false, shouldPrompt: !sent, alreadySent: sent, receptionSigned: true, isInternalEntry: false, includeInternalEntries: false,
+        attachReport: true, ccEmails: [], issues: [], warnings: [], recipients: [{ email: "compras@cliente-demo.cl", name: "Paula Rivas", contactId: 1 }], contactsWithoutEmail: [],
+        template: { id: 1, name: "Confirmación de ingreso" }, sender: { provider: "SMTP", email: "contacto@qualitzer.cl", reason: null } };
+    },
+    async workshopEmailOptions() {
+      return { templates: [{ id: 1, name: "Confirmación de ingreso", isDefault: true, attachReport: true }],
+        channels: [{ provider: "SMTP", available: true, email: "contacto@qualitzer.cl", reason: null, howTo: "La administra Qualitzer." },
+          { provider: "GOOGLE_OAUTH", available: false, email: null, reason: "No tienes tu Gmail conectado.", howTo: "Conéctalo desde la web, en tu perfil." }] };
+    },
+    async workshopEmailPreview(_branchId, entryId, input) {
+      const code = `ING-${String(entryId).padStart(5, "0")}`;
+      return { subject: `Confirmación de ingreso de su equipo · ${code}`, missing: [], attachmentName: `Informe-de-ingreso-${code}.pdf`,
+        paragraphs: ["Ingreso a taller", `Estimado(a) ${input.recipientName ?? "cliente"}:`, `Le confirmamos que su equipo ingresó a nuestro taller con el código ${code}.`, "Saludos cordiales."] };
+    },
+    async sendWorkshopEmail(_branchId, entryId, input) {
+      const items = input.recipients.map((recipient, index) => ({ id: Date.now() + index, date: new Date().toISOString(), trigger: "manual" as const, status: "sent" as const,
+        provider: "SMTP" as const, senderEmail: "contacto@qualitzer.cl", recipients: [recipient.email], subject: "Confirmación de ingreso", templateName: "Confirmación de ingreso",
+        responsibleName: "Demo", read: false, readCount: 0, lastOpenedAt: null, note: null }));
+      sentEmails[entryId] = [...items, ...(sentEmails[entryId] ?? [])];
+      return { results: items.map((item) => ({ email: item.recipients[0] ?? "", status: "sent" as const, provider: "SMTP" as const, senderEmail: item.senderEmail, error: null })) };
+    },
+    async workshopEmailHistory(_branchId, entryId) {
+      const items = sentEmails[entryId] ?? [];
+      return { items, summary: { sent: items.length, failed: 0, recipients: items.length, read: 0 }, trackingReachable: true };
+    }
+  };
   const documents: Record<number, string> = {};
   return {
     ...customersPort,
+    ...emailPort,
     ...inspectionPort,
     ...receptionPort,
     ...worksPort,

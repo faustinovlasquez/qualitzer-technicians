@@ -20,6 +20,7 @@ import { WorkshopEntryScreen } from "./WorkshopEntryScreen";
 import { WorkshopIntakeScreen } from "./intake/WorkshopIntakeScreen";
 import { WorkshopInspectionScreen } from "./inspection/WorkshopInspectionScreen";
 import { WorkshopReceptionScreen } from "./reception/WorkshopReceptionScreen";
+import { ReceptionDoneModal } from "./emails/ReceptionDoneModal";
 import { WorkshopDeliveryScreen } from "./delivery/WorkshopDeliveryScreen";
 import { WorkshopOrderScreen, type Section } from "./order/WorkshopOrderScreen";
 
@@ -92,6 +93,8 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
   const [view, setView] = useState<Opened | null>(() => memory.current?.key === memoryKey ? memory.current.view as Opened | null : null);
   const can = { inspections: useAppPermission("workshopInspections"), reception: useAppPermission("workshopReception") };
   useEffect(() => { memory.current = { key: memoryKey, view }; }, [view, memoryKey]);
+  /** Ingreso recién terminado: se celebra y se muestra el correo al cliente antes de dejar la ficha a la vista. */
+  const [receptionDone, setReceptionDone] = useState<WorkshopEntry | null>(null);
   useEffect(() => { onSectionChange?.(view !== null); }, [view !== null]);
   useEffect(() => { onViewChange?.(view?.kind ?? null); }, [view?.kind]);
   useEffect(() => () => { onSectionChange?.(false); }, []);
@@ -201,6 +204,7 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
       onDeliver={() => setView({ kind: "delivery", ref: view.ref })}
       onOpenFiles={workshop.drive.available ? () => setView({ kind: "files", ref: view.ref }) : undefined}
       onOpenComments={workshop.threads.available ? () => setView({ kind: "comments", ref: view.ref }) : undefined}
+      emails={workshop.emails.available ? workshop.emails : undefined}
       orderDrive={workshop.drive.available ? (orderId) => workshop.drive.order(view.ref.entry.id, orderId) : undefined}
       orderThread={workshop.threads.available ? (orderId) => workshop.threads.order(view.ref.entry.id, orderId) : undefined}
       workCard={assignmentCard} workLayout={workLayout} onWorkLayout={setWorkLayout}
@@ -283,8 +287,11 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
       onClose={() => showEntry(view.ref)} onGoEntry={() => showEntry(view.ref)} onGoBoard={() => { setView(null); void workshop.refresh(); }}
       onExitInspection={() => setView({ kind: "inspection", ref: view.ref, inspection: "exit", next: "delivery" })} /> : null}
     {view?.kind === "reception" ? <WorkshopReceptionScreen key={view.ref.entry.id} api={workshop.reception} load={workshop.loadEntry} entryId={view.ref.entry.id}
-      onClose={() => showEntry(view.ref)} onDone={() => showEntry(view.ref)}
+      onClose={() => showEntry(view.ref)} onDone={() => { showEntry(view.ref); setReceptionDone(view.ref.entry); }}
       onOpenInspection={() => setView({ kind: "inspection", ref: view.ref, inspection: "entry", next: "reception" })} /> : null}
+    {/* Al terminar la recepción: «¡Ingreso realizado!» con el correo al cliente (automático o para enviarlo). */}
+    {receptionDone ? <ReceptionDoneModal api={workshop.emails} entryId={receptionDone.id} entryCode={receptionDone.code}
+      equipmentLabel={receptionDone.equipmentLabel !== "Cargando…" ? receptionDone.equipmentLabel : null} onClose={() => setReceptionDone(null)} /> : null}
   </View>;
 }
 

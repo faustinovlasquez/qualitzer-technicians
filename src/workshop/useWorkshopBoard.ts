@@ -6,6 +6,7 @@ import type { WorkshopEntryDetail, WorkshopEntryPort } from "../domain/workshopE
 import type { WorkshopEquipmentQuery, WorkshopIntakeInput, WorkshopIntakePort } from "../domain/workshopIntake";
 import type { InspectionAnswerInput, InspectionDamageInput, InspectionKind, WorkshopInspectionPort } from "../domain/workshopInspection";
 import type { WorkshopReceptionInput, WorkshopReceptionPort, WorkshopSignatureSaveInput } from "../domain/workshopReception";
+import type { EmailSendInput, WorkshopCustomerEmailPort } from "../domain/workshopCustomerEmail";
 import type { WorkshopWorksPort } from "../domain/workshopWorks";
 import type { LocalPhoto } from "../domain/models";
 import type { WorkshopOrderGeneralInput, WorkshopOrderInput, WorkshopOrderItemInput, WorkshopOrderItemSection, WorkshopOrdersPort } from "../domain/workshopOrders";
@@ -29,7 +30,7 @@ function bound<T extends object, K extends keyof T>(port: T | null | undefined, 
   return typeof method === "function" ? (method as (...args: unknown[]) => unknown).bind(port) as T[K] : undefined;
 }
 
-export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort & FileDrivePort & ThreadPort> | null, userId: number, branchId: number, storageKey: string, sessionIdentity: string, enabled: boolean) {
+export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopCustomerEmailPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort & FileDrivePort & ThreadPort> | null, userId: number, branchId: number, storageKey: string, sessionIdentity: string, enabled: boolean) {
   const key = `workshop-board:${storageKey}:${userId}:${branchId}`;
   const [workshops, setWorkshops] = useState<WorkshopOption[] | null>(null);
   const [workshopId, setWorkshopId] = useState<number | null>(null);
@@ -234,6 +235,21 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     sign: (entryId: number, input: Omit<WorkshopReceptionInput, "companyBranchId">) => needReception("signWorkshopReception")(entryId, { ...input, companyBranchId: branchId })
   };
 
+  /** Correo de confirmación de ingreso al cliente (como en la web). Solo con conexión. */
+  function needEmail<K extends keyof WorkshopCustomerEmailPort>(name: K): NonNullable<Partial<WorkshopCustomerEmailPort>[K]> {
+    const action = bound(port, name);
+    if (!enabled || !action || branchId <= 0) throw new Error("No se puede revisar el correo al cliente en este momento. Revisa tu conexión.");
+    return action as NonNullable<Partial<WorkshopCustomerEmailPort>[K]>;
+  }
+  const emails = {
+    available: enabled && branchId > 0 && bound(port, "workshopEmailEligibility") !== undefined,
+    eligibility: (entryId: number) => needEmail("workshopEmailEligibility")(branchId, entryId),
+    options: () => needEmail("workshopEmailOptions")(branchId),
+    preview: (entryId: number, templateId: number | null, recipientName: string | null) => needEmail("workshopEmailPreview")(branchId, entryId, { templateId, recipientName }),
+    send: (entryId: number, input: EmailSendInput) => needEmail("sendWorkshopEmail")(branchId, entryId, input),
+    history: (entryId: number) => needEmail("workshopEmailHistory")(branchId, entryId)
+  };
+
   /** Trabajos del ingreso con la sucursal del tablero. Solo con conexión. */
   function needWorks<K extends keyof WorkshopWorksPort>(name: K): NonNullable<Partial<WorkshopWorksPort>[K]> {
     const action = bound(port, name);
@@ -309,5 +325,5 @@ export function useWorkshopBoard(port: Partial<WorkshopBoardPort & WorkshopEntry
     entry: (entryId: number): ThreadApi | null => chatPort && threadApi(chatPort, { kind: "entry", companyBranchId: branchId, entryId }),
     order: (entryId: number, orderId: number): ThreadApi | null => chatPort && threadApi(chatPort, { kind: "order", companyBranchId: branchId, entryId, orderId })
   };
-  return { workshops, workshopId, board, loading, error, refresh: () => loadBoard(), selectWorkshop, pinned, togglePin, layout, setLayout, loadEntry, intake, inspection, reception, works, orders, delivery, manage, drive, threads };
+  return { workshops, workshopId, board, loading, error, refresh: () => loadBoard(), selectWorkshop, pinned, togglePin, layout, setLayout, loadEntry, intake, inspection, reception, emails, works, orders, delivery, manage, drive, threads };
 }

@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.50
+# @qualitzer/mobile-gateway 1.0.51
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.50. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.51. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.51 agrega el correo de confirmación de ingreso al cliente en el Taller: `GET /workshop/entries/:id/emails/eligibility`, `GET /workshop/emails/options` (plantillas activas y canales), `POST /workshop/entries/:id/emails/preview` (vista previa en párrafos de texto), `POST /workshop/entries/:id/emails` (enviar; permiso `workshopReception`) y `GET /workshop/entries/:id/emails` (historial con lectura). Requiere el backend con el módulo `customerEmails` y sus migraciones (`history_send_mail` ampliado, `email_templates`, `email_template_settings`). También corrige la lista de rutas permitidas de la firma (`/users/select`, `/user_signatures/users/:id`).
 
 1.0.50 cambia la recepción del ingreso de taller: el «Técnico que recibe» es un usuario de la sucursal (`/users/select`, con foto, color y correo) y la firma se envía con `userId` (el backend deduce el trabajador). Nueva ruta `POST /api/workshop/signatures/users/:userId` para «Agregar firma» al técnico: la propia va a `/user_signatures/me`, la de otro técnico a `/user_signatures/users/:userId` (permiso de editar usuarios). Requiere el backend `development` con la migración `20261028140000-Add-UserId-To-OperationAreaEntrySignatures`.
 

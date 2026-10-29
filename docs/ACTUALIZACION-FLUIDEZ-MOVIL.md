@@ -1,3 +1,7 @@
+# Correo de confirmación de ingreso al cliente en la app: gateway 1.0.51 (APK 1.0.144)
+
+La app muestra «¡Ingreso realizado!» con el estado del correo (automático: a quién y por qué canal; manual: enviar ahora o después), envía la confirmación eligiendo plantilla, destinatarios, canal y adjunto, y muestra el historial de envíos con lectura en la ficha del ingreso. Requiere el backend con el módulo de correos al cliente y sus migraciones del 20261029.
+
 # Firma del técnico en la recepción y aviso «Configura tu firma»: gateway 1.0.50 (APK 1.0.140)
 
 El técnico que recibe un ingreso es un usuario de la sucursal y su firma se elige sola o se agrega en el momento; al entrar sin firma la app ofrece configurarla. Desplegar junto al backend `development` con la migración de `userId` en las firmas de recepción. Ver [actualización 1.0.140](ACTUALIZACION-1.0.140.md).
