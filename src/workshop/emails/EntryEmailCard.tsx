@@ -22,7 +22,9 @@ const formatDate = (value: string | null) => {
  * «Correo» en la barra de la ficha del ingreso: un botón de ícono con un punto de estado
  * (verde enviado, rojo falló, ámbar sin enviar) que abre una ventana para enviar la confirmación y ver los envíos.
  */
-export function EntryEmailButton({ api, entryId, entryCode }: { api: EmailsApi; entryId: number; entryCode: string }) {
+export function EntryEmailButton({ api, contacts, entryId, entryCode }: {
+  api: EmailsApi; contacts?: ReturnType<typeof useWorkshopBoard>["intake"]; entryId: number; entryCode: string;
+}) {
   const [history, setHistory] = useState<EmailHistory | null>(null);
   const [error, setError] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -56,7 +58,7 @@ export function EntryEmailButton({ api, entryId, entryCode }: { api: EmailsApi; 
         onPress={() => { setMenuOpen(false); setHistoryOpen(true); load(); }} />
     </ToolDialog> : null}
 
-    {sendOpen ? <EmailSendScreen api={api} entryId={entryId} entryCode={entryCode} onClose={() => setSendOpen(false)} onSent={() => { setSendOpen(false); load(); }} /> : null}
+    {sendOpen ? <EmailSendScreen api={api} contacts={contacts} entryId={entryId} entryCode={entryCode} onClose={() => setSendOpen(false)} onSent={() => { setSendOpen(false); load(); }} /> : null}
 
     {historyOpen ? <Modal visible animationType="slide" onRequestClose={() => setHistoryOpen(false)}>
       <SafeAreaView style={styles.screen} edges={["top", "left", "right", "bottom"]}>

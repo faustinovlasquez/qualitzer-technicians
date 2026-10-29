@@ -49,10 +49,12 @@ function headerOf(entry: WorkshopEntry, area: WorkshopArea, detail: WorkshopEntr
 }
 
 /** Ficha del ingreso abierta desde el tablero. Atrás (botón o el del teléfono) vuelve al tablero. */
-export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard, rememberedTab, onTabChange, entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, onOpenOrder, works, orders, onDeliver, manage, workshopId, initialNotice, onOpenFiles, onOpenComments, orderDrive, orderThread, emails }: {
+export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard, rememberedTab, onTabChange, entry, area, onBack, load, onEditIntake, onOpenInspection, onSign, onAddWork, onAddMaintenance, onOpenWork, onOpenOrder, works, orders, onDeliver, manage, workshopId, initialNotice, onOpenFiles, onOpenComments, orderDrive, orderThread, emails, emailContacts }: {
   onOpenOrder?: (orderId: number, entryCode: string) => void;
   /** Correo de confirmación al cliente (si la sesión puede usarlo). */
   emails?: ReturnType<typeof useWorkshopBoard>["emails"];
+  /** Datos del ingreso para listar los contactos del cliente y crear uno desde el envío del correo. */
+  emailContacts?: ReturnType<typeof useWorkshopBoard>["intake"];
   /** Archivos y comentarios de una OT del ingreso (null si no están disponibles): se abren en una ventana desde su tarjeta. */
   orderDrive?: (orderId: number) => DriveApi | null; orderThread?: (orderId: number) => ThreadApi | null;
   /** Archivos con carpetas del ingreso (mismo gestor de la web). */
@@ -187,7 +189,7 @@ export function WorkshopEntryScreen({ query, workLayout, onWorkLayout, workCard,
         <EntryToolbar>
           <IntakeButton detail={detail} onPress={() => setPanel("intake")} />
           {/* Correo de confirmación al cliente (como en la web): estado, enviar y envíos. */}
-          {emails && detail.reception.signed ? <EntryEmailButton api={emails} entryId={entry.id} entryCode={detail.code} /> : null}
+          {emails && detail.reception.signed ? <EntryEmailButton api={emails} contacts={emailContacts} entryId={entry.id} entryCode={detail.code} /> : null}
           {onOpenFiles ? <ToolbarIcon icon="folder-open" label="Archivos" accessibilityLabel="Archivos del ingreso: fotos y carpetas" color={palette.amber} soft={palette.amberSoft} onPress={onOpenFiles} /> : null}
           {onOpenComments ? <ToolbarIcon icon="chatbubbles" label="Chat" accessibilityLabel="Comentarios del ingreso: chat del equipo" onPress={onOpenComments} /> : null}
           {!detail.delivery && can.manage ? <ToolbarIcon icon="options-outline" label="Gestión" accessibilityLabel="Gestión: estado, mover de nave y fecha de entrega" color={palette.heading} soft={palette.track} onPress={() => setPanel("manage")} /> : null}

@@ -30,8 +30,8 @@ const shouldAsk = (eligibility: EmailEligibility) => eligibility.shouldPrompt
  * «¡Ingreso realizado!» al terminar la recepción (como en la web), con el correo al cliente: en automático muestra
  * a quién y cómo se envió; en manual ofrece enviarlo ahora o después desde la ficha.
  */
-export function ReceptionDoneModal({ api, entryId, entryCode, equipmentLabel, onClose }: {
-  api: EmailsApi; entryId: number; entryCode: string; equipmentLabel: string | null; onClose: () => void;
+export function ReceptionDoneModal({ api, contacts, entryId, entryCode, equipmentLabel, onClose }: {
+  api: EmailsApi; contacts?: ReturnType<typeof useWorkshopBoard>["intake"]; entryId: number; entryCode: string; equipmentLabel: string | null; onClose: () => void;
 }) {
   const [email, setEmail] = useState<EmailState>({ kind: "checking" });
   const [sendOpen, setSendOpen] = useState(false);
@@ -96,7 +96,7 @@ export function ReceptionDoneModal({ api, entryId, entryCode, equipmentLabel, on
           secondary={canSend ? { label: "Enviar después", icon: "time-outline", onPress: onClose } : undefined} />
       </View>
     </Modal>
-    {sendOpen ? <EmailSendScreen api={api} entryId={entryId} entryCode={entryCode}
+    {sendOpen ? <EmailSendScreen api={api} contacts={contacts} entryId={entryId} entryCode={entryCode}
       onClose={() => setSendOpen(false)}
       onSent={(result) => {
         setSendOpen(false);

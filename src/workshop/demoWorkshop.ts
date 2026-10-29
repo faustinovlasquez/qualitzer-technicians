@@ -695,8 +695,10 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
       const form = forms[entryId];
       if (form) return form;
       const detail = detailOf(entryId);
+      // El cliente de los ingresos de ejemplo se busca por nombre (como en el servidor real, el formulario lo trae).
+      const knownCustomer = detail.isInternalEntry ? undefined : customers.find((item) => item.name === detail.customerName);
       return { entryId, operationAreaId: detail.areaId, areaTitle: detail.areaTitle, title: detail.title ?? "", notes: detail.notes, isInternalEntry: detail.isInternalEntry,
-        customer: null, equipment: equipment.find((item) => item.label === detail.equipmentLabel) ?? null, branches: [], contacts: [],
+        customer: knownCustomer ? { id: knownCustomer.id, name: knownCustomer.name } : null, equipment: equipment.find((item) => item.label === detail.equipmentLabel) ?? null, branches: [], contacts: [],
         entryAt: detail.entryAt, estimatedDeliveryAt: detail.estimatedDeliveryAt, imageUrl: detail.imageUrl, signed: detail.reception.signed };
     },
     async createWorkshopEntry(input: WorkshopIntakeInput) {

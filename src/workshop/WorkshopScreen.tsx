@@ -204,7 +204,7 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
       onDeliver={() => setView({ kind: "delivery", ref: view.ref })}
       onOpenFiles={workshop.drive.available ? () => setView({ kind: "files", ref: view.ref }) : undefined}
       onOpenComments={workshop.threads.available ? () => setView({ kind: "comments", ref: view.ref }) : undefined}
-      emails={workshop.emails.available ? workshop.emails : undefined}
+      emails={workshop.emails.available ? workshop.emails : undefined} emailContacts={workshop.intake}
       orderDrive={workshop.drive.available ? (orderId) => workshop.drive.order(view.ref.entry.id, orderId) : undefined}
       orderThread={workshop.threads.available ? (orderId) => workshop.threads.order(view.ref.entry.id, orderId) : undefined}
       workCard={assignmentCard} workLayout={workLayout} onWorkLayout={setWorkLayout}
@@ -290,7 +290,7 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
       onClose={() => showEntry(view.ref)} onDone={() => { showEntry(view.ref); setReceptionDone(view.ref.entry); }}
       onOpenInspection={() => setView({ kind: "inspection", ref: view.ref, inspection: "entry", next: "reception" })} /> : null}
     {/* Al terminar la recepción: «¡Ingreso realizado!» con el correo al cliente (automático o para enviarlo). */}
-    {receptionDone ? <ReceptionDoneModal api={workshop.emails} entryId={receptionDone.id} entryCode={receptionDone.code}
+    {receptionDone ? <ReceptionDoneModal api={workshop.emails} contacts={workshop.intake} entryId={receptionDone.id} entryCode={receptionDone.code}
       equipmentLabel={receptionDone.equipmentLabel !== "Cargando…" ? receptionDone.equipmentLabel : null} onClose={() => setReceptionDone(null)} /> : null}
   </View>;
 }

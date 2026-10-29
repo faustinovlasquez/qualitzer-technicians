@@ -30,6 +30,12 @@ export async function scaledJpeg(uri: string, maxSide: number, maxBytes: number)
   return result;
 }
 
+/** En el navegador la vista previa usa la misma imagen ya reducida. */
+export async function scaledJpegWithPreview(uri: string, maxSide: number, maxBytes: number): Promise<{ dataUri: string; previewUri: string }> {
+  const dataUri = await scaledJpeg(uri, maxSide, maxBytes);
+  return { dataUri, previewUri: dataUri };
+}
+
 /** Igual que la foto de perfil, con el lado y el peso máximo indicados (por ejemplo, la foto del equipo en el taller). */
 export async function squareJpeg(uri: string, maxSide: number, maxBytes: number): Promise<string> {
   if (!/^(blob:|data:image\/(png|jpeg|webp);base64,)/.test(uri)) throw new Error("El formato de la foto no está permitido.");

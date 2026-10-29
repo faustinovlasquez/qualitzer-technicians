@@ -6,7 +6,9 @@ import { PrivateModal as Modal } from "../../security/DeviceSecurityContext";
 import { Button, IconButton } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import { SelectorTrigger } from "../../ui/time/SelectorUi";
-import { LocalPicker } from "../intake/IntakePickers";
+import { LocalPicker, MultiPicker } from "../intake/IntakePickers";
+import { NewContactSheet } from "../intake/CustomerForms";
+import { useAppPermission } from "../../application/appPermissions";
 import { Notice } from "../entry/EntrySections";
 import {
   EMAIL_PROVIDER_LABEL, type EmailEligibility, type EmailOptions, type EmailPreview, type EmailProvider, type EmailRecipient, type EmailSendResult
@@ -14,32 +16,75 @@ import {
 import type { useWorkshopBoard } from "../useWorkshopBoard";
 
 type EmailsApi = ReturnType<typeof useWorkshopBoard>["emails"];
+type IntakeApi = ReturnType<typeof useWorkshopBoard>["intake"];
+/** Contacto con correo que se puede elegir en «Para»: del ingreso o del cliente. */
+type ContactOption = { id: number; name: string; email: string; fromEntry: boolean };
 const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim());
 const failureText = (failure: unknown, fallback: string) => failure instanceof Error && failure.message ? failure.message : fallback;
+const splitEmails = (value: string) => value.split(/[,;\s]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
+
+/** Une listas de contactos sin repetir (por id o por correo); uno del ingreso sigue marcado como del ingreso. */
+function mergeContacts(current: ContactOption[], next: ContactOption[]): ContactOption[] {
+  const merged = [...current];
+  for (const contact of next) {
+    const found = merged.findIndex((item) => item.id === contact.id || item.email === contact.email);
+    if (found === -1) merged.push(contact);
+    else merged[found] = { ...merged[found], fromEntry: merged[found].fromEntry || contact.fromEntry };
+  }
+  return merged;
+}
 
 /**
- * Enviar la confirmación de ingreso al cliente (como en la web): plantilla, destinatarios (contactos del ingreso o
- * correos nuevos, con opción de guardarlos como contacto), canal, informe adjunto y vista previa.
+ * Enviar la confirmación de ingreso al cliente (como en la web): plantilla, «Para» con los contactos del ingreso y del
+ * cliente (y «+» para crear uno), con copia, informe adjunto y canal. La vista previa se abre en una ventana.
+ * `contacts` (datos del ingreso) permite listar los contactos del cliente y crear uno nuevo.
  */
-export function EmailSendScreen({ api, entryId, entryCode, onClose, onSent }: {
-  api: EmailsApi; entryId: number; entryCode: string; onClose: () => void; onSent: (result: EmailSendResult) => void;
+export function EmailSendScreen({ api, contacts, entryId, entryCode, onClose, onSent }: {
+  api: EmailsApi; contacts?: IntakeApi; entryId: number; entryCode: string; onClose: () => void; onSent: (result: EmailSendResult) => void;
 }) {
+  const canCreateContacts = useAppPermission("workshopCustomers");
   const [eligibility, setEligibility] = useState<EmailEligibility | null>(null);
   const [options, setOptions] = useState<EmailOptions | null>(null);
   const [loadError, setLoadError] = useState("");
   const [templateId, setTemplateId] = useState<number | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [extra, setExtra] = useState<string[]>([]);
-  const [draft, setDraft] = useState("");
-  const [draftError, setDraftError] = useState("");
-  const [saveNew, setSaveNew] = useState(true);
+  const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [customer, setCustomer] = useState<{ id: number; name: string } | null>(null);
+  const [contactsNote, setContactsNote] = useState("");
+  const [choosing, setChoosing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [ccText, setCcText] = useState("");
+  const [ccError, setCcError] = useState("");
   const [provider, setProvider] = useState<EmailProvider | null>(null);
   const [attachReport, setAttachReport] = useState(true);
   const [preview, setPreview] = useState<EmailPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
+
+  // Contactos del cliente del ingreso (con correo), para elegirlos además de los del ingreso.
+  const loadCustomerContacts = async (select?: number) => {
+    if (!contacts) return;
+    try {
+      const form = await contacts.form(entryId);
+      if (!form.customer || form.isInternalEntry) return;
+      setCustomer(form.customer);
+      const detail = await contacts.customer(form.customer.id);
+      const entryIds = new Set(form.contacts.map((item) => item.id));
+      const found = detail.contacts.flatMap((item) => item.email && isEmail(item.email)
+        ? [{ id: item.id, name: item.fullName, email: item.email.trim().toLowerCase(), fromEntry: entryIds.has(item.id) }] : []);
+      setContactOptions((current) => mergeContacts(current, found));
+      setContactsNote("");
+      if (select !== undefined) {
+        if (found.some((item) => item.id === select)) setSelectedIds((current) => current.includes(select) ? current : [...current, select]);
+        else setContactsNote("Ese contacto no tiene correo: agrégaselo desde la web para enviarle la confirmación.");
+      }
+    } catch {
+      setContactsNote("No se pudieron cargar los contactos del cliente. Puedes elegir los del ingreso.");
+    }
+  };
 
   const load = () => {
     setLoadError("");
@@ -48,17 +93,22 @@ export function EmailSendScreen({ api, entryId, entryCode, onClose, onSent }: {
         setEligibility(nextEligibility);
         setOptions(nextOptions);
         setTemplateId(nextEligibility.template?.id ?? nextOptions.templates.find((item) => item.isDefault)?.id ?? nextOptions.templates[0]?.id ?? null);
-        setSelected(nextEligibility.recipients.map((recipient) => recipient.email));
+        const fromEntry = nextEligibility.recipients.map((recipient, index) => ({
+          id: recipient.contactId ?? -(index + 1), name: recipient.name ?? recipient.email, email: recipient.email.toLowerCase(), fromEntry: true
+        }));
+        setContactOptions(fromEntry);
+        setSelectedIds(fromEntry.map((item) => item.id));
+        setCcText(nextEligibility.ccEmails.join(", "));
         setAttachReport(nextEligibility.attachReport);
+        void loadCustomerContacts();
       })
       .catch((failure: unknown) => setLoadError(failureText(failure, "No se pudo revisar el ingreso. Revisa tu conexión.")));
   };
   useEffect(load, [entryId]);
 
-  const recipients: EmailRecipient[] = useMemo(() => [
-    ...(eligibility?.recipients ?? []).filter((recipient) => selected.includes(recipient.email)),
-    ...extra.map((email) => ({ email, name: null, contactId: null }))
-  ], [eligibility?.recipients, selected, extra]);
+  const chosen = contactOptions.filter((item) => selectedIds.includes(item.id));
+  const recipients: EmailRecipient[] = useMemo(() => chosen.map((item) => ({ email: item.email, name: item.name, contactId: item.id > 0 ? item.id : null })),
+    [contactOptions, selectedIds]);
 
   // Vista previa con el primer destinatario (el saludo usa su nombre).
   const firstName = recipients[0]?.name ?? null;
@@ -75,28 +125,21 @@ export function EmailSendScreen({ api, entryId, entryCode, onClose, onSent }: {
     return () => { active = false; clearTimeout(timer); };
   }, [entryId, templateId, firstName]);
 
-  const addEmail = () => {
-    const email = draft.trim().toLowerCase();
-    if (email === "") return;
-    if (!isEmail(email)) { setDraftError("Ese correo no es válido."); return; }
-    setDraftError("");
-    if ((eligibility?.recipients ?? []).some((recipient) => recipient.email === email)) {
-      setSelected((current) => current.includes(email) ? current : [...current, email]);
-    } else if (!extra.includes(email)) setExtra([...extra, email]);
-    setDraft("");
-  };
-
   const template = options?.templates.find((item) => item.id === templateId) ?? null;
   const blocked = (eligibility?.issues.length ?? 0) > 0;
   const warnings = (eligibility?.warnings ?? []).filter((warning) => warning.code !== "NO_RECIPIENTS" || recipients.length === 0);
 
   const send = async () => {
     if (sending || recipients.length === 0 || templateId === null) return;
+    const cc = splitEmails(ccText);
+    const invalidCc = cc.filter((email) => !isEmail(email));
+    if (invalidCc.length > 0) { setCcError(`Revisa: ${invalidCc.join(", ")}`); return; }
     setSending(true);
     setSendError("");
     try {
+      // Un contacto del cliente que no estaba en el ingreso queda unido al ingreso al enviar (como en la web).
       const result = await api.send(entryId, {
-        templateId, recipients, cc: [], attachReport, saveNewContacts: saveNew && extra.length > 0, provider
+        templateId, recipients, cc: [...new Set(cc)].slice(0, 20), attachReport, saveNewContacts: chosen.some((item) => !item.fromEntry), provider
       });
       if (result.results.some((item) => item.status === "sent")) onSent(result);
       else setSendError(result.results[0]?.error ?? "No se pudo enviar. Revisa el canal elegido e inténtalo de nuevo.");
@@ -130,37 +173,49 @@ export function EmailSendScreen({ api, entryId, entryCode, onClose, onSent }: {
 
             <SelectorTrigger label="Plantilla" icon="document-text-outline" value={template?.name ?? ""} disabled={sending} onPress={() => setPicking(true)} />
 
+            {/* «Para»: lista de contactos del ingreso y del cliente (con correo) y «+» para crear uno, como en la web. */}
             <View style={styles.section}>
               <Text style={styles.label}>Para *</Text>
-              {eligibility.recipients.map((recipient) => {
-                const on = selected.includes(recipient.email);
-                return <Pressable key={recipient.email} accessibilityRole="checkbox" accessibilityState={{ checked: on }} disabled={sending}
-                  onPress={() => setSelected((current) => on ? current.filter((email) => email !== recipient.email) : [...current, recipient.email])}
-                  style={[styles.row, on && styles.rowOn]}>
-                  <Ionicons name={on ? "checkbox" : "square-outline"} size={22} color={on ? palette.primary : palette.textMuted} />
-                  <View style={styles.grow}>
-                    <Text style={styles.rowTitle} numberOfLines={1}>{recipient.name ?? recipient.email}</Text>
-                    <Text style={styles.hint} numberOfLines={1}>{recipient.email} · contacto del ingreso</Text>
-                  </View>
-                </Pressable>;
-              })}
-              {eligibility.contactsWithoutEmail.map((name) => <Text key={name} style={styles.hint}>{name} · sin correo</Text>)}
-              {extra.map((email) => <View key={email} style={[styles.row, styles.rowOn]}>
-                <Ionicons name="mail-outline" size={20} color={palette.primary} />
-                <Text style={[styles.rowTitle, styles.grow]} numberOfLines={1}>{email}</Text>
-                <IconButton name="close" label={`Quitar ${email}`} onPress={() => setExtra(extra.filter((item) => item !== email))} />
-              </View>)}
-              <View style={styles.addRow}>
-                <TextInput value={draft} onChangeText={(value) => { setDraft(value); setDraftError(""); }} onSubmitEditing={addEmail} placeholder="Agregar otro correo"
-                  placeholderTextColor={palette.textMuted} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="done"
-                  style={[styles.input, draftError !== "" && styles.invalid]} accessibilityLabel="Agregar otro correo" editable={!sending} />
-                <Button title="Agregar" icon="add" variant="secondary" disabled={sending || draft.trim() === ""} onPress={addEmail} />
+              <View style={[styles.addRow, styles.alignStart]}>
+                {/* Las etiquetas (con su «x») y la zona que abre la lista van separadas: un botón no puede ir dentro de otro. */}
+                <View style={styles.combo}>
+                  {chosen.length > 0 ? <View style={styles.chips}>
+                    {chosen.map((item) => <View key={item.id} style={styles.chip}>
+                      <Text style={styles.chipText} numberOfLines={1}>{item.name} · {item.email}</Text>
+                      <Pressable accessibilityRole="button" accessibilityLabel={`Quitar ${item.name}`} hitSlop={8} disabled={sending}
+                        onPress={() => setSelectedIds((current) => current.filter((value) => value !== item.id))}>
+                        <Ionicons name="close" size={14} color={palette.primary} />
+                      </Pressable>
+                    </View>)}
+                  </View> : null}
+                  <Pressable accessibilityRole="button" accessibilityLabel="Elegir los contactos que recibirán el correo" disabled={sending}
+                    onPress={() => setChoosing(true)} style={({ pressed }) => [styles.comboTrigger, pressed && styles.pressed]}>
+                    <Text style={[styles.comboPlaceholder, styles.grow]} numberOfLines={1}>
+                      {chosen.length === 0 ? "Elige los contactos que recibirán el correo…" : "Agregar o quitar contactos"}</Text>
+                    <Ionicons name="chevron-down" size={18} color={palette.textMuted} />
+                  </Pressable>
+                </View>
+                {contacts && customer && canCreateContacts ? <Pressable accessibilityRole="button" accessibilityLabel="Crear un contacto nuevo del cliente" disabled={sending}
+                  onPress={() => setCreating(true)} style={({ pressed }) => [styles.plus, pressed && styles.pressed]}>
+                  <Ionicons name="add" size={22} color={palette.primary} />
+                </Pressable> : null}
               </View>
-              {draftError !== "" ? <Text style={styles.errorText}>{draftError}</Text> : null}
-              {extra.length > 0 ? <View style={styles.switchRow}>
-                <Switch value={saveNew} onValueChange={setSaveNew} disabled={sending} />
-                <Text style={[styles.hint, styles.grow]}>Guardar los correos nuevos como contactos del cliente y del ingreso</Text>
-              </View> : null}
+              <Text style={styles.hint}>Contactos del ingreso y del cliente con correo.{contacts && customer && canCreateContacts ? " Con el «+» creas un contacto nuevo del cliente." : ""}</Text>
+              {eligibility.contactsWithoutEmail.length > 0 ? <Text style={styles.hint}>Sin correo: {eligibility.contactsWithoutEmail.join(", ")}</Text> : null}
+              {contactsNote !== "" ? <Text style={styles.warningText}>{contactsNote}</Text> : null}
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.label}>Con copia (opcional)</Text>
+              <TextInput value={ccText} onChangeText={(value) => { setCcText(value); setCcError(""); }} placeholder="correo1@empresa.cl, correo2@empresa.cl"
+                placeholderTextColor={palette.textMuted} keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
+                style={[styles.input, ccError !== "" && styles.invalid]} accessibilityLabel="Con copia" editable={!sending} />
+              {ccError !== "" ? <Text style={styles.errorText}>{ccError}</Text> : null}
+            </View>
+
+            <View style={[styles.row, styles.switchCard]}>
+              <Switch value={attachReport} onValueChange={setAttachReport} disabled={sending} />
+              <Text style={[styles.rowTitle, styles.grow]}>Adjuntar informe de ingreso (PDF)</Text>
             </View>
 
             <View style={styles.section}>
@@ -178,14 +233,32 @@ export function EmailSendScreen({ api, entryId, entryCode, onClose, onSent }: {
               <Text style={styles.hint}>Para conectar tu Gmail o tu correo, entra a tu perfil desde la web.</Text>
             </View>
 
-            <View style={styles.switchRow}>
-              <Switch value={attachReport} onValueChange={setAttachReport} disabled={sending} />
-              <Text style={[styles.rowTitle, styles.grow]}>Adjuntar informe de ingreso (PDF)</Text>
+            {sendError !== "" ? <Notice tone="danger" icon="alert-circle-outline" message={sendError} /> : null}
+          </> : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
+      <View style={styles.footer}>
+        <Text style={styles.hint}>{recipients.length === 0 ? "Elige al menos un destinatario." : `${recipients.length} destinatario(s)`}</Text>
+        <View style={styles.footerButtons}>
+          <Button title="Vista previa" icon="eye-outline" variant="secondary" disabled={templateId === null} onPress={() => setPreviewOpen(true)} />
+          <Button title="Enviar al cliente" icon="send" variant="warning" loading={sending} style={styles.grow}
+            disabled={sending || blocked || recipients.length === 0 || templateId === null} onPress={() => void send()} />
+        </View>
+      </View>
+      {previewOpen ? <Modal visible transparent animationType="fade" onRequestClose={() => setPreviewOpen(false)}>
+        <View style={styles.overlay}>
+          <View style={styles.dialog}>
+            <View style={styles.dialogHead}>
+              <Ionicons name="eye-outline" size={18} color={palette.primary} />
+              <View style={styles.grow}>
+                <Text style={styles.rowTitle}>Vista previa</Text>
+                <Text style={styles.hint} numberOfLines={1}>{recipients[0] ? `Para ${recipients[0].name ?? recipients[0].email}` : "Sin destinatario elegido"}</Text>
+              </View>
+              <IconButton name="close" label="Cerrar vista previa" onPress={() => setPreviewOpen(false)} />
             </View>
-
-            <View style={styles.preview}>
-              <Text style={styles.previewLabel}>VISTA PREVIA</Text>
+            <ScrollView contentContainerStyle={styles.previewBody}>
               {previewLoading && preview === null ? <ActivityIndicator color={palette.primary} /> : null}
+              {!previewLoading && preview === null ? <Text style={styles.hint}>No se pudo cargar la vista previa.</Text> : null}
               {preview !== null ? <>
                 <Text style={styles.previewSubject}>{preview.subject}</Text>
                 {attachReport && preview.attachmentName ? <View style={styles.attachment}>
@@ -195,17 +268,28 @@ export function EmailSendScreen({ api, entryId, entryCode, onClose, onSent }: {
                 {preview.missing.length > 0 ? <Text style={styles.warningText}>Sin dato en este ingreso: {preview.missing.join(", ")}</Text> : null}
                 {preview.paragraphs.map((paragraph, index) => <Text key={index} style={styles.previewText}>{paragraph}</Text>)}
               </> : null}
-            </View>
-
-            {sendError !== "" ? <Notice tone="danger" icon="alert-circle-outline" message={sendError} /> : null}
-          </> : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
-      <View style={styles.footer}>
-        <Text style={styles.hint}>{recipients.length === 0 ? "Elige al menos un destinatario." : `${recipients.length} destinatario(s)`}</Text>
-        <Button title="Enviar al cliente" icon="send" variant="warning" loading={sending}
-          disabled={sending || blocked || recipients.length === 0 || templateId === null} onPress={() => void send()} />
-      </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal> : null}
+      {choosing ? <MultiPicker title="Para" items={contactOptions} selected={selectedIds}
+        label={(item) => item.name} detail={(item) => `${item.email} · ${item.fromEntry ? "contacto del ingreso" : "contacto del cliente"}`}
+        emptyText="Ni el ingreso ni el cliente tienen contactos con correo."
+        action={contacts && customer && canCreateContacts ? { label: "Crear contacto nuevo", onPress: () => { setChoosing(false); setCreating(true); } } : undefined}
+        onConfirm={(ids) => { setSelectedIds(ids); setChoosing(false); }} onClose={() => setChoosing(false)} /> : null}
+      {creating && contacts && customer ? <NewContactSheet customerName={customer.name} onClose={() => setCreating(false)}
+        create={(input) => contacts.createContact(customer.id, input)}
+        findDuplicates={(query) => contacts.contactDuplicates(customer.id, query)}
+        onUseExisting={(contact) => { setCreating(false); void loadCustomerContacts(contact.id); }}
+        onCreated={(contact) => {
+          setCreating(false);
+          if (contact.email && isEmail(contact.email)) {
+            const option = { id: contact.id, name: contact.fullName, email: contact.email.trim().toLowerCase(), fromEntry: false };
+            setContactOptions((current) => mergeContacts(current, [option]));
+            setSelectedIds((current) => current.includes(contact.id) ? current : [...current, contact.id]);
+            setContactsNote("");
+          } else setContactsNote("El contacto se creó sin correo: no se le puede enviar la confirmación.");
+        }} /> : null}
       {picking && options !== null ? <LocalPicker title="Plantilla" placeholder="Buscar plantilla" emptyText="No hay plantillas activas para esta sucursal."
         load={async () => options.templates} label={(item) => item.name} detail={(item) => item.isDefault ? "Por defecto" : null}
         selectedId={templateId} onPick={(item) => { setTemplateId(item.id); setAttachReport((eligibility?.attachReport ?? true) && item.attachReport); setPicking(false); }}
@@ -255,10 +339,23 @@ const styles = StyleSheet.create({
   input: { flex: 1, minHeight: 46, paddingHorizontal: 14, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, fontSize: 15, color: palette.text },
   invalid: { borderColor: palette.danger },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  preview: { gap: 8, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
-  previewLabel: { ...typography.overline, color: palette.textMuted },
+  pressed: { opacity: 0.75 },
+  combo: { flex: 1, minHeight: 48, gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, justifyContent: "center" },
+  comboTrigger: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 34 },
+  comboPlaceholder: { fontSize: 14, color: palette.textMuted },
+  alignStart: { alignItems: "flex-start" },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chip: { maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 10, paddingRight: 8, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: palette.primarySoft },
+  chipText: { flexShrink: 1, fontSize: 12, fontWeight: "700", color: palette.primary },
+  plus: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
+  switchCard: { gap: 10 },
+  footerButtons: { flexDirection: "row", alignItems: "center", gap: 8 },
+  overlay: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, backgroundColor: "rgba(15,23,42,0.55)" },
+  dialog: { width: "100%", maxWidth: 480, maxHeight: "85%", borderRadius: radius.lg, backgroundColor: palette.surface, overflow: "hidden" },
+  dialogHead: { flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 14, paddingRight: 6, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: palette.border },
+  previewBody: { gap: 8, padding: 14 },
   previewSubject: { fontSize: 16, fontWeight: "800", color: palette.heading },
   previewText: { fontSize: 14, lineHeight: 21, color: palette.text },
   attachment: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm, backgroundColor: palette.track },
-  footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, padding: 12, borderTopWidth: 1, borderTopColor: palette.border, backgroundColor: palette.surface }
+  footer: { gap: 8, padding: 12, borderTopWidth: 1, borderTopColor: palette.border, backgroundColor: palette.surface }
 });

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
 import { ActivityIndicator, BackHandler, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { Button, IconButton } from "../../ui/components";
 import { palette, radius, theme, typography } from "../../ui/theme";
@@ -10,7 +11,7 @@ import { TimeField } from "../../ui/time/TimeField";
 import { CreationDatePicker } from "../../screens/creation/CreationDatePicker";
 import { useTrustedNativePicker } from "../../security/DeviceSecurityContext";
 import { pickAvatar } from "../../screens/profile/pickAvatar";
-import { squareJpeg } from "../../infrastructure/avatarImage";
+import { scaledJpegWithPreview } from "../../infrastructure/avatarImage";
 import { CameraPermissionError } from "../../domain/cameraErrors";
 import {
   WORKSHOP_IMAGE_MAX_BYTES, workshopIntakeIssues,
@@ -141,6 +142,8 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [previewKey, setPreviewKey] = useState(0);
   const attempt = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const update = (patch: Partial<Values>) => { setValues((current) => ({ ...current, ...patch })); setIssues({}); setMessage(""); };
 
@@ -209,18 +212,42 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
   const branches = customerDetail?.branches ?? known.branches;
   const contacts = customerDetail?.contacts ?? known.contacts;
 
-  async function chooseImage(source: "camera" | "library") {
-    setMessage("");
+  async function prepareImage(uri: string) {
+    setImageBusy(true);
     try {
+      // Igual que las fotos de la inspección (reducir sin recortar; el tablero y la ficha la muestran en cuadrado).
+      // La vista previa usa ese JPEG reducido en un archivo: la foto original de la cámara (50 MP o más) no se alcanza a
+      // dibujar en algunos Android y el recuadro quedaba gris; el texto base64 tampoco se dibuja siempre.
+      const { dataUri, previewUri } = await scaledJpegWithPreview(uri, 1280, WORKSHOP_IMAGE_MAX_BYTES);
+      setImage({ preview: previewUri, dataUri });
+      setImageFailed(false);
+    } finally { setImageBusy(false); }
+    // Al volver de la cámara o la galería la pantalla estuvo oculta por la protección del teléfono: la vista previa se
+    // vuelve a montar un momento después para que Android la dibuje (si no, el recuadro quedaba gris).
+    setTimeout(() => setPreviewKey((value) => value + 1), 400);
+  }
+
+  // Si Android cerró la app mientras la cámara estaba abierta (poca memoria), la foto tomada se recupera al volver.
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    let active = true;
+    ImagePicker.getPendingResultAsync().then((pending) => {
+      const uri = pending && "assets" in pending && !pending.canceled ? pending.assets?.[0]?.uri : null;
+      if (active && uri) void prepareImage(uri).catch(() => setImageError("No se pudo recuperar la foto tomada. Vuelve a tomarla."));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  async function chooseImage(source: "camera" | "library") {
+    setMessage(""); setImageError("");
+    try {
+      // Con la pantalla de recorte cuadrado del sistema (la foto del equipo se ve en cuadrado en el tablero y la ficha).
       const uri = await pickAvatar(source, picker, () => true, { camera: "back" });
       if (!uri) return;
-      setImageBusy(true);
-      const dataUri = await squareJpeg(uri, 1280, WORKSHOP_IMAGE_MAX_BYTES);
-      // La vista previa usa el archivo elegido: en Android una imagen en texto (base64) tan grande a veces no se dibuja.
-      setImage({ preview: uri, dataUri });
-      setImageFailed(false);
+      await prepareImage(uri);
     } catch (failure) {
-      setMessage(failure instanceof CameraPermissionError ? "La app no tiene permiso para usar la cámara. Actívalo en los ajustes del teléfono." : failure instanceof Error ? failure.message : "No se pudo preparar la foto.");
+      // Junto a la foto: al final del formulario el aviso quedaba fuera de la vista.
+      setImageError(failure instanceof CameraPermissionError ? "La app no tiene permiso para usar la cámara. Actívalo en los ajustes del teléfono." : failure instanceof Error ? failure.message : "No se pudo preparar la foto.");
     } finally { setImageBusy(false); }
   }
 
@@ -303,13 +330,16 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
 
           <Section title="Foto del equipo" icon="camera-outline">
             <View style={styles.photoRow}>
-              <Pressable accessibilityRole="button" accessibilityLabel={shownImage ? "Cambiar la foto del equipo con la cámara" : "Tomar la foto del equipo"}
+              <Pressable key={`photo-${previewKey}`} accessibilityRole="button" accessibilityLabel={shownImage ? "Cambiar la foto del equipo con la cámara" : "Tomar la foto del equipo"}
                 disabled={imageBusy || saving} onPress={() => void chooseImage("camera")}
                 style={({ pressed }) => [styles.photo, !shownImage && styles.photoEmpty, pressed && styles.photoPressed]}>
                 {imageBusy ? <ActivityIndicator color={palette.primary} />
                   : shownImage ? <>
-                    <Image source={{ uri: shownImage }} style={styles.photoImage} resizeMode="cover" accessibilityLabel="Foto del equipo"
-                      onError={() => { if (image && shownImage !== image.dataUri) setImage({ ...image, preview: image.dataUri }); }} />
+                    <Image key={shownImage} source={{ uri: shownImage }} style={styles.photoImage} resizeMode="cover" resizeMethod="resize" accessibilityLabel="Foto del equipo"
+                      onError={(event) => {
+                        if (image && shownImage !== image.dataUri) setImage({ ...image, preview: image.dataUri });
+                        else if (image) setImageError(`No se pudo mostrar la vista previa, pero la foto se guardará igual. (${String(event.nativeEvent?.error ?? "sin detalle").slice(0, 120)})`);
+                      }} />
                     <View style={styles.photoEdit}><Ionicons name="camera" size={14} color={palette.white} accessible={false} /></View>
                   </> : <>
                     <Ionicons name="camera-outline" size={28} color={palette.primary} accessible={false} />
@@ -336,6 +366,7 @@ export function WorkshopIntakeScreen({ intake, workshopId, entryId: initialEntry
                 </View>
               </View>
             </View>
+            {imageError ? <Notice tone="danger" icon="alert-circle-outline" message={imageError} /> : null}
           </Section>
 
           <Section title="Datos del ingreso" icon="create-outline">
