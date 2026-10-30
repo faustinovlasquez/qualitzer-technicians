@@ -23,6 +23,8 @@ interface Props {
   disabled: boolean;
   editing?: boolean;
   specialtyLocked?: boolean;
+  /** Crear trabajo: la especialidad se elige al planificar, no en los datos. */
+  hideSpecialty?: boolean;
   showWorkSystem?: boolean;
   equipmentLookup: ReactNode;
   onChange: <Key extends keyof CreationForm>(field: Key, value: CreationForm[Key]) => void;
@@ -73,7 +75,7 @@ function WorkSystemFields({ form, disabled, onChange, onSelectCatalog }: Pick<Pr
   </>;
 }
 
-export function CreationFields({ kind, form, errors, options, disabled, editing = false, specialtyLocked = false, showWorkSystem = false, equipmentLookup, onChange, onSelectCatalog }: Props) {
+export function CreationFields({ kind, form, errors, options, disabled, editing = false, specialtyLocked = false, hideSpecialty = false, showWorkSystem = false, equipmentLookup, onChange, onSelectCatalog }: Props) {
   return <View style={styles.fields}>
     {kind === "maintenance" ? <>
       <Text style={styles.label}>Tipo de mantenimiento *</Text>
@@ -100,8 +102,8 @@ export function CreationFields({ kind, form, errors, options, disabled, editing 
           <Text style={[styles.choiceText, form.priority === priority && styles.priorityTextOn]}>{priorityLabels[priority]}</Text>
         </Pressable>)}
       </View>
-      <CatalogPicker label="Especialidad (opcional)" icon="hammer-outline" value={form.specialty?.label ?? null} placeholder="Elegir especialidad" disabled={disabled} locked={specialtyLocked}
-        onPress={() => onSelectCatalog("specialties")} onClear={() => onChange("specialty", null)} />
+      {hideSpecialty ? null : <CatalogPicker label="Especialidad (opcional)" icon="hammer-outline" value={form.specialty?.label ?? null} placeholder="Elegir especialidad" disabled={disabled} locked={specialtyLocked}
+        onPress={() => onSelectCatalog("specialties")} onClear={() => onChange("specialty", null)} />}
       {showWorkSystem ? <WorkSystemFields form={form} disabled={disabled} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
       {kind === "maintenance" ? <>
         <Text style={styles.label}>Tipo de daño (opcional)</Text>

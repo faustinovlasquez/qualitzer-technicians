@@ -182,11 +182,10 @@ async function main() {
     await page.getByRole("button", { name: "Nuevo trabajo", exact: true }).click();
     await page.getByRole("textbox", { name: "Título *", exact: true }).fill(title);
     await page.getByRole("textbox", { name: "Resumen del trabajo *", exact: true }).fill("Fixture seguro: crear, guardar foto, reiniciar y reconciliar sin pérdidas.");
-    await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+    await page.getByRole("button", { name: "Planificar fecha y horario", exact: true }).click();
     await page.getByRole("textbox", { name: "Hora de inicio *", exact: true }).fill("17:00");
     await page.getByRole("textbox", { name: "Hora de fin *", exact: true }).fill("18:00");
-    await page.getByRole("button", { name: "Revisar creación", exact: true }).click();
-    await page.getByRole("button", { name: "Confirmar y crear", exact: true }).click();
+    await page.getByRole("button", { name: "Crear trabajo", exact: true }).click();
     await page.getByRole("button", { name: "Ver trabajo local", exact: true }).waitFor();
     assert.equal((await metrics()).effects.creations, 0);
     await page.getByRole("button", { name: "Ver trabajo local", exact: true }).click();

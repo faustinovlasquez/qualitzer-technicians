@@ -5,6 +5,7 @@ import {
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
 import { asRecord, branchEntry, clip, count, isoDate, list, positive, text, type Raw } from "./support";
+import { formatWorkshopEntryCode } from "../../src/domain/workshopEntryCode";
 
 const pad = (value: number, size: number) => String(value).padStart(size, "0");
 const nameOf = (value: unknown) => text(asRecord(value).name);
@@ -219,7 +220,7 @@ export async function loadWorkshopEntry(upstream: Upstream, token: string, branc
   const deliveredAt = isoDate(raw.deliveredAt);
   const result = workshopEntryDetailSchema.safeParse({
     id: entryId,
-    code: `ING-${pad(entryId, 5)}`,
+    code: formatWorkshopEntryCode(entryId),
     title: clip(text(raw.title), 500),
     notes: clip(text(raw.notes), 4000),
     areaId: positive(raw.operationAreaId),

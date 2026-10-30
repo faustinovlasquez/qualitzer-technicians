@@ -36,7 +36,7 @@ function mergeContacts(current: ContactOption[], next: ContactOption[]): Contact
 
 /**
  * Enviar la confirmación de ingreso al cliente (como en la web): plantilla, «Para» con los contactos del ingreso y del
- * cliente (y «+» para crear uno), con copia, informe adjunto y canal. La vista previa se abre en una ventana.
+ * cliente (y «+» para crear uno), con copia, certificado de ingreso adjunto y canal. La vista previa se abre en una ventana.
  * `contacts` (datos del ingreso) permite listar los contactos del cliente y crear uno nuevo.
  */
 export function EmailSendScreen({ api, contacts, entryId, entryCode, onClose, onSent }: {
@@ -215,7 +215,7 @@ export function EmailSendScreen({ api, contacts, entryId, entryCode, onClose, on
 
             <View style={[styles.row, styles.switchCard]}>
               <Switch value={attachReport} onValueChange={setAttachReport} disabled={sending} />
-              <Text style={[styles.rowTitle, styles.grow]}>Adjuntar informe de ingreso (PDF)</Text>
+              <Text style={[styles.rowTitle, styles.grow]}>Adjuntar certificado de ingreso (PDF)</Text>
             </View>
 
             <View style={styles.section}>

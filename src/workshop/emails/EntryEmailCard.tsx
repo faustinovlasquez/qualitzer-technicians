@@ -61,7 +61,7 @@ export function EntryEmailButton({ api, contacts, entryId, entryCode }: {
         {status ? <Text style={[styles.status, status.tone === "success" ? styles.statusOk : status.tone === "danger" ? styles.statusBad : styles.statusPending]}>{status.label}</Text>
           : error ? <Text style={styles.hint}>No se pudo revisar el envío.</Text> : <ActivityIndicator size="small" color={palette.info} />}
       </View>
-      <ToolOption icon="send" label={sent ? "Reenviar al cliente" : "Enviar al cliente"} caption="Confirmación de ingreso con el informe" strong
+      <ToolOption icon="send" label={sent ? "Reenviar al cliente" : "Enviar al cliente"} caption="Confirmación de ingreso con el certificado" strong
         onPress={() => { setMenuOpen(false); setSendOpen(true); }} />
       <ToolOption icon="time-outline" label="Ver envíos" caption={total > 0 ? `${total} ${total === 1 ? "envío" : "envíos"}${history ? ` · leído por ${history.summary.read}` : ""}` : "Aún no hay envíos"}
         onPress={() => { setMenuOpen(false); setHistoryOpen(true); load(); }} />

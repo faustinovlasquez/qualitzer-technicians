@@ -73,7 +73,7 @@ export function ReceptionDoneModal({ api, contacts, entryId, entryCode, equipmen
           : email.kind === "failed" ? { icon: "alert-circle-outline", label: "No se pudo enviar la confirmación. Puedes enviarla ahora o desde la ficha." }
             : email.kind === "slow" ? { icon: "time-outline", label: "La confirmación se sigue enviando; te llegará una notificación." }
               : email.kind === "ask" ? { icon: "mail-unread-outline", label: email.eligibility.recipients.length > 0
-                ? `Puedes avisar al cliente (${email.eligibility.recipients.map((recipient) => recipient.name ?? recipient.email).join(", ")}) con el informe adjunto.`
+                ? `Puedes avisar al cliente (${email.eligibility.recipients.map((recipient) => recipient.name ?? recipient.email).join(", ")}) con el certificado de ingreso adjunto.`
                 : "El ingreso no tiene contactos con correo: al enviar puedes agregar uno." }
                 : email.message !== null ? { icon: "mail-outline", label: email.message } : null;
 

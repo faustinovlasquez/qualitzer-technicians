@@ -19,6 +19,7 @@ import { StepAnswerControl } from "./StepAnswerControl";
 import { DamageEditor, type DamagePhoto } from "./DamageEditor";
 import { AddPhotoSheet, GuidedCapture, InspectionChecklistPanel, InspectionPhotoPanel, InspectionPhotoSummary, PhotoActionsSheet, PhotoViewer, ShareSheet } from "./InspectionPhotos";
 import { InspectionChecklistScreen } from "./InspectionChecklistScreen";
+import { formatWorkshopEntryCode } from "../../domain/workshopEntryCode";
 
 type InspectionApi = ReturnType<typeof useWorkshopBoard>["inspection"];
 type PhotoTarget = { kind: "slot"; key: string; name: string; hasPhoto: boolean } | { kind: "custom"; label: string } | { kind: "step"; stepId: number; title: string } | { kind: "damage"; damageId: number };
@@ -174,7 +175,7 @@ export function WorkshopInspectionScreen({ api, entryId, kind, onClose, onDone }
     const inspection = current.current;
     if (!inspection || downloading) return;
     setDownloading(true); setMessage("");
-    try { await api.downloadPhotos(entryId, inspection.inspectionId, `inspeccion-ING-${String(entryId).padStart(5, "0")}-${kind === "entry" ? "ingreso" : "entrega"}`); }
+    try { await api.downloadPhotos(entryId, inspection.inspectionId, `inspeccion-${formatWorkshopEntryCode(entryId)}-${kind === "entry" ? "ingreso" : "entrega"}`); }
     catch (failure) { setMessage(failureText(failure, "No se pudo descargar el comprimido.")); }
     finally { setDownloading(false); }
   }

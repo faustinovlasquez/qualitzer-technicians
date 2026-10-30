@@ -12,6 +12,7 @@ import type { WorkshopOrderDetail, WorkshopOrdersPort } from "../domain/workshop
 import { deliveryBlockers, type WorkshopDeliveryPort } from "../domain/workshopDelivery";
 import type { WorkshopManagePort } from "../domain/workshopManage";
 import { formatRut, isValidRut, type WorkshopCustomersPort } from "../domain/workshopCustomers";
+import { formatWorkshopEntryCode } from "../domain/workshopEntryCode";
 
 export type DemoWorkshopPort = WorkshopBoardPort & WorkshopEntryPort & WorkshopIntakePort & WorkshopInspectionPort & WorkshopReceptionPort & WorkshopCustomerEmailPort & WorkshopWorksPort & WorkshopOrdersPort & WorkshopDeliveryPort & WorkshopManagePort & WorkshopCustomersPort;
 const structuredCopy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -20,7 +21,7 @@ const structuredCopy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as 
 export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort {
   const inDays = (days: number) => new Date(now.getTime() + days * 86_400_000).toISOString();
   const entry = (value: Partial<WorkshopEntry> & Pick<WorkshopEntry, "id" | "equipmentLabel">): WorkshopEntry => ({
-    code: `ING-${String(value.id).padStart(5, "0")}`, title: null, statusKey: "IN_PROGRESS", statusColor: "#8E44AD", subStatusName: null,
+    code: formatWorkshopEntryCode(value.id), title: null, statusKey: "IN_PROGRESS", statusColor: "#8E44AD", subStatusName: null,
     equipmentCode: null, customerName: null, isInternalEntry: false, daysInArea: 0, estimatedDeliveryAt: null, isReceptionPending: false,
     negotiationsCount: 0, imageUrl: null, ...value
   });
@@ -645,8 +646,8 @@ export function createDemoWorkshopPort(now: Date = new Date()): DemoWorkshopPort
           { provider: "GOOGLE_OAUTH", available: false, email: null, reason: "No tienes tu Gmail conectado.", howTo: "Conéctalo desde la web, en tu perfil." }] };
     },
     async workshopEmailPreview(_branchId, entryId, input) {
-      const code = `ING-${String(entryId).padStart(5, "0")}`;
-      return { subject: `Confirmación de ingreso de su equipo · ${code}`, missing: [], attachmentName: `Informe-de-ingreso-${code}.pdf`,
+      const code = formatWorkshopEntryCode(entryId);
+      return { subject: `Confirmación de ingreso de su equipo · ${code}`, missing: [], attachmentName: `Certificado-de-ingreso-${code}.pdf`,
         paragraphs: ["Ingreso a taller", `Estimado(a) ${input.recipientName ?? "cliente"}:`, `Le confirmamos que su equipo ingresó a nuestro taller con el código ${code}.`, "Saludos cordiales."] };
     },
     async sendWorkshopEmail(_branchId, entryId, input) {

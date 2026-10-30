@@ -19,6 +19,7 @@ import { registerManageRoutes } from "./manage";
 import { registerCustomerRoutes } from "./customers";
 import { entryForClient, equipmentSummary, loadWorkshopEntry } from "./entry";
 import { DELIVERY_CONDITIONS_HEADER } from "../../src/domain/workshopEntry";
+import { formatWorkshopEntryCode } from "../../src/domain/workshopEntryCode";
 
 /** Ingreso del tablero web (operation_area/dashboard) a la forma que muestra la app. */
 function toEntry(raw: unknown): WorkshopEntry | null {
@@ -31,7 +32,7 @@ function toEntry(raw: unknown): WorkshopEntry | null {
   const subStatus = asRecord(entry.subStatus);
   return {
     id: entryId,
-    code: `ING-${String(entryId).padStart(5, "0")}`,
+    code: formatWorkshopEntryCode(entryId),
     title: clip(text(entry.title), 500),
     statusKey: clip(text(status.key), 80),
     statusColor: clip(text(status.color), 40),

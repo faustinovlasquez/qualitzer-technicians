@@ -15,9 +15,9 @@ import { CreationCatalogSelector, type CreationCatalogCache } from "./CreationCa
 import { CreationScheduleFields } from "./CreationScheduleFields";
 import { WorkEditScreen, type WorkEditScreenProps } from "./WorkEditScreen";
 import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
-import { CreationFields, LinkedEquipmentCard, creationLabels, priorityLabels } from "./CreationFields";
+import { CatalogPicker, CreationFields, LinkedEquipmentCard, creationLabels } from "./CreationFields";
 import { CreationModal } from "./CreationModal";
-import { CreationDone, CreationReview, CreationStepper } from "./CreationUi";
+import { CreationDone, CreationStepper } from "./CreationUi";
 import { creationDraftKey, openCreationDraftStore } from "./creationDrafts";
 import { applyCatalogSelection, catalogFormField, creationAssignedMinutes, creationConflictPreview, creationDuration, durationText, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
 
@@ -44,6 +44,8 @@ export interface CreationScreenProps {
   onSubmit: (input: CreationInput) => Promise<CreationResult>;
   onCreated?: (result: CreationResult) => void | Promise<void>;
   onQueued?: (outcome: OfflineQueuedOutcome) => void | Promise<void>;
+  /** «Crear e iniciar» (trabajos del día): avisa antes de crear si el trabajo debe iniciarse al abrir su ficha. */
+  onStartRequest?: (start: boolean) => void;
   /** Al confirmar, en vez de abrir el trabajo se muestra la ventana de éxito: ver los trabajos, crear otro o abrir el creado. */
   successFlow?: { viewLabel: string; onConfirmed?: (result: CreationResult) => void; onView: (result: CreationResult) => void; subtitle?: string; hideOpen?: boolean };
 }
@@ -55,8 +57,11 @@ export function CreationScreen(props: CreationScreenProps | WorkEditScreenProps)
   return <CreationScreenContent key={scope} {...props} draftKey={scope} />;
 }
 
-const steps = [{ label: "Datos", icon: "document-text-outline" as const }, { label: "Horario", icon: "time-outline" as const }, { label: "Revisar", icon: "checkmark-done-outline" as const }];
-const stepTitles = ["Datos del trabajo", "Fecha y horario", "Revisar y crear"];
+// Dos pasos y sin resumen final: los datos (un trabajo se puede crear ahí mismo, para hoy y sin hora fija) y la
+// planificación opcional (fecha y horario), que también crea al terminar.
+const steps = [{ label: "Datos", icon: "document-text-outline" as const }, { label: "Planificar", icon: "calendar-outline" as const }];
+const stepTitles = ["Datos del trabajo", "Planificar fecha y horario"];
+const creationActionLabels = { work: "Crear trabajo", maintenance: "Crear mantenimiento", non_productive: "Registrar tiempo" } as const;
 const serverMessages = new Map<string, string>([
   ["MOBILE_CREATION_INVALID_LOCAL_TIME", "Esa hora local no existe por el cambio de horario. Elige otra franja."],
   ["MOBILE_CREATION_AMBIGUOUS_LOCAL_TIME", "La franja contiene una hora ambigua por cambio de horario."],
@@ -77,7 +82,7 @@ function submissionError(error: unknown): string {
   return error instanceof Error ? serverMessages.get(error.message) ?? "No se confirmó la creación. Puede haberse recibido en el servidor." : "No se confirmó la creación. Puede haberse recibido en el servidor.";
 }
 
-function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, successFlow, draftKey, parentMaintenance, parentEntry }: CreationScreenProps & { draftKey: string }) {
+function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBranchId, initialDate, data, offline, mode, busy = false, onBack, onLoadOptions, onSubmit, onCreated, onQueued, onStartRequest, successFlow, draftKey, parentMaintenance, parentEntry }: CreationScreenProps & { draftKey: string }) {
   const security = useDeviceSecurity();
   const store = useMemo(() => openCreationDraftStore(draftKey, kind, companyBranchId), [draftKey, kind, companyBranchId]);
   const catalogCache = useMemo<CreationCatalogCache>(() => new Map(), [draftKey]);
@@ -132,7 +137,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     void store.read().then((saved) => {
       if (!active) return;
       if (saved && (saved.form.maintenanceId !== parentMaintenance?.id || saved.form.operationAreaEntryId !== parentEntry?.id)) throw new Error("CREATION_PARENT_MISMATCH");
-      if (saved) { replaceDraft(saved); changed.current = true; if (saved.phase !== "editing") setStep(2); }
+      if (saved) { replaceDraft(saved); changed.current = true; if (saved.phase !== "editing") setStep(1); }
       setReady(true);
     }).catch(() => {
       if (active) setDraftError("No se pudo recuperar el borrador. Si ya intentaste crear este registro, revisa tu agenda antes de descartarlo.");
@@ -255,6 +260,14 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     }
   }
 
+  // «Crear e iniciar» solo para un trabajo de hoy: no tiene sentido iniciar ahora algo planificado para otro día.
+  const today = (() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; })();
+  const canStart = kind === "work" && onStartRequest !== undefined && draft.phase === "editing" && form.date === today;
+  function create(start: boolean): void {
+    onStartRequest?.(start);
+    void submit();
+  }
+
   async function leaveWithDraft(): Promise<void> {
     if (lock.current) return;
     if (draftError) { setDialog(null); onBack(); return; }
@@ -326,7 +339,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
         <IconButton name="arrow-back" label="Volver conservando borrador" disabled={busy || sending} onPress={requestBack} />
         <View style={styles.headerText}>
           <Text accessibilityRole="header" style={styles.headerTitle}>{creationLabels[kind]}</Text>
-          <Text style={styles.headerStep} numberOfLines={1}>{draft.phase === "editing" ? `Paso ${step + 1} de 3 · ${stepTitles[step]}` : draft.phase === "pending" ? "Por confirmar" : "Creación lista"}
+          <Text style={styles.headerStep} numberOfLines={1}>{draft.phase === "editing" ? `Paso ${step + 1} de ${steps.length} · ${stepTitles[step]}` : draft.phase === "pending" ? "Por confirmar" : "Creación lista"}
             {parentEntry ? ` · Ingreso ${parentEntry.code}` : parentMaintenance ? ` · ${parentMaintenance.code}` : ""}</Text>
         </View>
         <IconButton name="list-outline" label="Volver a mis asignaciones" disabled={busy || sending} onPress={requestExit} />
@@ -365,51 +378,41 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Text accessibilityRole="alert" style={styles.warning}>No se ha confirmado si el registro se creó. Se conservan los datos para reintentar sin duplicarlo.</Text>
               <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar creación. Crear otro registro puede duplicar uno ya guardado.</Text>
             </Card> : null}
-            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={kind === "maintenance" || !!parentMaintenance} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
+            {/* Trabajo: los datos son solo título, resumen y prioridad (sin equipo); la especialidad se elige al planificar. */}
+            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={kind === "maintenance" || !!parentMaintenance} hideSpecialty={kind === "work"} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
               equipmentLookup={parentEntry ? <LinkedEquipmentCard title={`EQUIPO DEL INGRESO ${parentEntry.code}`} label={parentEntry.equipmentLabel}
                   hint={kind === "maintenance" ? "El mantenimiento queda unido al ingreso con su equipo propio." : "El trabajo queda unido al ingreso con su cliente y equipo."} />
                 : parentMaintenance ? <LinkedEquipmentCard title="EQUIPO DEL MANTENIMIENTO" label={parentMaintenance.equipment?.label ?? "No informado"}
-                  detail={parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier} hint={`El trabajo queda dentro de ${parentMaintenance.code}.`} /> : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
+                  detail={parentMaintenance.equipment?.internalNumber ?? parentMaintenance.equipment?.identifier} hint={`El trabajo queda dentro de ${parentMaintenance.code}.`} /> : kind === "work" ? null : <CreationEquipmentLookup companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId}
                 required={kind === "maintenance"} disabled={frozen} selected={form.equipment} error={errors.equipment} cache={catalogCache}
                 onLoadOptions={onLoadOptions} onSelect={(item) => change("equipment", item)} />} /></Card> : null}
             {step === 1 ? <Card style={styles.card}>
+              {kind === "work" ? <CatalogPicker label="Especialidad (opcional)" icon="hammer-outline" value={form.specialty?.label ?? null} placeholder="Elegir especialidad" disabled={frozen}
+                onPress={() => setCatalog("specialties")} onClear={() => change("specialty", null)} /> : null}
               <CreationScheduleFields form={form} errors={errors} disabled={frozen} optionalTimes={kind === "work"} scopeKey={JSON.stringify([draftKey, form.date])} today={initialDate} onChange={change} />
               {kind !== "work" ? <Text accessibilityLiveRegion="polite" style={styles.body}>Duración: {minutes === null ? "completa un horario válido" : durationText(minutes)}</Text> : null}
               <Text style={styles.hint}>Un solo día, en hora de {options.timezone}. Para cruzar la medianoche o repetir, planifícalo desde la web.</Text>
             </Card> : null}
-            {step === 2 ? <CreationReview disabled={frozen || draft.phase !== "editing"} onEdit={(index) => { setStep(index); setError(""); }}
-              note="Se asignará a ti en esta sucursal, sin iniciar su ejecución."
-              sections={[
-                kind !== "non_productive" ? { title: "Datos del trabajo", icon: "document-text-outline" as const, step: 0, rows: [
-                  { icon: "text-outline" as const, label: "Título", value: form.title.trim(), strong: true },
-                  ...((kind === "work" ? form.summary : form.motive).trim() ? [{ icon: "reader-outline" as const, label: kind === "work" ? "Resumen" : "Motivo", value: (kind === "work" ? form.summary : form.motive).trim() }] : []),
-                  ...(kind === "maintenance" ? [{ icon: "build-outline" as const, label: "Tipo", value: form.maintenanceType === "correctivo" ? "Correctivo" : "Detención" }] : []),
-                  { icon: "flag-outline" as const, label: "Prioridad", value: priorityLabels[form.priority] },
-                  { icon: "construct-outline" as const, label: "Equipo", value: parentEntry ? `${parentEntry.equipmentLabel} · Ingreso ${parentEntry.code}` : parentMaintenance ? parentMaintenance.equipment?.label ?? "No informado" : form.equipment ? form.equipment.label : "Sin equipo asociado" },
-                  ...(form.specialty ? [{ icon: "hammer-outline" as const, label: "Especialidad", value: form.specialty.label }] : []),
-                  ...(form.system && (kind === "maintenance" || parentMaintenance) ? [{ icon: "git-network-outline" as const, label: "Sistema", value: `${form.system.label}${form.component ? ` · ${form.component.label}` : ""}` }] : []),
-                  ...(kind === "maintenance" && form.damageType ? [{ icon: "warning-outline" as const, label: "Daño", value: form.damageType === "desgaste" ? "Desgaste" : "Operacional" }] : [])
-                ] } : { title: "Motivo", icon: "pause-circle-outline" as const, step: 0, rows: [
-                  { icon: "pause-outline" as const, label: "Motivo", value: options.nonProductiveReasons.find((item) => item.value === form.reason)?.label ?? form.reason, strong: true },
-                  ...(form.reasonText.trim() ? [{ icon: "reader-outline" as const, label: "Detalle", value: form.reasonText.trim() }] : []),
-                  ...(form.initialComment.trim() ? [{ icon: "chatbubble-outline" as const, label: "Comentario", value: form.initialComment.trim() }] : [])
-                ] },
-                { title: "Fecha y horario", icon: "time-outline" as const, step: 1, rows: [
-                  { icon: "calendar-outline" as const, label: "Día", value: form.date },
-                  { icon: "hourglass-outline" as const, label: kind === "work" ? "Tiempo asignado" : "Duración", value: minutes === null ? "Sin tiempo asignado" : durationText(minutes), strong: true },
-                  { icon: "time-outline" as const, label: "Horario", value: form.startTime || form.endTime ? `${form.startTime || "Sin inicio"} – ${form.endTime || "Sin fin"}` : "Sin hora fija" }
-                ] }
-              ]} /> : null}
             {step > 0 && preview.overlaps.length > 0 ? <Card style={styles.card}>
               <Text style={styles.warning}>Este horario coincide con otros trabajos de tu agenda. Puedes continuar.</Text>
               {preview.overlaps.map((title) => <Text key={title} style={styles.body}>• {title}</Text>)}
             </Card> : null}
             {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-            {step < 2 ? <Button title={step === 0 ? "Continuar a horario" : "Revisar creación"} disabled={frozen} onPress={() => { if (checkForm(step === 1)) setStep(step + 1); }} /> : <>
-              <Button title={draft.phase === "pending" ? "Reintentar creación" : mode === "demo" ? "Simular creación" : "Confirmar y crear"} icon="checkmark-outline" loading={sending} disabled={busy || loadingOptions} onPress={() => void submit()} />
-              {draft.phase === "pending" ? <Button title="Editar como nueva creación" variant="secondary" disabled={busy || sending} onPress={() => setDialog("new")} /> : null}
+            {draft.phase === "pending" ? <>
+              <Button title="Reintentar creación" icon="refresh" loading={sending} disabled={busy || loadingOptions} onPress={() => void submit()} />
+              <Button title="Editar como nueva creación" variant="secondary" disabled={busy || sending} onPress={() => setDialog("new")} />
+            </> : step === 0 ? <>
+              {/* Un trabajo se crea aquí mismo (hoy, sin hora fija); planificar es opcional. Los demás tipos necesitan horario. */}
+              {kind === "work" ? <Button title={mode === "demo" ? "Simular creación" : creationActionLabels[kind]} icon="checkmark-outline" loading={sending} disabled={frozen || loadingOptions} onPress={() => create(false)} /> : null}
+              {canStart ? <Button title="Crear e iniciar" icon="play" variant="warning" disabled={frozen || loadingOptions} onPress={() => create(true)} /> : null}
+              <Button title={kind === "work" ? "Planificar fecha y horario" : "Continuar a fecha y horario"} icon="calendar-outline" variant={kind === "work" ? "secondary" : "primary"} disabled={frozen}
+                onPress={() => { if (checkForm(false)) setStep(1); }} />
+              <Text style={styles.hint}>{kind === "work" ? "Se crea para hoy, asignado a ti y sin iniciar. Planifica si quieres darle fecha y horario." : "Se asignará a ti en esta sucursal."}</Text>
+            </> : <>
+              <Button title={mode === "demo" ? "Simular creación" : creationActionLabels[kind]} icon="checkmark-outline" loading={sending} disabled={frozen || loadingOptions} onPress={() => create(false)} />
+              {canStart ? <Button title="Crear e iniciar" icon="play" variant="warning" disabled={frozen || loadingOptions} onPress={() => create(true)} /> : null}
+              <Button title="Paso anterior" variant="ghost" disabled={sending || busy} onPress={() => { setStep(0); setError(""); }} />
             </>}
-            {step > 0 && draft.phase === "editing" ? <Button title="Paso anterior" variant="ghost" disabled={sending || busy} onPress={() => { setStep(step - 1); setError(""); }} /> : null}
             <Text style={styles.hint}>El borrador se conserva en este dispositivo para esta sesión, empresa, sucursal y tipo de creación.</Text>
           </> : null}
         </>}

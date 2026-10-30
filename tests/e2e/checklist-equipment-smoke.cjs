@@ -71,13 +71,12 @@ async function equipmentCreation(page, mode) {
   await page.getByRole("button", { name: "Nuevo trabajo", exact: true }).click();
   await page.getByText(/^Equipo seleccionado: .*EQ-15.*ID 15$/).waitFor();
   assert.equal(await page.getByRole("textbox", { name: "Título *", exact: true }).inputValue(), title);
-  await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+  await page.getByRole("button", { name: "Planificar fecha y horario", exact: true }).click();
   await page.getByRole("textbox", { name: "Hora de inicio *", exact: true }).fill("18:00");
   await page.getByRole("textbox", { name: "Hora de fin *", exact: true }).fill("19:00");
-  await page.getByRole("button", { name: "Revisar creación", exact: true }).click();
   await page.getByText(/^Equipo: .*EQ-15.*ID 15$/).waitFor();
   await snapshot(page, `${mode}_EQUIPMENT_PREVIEW`);
-  await page.getByRole("button", { name: mode === "demo" ? "Simular creación" : "Confirmar y crear", exact: true }).click();
+  await page.getByRole("button", { name: mode === "demo" ? "Simular creación" : "Crear trabajo", exact: true }).click();
   await page.getByRole("button", { name: "Ver en mi agenda", exact: true }).waitFor();
   const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.includes(":creation:v1:")).map(([, value]) => JSON.parse(value)));
   const draft = drafts.find((item) => item.form?.title === title);

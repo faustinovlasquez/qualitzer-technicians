@@ -67,7 +67,7 @@ interface SelectedWork {
   queryDate: string;
   scheduledDate: string;
   initialTab?: WorkDetailTab;
-  initialAction?: "deliver";
+  initialAction?: "deliver" | "start";
 }
 interface SelectedOrder { id: string; draftGroupId?: string; queryDate: string; initialTab: "works" | "files" | "comments"; deliveryIntent?: "deliver" | "ready"; }
 interface PendingLogin {
@@ -173,6 +173,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const baselineRead = useRef<AbortController | null>(null);
   const sessionVersion = useRef(0);
   const creationVersion = useRef(0);
+  /** «Crear e iniciar»: la creación en curso debe iniciarse al abrir su ficha. */
+  const startAfterCreate = useRef(false);
   const pendingLogin = useRef<PendingLogin | null>(null);
   const sessionSetup = useRef<SessionSetup | null>(null);
   const actionLock = useRef<symbol | null>(null);
@@ -1377,11 +1379,15 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const result = creationResultSchema.parse(value);
     const { current, repo } = creationContext(result.companyBranchId, false);
     if (result.kind !== selectedCreationKind || actionLock.current) return;
+    // «Crear e iniciar»: al abrir la ficha creada se inicia, igual que con «Iniciar trabajo».
+    const startNow = startAfterCreate.current && result.kind === "work";
+    startAfterCreate.current = false;
     const version = sessionVersion.current;
     const action = beginAction();
     const nextTab = "today";
     const nextRange = dailyRange(result.schedule.date);
-    const nextWork: SelectedWork | null = result.kind === "maintenance" ? null : { groupId: result.groupId, workId: String(result.workId), queryDate: result.schedule.date, scheduledDate: result.schedule.date, initialTab: "work" };
+    const nextWork: SelectedWork | null = result.kind === "maintenance" ? null : { groupId: result.groupId, workId: String(result.workId), queryDate: result.schedule.date, scheduledDate: result.schedule.date, initialTab: "work",
+      ...(startNow ? { initialAction: "start" as const } : {}) };
     const nextOrder: SelectedOrder | null = result.kind === "maintenance" ? { id: result.groupId, queryDate: result.schedule.date, initialTab: "works" } : null;
     requestVersion.current += 1;
     manualRefresh.current = { session: current, range: nextRange };
@@ -2007,6 +2013,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     storageKey: session ? tenantStorageNamespace(session, gatewayUrl, session.branchId) : "anonymous",
     login, demo, changePassword, retrySessionSetup, branch, logout, checkConnection, refresh, changeRange, agendaFocusDate, focusAgendaDay, openGroup, closeOrder, openWork, closeWork, closeDetails, homeFromDetails, backTab, homeTab, onWorkStatus,
     openCreate, closeCreate, creationOptions, createRecord, onCreated, onOfflineQueuedCreate,
+    setStartAfterCreate: (value: boolean) => { startAfterCreate.current = value; },
     changeStatus,
     reopenWork: () => performMutation(scope(), (repo, value) => workActions(repo).reopenWork(value), true, "WORK_REOPENED"),
     loadActivities: () => readWork((repo, value) => workActions(repo).activities(value)),

@@ -109,7 +109,7 @@ async function creationFixture(initial?: CreationDraft, parentMaintenance?: Crea
     "./CreationScheduleFields": { CreationScheduleFields: "CreationScheduleFields" },
     "./WorkEditScreen": { WorkEditScreen: "WorkEditScreen" },
     "./CreationEquipmentLookup": { CreationEquipmentLookup: "CreationEquipmentLookup" },
-    "./CreationFields": { CreationFields: "CreationFields", LinkedEquipmentCard: "LinkedEquipmentCard", creationLabels: { work: "Trabajo", maintenance: "Mantenimiento", non_productive: "Tiempo no productivo" }, priorityLabels: { medium: "Media" } },
+    "./CreationFields": { CreationFields: "CreationFields", CatalogPicker: "CatalogPicker", LinkedEquipmentCard: "LinkedEquipmentCard", creationLabels: { work: "Trabajo", maintenance: "Mantenimiento", non_productive: "Tiempo no productivo" }, priorityLabels: { medium: "Media" } },
     "./CreationModal": { CreationModal: "CreationModal" },
     "./CreationUi": { CreationStepper: "CreationStepper", CreationReview: "CreationReview", CreationDone: "CreationDone" },
   });
@@ -134,8 +134,7 @@ async function creationFixture(initial?: CreationDraft, parentMaintenance?: Crea
   };
   render(); await settle(); render();
   function review(): void {
-    action(render(), "Continuar a horario").onPress();
-    action(render(), "Revisar creación").onPress();
+    action(render(), "Planificar fecha y horario").onPress();
   }
   return { hooks, props, memory, drafts, key, security, controls, submit, writes, submitted, queued, created, events, render, review, backs: () => backs };
 }
@@ -143,7 +142,7 @@ async function creationFixture(initial?: CreationDraft, parentMaintenance?: Crea
 test("parent maintenance form persists an isolated draft and only opens its own confirmed child", async context => {
   const current = await creationFixture(undefined, { id: 7, code: "OT-COR-7", equipment: null }); context.after(() => current.hooks.unmount());
   assert.match(current.key(), /:maintenance:7$/);
-  current.review(); action(current.render(), "Confirmar y crear").onPress(); await settle();
+  current.review(); action(current.render(), "Crear trabajo").onPress(); await settle();
   assert.equal(current.submitted[0].kind === "work" && current.submitted[0].maintenanceId, 7);
   current.submit.resolve({ ...result, groupId: "maintenance-7" }); await settle();
   assert.equal(current.created.length, 1); assert.equal(current.created[0].groupId, "maintenance-7");
@@ -167,12 +166,11 @@ for (const kind of ["work", "maintenance", "non_productive"] as const) test(`${k
     assert.equal(fixture.submitted.length, index - 1);
     const fields = elements<{ form: CreationForm; onChange: (field: keyof CreationForm, value: CreationForm[keyof CreationForm]) => void }>(fixture.render(), "CreationFields")[0].props;
     fields.onChange("title", `Trabajo distinto ${index}`); fields.onChange("summary", "Alcance nuevo"); fields.onChange("motive", "Motivo nuevo"); fields.onChange("equipment", { id: 4, label: "Camion" });
-    action(fixture.render(), "Continuar a horario").onPress();
+    action(fixture.render(), kind === "work" ? "Planificar fecha y horario" : "Continuar a fecha y horario").onPress();
     const times = elements<ComponentProps<typeof CreationScheduleFields>>(fixture.render(), "CreationScheduleFields")[0].props;
     times.onChange("startTime", "11:00"); times.onChange("endTime", "12:00");
-    action(fixture.render(), "Revisar creación").onPress();
     assert.equal(fixture.submitted.length, index - 1);
-    const confirm = action(fixture.render(), "Confirmar y crear"); confirm.onPress(); confirm.onPress(); await settle();
+    const confirm = action(fixture.render(), { work: "Crear trabajo", maintenance: "Crear mantenimiento", non_productive: "Registrar tiempo" }[kind]); confirm.onPress(); confirm.onPress(); await settle();
     assert.equal((await store.read())?.phase, "queued");
     assert.equal(fixture.submitted.length, index);
   }
@@ -197,7 +195,7 @@ for (const phase of ["queued", "confirmed"] as const) test(`${phase}: failure sa
   action(fixture.render(), "Crear otro").onPress(); await settle();
   assert.equal((await store.read())?.phase, "editing");
   fixture.hooks.unmount(); fixture.render(); await settle();
-  assert.ok(action(fixture.render(), "Continuar a horario"));
+  assert.ok(action(fixture.render(), "Planificar fecha y horario"));
   assert.equal(fixture.submitted.length, 0);
 });
 
@@ -255,10 +253,7 @@ test("header back traverses creation steps while list exit retains the draft gua
   const fixture = await creationFixture(); t.after(() => fixture.hooks.unmount());
   fixture.review();
   action(fixture.render(), "Volver conservando borrador").onPress();
-  assert.ok(action(fixture.render(), "Revisar creación"));
-  assert.equal(fixture.backs(), 0);
-  action(fixture.render(), "Volver conservando borrador").onPress();
-  assert.ok(action(fixture.render(), "Continuar a horario"));
+  assert.ok(action(fixture.render(), "Planificar fecha y horario"));
   assert.equal(fixture.backs(), 0);
   action(fixture.render(), "Volver a mis asignaciones").onPress();
   assert.equal(elements(fixture.render(), "CreationModal").length > 0, true);
@@ -277,7 +272,7 @@ for (const phase of ["queued", "confirmed"] as const) {
     const f = await creationFixture(); t.after(() => f.hooks.unmount());
     f.controls.hold = phase; f.controls.gate = deferred<void>();
     f.review();
-    const save = action(f.render(), "Confirmar y crear");
+    const save = action(f.render(), "Crear trabajo");
     save.onPress(); save.onPress(); await settle();
     assert.equal(f.submitted.length, 1);
     complete(f); await settle();
@@ -298,7 +293,7 @@ for (const phase of ["queued", "confirmed"] as const) {
   test(`${phase}: delayed marker failure keeps recovery available without resending`, async (t) => {
     const f = await creationFixture(); t.after(() => f.hooks.unmount());
     f.controls.hold = phase; f.controls.gate = deferred<void>();
-    f.review(); const save = action(f.render(), "Confirmar y crear"); save.onPress(); await settle();
+    f.review(); const save = action(f.render(), "Crear trabajo"); save.onPress(); await settle();
     complete(f); await settle();
     f.controls.gate.reject(new Error("DISK_FULL")); await settle();
     assert.equal(f.queued.length + f.created.length, 0);
@@ -315,7 +310,7 @@ for (const phase of ["queued", "confirmed"] as const) {
     const navigation = deferred<void>(); let attempts = 0;
     const open = async () => { attempts++; await navigation.promise; };
     if (phase === "queued") f.props.onQueued = open; else f.props.onCreated = open;
-    f.review(); const save = action(f.render(), "Confirmar y crear"); save.onPress(); await settle();
+    f.review(); const save = action(f.render(), "Crear trabajo"); save.onPress(); await settle();
     complete(f); await settle();
     action(f.render(), label).onPress(); assert.equal(attempts, 1);
     navigation.reject(new Error("NAVIGATION_FAILED")); await settle();
@@ -329,7 +324,7 @@ for (const phase of ["queued", "confirmed"] as const) {
 
   test(`${phase}: unmounted completion still persists the outcome without navigating`, async () => {
     const f = await creationFixture(); f.review();
-    const save = action(f.render(), "Confirmar y crear"); save.onPress(); await settle();
+    const save = action(f.render(), "Crear trabajo"); save.onPress(); await settle();
     f.hooks.unmount(); complete(f); await settle(); save.onPress(); await settle();
     assert.equal(f.queued.length + f.created.length, 0);
     assert.equal(f.submitted.length, 1);
@@ -339,7 +334,7 @@ for (const phase of ["queued", "confirmed"] as const) {
   test(`${phase}: device lock during persistence prevents auto-navigation and allows explicit recovery after unlock`, async (t) => {
     const f = await creationFixture(); t.after(() => f.hooks.unmount());
     f.controls.hold = phase; f.controls.gate = deferred<void>(); f.review();
-    action(f.render(), "Confirmar y crear").onPress(); await settle(); complete(f); await settle();
+    action(f.render(), "Crear trabajo").onPress(); await settle(); complete(f); await settle();
     const fallback = action(f.render(), label);
     f.security.unlocked = false; f.controls.gate.resolve(); await settle();
     fallback.onPress(); await settle(); assert.equal(f.queued.length + f.created.length, 0);
@@ -361,7 +356,7 @@ for (const phase of ["queued", "confirmed"] as const) {
 test("pending persistence failure never submits and retry preserves the original UUID and payload", async (t) => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount());
   f.controls.hold = "pending"; f.controls.gate = deferred<void>(); f.review();
-  action(f.render(), "Confirmar y crear").onPress(); await settle();
+  action(f.render(), "Crear trabajo").onPress(); await settle();
   f.controls.gate.reject(new Error("DISK_FULL")); await settle();
   assert.equal(f.submitted.length, 0); assert.equal(f.queued.length, 0);
   f.controls.hold = undefined;
@@ -374,7 +369,7 @@ test("pending persistence failure never submits and retry preserves the original
 test("a security lock before pending persistence finishes prevents even the submit callback", async (t) => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount());
   f.controls.hold = "pending"; f.controls.gate = deferred<void>(); f.review();
-  const save = action(f.render(), "Confirmar y crear"); save.onPress(); await settle();
+  const save = action(f.render(), "Crear trabajo"); save.onPress(); await settle();
   f.security.unlocked = false; f.controls.gate.resolve(); await settle(); save.onPress();
   assert.equal(f.submitted.length, 0); assert.equal(f.queued.length, 0);
 });
@@ -383,7 +378,7 @@ for (const scope of ["tenant", "user", "branch", "kind", "storage"] as const) {
   test(`changing ${scope} while the queued marker writes cannot navigate the new creation screen`, async (t) => {
     const f = await creationFixture(); t.after(() => f.hooks.unmount());
     f.controls.hold = "queued"; f.controls.gate = deferred<void>(); f.review();
-    action(f.render(), "Confirmar y crear").onPress(); await settle();
+    action(f.render(), "Crear trabajo").onPress(); await settle();
     f.submit.reject(new OfflineQueuedError(outcome)); await settle(); const oldKey = f.key();
     if (scope === "tenant") f.props.tenant = { ...tenant, id: "tenant-2" };
     if (scope === "user") f.props.user = { ...user(), id: 10 };
@@ -401,7 +396,7 @@ for (const scope of ["tenant", "user", "branch", "kind", "storage"] as const) {
 
 test("a foreign queued outcome cannot advance or overwrite the pending draft", async (t) => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount()); f.review();
-  action(f.render(), "Confirmar y crear").onPress(); await settle();
+  action(f.render(), "Crear trabajo").onPress(); await settle();
   f.submit.reject(new OfflineQueuedError({ ...outcome, operationId: "52b5201d-4ea9-4dad-9f9d-191d11ea8462" })); await settle();
   assert.equal(f.queued.length, 0);
   assert.match(alerts(f.render()), /no corresponde/);
@@ -410,7 +405,7 @@ test("a foreign queued outcome cannot advance or overwrite the pending draft", a
 
 test("missing optional callbacks retain manual back navigation after durable storage", async (t) => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount()); f.props.onQueued = undefined; f.review();
-  action(f.render(), "Confirmar y crear").onPress(); await settle();
+  action(f.render(), "Crear trabajo").onPress(); await settle();
   f.submit.reject(new OfflineQueuedError(outcome)); await settle();
   assert.equal(f.backs(), 0); action(f.render(), "Ver trabajo local").onPress(); await settle();
   assert.equal(f.backs(), 1); assert.equal(f.submitted.length, 1);
@@ -419,7 +414,7 @@ test("missing optional callbacks retain manual back navigation after durable sto
 test("a synchronous callback failure remains a queued navigation error, not a submission failure", async (t) => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount());
   f.props.onQueued = () => { throw new Error("NAVIGATION_FAILED"); }; f.review();
-  const save = action(f.render(), "Confirmar y crear"); save.onPress(); await settle();
+  const save = action(f.render(), "Crear trabajo"); save.onPress(); await settle();
   f.submit.reject(new OfflineQueuedError(outcome)); await settle();
   assert.match(alerts(f.render()), /sigue guardado en la cola local/);
   assert.doesNotMatch(alerts(f.render()), /No se confirmó|no se envió/);
@@ -429,7 +424,7 @@ test("a synchronous callback failure remains a queued navigation error, not a su
 
 test("a retained submit callback observes the latest busy gate before writing or submitting", async (t) => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount()); f.review();
-  const save = action(f.render(), "Confirmar y crear");
+  const save = action(f.render(), "Crear trabajo");
   f.props.busy = true; f.render(); save.onPress(); await settle();
   assert.equal(f.submitted.length, 0); assert.equal(f.writes.some((entry) => entry.phase === "pending"), false);
 });
@@ -437,27 +432,26 @@ test("a retained submit callback observes the latest busy gate before writing or
 test("wizard Next still validates synchronously and never calls submission", async (t) => {
   const f = await creationFixture({ version: 1, kind: "work", phase: "editing", form: emptyCreationForm(date) });
   t.after(() => f.hooks.unmount());
-  action(f.render(), "Continuar a horario").onPress();
+  action(f.render(), "Planificar fecha y horario").onPress();
   assert.match(alerts(f.render()), /Revisa los campos/);
-  assert.ok(action(f.render(), "Continuar a horario")); assert.equal(f.submitted.length, 0);
+  assert.ok(action(f.render(), "Planificar fecha y horario")); assert.equal(f.submitted.length, 0);
 });
 
 test("clock onChange edits the creation draft only; invalid end time still blocks review and valid times require explicit create", async t => {
   const f = await creationFixture(); t.after(() => f.hooks.unmount());
-  action(f.render(), "Continuar a horario").onPress();
+  action(f.render(), "Planificar fecha y horario").onPress();
   let fields = elements<ComponentProps<typeof CreationScheduleFields>>(f.render(), "CreationScheduleFields");
   assert.equal(fields.length, 1);
   assert.equal(fields[0].props.form.startTime, "09:00");
   fields[0].props.onChange("startTime", "23:00"); fields[0].props.onChange("endTime", "00:07");
   assert.equal(f.submitted.length, 0); assert.equal(f.queued.length + f.created.length, 0);
-  action(f.render(), "Revisar creación").onPress();
+  action(f.render(), "Crear trabajo").onPress();
   assert.match(alerts(f.render()), /Revisa los campos/);
   fields = elements<ComponentProps<typeof CreationScheduleFields>>(f.render(), "CreationScheduleFields");
   assert.equal(fields.length, 1); assert.equal(fields[0].props.form.endTime, "00:07");
   fields[0].props.onChange("endTime", "23:59");
-  action(f.render(), "Revisar creación").onPress();
   assert.equal(f.submitted.length, 0);
-  const confirm = action(f.render(), "Confirmar y crear"); confirm.onPress(); confirm.onPress(); await settle();
+  const confirm = action(f.render(), "Crear trabajo"); confirm.onPress(); confirm.onPress(); await settle();
   assert.equal(f.submitted.length, 1);
   assert.deepEqual(f.submitted[0], { ...input, schedule: { date, startTime: "23:00", endTime: "23:59" } });
   f.submit.reject(new OfflineQueuedError(outcome)); await settle();

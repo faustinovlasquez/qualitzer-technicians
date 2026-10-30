@@ -99,7 +99,8 @@ export interface WorkDetailScreenProps {
   onUpload: (photos: LocalPhoto[], stepId?: string) => Promise<void>;
   onReport: (note: string) => Promise<void>;
   initialTab?: WorkDetailTab;
-  initialAction?: "deliver";
+  /** «deliver»: abre la entrega; «start»: inicia el trabajo apenas carga (crear e iniciar). */
+  initialAction?: "deliver" | "start";
   allowEditExecutionTime: boolean;
   /** En false la sucursal trabaja con horas manuales: no se ofrece iniciar el cronómetro. */
   showWorkTimer?: boolean;
@@ -637,6 +638,14 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
 
   // Mantenimientos siempre usan cronómetro; con horas manuales solo se puede pausar un trabajo ya iniciado.
   const timerEnabled = maintenance || props.showWorkTimer !== false || !props.allowEditExecutionTime;
+  // «Crear e iniciar»: apenas la ficha está lista, el mismo «Iniciar trabajo» del pie (cronómetro incluido, también sin señal).
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (props.initialAction !== "start" || autoStarted.current) return;
+    if (readOnly || disabled || timerNeedsAttention || !timerEnabled || !work.canExecute || desiredStatus !== "pending" || !withinRange(selectedDate, range)) return;
+    autoStarted.current = true;
+    updateStatus({ status: "in_progress", executionDates: [selectedDate] });
+  }, [props.initialAction, readOnly, disabled, timerNeedsAttention, timerEnabled, work.canExecute, desiredStatus, selectedDate]);
   // Datos de la tarjeta superior: equipo, ubicación, fotos y el mismo inicio/pausa del pie (con sus mismas condiciones).
   const heroEquipment = maintenance ? group.equipment : work.workEquipment ?? group.equipment;
   // Sistema y subsistema del trabajo (los define el mantenimiento en la web): a la vista en la tarjeta.

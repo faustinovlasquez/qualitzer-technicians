@@ -23,6 +23,7 @@ import { WorkshopReceptionScreen } from "./reception/WorkshopReceptionScreen";
 import { ReceptionDoneModal } from "./emails/ReceptionDoneModal";
 import { WorkshopDeliveryScreen } from "./delivery/WorkshopDeliveryScreen";
 import { WorkshopOrderScreen, type Section } from "./order/WorkshopOrderScreen";
+import { formatWorkshopEntryCode } from "../domain/workshopEntryCode";
 
 type WorkshopModel = ReturnType<typeof useWorkshopBoard>;
 interface EntryRef { entry: WorkshopEntry; area: WorkshopArea }
@@ -70,7 +71,7 @@ export type WorkshopCreation = Pick<CreationScreenProps, "user" | "tenant" | "co
 
 /** Mientras llega la ficha de un ingreso recién guardado se muestra con lo mínimo; la ficha completa lo reemplaza. */
 const placeholderEntry = (entryId: number): WorkshopEntry => ({
-  id: entryId, code: `ING-${String(entryId).padStart(5, "0")}`, title: null, statusKey: null, statusColor: null, subStatusName: null, equipmentLabel: "Cargando…",
+  id: entryId, code: formatWorkshopEntryCode(entryId), title: null, statusKey: null, statusColor: null, subStatusName: null, equipmentLabel: "Cargando…",
   equipmentCode: null, customerName: null, isInternalEntry: false, daysInArea: 0, estimatedDeliveryAt: null, isReceptionPending: true, negotiationsCount: 0, imageUrl: null
 });
 const placeholderArea = (areaId: number | null, title: string | null): WorkshopArea => ({ id: areaId ?? 1, title: title ?? "", maxSlots: 0, occupiedSlots: 0, hasUnlimitedSlots: true, entries: [] });

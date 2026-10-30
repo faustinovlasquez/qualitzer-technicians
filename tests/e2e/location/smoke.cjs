@@ -167,7 +167,7 @@ async function workEditFlows(browser, base) {
     } }; resize(); new MutationObserver(resize).observe(document.body, { childList: true, subtree: true }); });
     const screenshot = `work-edit-${width}-${scale}x.png`; await page.screenshot({ path: path.join(output, screenshot), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-    await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+    await page.getByRole("button", { name: "Planificar fecha y horario", exact: true }).click();
     await page.getByRole("textbox", { name: "Fecha *", exact: true }).fill("2026-09-23");
     await page.getByRole("button", { name: "Revisar cambios", exact: true }).click();
     await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
@@ -181,7 +181,7 @@ async function workEditFlows(browser, base) {
     await page.getByRole("button", { name: "Editar trabajo", exact: true }).click();
     await page.getByText("Equipo heredado", { exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: /catálogo/i }).count(), 0);
-    await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+    await page.getByRole("button", { name: "Planificar fecha y horario", exact: true }).click();
     await page.getByRole("button", { name: "Revisar cambios", exact: true }).click();
     await page.evaluate(() => { window.workEditFixture.conflict = true; });
     await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
@@ -230,12 +230,12 @@ async function equipmentPickerFlows(browser, base) {
     await page.getByRole("textbox", { name: "Título *", exact: true }).fill("Trabajo de prueba");
     if (kind === "maintenance") {
       await page.getByRole("textbox", { name: "Motivo del mantenimiento *", exact: true }).fill("Inspeccionar equipo");
-      await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+      await page.getByRole("button", { name: "Planificar fecha y horario", exact: true }).click();
       await page.getByText("Selecciona un equipo.", { exact: true }).waitFor();
     }
     await associate.click(); await page.getByRole("tab", { name: "Catálogo", exact: true }).click();
     await page.getByRole("button", { name: "BULLDOZER D10T · Agrícola", exact: true }).click();
-    await page.getByRole("button", { name: "Continuar a horario", exact: true }).click();
+    await page.getByRole("button", { name: "Planificar fecha y horario", exact: true }).click();
     await page.getByRole("textbox", { name: "Fecha *", exact: true }).waitFor();
     report.cases.push({ view: "equipment-picker", kind, width, scale, passed: true, screenshot, dialogFile, apiSimulated: true });
     await context.close();

@@ -208,6 +208,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       offline={app.offlineController ? app.offline : undefined}
       onCreated={app.onCreated}
       onQueued={app.onOfflineQueuedCreate}
+      onStartRequest={app.setStartAfterCreate}
     /></FadeIn>;
   }
   // «Entregar» desde la tarjeta abre solo la ventana de entrega sobre la lista, sin ir al detalle.
