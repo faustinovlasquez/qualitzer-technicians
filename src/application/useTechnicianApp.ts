@@ -838,18 +838,27 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const still = () => version === sessionVersion.current && repository.current === repo && state.current.session === current && isAccessAllowed();
     try {
       const wide: DateRange = { startDate: shiftDate(today, -15), endDate: shiftDate(today, 15) };
-      const all = normalizeAssignmentsChecklistProgress(await repo.assignments(wide, branchId));
-      if (!still()) return null;
-      if (all.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
-      const group = all.groups.find((item) => item.works.some((work) => work.id === String(workId)));
-      if (!group) return "Este trabajo no está en tu agenda de estos días. Puede estar asignado a otro técnico o planificado más adelante.";
-      const groupId = Number(group.id.replace(/^(maintenance|external|direct-np|direct)-/, ""));
-      const target: NoticeTarget = { groupType: group.id.startsWith("maintenance-") ? "maintenance" : group.id.startsWith("external-") ? "negotiation" : "work", groupId, workId };
-      const day = noticeDayInRange(all, target, wide, today) ?? today;
-      const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(dailyRange(day), branchId));
-      if (!still()) return null;
-      const located = locateNotice(fresh, target, day);
-      if (!located?.work) return "No se pudo abrir el trabajo en tu agenda. Actualiza y vuelve a intentarlo.";
+      const find = async (recentCopies: boolean) => {
+        const all = normalizeAssignmentsChecklistProgress(await repo.assignments(wide, branchId, recentCopies ? { maxAgeMs: ASSIGNMENT_CACHE_FRESH_MS } : undefined));
+        if (!still()) return null;
+        if (all.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
+        const group = all.groups.find((item) => item.works.some((work) => work.id === String(workId)));
+        if (!group) return { problem: "Este trabajo no está en tu agenda de estos días. Puede estar asignado a otro técnico o planificado más adelante." };
+        const groupId = Number(group.id.replace(/^(maintenance|external|direct-np|direct)-/, ""));
+        const target: NoticeTarget = { groupType: group.id.startsWith("maintenance-") ? "maintenance" : group.id.startsWith("external-") ? "negotiation" : "work", groupId, workId };
+        const day = noticeDayInRange(all, target, wide, today) ?? today;
+        const fresh = normalizeAssignmentsChecklistProgress(await repo.assignments(dailyRange(day), branchId));
+        if (!still()) return null;
+        const located = locateNotice(fresh, target, day);
+        if (!located?.work) return { problem: "No se pudo abrir el trabajo en tu agenda. Actualiza y vuelve a intentarlo." };
+        return { day, fresh, located: { ...located, work: located.work } };
+      };
+      // Primero con las copias recientes (31 días son 31 solicitudes); solo si ahí no calza se consulta todo al servidor.
+      let found = await find(true);
+      if (found && "problem" in found) found = await find(false);
+      if (!found) return null;
+      if ("problem" in found) return found.problem ?? null;
+      const { day, fresh, located } = found;
       const nextRange = dailyRange(day);
       const nextWork: SelectedWork = { groupId: located.group.id, workId: located.work.id, queryDate: day, scheduledDate: located.scheduledDate ?? day, initialTab: options?.tab ?? "work", initialAction: options?.action };
       manualRefresh.current = { session: current, range: nextRange };
@@ -874,7 +883,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     const today = scheduleClock(current.user.system.timezone)?.day;
     if (!today) throw new Error("La sucursal no tiene una zona horaria válida configurada.");
     const version = sessionVersion.current;
-    const all = normalizeAssignmentsChecklistProgress(await repo.assignments({ startDate: shiftDate(today, -15), endDate: shiftDate(today, 15) }, current.branchId));
+    // Con copias recientes: se pide cada vez que se abre un ingreso y son 31 solicitudes, que agotarían el límite de la pasarela.
+    const all = normalizeAssignmentsChecklistProgress(await repo.assignments({ startDate: shiftDate(today, -15), endDate: shiftDate(today, 15) }, current.branchId, { maxAgeMs: ASSIGNMENT_CACHE_FRESH_MS }));
     if (version !== sessionVersion.current || repository.current !== repo || state.current.session !== current) throw new Error("La sesión cambió durante la consulta.");
     if (all.technician.id !== current.user.workerId) throw new Error("La identidad del trabajador cambió. Vuelve a ingresar.");
     return all;
@@ -887,6 +897,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (!day) throw new Error("El trabajo no tiene una fecha válida. Actualiza la información.");
     const value: WorkScope = { ...dailyRange(day), groupId: group.id, workId: work.id, companyBranchId: session.branchId };
     await performMutation(value, (repo, scope) => repo.status(scope, { ...input, executionDates: input.executionDates ?? [scope.startDate] }), true, statusLocationAction(input, work.status));
+    // La tarjeta se vuelve a armar con copias recientes: se renueva la del día que cambió para que muestre el estado nuevo.
+    await repository.current?.assignments(dailyRange(day), session.branchId).catch(() => undefined);
   }
 
   /** Crear un trabajo (o un mantenimiento, si el equipo es propio) de un ingreso con el formulario normal de creación (solo con conexión). */

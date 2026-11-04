@@ -4,6 +4,7 @@ import { Button } from "../../ui/components";
 import { palette } from "../../ui/theme";
 import type { WorkshopFreeWork } from "../../domain/workshopWorks";
 import { OptionRow, PickerSheet, PickerState, SearchBox } from "../intake/IntakePickers";
+import { retryWhenRateLimited } from "../requestPacing";
 
 /** Elegir trabajos libres (sin OT ni ingreso) para unirlos al ingreso. */
 export function LinkWorksSheet({ load, onLink, onClose }: {
@@ -21,15 +22,16 @@ export function LinkWorksSheet({ load, onLink, onClose }: {
   const [saving, setSaving] = useState(false);
   const loader = useRef(load);
   loader.current = load;
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
       setItems(null); setError("");
-      loader.current(query.trim()).then((result) => { if (active) setItems(result.items); },
+      retryWhenRateLimited(() => loader.current(query.trim()), () => active).then((result) => { if (active) setItems(result.items); },
         (failure: unknown) => { if (active) setError(failure instanceof Error ? failure.message : "No se pudieron cargar los trabajos."); });
     }, query ? 350 : 0);
     return () => { active = false; clearTimeout(timer); };
-  }, [query]);
+  }, [query, attempt]);
 
   async function link() {
     setSaving(true); setSaveError("");
@@ -41,7 +43,7 @@ export function LinkWorksSheet({ load, onLink, onClose }: {
   return <PickerSheet title="Unir trabajos existentes" onClose={saving ? () => undefined : onClose} search={<SearchBox value={query} onChange={setQuery} placeholder="Buscar trabajo" />}
     footer={<Button title={chosen.length === 0 ? "Elige trabajos" : `Unir ${chosen.length} trabajo(s)`} icon="link-outline" loading={saving} disabled={saving || chosen.length === 0} onPress={() => void link()} />}>
     <Text style={{ fontSize: 12, color: palette.textSecondary }}>Trabajos tuyos que no están en ninguna OT ni en otro ingreso.</Text>
-    <PickerState loading={items === null && !error} error={error} empty={items !== null && items.length === 0 ? "No hay trabajos libres para unir." : null} />
+    <PickerState loading={items === null && !error} error={error} onRetry={() => setAttempt((value) => value + 1)} empty={items !== null && items.length === 0 ? "No hay trabajos libres para unir." : null} />
     {hidden.map((item) => <OptionRow key={`picked-${item.id}`} multiple title={`${item.code} · ${item.title}`} subtitle="Elegido" selected onPress={() => toggle(item)} />)}
     {(items ?? []).map((item) => <OptionRow key={item.id} multiple title={`${item.code} · ${item.title}`} subtitle={item.statusName} selected={chosen.includes(item.id)}
       onPress={() => toggle(item)} />)}

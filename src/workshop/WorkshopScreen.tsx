@@ -14,6 +14,7 @@ import { ChatThread } from "../chat/ChatThread";
 import type { WorkshopArea, WorkshopEntry } from "../domain/workshopBoard";
 import type { InspectionKind } from "../domain/workshopInspection";
 import { CreationScreen, type CreationScreenProps } from "../screens/creation/CreationScreen";
+import { singleFlight } from "./requestPacing";
 import type { useWorkshopBoard } from "./useWorkshopBoard";
 import { WorkshopBoardScreen } from "./WorkshopBoardScreen";
 import { WorkshopEntryScreen } from "./WorkshopEntryScreen";
@@ -108,12 +109,10 @@ export function WorkshopScreen({ workshop, onSectionChange, onOpenWork, creation
 
   // Asignaciones amplias (±15 días) para la tarjeta completa de los trabajos del ingreso o la OT abierta.
   const [wide, setWide] = useState<AssignmentData | null>(null);
-  const wideRequest = useRef(0);
-  const reloadWide = () => {
-    if (!assignments?.loadWide) return;
-    const request = ++wideRequest.current;
-    assignments.loadWide().then((data) => { if (request === wideRequest.current) setWide(data); }, () => undefined);
-  };
+  const loadWide = useRef(assignments?.loadWide);
+  loadWide.current = assignments?.loadWide;
+  // Son muchos días y cada uno es una solicitud: nunca dos cargas al mismo tiempo, para no agotar el límite de la pasarela.
+  const [reloadWide] = useState(() => singleFlight(async () => { const data = await loadWide.current?.(); if (data) setWide(data); }));
   const openedEntry = view && "ref" in view ? view.ref.entry.id : null;
   useEffect(() => { if (view?.kind === "entry" || view?.kind === "order") reloadWide(); }, [view?.kind, openedEntry, assignments?.data?.generatedAt]);
 
