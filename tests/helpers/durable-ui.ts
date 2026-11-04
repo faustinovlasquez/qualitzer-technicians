@@ -90,6 +90,10 @@ export function uiModule<T>(relative: string, hooks: UiHooks, overrides: { [name
     if (id.endsWith("/AssignmentInfoBlock")) return uiModule("screens/orders/AssignmentInfoBlock.tsx", hooks, overrides);
     if (id.endsWith("/schedule/AgendaTimeline")) return { AgendaTimeline: "AgendaTimeline" };
     if (id.endsWith("/files/CameraPermissionGuide")) return { CameraPermissionGuide: "CameraPermissionGuide" };
+    if (id.endsWith("/files/FileGallery")) return { FileGallery: "FileGallery" };
+    if (id.endsWith("/EvidenceCollage")) return { EvidenceCollage: "EvidenceCollage" };
+    if (id.endsWith("/ImageGalleryViewer")) return { ImageGalleryViewer: "ImageGalleryViewer", canDownloadImage: () => true, downloadImage: () => undefined };
+    if (id.endsWith("/files/driveView") || id === "./driveView") return { DriveViewSwitch: "DriveViewSwitch", GRID_GAP: 10, useDriveView: () => ({ view: "small", setView: () => undefined, tileSize: 96, tileStyle: {}, onGridLayout: () => undefined }) };
     if (id.endsWith("/security/useTrustedNativePicker")) return { useTrustedNativePicker: () => <T>(operation: () => Promise<T>) => operation() };
     if (id.endsWith("/OfflineFileCard")) return { OfflineFileCard: "OfflineFileCard" };
     if (id.endsWith("/workTeam/WorkTeamSheet")) return workTeamSheetStub;

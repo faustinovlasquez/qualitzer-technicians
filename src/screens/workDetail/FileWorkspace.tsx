@@ -7,6 +7,8 @@ import type { OfflineController, OfflineSnapshot } from "../../domain/offline";
 import { OfflineFileCard } from "../offline/OfflineFileCard";
 import { isConfirmedAttachment, offlineAttachment, pendingDocumentAttachment, type PendingDocument } from "../offline/offlineUi";
 import { syncUserError, userErrorText } from "../offline/syncUserPresentation";
+import { DISCARDABLE_STATUSES } from "../../offline/discard";
+import { FileGallery } from "./files/FileGallery";
 import { BodyText, Button, IconButton, SectionTitle } from "../../ui/components";
 import { palette } from "../../ui/theme";
 import { Notice } from "./DetailUi";
@@ -42,6 +44,10 @@ export interface FileWorkspaceProps {
   onLoad: () => Promise<Attachment[]>;
   onUpload: (files: LocalPhoto[]) => Promise<void>;
   onDelete?: (fileId: string) => Promise<void>;
+  /** Quita de la cola un envío que ya falló, para que no quede atascado en la lista. */
+  onDiscardPending?: (operationId: string) => Promise<void>;
+  /** Muestra los archivos como el gestor: fotos grandes, pequeñas o lista, con su avance mientras suben. */
+  gallery?: boolean;
   offline?: OfflineSnapshot | null;
   pending?: PendingDocument[];
   readLocalFile?: OfflineController["readLocalFile"];
@@ -103,6 +109,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
   const [syncWatch, setSyncWatch] = useState<{ total: number } | null>(null);
   const [savedFlash, setSavedFlash] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<Attachment | null>(null);
+  const [discarding, setDiscarding] = useState<{ operationId: string; name: string } | null>(null);
   const [help, setHelp] = useState(false);
   useEffect(() => {
     const handler = props.backHandler;
@@ -304,11 +311,33 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     finally { draft.store.endFiles(lease); if (active.current) setOperation(null); }
   }
 
+  async function discardPending(): Promise<void> {
+    const onDiscard = callbacks.current.onDiscardPending;
+    if (!active.current || !discarding || !onDiscard || callbacks.current.offline?.authBlocked) return;
+    const lease = draft.store.beginFiles();
+    if (!lease) return;
+    const { operationId } = discarding;
+    setMessage(null);
+    setOperation("delete");
+    try {
+      await onDiscard(operationId);
+      if (active.current) {
+        generation.current += 1;
+        setFiles(current => current?.filter(file => offlineAttachment(file)?.offline.operationId !== operationId) ?? null);
+        setDiscarding(null);
+        setMessage({ text: "Envío descartado. Si lo necesitas, puedes agregar el archivo otra vez.", tone: "success" });
+      }
+      if (active.current) await load();
+    } catch (error) { if (active.current) setMessage({ text: `No se pudo descartar el envío: ${errorMessage(error)}`, tone: "error" }); }
+    finally { draft.store.endFiles(lease); if (active.current) setOperation(null); }
+  }
+
   async function retryDraft(): Promise<void> {
     try { await draft.store.retry(); }
     catch (error) { if (active.current) setMessage({ text: errorMessage(error), tone: "error" }); }
   }
 
+  const refreshButton = <IconButton label={loadError ? "Reintentar archivos" : "Actualizar archivos"} name="refresh-outline" disabled={loading || props.busy || draft.fileBusy || draft.closed} onPress={() => { void load(); }} />;
   const listContent = <View style={styles.tight}>
       {props.notices}
       {props.readOnly ? <Notice message="Solo lectura · puedes consultar los archivos." /> : null}
@@ -318,21 +347,30 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       {saveStatus}
       {message ? <Notice message={userErrorText(message.text)} tone={message.tone} onDismiss={() => setMessage(null)} /> : null}
       {props.compact && Platform.OS === "web" && pending.length > 0 ? <Text style={styles.caption}>Sin guardar: se pierden al recargar.</Text> : null}
-      {draft.hydrated && pending.length > 0 ? <Text style={styles.label}>{pending.length} sin guardar · {fileSizeLabel(draft.files.reduce((sum, file) => sum + file.size, 0))} / 40 MiB</Text> : null}
-      <PendingFileList files={props.offline !== undefined ? pending : draft.files} expanded={props.autoSave} disabled={unavailable} onRemove={(id) => { void remove(id); }} />
+      {!props.gallery && draft.hydrated && pending.length > 0 ? <Text style={styles.label}>{pending.length} sin guardar · {fileSizeLabel(draft.files.reduce((sum, file) => sum + file.size, 0))} / 40 MiB</Text> : null}
+      {!props.gallery ? <PendingFileList files={props.offline !== undefined ? pending : draft.files} expanded={props.autoSave} disabled={unavailable} onRemove={(id) => { void remove(id); }} /> : null}
       {draft.files.some((file) => file.uploaded) ? <View style={styles.tight}><Notice message="Ya transferidos; no se reenviarán. Falta limpiar el borrador original." tone="warning" />{draft.files.filter((file) => file.uploaded).map((file) => <Button key={file.id} title={`Limpiar borrador original: ${file.name}`} variant="secondary" disabled={unavailable} onPress={() => void remove(file.id)} />)}</View> : null}
-      <View style={styles.between}><Text style={styles.label}>{[...displayedFiles.values()].filter(isConfirmedAttachment).length}{props.mode === "demo" ? " en listado demo" : " confirmados"} · {localFiles.filter((file) => !file.offline.confirmed).length} en cola</Text><IconButton label={loadError ? "Reintentar archivos" : "Actualizar archivos"} name="refresh-outline" disabled={loading || props.busy || draft.fileBusy || draft.closed} onPress={() => { void load(); }} /></View>
+      {!props.gallery ? <View style={styles.between}><Text style={styles.label}>{[...displayedFiles.values()].filter(isConfirmedAttachment).length}{props.mode === "demo" ? " en listado demo" : " confirmados"} · {localFiles.filter((file) => !file.offline.confirmed).length} en cola</Text>{refreshButton}</View> : null}
       {props.mode === "demo" && localFiles.some((file) => !file.offline.confirmed) ? <Notice message="El listado demo no confirma los envíos en cola. Sus copias pendientes se conservan." tone="warning" /> : null}
       {loading ? <View style={styles.row}><ActivityIndicator color={palette.primary} /><BodyText>Consultando archivos…</BodyText></View> : null}
       {loadError ? <Notice message={`${userErrorText(loadError)}${files !== null ? " La lista visible corresponde a la última consulta correcta." : " No se ha verificado si hay archivos."}`} tone="error" /> : null}
-      {localFiles.map((file) => {
+      {props.gallery ? <FileGallery saved={remoteFiles} local={localFiles} drafts={props.offline !== undefined ? pending : draft.files} uploadingDrafts={operation === "upload" || operation === "prepare"}
+        online={props.offline === undefined || props.offline?.online === true} mode={props.mode} readLocalFile={!props.offline?.authBlocked ? props.readLocalFile : undefined}
+        errorFor={(file) => { const error = props.pending?.find((entry) => entry.id === file.offline.operationId)?.lastError; return error ? syncUserError(error) : null; }}
+        canDiscard={(file) => !!props.onDiscardPending && !!file.offline.operationId && !!file.offline.status && DISCARDABLE_STATUSES.includes(file.offline.status) && operation === null && props.busy !== true && props.offline?.authBlocked !== true}
+        canDelete={!unavailable && !loading && !loadError && !deletionDisabled} canRemoveDraft={!unavailable} onDelete={props.onDelete ? setDeleting : undefined}
+        onDiscard={(file) => setDiscarding({ operationId: file.offline.operationId!, name: file.name })} onRemoveDraft={(id) => { void remove(id); }} action={refreshButton}
+        empty={files !== null && !loadError && !loading ? <BodyText>Aún no hay archivos. Agrega uno con los botones de arriba.</BodyText> : null} /> : null}
+      {!props.gallery ? localFiles.map((file) => {
         const error = props.pending?.find((operation) => operation.id === file.offline.operationId)?.lastError;
         return <View key={String(file.id)} style={styles.tight}>
         <OfflineFileCard file={file} readLocalFile={props.offline?.authBlocked ? undefined : props.readLocalFile} expanded={props.autoSave} />
         {error ? <Notice message={syncUserError(error)} tone="warning" /> : null}
-        {props.onDelete ? <Button title="Eliminar archivo" variant="secondary" disabled={unavailable || deletionDisabled || !file.offline.confirmed || String(file.id).startsWith("local-") || loading || !!loadError} onPress={() => setDeleting(file)} /> : null}
-      </View>; })}
-      {remoteFiles.length > 0 ? <SavedFileList files={remoteFiles} mode={props.mode} readLocalFile={!loadError && !props.offline?.authBlocked ? props.readLocalFile : undefined} canDelete={!unavailable && !loading && !loadError && !deletionDisabled} onDelete={props.onDelete ? setDeleting : undefined} /> : displayedFiles.size === 0 && files !== null && !loadError && !loading ? <BodyText>No hay archivos guardados en este destino.</BodyText> : null}
+        {props.onDiscardPending && file.offline.operationId && file.offline.status && DISCARDABLE_STATUSES.includes(file.offline.status)
+          ? <Button title="Descartar este envío" icon="trash-outline" variant="secondary" disabled={operation !== null || props.busy === true || props.offline?.authBlocked === true} onPress={() => setDiscarding({ operationId: file.offline.operationId!, name: file.name })} />
+          : props.onDelete ? <Button title="Eliminar archivo" variant="secondary" disabled={unavailable || deletionDisabled || !file.offline.confirmed || String(file.id).startsWith("local-") || loading || !!loadError} onPress={() => setDeleting(file)} /> : null}
+      </View>; }) : null}
+      {props.gallery ? null : remoteFiles.length > 0 ? <SavedFileList files={remoteFiles} mode={props.mode} readLocalFile={!loadError && !props.offline?.authBlocked ? props.readLocalFile : undefined} canDelete={!unavailable && !loading && !loadError && !deletionDisabled} onDelete={props.onDelete ? setDeleting : undefined} /> : displayedFiles.size === 0 && files !== null && !loadError && !loading ? <BodyText>No hay archivos guardados en este destino.</BodyText> : null}
       {props.listFooter}
     </View>;
   const connection = props.offline === null ? "Recuperando cola…" : props.offline?.authBlocked ? "Verifica tu sesión · pendientes conservados" : props.mode === "demo" ? "Demostración · guardado local" : props.offline === undefined ? "Carga manual · espera confirmación" : "Guarda los archivos seleccionados";
@@ -352,11 +390,12 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       </View> : null}
     </View>
     {props.compact ? <ScrollView ref={list} style={workspaceStyles.list} contentContainerStyle={workspaceStyles.listContent} keyboardShouldPersistTaps="handled" testID="files-list-scroll">{listContent}</ScrollView> : <View style={workspaceStyles.listContent}>{listContent}</View>}
-    <View style={workspaceStyles.dock} testID="files-save-dock">
+    {/* Con galería la subida es automática: la barra de guardar solo aparece si algo quedó sin enviar. */}
+    {props.gallery && operation !== "select" && operation !== "upload" && pending.length === 0 ? null : <View style={workspaceStyles.dock} testID="files-save-dock">
       <Text style={styles.caption} accessibilityLiveRegion="polite" numberOfLines={2}>{progress || (operation === "select" ? "Esperando selección…" : operation === "prepare" ? "Protegiendo archivos…" : props.autoSave && !offlineLoading && !props.offline?.authBlocked ? pending.length > 0 ? `${pending.length} archivo(s) por guardar` : localFiles.length > 0 ? "Guardado local · pendiente de sincronizar" : "Sin archivos por guardar" : connection)}</Text>
       {!props.compact && Platform.OS === "web" && pending.length > 0 ? <Text style={styles.caption}>Sin guardar: se pierden al recargar.</Text> : null}
       {operation === "select" && Platform.OS === "web" ? <Button title="Ya cerré el selector · cancelar" variant="secondary" onPress={cancelPicker} /> : !props.readOnly && (!props.autoSave || pending.length > 0 || operation === "upload") ? <Button title={props.autoSave ? `${props.compact ? "Guardar" : "Guardar pendientes"} · ${pending.length}` : savePresentation.title} accessibilityLabel={props.autoSave ? `Guardar pendientes · ${pending.length}` : savePresentation.title} icon="cloud-upload-outline" disabled={unavailable || offlineLoading || pending.length === 0 || draft.saving || draft.error !== null} loading={operation === "upload"} onPress={() => { void upload(); }} /> : null}
-    </View>
+    </View>}
     <CameraPermissionGuide guide={cameraGuide} />
     <Modal visible={help} transparent animationType="fade" onRequestClose={() => setHelp(false)}>
       <View style={styles.modalOverlay}><View style={styles.modalCard} accessibilityViewIsModal><ScrollView contentContainerStyle={styles.modalContent}>
@@ -377,6 +416,15 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
         {message?.tone === "error" ? <Notice message={userErrorText(message.text)} tone="error" /> : null}
         <Button title="Cancelar" variant="secondary" disabled={operation === "delete"} onPress={() => setDeleting(null)} />
         <Button title="Confirmar eliminación" variant="danger" icon="trash-outline" loading={operation === "delete"} disabled={unavailable || deletionDisabled || !props.onDelete} onPress={() => { void deleteSaved(); }} />
+      </ScrollView></View></View>
+    </Modal> : null}
+    {discarding !== null ? <Modal visible transparent animationType="fade" onRequestClose={() => { if (operation !== "delete") setDiscarding(null); }}>
+      <View style={styles.modalOverlay}><View style={styles.modalCard} accessibilityViewIsModal><ScrollView contentContainerStyle={styles.modalContent}>
+        <SectionTitle title="¿Descartar este envío?" subtitle={discarding.name} />
+        <BodyText>Se quitará de la lista y se borrará su copia de este dispositivo. Si todavía la necesitas, descárgala antes.</BodyText>
+        {message?.tone === "error" ? <Notice message={userErrorText(message.text)} tone="error" /> : null}
+        <Button title="Cancelar" variant="secondary" disabled={operation === "delete"} onPress={() => setDiscarding(null)} />
+        <Button title="Descartar envío" variant="danger" icon="trash-outline" loading={operation === "delete"} onPress={() => { void discardPending(); }} />
       </ScrollView></View></View>
     </Modal> : null}
   </View>;

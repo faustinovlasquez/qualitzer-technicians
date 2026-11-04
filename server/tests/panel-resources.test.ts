@@ -568,6 +568,31 @@ test("el gestor de archivos usa los archivos del trabajo, del mantenimiento o de
   }
 });
 
+test("el trabajo dentro de un mantenimiento muestra su carpeta Lista de chequeo y solo esa rama del árbol", async (t) => {
+  const { request, state } = await harness(t);
+  state.assignments = assignments([group({ id: "maintenance-50", type: "internal_maintenance" })]);
+  const drive = workPath("maintenance-50", "11", "/drive");
+  state.failures.set("GET /api/maintenance_files/folders/50", { status: 200, body: [
+    { id: "maintenance_work_11", name: "Trabajo 1", fileCount: 3, parentId: null, readOnly: true },
+    { id: "maintenance_work_11_checklist", name: "Lista de chequeo", fileCount: 2, parentId: "maintenance_work_11", readOnly: true },
+    { id: "maintenance_work_12_checklist", name: "Lista de chequeo", fileCount: 9, parentId: "maintenance_work_12", readOnly: true },
+    { id: 4, name: "Informes", fileCount: 1, parentId: null },
+  ] });
+  state.failures.set("GET /api/maintenance_files/50", { status: 200, body: { data: [{ id: 7, name: "foto.jpg", url: "https://files.example.invalid/foto.jpg" }], totalRows: 1, totalPages: 1 } });
+  const root = await request(drive);
+  assert.equal(root.response.status, 200);
+  const listing = root.data as { folders: Array<{ id: unknown; parentId: unknown; readOnly: boolean }>; capabilities: { folders: boolean } };
+  assert.deepEqual(listing.folders.map((folder) => [folder.id, folder.parentId, folder.readOnly]), [["maintenance_work_11_checklist", null, true]]);
+  assert.equal(listing.capabilities.folders, false);
+  const lastFilter = () => JSON.parse(state.calls.filter((call) => call.path === "/api/maintenance_files/50" && call.method === "GET").at(-1)?.query.get("filters") ?? "{}").folderId;
+  assert.equal(lastFilter(), "maintenance_work_11");
+  const inside = await request(`${drive}${drive.includes("?") ? "&" : "?"}folderId=maintenance_work_11_checklist`);
+  assert.equal(inside.response.status, 200);
+  assert.equal(lastFilter(), "maintenance_work_11_checklist");
+  // Una carpeta de otro trabajo del mismo mantenimiento no se puede abrir desde aquí.
+  assert.equal((await request(`${drive}${drive.includes("?") ? "&" : "?"}folderId=maintenance_work_12_checklist`)).response.status, 404);
+});
+
 test("el gestor de archivos no abre un grupo sin archivos propios ni uno que no está asignado", async (t) => {
   const { request, state } = await harness(t);
   state.assignments = assignments([group()]);

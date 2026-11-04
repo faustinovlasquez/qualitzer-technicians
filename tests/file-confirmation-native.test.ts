@@ -78,6 +78,7 @@ test("actual FileWorkspace labels demo listings separately, retains review copie
     if (id === "./files/fileRules") return { MAX_FILES: 100, fileSizeLabel: () => "0 MiB" };
     if (id === "./files/filePicker" || id === "./files/saveFileBatch") return {};
     if (id === "./files/WorkspaceFileList") return { PendingFileList: "PendingFileList", SavedFileList: "SavedFileList" };
+    if (id === "./files/FileGallery") return { FileGallery: "FileGallery" };
     if (id === "./files/WorkspaceDraftStore") return { useWorkspaceDraft: () => ({ store, files: [], hydrated: true, closed: false, error: null }) };
     return localRequire(id);
   });

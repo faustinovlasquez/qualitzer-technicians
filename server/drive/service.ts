@@ -30,12 +30,19 @@ export class DriveService {
   constructor(private readonly upstream: Upstream) {}
 
   async folders(target: DriveTarget): Promise<DriveFolder[]> {
-    if (target.fixedFolder) return [];
-    const raw = await this.upstream.request(`/${target.base}/folders/${target.entityId}`, { token: target.token, query: new URLSearchParams({
-      filters: JSON.stringify({ companyBranchId: target.companyBranchId })
-    }) });
+    const fixedFolder = target.fixedFolder;
+    let raw: unknown;
+    try {
+      raw = await this.upstream.request(`/${target.base}/folders/${target.entityId}`, { token: target.token, query: new URLSearchParams({
+        filters: JSON.stringify({ companyBranchId: target.companyBranchId })
+      }) });
+    } catch (error) {
+      // Sin acceso al árbol, un trabajo dentro de un mantenimiento sigue mostrando sus archivos.
+      if (fixedFolder && error instanceof GatewayError && [403, 404].includes(error.status)) return [];
+      throw error;
+    }
     const rows = Array.isArray(raw) ? raw : z.object({ data: z.array(z.unknown()) }).passthrough().parse(raw).data;
-    return rows.slice(0, 500).flatMap((row) => {
+    const folders = rows.slice(0, 500).flatMap((row) => {
       const parsed = rawFolderSchema.safeParse(row);
       if (!parsed.success) return [];
       const folder = driveFolderSchema.safeParse({
@@ -48,10 +55,13 @@ export class DriveService {
       });
       return folder.success ? [folder.data] : [];
     });
+    if (!fixedFolder) return folders;
+    // La carpeta fija hace de carpeta principal: se ven sus subcarpetas, como «Lista de chequeo».
+    return folders.filter((folder) => folder.parentId !== null && String(folder.parentId) === fixedFolder).map((folder) => ({ ...folder, parentId: null }));
   }
 
   private async page(target: DriveTarget, folderId: DriveFolderId | null, search: string | null, page: number) {
-    const folder = target.fixedFolder ?? folderId;
+    const folder = folderId ?? target.fixedFolder ?? null;
     return parseUpstream(panelFilesSchema, await this.upstream.request(`/${target.base}/${target.entityId}`, { token: target.token, query: new URLSearchParams({
       companyBranchId: String(target.companyBranchId),
       filters: JSON.stringify({ companyBranchId: target.companyBranchId, ...(folder !== null ? { folderId: folder } : {}), ...(search ? { search } : {}) }),
@@ -104,7 +114,7 @@ export class DriveService {
     const folder = await this.folderOf(target, folderId);
     if (folder?.readOnly) throw new GatewayError(409, "FOLDER_READ_ONLY", "En esta carpeta no se pueden subir archivos.");
     const form = documentForm(files, "attachments", target.companyBranchId);
-    const destination = target.fixedFolder ?? folderId;
+    const destination = folderId ?? target.fixedFolder ?? null;
     if (destination !== null) form.set("folderId", String(destination));
     await this.upstream.request(`/${target.base}/${target.entityId}`, { method: "POST", token: target.token, form });
   }

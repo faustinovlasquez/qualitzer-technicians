@@ -207,13 +207,34 @@ test("offline documents verify byte SHA before forward, strip metadata SHA and n
   assert.equal(call.files[0]?.mime, "image/png");
 });
 
-test("offline multipart rejects extra/duplicate metadata, multiple files, oversized fields, dangerous types and MIME mismatches", async (t) => {
+test("offline upload keeps the real type when the name or declared type do not match its content", async (t) => {
+  const { state, baseUrl } = await harness(t);
+  state.failures.set(upstreamDocuments, { status: 200, body: applied });
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70]);
+  for (const [bytes, name, mime, savedName, savedMime] of [
+    [JPEG, "01_delantera_derecha.png", "image/png", "01_delantera_derecha.jpg", "image/jpeg"],
+    [PNG, "bad.exe", "application/octet-stream", "bad.png", "image/png"],
+    [PNG, "photo.png", "text/plain", "photo.png", "image/png"],
+    [JPEG, "sin-extension", "image/jpeg", "sin-extension.jpg", "image/jpeg"],
+  ] as const) {
+    const before = writeCalls(state).length;
+    assert.equal((await uploadRequest(baseUrl, "/api/offline/documents", documentForm({ ...metadata, sha256: hash(bytes) }, bytes, name, mime))).response.status, 200);
+    assert.equal(writeCalls(state).length, before + 1);
+    const file = writeCalls(state).at(-1)?.files[0];
+    assert.equal(file?.name, savedName);
+    assert.equal(file?.mime, savedMime);
+    assert.deepEqual(file?.bytes, bytes);
+  }
+});
+
+test("offline multipart rejects extra/duplicate metadata, multiple files, oversized fields and dangerous types", async (t) => {
   const { state, baseUrl } = await harness(t);
   const duplicate = documentForm(); duplicate.append("metadata", JSON.stringify(metadata));
   const extra = documentForm(); extra.append("userId", "9");
   const two = documentForm(); two.append("files", new Blob([PNG]), "two.png");
   const huge = documentForm({ ...metadata, unknown: "x".repeat(16384) });
-  for (const body of [duplicate, extra, two, huge, documentForm(metadata, PNG, "bad.exe"), documentForm(metadata, PNG, "photo.png", "text/plain"), documentForm({ ...metadata, userId: 9 })]) {
+  const executable = Buffer.from("MZ executable");
+  for (const body of [duplicate, extra, two, huge, documentForm({ ...metadata, sha256: hash(executable) }, executable, "bad.exe"), documentForm({ ...metadata, sha256: hash(executable) }, executable, "bad.png", "image/png"), documentForm({ ...metadata, userId: 9 })]) {
     assert.ok((await uploadRequest(baseUrl, "/api/offline/documents", body)).response.status >= 400);
   }
   for (const [content, name, mime] of [["=SUM(A1)", "data.csv", "text/csv"], ["<svg></svg>", "data.txt", "text/plain"], ["%PDF-1.7\n/Java#53cript\n%%EOF", "data.pdf", "application/pdf"]]) {

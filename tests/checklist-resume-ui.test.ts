@@ -104,6 +104,7 @@ async function fixture(confirmed = 20) {
     if (id === "../useWorkDraft") return draftModule;
     if (id === "./checklistPresentation") return presentation;
     if (id === "./ResponseInput") return { ResponseInput: "ResponseInput" };
+    if (id === "./EvidenceCollage") return { EvidenceCollage: "EvidenceCollage" };
     if (id === "./styles") return { checklistStyles: {} };
     if (id === "@expo/vector-icons") return { Ionicons: "Ionicons" };
     if (id === "../../../ui/theme") return { palette: {} };

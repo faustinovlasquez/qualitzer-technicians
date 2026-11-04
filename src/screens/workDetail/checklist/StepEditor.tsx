@@ -1,13 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { checklistAnswerError, hasChecklistStepAnswer, isChecklistStepProgressRelevant, normalizeChecklistAnswer } from "../../../domain/checklistProgress";
+import { checklistAnswerError, isChecklistStepProgressRelevant, normalizeChecklistAnswer } from "../../../domain/checklistProgress";
 import { answerFromStep, plainText } from "../../../domain/format";
 import type { ChecklistStep, StepAnswer } from "../../../domain/models";
 import { BodyText, Button, Field, IconButton, type BadgeTone } from "../../../ui/components";
 import { palette } from "../../../ui/theme";
 import type { ChecklistTabProps } from "../ChecklistTab";
-import { AttachmentList, Notice } from "../DetailUi";
+import { Notice } from "../DetailUi";
+import { EvidenceCollage } from "./EvidenceCollage";
 import { userActionError as errorMessage } from "../../offline/syncUserPresentation";
 import { styles } from "../detailStyles";
 import { displayedAnswer } from "../useWorkDraft";
@@ -54,7 +55,6 @@ export function StepEditor({ step, context, onPrevious, onNext, onFinish, notice
   const [saving, setSaving] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
   const [showComment, setShowComment] = useState(false);
-  const [showConfirmed, setShowConfirmed] = useState(false);
   const scroll = useRef<ScrollView>(null);
   const mounted = useRef(true);
   const running = useRef(false);
@@ -68,9 +68,9 @@ export function StepEditor({ step, context, onPrevious, onNext, onFinish, notice
   const answer = context.readOnly ? confirmedAnswer : displayedAnswer(step, entry);
   const queued = context.isAnswerQueued?.(step, answer) === true;
   const pendingSave = dirty && !queued;
+  const confirmedFiles = step.attachments.filter((file) => !String(file.id).startsWith("local-")).length;
   const title = plainText(step.title) || "Paso sin título";
   const description = plainText(step.description);
-  const confirmed = entry?.saved === true || hasChecklistStepAnswer(step) || step.comment.trim() !== "";
   const pendingFiles = context.draft.photos.filter((item) => item.stepId === id && !item.uploaded).length + (context.pendingEvidenceCount?.(id) ?? 0);
   const disabled = context.disabled || context.readOnly || saving || context.savingStep !== null;
   const status = checklistStepStatus(step);
@@ -151,22 +151,11 @@ export function StepEditor({ step, context, onPrevious, onNext, onFinish, notice
       {answer.responseValue === "not_applicable" ? <BodyText>«No aplica» registra una respuesta, sin afirmar aprobación.</BodyText> : null}
       {step.type === "approval" && answer.responseValue === "rejected" ? <Notice message="La respuesta es «Rechazado». Responder este paso no equivale a aprobarlo." tone="warning" /> : null}
       <View style={checklistStyles.sectionFlush}>
-        <StepAction icon="camera-outline" title={context.readOnly ? "Ver archivos" : "Fotos y archivos"} subtitle={`${step.attachments.length} confirmados${pendingFiles > 0 ? ` · ${pendingFiles} por confirmar` : ""}${step.isFilesRequired ? " · Obligatorio" : " · Opcional"}`} label={context.readOnly ? "Consultar evidencias del paso" : "Adjuntar al paso"} disabled={!context.readOnly && disabled} onPress={() => context.onEvidence(id)} />
+        <StepAction icon="camera-outline" title={context.readOnly ? "Ver archivos" : "Fotos y archivos"} subtitle={`${confirmedFiles === 1 ? "1 archivo" : `${confirmedFiles} archivos`}${pendingFiles > 0 ? ` · ${pendingFiles} por subir` : ""}${step.isFilesRequired ? " · Obligatorio" : " · Opcional"}`} label={context.readOnly ? "Consultar evidencias del paso" : "Adjuntar al paso"} disabled={!context.readOnly && disabled} onPress={() => context.onEvidence(id)} />
+        {step.attachments.length > 0 ? <EvidenceCollage files={step.attachments} manageLabel={context.readOnly ? "Ver archivos" : "Administrar"} onManage={() => context.onEvidence(id)} /> : null}
         {!showComment && !answer.comment?.trim() && !context.readOnly ? <StepAction divided icon="chatbubble-ellipses-outline" title="Comentario" subtitle="Agrega una observación" label="Añadir comentario del paso" disabled={disabled} onPress={() => setShowComment(true)} /> : null}
       </View>
       {showComment || answer.comment?.trim() ? <Field label="Comentario del paso (opcional)" value={answer.comment ?? ""} onChangeText={(comment) => change(normalizeChecklistAnswer(step, { ...answer, comment }))} editable={!disabled} multiline maxLength={10000} style={checklistStyles.comment} placeholder="Observaciones o motivo de la respuesta…" hint={!isChecklistStepProgressRelevant(step) ? "Puedes guardar solo el comentario, sin seleccionar una respuesta." : undefined} /> : null}
-      {step.isFilesRequired || step.attachments.length > 0 || pendingFiles > 0 ? <View style={styles.tight}>
-        <Text style={styles.label}>Archivos · {step.attachments.length} confirmados{step.isFilesRequired ? " · requeridos para entregar" : ""}</Text>
-        {step.attachments.length > 0 ? <AttachmentList files={step.attachments} /> : null}
-        {pendingFiles > 0 ? <BodyText>{pendingFiles} archivos pendientes en el dispositivo; todavía no cuentan como evidencia confirmada.</BodyText> : null}
-      </View> : null}
-      {confirmed ? <Button title={showConfirmed ? "Ocultar respuesta confirmada" : "Ver respuesta confirmada"} variant="ghost" style={checklistStyles.compactButton} onPress={() => setShowConfirmed(!showConfirmed)} /> : null}
-      {showConfirmed && confirmed ? <View style={checklistStyles.snapshot}>
-        <Text style={styles.label}>{context.mode === "demo" ? "Última respuesta guardada · demostración local" : "Última respuesta confirmada por Qualitzer"}</Text>
-        <Text selectable style={styles.caption}>{confirmed ? checklistAnswerLabel(step, confirmedAnswer) : "No hay una respuesta guardada en la información recibida."}</Text>
-        {confirmedAnswer.comment?.trim() ? <Text selectable style={styles.caption}>Comentario: {confirmedAnswer.comment}</Text> : null}
-        {entry?.saved === true ? <Text style={styles.caption}>Envío confirmado. El progreso se calcula con la ficha recibida, no con el borrador.</Text> : null}
-      </View> : null}
       {context.readOnly ? <Notice message={dirty ? "Solo lectura. Se muestra la última información confirmada; el borrador pendiente se conserva sin enviarlo ni sobrescribirlo." : "Solo lectura. Las respuestas y los archivos recibidos siguen disponibles para consulta."} /> : null}
       {context.readOnly && dirty && entry ? <View style={styles.tight}>
         <Button title={showDraft ? "Ocultar borrador no enviado" : "Consultar borrador no enviado"} variant="ghost" onPress={() => setShowDraft(!showDraft)} />

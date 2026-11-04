@@ -90,6 +90,13 @@ test("checklist and evidence routes are separate from parent scroll and inside k
   assert.match(text, /progressBackgroundColor=\{palette.surface\}/);
 });
 
+test("a failed upload can be discarded from the screens: the app controller exposes discard", () => {
+  const app = readFileSync(resolve(__dirname, "../src/application/useTechnicianApp.ts"), "utf8");
+  assert.match(app, /discard: \(id\) => isAccessAllowed\(\) && repository\.current === offlineController \? offlineController\.discard\(id\)/);
+  assert.match(source("WorkDetailScreen.tsx"), /onDiscardPending=\{props\.onDiscardOperation/);
+  assert.match(source("workDetail/FileWorkspace.tsx"), /title="Descartar este envío"/);
+});
+
 test("wizard omits template code but retains canonical confirmed progress and checklist requirement", () => {
   const text = source("workDetail/ChecklistTab.tsx");
   assert.doesNotMatch(text, /plainText\(checklist.code\)|Complementario/);

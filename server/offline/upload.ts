@@ -1,11 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { extname } from "node:path";
 import type { Request, Response } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { syncDocumentSchema, type SyncDocument } from "../../src/domain/offlineProtocol";
 import { GatewayError } from "../errors";
-import { detectDocument, MAX_DOCUMENT_BYTES, releaseDocuments } from "../files/documents";
+import { detectDocument, documentFilename, MAX_DOCUMENT_BYTES, releaseDocuments } from "../files/documents";
 
 export const MAX_SYNC_METADATA_BYTES = 16 * 1024;
 export const MAX_SYNC_MULTIPART_BYTES = MAX_DOCUMENT_BYTES + MAX_SYNC_METADATA_BYTES + 65536;
@@ -21,17 +20,16 @@ function validateFile(file: Express.Multer.File): void {
   const invalid = () => new GatewayError(415, "MOBILE_SYNC_INVALID_FILE_TYPE");
   const name = Buffer.from(file.originalname, "latin1").toString("utf8").normalize("NFKC");
   if (!name || name.length > 180 || /[\\/\u0000-\u001f\u007f\ufffd]/.test(name)) throw invalid();
+  // Manda el contenido real, no el nombre: una foto JPG llamada .png se acepta y se guarda como .jpg, igual que en las otras subidas.
   const type = detectDocument(file.buffer, name);
-  const extension = extname(name).slice(1).toLowerCase();
-  if (type.extension === "heic" || !(extension === type.extension || (extension === "jpeg" && type.extension === "jpg"))) throw invalid();
-  if (file.mimetype !== type.mime && file.mimetype !== "application/octet-stream") throw invalid();
+  if (type.extension === "heic") throw invalid();
   if (["txt", "csv"].includes(type.extension) && /<\s*(?:!doctype|html|script|svg|iframe)/i.test(file.buffer.toString("utf8"))) throw invalid();
   if (type.extension === "csv" && /(?:^|[,;\r\n])\s*["']?\s*[=+@]/m.test(file.buffer.toString("utf8"))) throw invalid();
   if (type.extension === "pdf") {
     const content = file.buffer.toString("latin1").replace(/#([0-9a-f]{2})/gi, (_match, value: string) => String.fromCharCode(parseInt(value, 16)));
     if (!/^%PDF-(?:1\.[0-7]|2\.0)/.test(content) || !/%%EOF\s*$/.test(content.slice(-1024)) || /\/(?:JavaScript|JS|Launch|EmbeddedFile|OpenAction|AA|RichMedia)\b/i.test(content)) throw invalid();
   }
-  file.originalname = name.replace(/[^a-zA-Z0-9._ -]/g, "_");
+  file.originalname = documentFilename(name, type.extension).replace(/[^a-zA-Z0-9._ -]/g, "_");
   file.mimetype = type.mime;
 }
 

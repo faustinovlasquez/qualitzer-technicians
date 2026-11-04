@@ -34,8 +34,10 @@ export function locallySavedWork(work: AssignmentWork, operations: readonly Offl
       && ["pending", "syncing", "applied"].includes(operation.status)).at(-1);
     const saved = answer?.answer;
     const value = saved ? "executionStatus" in saved ? saved.responseValue : syncResponseForStep(step, saved) : undefined;
+    // Lo ya enviado que el servidor lista no se agrega de nuevo: contaría dos veces la misma foto y sin enlace.
     const documents = operations.filter((operation): operation is PendingDocument => operation.kind === "document" && operation.stepId === String(step.stepId)
-      && ["pending", "syncing", "applied"].includes(operation.status));
+      && ["pending", "syncing", "applied"].includes(operation.status)
+      && !(operation.receipt?.fileId !== undefined && step.attachments.some((file) => String(file.id) === String(operation.receipt?.fileId))));
     return { ...step, ...(saved ? { isCompleted: saved.isCompleted, comment: saved.comment ?? "",
       responseValue: typeof value === "string" ? value : step.responseValue,
       selectValue: typeof value === "string" ? value : step.selectValue, optionsSelectValue: Array.isArray(value) ? value : step.optionsSelectValue } : {}),

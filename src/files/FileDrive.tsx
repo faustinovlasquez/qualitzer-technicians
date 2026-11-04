@@ -11,6 +11,8 @@ import type { FileSource } from "../screens/workDetail/files/fileRules";
 import { httpUrl } from "../screens/workDetail/detailRules";
 import { Button, IconButton } from "../ui/components";
 import { palette, radius, typography } from "../ui/theme";
+import { DriveViewSwitch, GRID_GAP, useDriveView } from "./driveView";
+import { downloadImage, ImageGalleryViewer, type GalleryAction } from "./ImageGalleryViewer";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 type Upload = {
@@ -203,7 +205,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<string | null>(null);
-  const [view, setView] = useState<"grid" | "list">("grid");
+  const { view, setView, tileSize, tileStyle, onGridLayout } = useDriveView();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [uploads, setUploads, uploadState] = useUploads(uploadKey ?? `${title}:${subtitle ?? ""}`);
   const [busy, setBusy] = useState(false);
@@ -388,6 +390,10 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
     if (files.length > 0) await send(files);
   }
 
+  /** Una foto se abre directo en la galería, con sus opciones a la vista; los demás archivos muestran sus opciones. */
+  function selectFile(file: DriveFile) {
+    setDialog(isImage(file) && httpUrl(file.url) ? { kind: "preview", file } : { kind: "file", file });
+  }
   function open(file: DriveFile) {
     if (isImage(file) && httpUrl(file.url)) { setDialog({ kind: "preview", file }); return; }
     const url = httpUrl(file.url);
@@ -422,7 +428,6 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
           </View>)}
         </View>
       </View>
-      <IconButton name={view === "grid" ? "list-outline" : "grid-outline"} label={view === "grid" ? "Ver como lista" : "Ver como cuadrícula"} onPress={() => setView(view === "grid" ? "list" : "grid")} />
     </View>
 
     <View style={styles.searchRow}>
@@ -490,18 +495,21 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
           </> : null}
 
           {files.length > 0 || pending.length > 0 ? <>
-            <Text style={styles.section}>{search ? `Archivos con «${search}»` : "Archivos"} · {listing?.totalFiles ?? files.length}</Text>
-            {view === "grid" ? <View style={styles.fileGrid}>
-              {pending.map((upload) => <Pressable key={upload.id} style={styles.tile} accessibilityRole={upload.status === "error" ? "button" : undefined}
+            <View style={styles.sectionRow}>
+              <Text style={[styles.section, styles.grow]} numberOfLines={1}>{search ? `Archivos con «${search}»` : "Archivos"} · {listing?.totalFiles ?? files.length}</Text>
+              <DriveViewSwitch view={view} onChange={setView} />
+            </View>
+            {view !== "list" ? <View style={styles.fileGrid} onLayout={onGridLayout}>
+              {pending.map((upload) => <Pressable key={upload.id} style={[styles.tile, tileStyle]} accessibilityRole={upload.status === "error" ? "button" : undefined}
                 accessibilityLabel={`${upload.name}: ${pendingLabel(upload, uploadShare(upload, now))}${upload.status === "error" ? ". Toca para reintentar" : ""}`}
                 disabled={upload.status !== "error" || uploading || !uploadState.retryable.has(upload.id)} onPress={() => void retryFailed()}>
-                <PendingThumb upload={upload} share={uploadShare(upload, now)} size={96} />
+                <PendingThumb upload={upload} share={uploadShare(upload, now)} size={tileSize} />
                 <Text style={[styles.tileName, upload.status === "error" && { color: palette.danger }]} numberOfLines={2}>
                   {upload.status === "error" && uploadState.retryable.has(upload.id) ? "Toca para reintentar" : upload.name}</Text>
               </Pressable>)}
-              {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
-                style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
-                <Thumb file={file} size={96} placeholder={uploadState.previews.get(file.id)} />
+              {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => selectFile(file)}
+                style={({ pressed }) => [styles.tile, tileStyle, pressed && styles.pressed]}>
+                <Thumb file={file} size={tileSize} placeholder={uploadState.previews.get(file.id)} />
                 <Text style={styles.tileName} numberOfLines={2}>{file.name}</Text>
               </Pressable>)}
             </View> : <View style={styles.fileList}>
@@ -516,7 +524,7 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
                       : upload.status === "queued" ? "En cola: se enviará solo al volver la señal" : upload.status === "waiting" ? "En espera" : `Subiendo… ${Math.round(uploadShare(upload, now) * 100)} %`}</Text>
                 </View>
               </Pressable>)}
-              {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => setDialog({ kind: "file", file })}
+              {files.map((file) => <Pressable key={file.id} accessibilityRole="button" accessibilityLabel={`${file.name}. ${meta(file)}`} onPress={() => selectFile(file)}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
                 <Thumb file={file} size={44} placeholder={uploadState.previews.get(file.id)} />
                 <View style={styles.grow}>
@@ -592,20 +600,14 @@ export function FileDrive({ api, title, subtitle, onClose, readOnly = false, can
       </View>
     </Sheet> : null}
 
-    {dialog?.kind === "preview" ? <Modal visible transparent={false} animationType="fade" onRequestClose={() => setDialog(null)}>
-      <View style={styles.preview}>
-        <View style={styles.previewBar}>
-          <Text style={styles.previewTitle} numberOfLines={1}>{dialog.file.name}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Abrir original" hitSlop={8} onPress={() => { const url = httpUrl(dialog.file.url); if (url) void Linking.openURL(url).catch(() => undefined); }}>
-            <Ionicons name="open-outline" size={22} color={palette.white} accessible={false} />
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Cerrar vista previa" hitSlop={8} onPress={() => setDialog(null)}>
-            <Ionicons name="close" size={26} color={palette.white} accessible={false} />
-          </Pressable>
-        </View>
-        <Image source={{ uri: httpUrl(dialog.file.url) ?? "" }} resizeMode="contain" style={styles.previewImage} accessibilityLabel={dialog.file.name} />
-      </View>
-    </Modal> : null}
+    {dialog?.kind === "preview" ? <ImageGalleryViewer initialKey={dialog.file.id} onClose={() => setDialog(null)} images={files.flatMap((file) => {
+      const uri = isImage(file) ? httpUrl(file.url) : null;
+      if (!uri) return [];
+      const actions: GalleryAction[] = [{ icon: "download-outline", label: "Descargar", onPress: () => downloadImage(uri, file.name) }];
+      if (canFolders && !current?.readOnly && (folderId !== null || movable.length > 0)) actions.push({ icon: "folder-outline", label: "Mover", onPress: () => setDialog({ kind: "move", file }) });
+      if (canRemove) actions.push({ icon: "trash-outline", label: "Eliminar", danger: true, onPress: () => setDialog({ kind: "confirm", target: { file } }) });
+      return [{ key: file.id, name: file.name, uri, detail: meta(file), actions }];
+    })} /> : null}
   </View>;
 }
 
@@ -630,8 +632,9 @@ const styles = StyleSheet.create({
   folderIconLocked: { backgroundColor: palette.track },
   lock: { position: "absolute", right: -3, bottom: -3, width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: palette.textSecondary },
   folderName: { fontSize: 14, fontWeight: "800", color: palette.heading },
-  fileGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  tile: { width: 104, gap: 6, padding: 4, borderRadius: radius.md },
+  sectionRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
+  fileGrid: { flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP },
+  tile: { gap: 6, borderRadius: radius.md },
   tileName: { fontSize: 12, fontWeight: "600", color: palette.text },
   fileList: { borderRadius: radius.lg, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: palette.track },
@@ -675,10 +678,6 @@ const styles = StyleSheet.create({
   input: { minHeight: 48, paddingHorizontal: 14, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background, fontSize: 15, color: palette.text, marginBottom: 6 },
   moveList: { maxHeight: 360 },
   confirmRow: { flexDirection: "row", gap: 10, marginTop: 8 },
-  preview: { flex: 1, backgroundColor: "#000000" },
-  previewBar: { flexDirection: "row", alignItems: "center", gap: 16, paddingHorizontal: 16, paddingTop: 44, paddingBottom: 12 },
-  previewTitle: { flex: 1, fontSize: 15, fontWeight: "700", color: palette.white },
-  previewImage: { flex: 1, width: "100%" },
   hint: { ...typography.caption, color: palette.textSecondary },
   grow: { flex: 1, minWidth: 0 },
   disabled: { opacity: 0.5 },

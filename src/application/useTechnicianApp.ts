@@ -1938,6 +1938,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     syncNow: () => repository.current === offlineController ? offlineActions.current.syncOffline() : Promise.reject(new Error("La sesión offline cambió.")),
     requestSync: () => repository.current === offlineController ? offlineActions.current.syncOffline() : Promise.reject(new Error("La sesión offline cambió.")),
     retry: (id) => repository.current === offlineController ? offlineActions.current.retryOffline(id) : Promise.reject(new Error("La sesión offline cambió.")),
+    discard: (id) => isAccessAllowed() && repository.current === offlineController ? offlineController.discard(id) : Promise.reject(new Error("La sesión offline cambió.")),
     hasPendingChanges: offlineController.hasPendingChanges, readLocalFile: offlineController.readLocalFile,
     prepareWeek: (nextRange, branchId, options) => isAccessAllowed() && repository.current === offlineController ? offlineController.prepareWeek(nextRange, branchId, options) : Promise.reject(new Error("Desbloquea la app y verifica la sesión offline.")),
   } : null, [offlineController, isAccessAllowed]);

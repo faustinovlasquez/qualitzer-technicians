@@ -163,7 +163,7 @@ async function main() {
       assert.deepEqual(await page.evaluate(() => window.compactChecklist.uploads.at(-1)), { stepId: "1007", name: "evidence.txt", size: 16 });
       await button("Volver al checklist").click();
       await heading("Pregunta 7").waitFor();
-      await page.getByText("Archivos · 1 confirmados · requeridos para entregar", { exact: true }).waitFor();
+      await page.getByText("1 archivo · Obligatorio", { exact: true }).waitFor();
       await button("Adjuntar al paso").click();
       await button("Eliminar archivo guardado: evidence.txt").click();
       await button("Confirmar eliminación").click();

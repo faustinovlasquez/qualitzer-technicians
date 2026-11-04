@@ -53,6 +53,8 @@ export function syncUserError(code: string | null | undefined): string {
     case "OFFLINE_LOCAL_FILE_MISSING":
     case "OFFLINE_FILE_INTEGRITY_MISMATCH":
       return "La copia del archivo falta o está dañada. Requiere revisión.";
+    case "MOBILE_SYNC_INVALID_FILE_TYPE":
+      return "Qualitzer no aceptó este archivo porque su formato no está permitido. Descarta este envío y sube otro archivo.";
     case "OFFLINE_LOCAL_FILE_UNREADABLE":
     case "OFFLINE_SOURCE_FILE_UNREADABLE":
     case "OFFLINE_DOCUMENT_MULTIPART_PREPARATION_FAILED":

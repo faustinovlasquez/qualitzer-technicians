@@ -683,6 +683,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const workspaceContent = <FileWorkspace
     backHandler={tab === "checklist" ? stepFilesBack : childBack}
     compact
+    gallery={tab === "checklist"}
+    autoSave={tab === "checklist"}
     scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:${target ?? "files"}`}
     resourceKey={JSON.stringify([resourceKey, target])}
     title={target !== undefined ? plainText(evidenceStep?.title ?? "Paso no disponible") : "Archivos del trabajo"}
@@ -708,6 +710,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     }}
     onUpload={async (documents) => { await props.onUploadDocuments(documents, target); void refreshAfterSave(); if (mounted.current) void files.load(); }}
     onDelete={async (fileId) => { await props.onDeleteFile(fileId, target); await refreshAfterSave(); if (mounted.current) await files.load(); }}
+    onDiscardPending={props.onDiscardOperation ? async (operationId) => { await callbacks.current.onDiscardOperation?.(operationId); if (mounted.current) await files.load(); } : undefined}
     listFooter={draft.data.photos.length > 0 ? <Card style={styles.stack}><SectionTitle title="Fotos pendientes anteriores" subtitle="Conservamos las fotos que preparaste antes de esta actualización." /><EvidenceTab work={work} maintenance={maintenance} mode={mode} files={files.files} loading={files.loading} filesError={files.error} photos={draft.data.photos} target={target} disabled={disabled} readOnly={false} preparing={action === "photos"} uploading={action === "upload"} onTarget={setTarget} onPick={choosePhotos} onCancelPick={cancelWebPicker} onRemove={removePhoto} onUpload={uploadPhotos} onCleanup={() => { void runAction("cleanup", cleanUploadedPhotos); }} onLoad={() => { void runAction("files", files.load); }} /></Card> : undefined}
   />;
   // Archivos generales con conexión: el gestor con carpetas de la web. Sin conexión, con envíos en cola o para la
