@@ -88,12 +88,15 @@ test("back returns through files and checklist before leaving the work", async t
   const workTab = elements<{ onChecklist(id: number): void }>(fixture.render(), "WorkTab")[0];
   workTab.props.onChecklist(10);
   assert.doesNotMatch(JSON.stringify(fixture.render()), /work-execution-footer/);
-  const checklist = elements<{ onEvidence(id?: string): void }>(fixture.render(), "ChecklistTab")[0];
-  checklist.props.onEvidence("102");
-  assert.equal(elements(fixture.render(), "FileWorkspace").length, 1);
+  const checklist = () => elements<{ onEvidence(id?: string): void; onCloseStepFiles(): void; stepFiles: ReactNode }>(fixture.render(), "ChecklistTab")[0];
+  // Los archivos del paso se gestionan dentro de la ventana del checklist, sin cambiar de pestaña.
+  assert.equal(elements(checklist().props.stepFiles, "FileWorkspace").length, 0);
+  checklist().props.onEvidence("102");
+  assert.equal(elements(checklist().props.stepFiles, "FileWorkspace").length, 1);
   assert.doesNotMatch(JSON.stringify(fixture.render()), /work-execution-footer/);
-  action(fixture.render(), "Volver conservando el borrador").onPress(); await settle();
+  checklist().props.onCloseStepFiles(); await settle();
   assert.equal(exits, 0);
+  assert.equal(elements(checklist().props.stepFiles, "FileWorkspace").length, 0);
   assert.equal(elements(fixture.render(), "ChecklistTab").length, 1);
   action(fixture.render(), "Ir al inicio del trabajo").onPress(); await settle();
   assert.equal(elements(fixture.render(), "WorkTab").length, 1);

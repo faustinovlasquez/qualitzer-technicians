@@ -1,10 +1,13 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { checklistResumeTarget } from "../../domain/checklistResume";
 import { plainText } from "../../domain/format";
 import type { AssignmentWork, Checklist, ChecklistStep, StepAnswer } from "../../domain/models";
-import { Badge, BodyText, Button, EmptyState, IconButton, SectionTitle } from "../../ui/components";
+import { Badge, BodyText, EmptyState, SectionTitle } from "../../ui/components";
+import { palette } from "../../ui/theme";
 import { ChecklistCatalog, ChecklistProgress } from "./checklist/ChecklistCatalog";
+import { ChecklistDialog } from "./checklist/ChecklistDialog";
 import { ChecklistOverview } from "./checklist/ChecklistOverview";
 import { StepEditor } from "./checklist/StepEditor";
 import { checklistRefreshColor, checklistStyles } from "./checklist/styles";
@@ -15,6 +18,14 @@ import type { WorkDraft } from "./useWorkDraft";
 
 export interface ChecklistTabProps {
   backHandler?: { current: ((home?: boolean) => boolean) | null };
+  /** La ventana del checklist solo se muestra mientras esta sección esté a la vista. */
+  active?: boolean;
+  /** La pantalla que lo contiene ya es una ventana (inspección del taller): no se abre otra encima. */
+  inline?: boolean;
+  /** Gestor de archivos del paso: si viene, se muestra dentro de la ventana en lugar del paso. */
+  stepFiles?: ReactNode;
+  stepFilesBack?: { current: ((home?: boolean) => boolean) | null };
+  onCloseStepFiles?: () => void;
   initialChecklistId?: number;
   /** Solo se usan el id y las listas: la inspección del taller entrega sus listas con la misma forma. */
   work: Pick<AssignmentWork, "id" | "checklists">;
@@ -64,20 +75,19 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
   const stepId = checklist ? navigation.selection.stepIds[String(checklist.checklistId)] : undefined;
   const index = steps.findIndex((step) => String(step.stepId) === stepId);
   const step = steps[index];
-  const history = useRef<Array<{ checklistId: number | null; stepId?: string; overview: boolean }>>([]);
-  function remember(): void { history.current.push({ checklistId: checklist?.checklistId ?? null, stepId, overview }); }
+  function closeDialog(): void {
+    setOverview(false);
+    navigation.catalog();
+  }
   function goBack(): boolean {
     if (props.disabled || refreshingRef.current || navigation.restoring) return true;
-    const previous = history.current.pop();
-    if (previous) {
-      setOverview(previous.overview);
-      if (previous.checklistId == null) navigation.catalog();
-      else if (previous.stepId !== undefined) navigation.jump(previous.checklistId, previous.stepId);
-      else { const item = props.work.checklists.find(item => item.checklistId === previous.checklistId); if (item) navigation.open(item); }
+    if (props.stepFiles) {
+      // El gestor resuelve primero lo suyo (una subida en curso o un aviso abierto); después se vuelve al paso.
+      if (!props.stepFilesBack?.current?.()) props.onCloseStepFiles?.();
       return true;
     }
-    if (overview) { setOverview(false); return true; }
-    if (checklist) { navigation.catalog(); return true; }
+    if (overview && step) { setOverview(false); return true; }
+    if (checklist) { closeDialog(); return true; }
     return false;
   }
   useEffect(() => {
@@ -86,17 +96,15 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
     const back = (home = false): boolean => home ? props.disabled || refreshingRef.current : goBack();
     handler.current = back;
     return () => { if (handler.current === back) handler.current = null; };
-  }, [props.backHandler, props.disabled, props.work.checklists, overview, navigation.selection, navigation.restoring]);
+  }, [props.backHandler, props.disabled, props.work.checklists, overview, navigation.selection, navigation.restoring, props.stepFiles]);
 
   function open(item: Checklist): void {
-    remember();
     setOverview(false);
     navigation.open(item);
   }
 
   function jump(id: string): void {
     if (!checklist) return;
-    remember();
     setOverview(false);
     navigation.jump(checklist.checklistId, id);
   }
@@ -121,30 +129,38 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
   if (navigation.restoring) return <View style={checklistStyles.screen}><BodyText>Recuperando navegación del checklist…</BodyText></View>;
 
   // Se actualiza deslizando la lista hacia abajo.
-  if (!checklist) return <ScrollView style={checklistStyles.screen} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled"
+  const catalog = <ScrollView style={checklistStyles.screen} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled"
     refreshControl={props.onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} enabled={!props.disabled} tintColor={checklistRefreshColor} colors={[checklistRefreshColor]} /> : undefined}>
     <SectionTitle title={props.labels?.catalogTitle ?? "Checklists del trabajo"} subtitle={props.work.checklists.length === 0 ? undefined : props.labels?.catalogSubtitle ?? "Toca una lista para responder."} />
-    {notices}
-    {navigation.selection.checklistId !== null ? <Notice message="El checklist que tenías abierto ya no está en este trabajo." tone="warning" /> : null}
+    {checklist ? null : notices}
+    {!checklist && navigation.selection.checklistId !== null ? <Notice message="El checklist que tenías abierto ya no está en este trabajo." tone="warning" /> : null}
     {props.work.checklists.length === 0 ? <EmptyState title="Aún no hay checklists" message="Agrega uno de la empresa para empezar la revisión." icon="list-outline" /> : <ChecklistCatalog checklists={props.work.checklists} draft={props.draft} onOpen={open} />}
     {props.catalogHeader}
     {props.work.checklists.length > 0 ? <BodyText>{props.labels ? props.labels.progressNote : props.mode === "demo" ? "Demostración: el avance usa las respuestas de ejemplo." : "El avance cuenta solo las respuestas guardadas."}</BodyText> : null}
   </ScrollView>;
+  if (!checklist) return catalog;
 
-  return (
-    <View style={checklistStyles.screen} testID="checklist-workspace">
-      <View style={checklistStyles.toolbar}>
-        <View style={checklistStyles.toolbarRow}>
-          <IconButton name="arrow-back-outline" label="Volver al paso anterior del checklist" disabled={props.disabled} onPress={goBack} />
-          <IconButton name="list-outline" label="Volver a los checklists" disabled={props.disabled} onPress={() => { history.current = []; setOverview(false); navigation.catalog(); }} />
+  const showingFiles = Boolean(props.stepFiles);
+  const workspace = (
+    <View style={checklistStyles.dialogBody} testID="checklist-workspace">
+      <View style={checklistStyles.dialogHeader}>
+        <View style={checklistStyles.dialogHeaderRow}>
+          <Pressable accessibilityRole="button" accessibilityLabel={showingFiles ? "Volver al paso" : "Cerrar checklist"} disabled={props.disabled} onPress={showingFiles ? () => { goBack(); } : closeDialog} style={({ pressed }) => [checklistStyles.dialogButton, (pressed || props.disabled) && checklistStyles.pressed]}>
+            <Ionicons name={showingFiles ? "arrow-back" : "close"} size={26} color={palette.white} accessible={false} />
+          </Pressable>
           <View style={checklistStyles.toolbarTitle}>
-            <Text accessibilityRole="header" numberOfLines={2} style={checklistStyles.title}>{plainText(checklist.name) || "Checklist sin nombre"}</Text>
-            <Text accessibilityLiveRegion="polite" style={checklistStyles.progress}>{step ? `Paso ${index + 1} de ${steps.length}` : `${steps.length} pasos`}{checklist.required === true ? " · Obligatorio" : checklist.required == null ? " · Obligatoriedad no informada" : ""}{props.readOnly ? " · Solo lectura" : ""}</Text>
+            <Text accessibilityRole="header" numberOfLines={2} style={checklistStyles.dialogTitle}>{plainText(checklist.name) || "Checklist sin nombre"}</Text>
+            <Text accessibilityLiveRegion="polite" style={checklistStyles.dialogSubtitle}>{showingFiles ? `Fotos y archivos · Paso ${index + 1} de ${steps.length}` : <>{step ? `Paso ${index + 1} de ${steps.length}` : `${steps.length} pasos`}{checklist.required === true ? " · Obligatorio" : checklist.required == null ? " · Obligatoriedad no informada" : ""}{props.readOnly ? " · Solo lectura" : ""}</>}</Text>
           </View>
-          <IconButton name={overview ? "create-outline" : "grid-outline"} label={overview ? "Volver al paso" : "Resumen de pasos"} disabled={!step || props.disabled} onPress={() => { remember(); setOverview(!overview); }} />
+          {showingFiles ? null : <Pressable accessibilityRole="button" accessibilityLabel={overview ? "Volver al paso" : "Resumen de pasos"} disabled={!step || props.disabled} onPress={() => setOverview(!overview)} style={({ pressed }) => [checklistStyles.dialogButton, (pressed || !step || props.disabled) && checklistStyles.pressed]}>
+            <Ionicons name={overview ? "create-outline" : "grid-outline"} size={22} color={palette.white} accessible={false} />
+          </Pressable>}
         </View>
-        <ChecklistProgress checklist={checklist} compact />
+        {showingFiles ? null : <ChecklistProgress checklist={checklist} compact />}
       </View>
+      {showingFiles ? <View style={checklistStyles.scroll} testID="checklist-step-files">{props.stepFiles}</View> : null}
+      {/* El paso sigue montado debajo: un guardado automático en curso no se pierde al abrir los archivos. */}
+      <View style={showingFiles ? checklistStyles.hiddenBody : checklistStyles.scroll}>
       {overview || !step ? <ScrollView key={`overview:${checklist.checklistId}`} style={checklistStyles.scroll} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled">
         {steps.length === 0 ? <EmptyState title="Sin pasos disponibles" message="No se recibieron pasos para este checklist. Actualiza la ficha o solicita revisar su configuración; no se presume completado." icon="list-outline" /> : <>
           {!step && stepId !== undefined ? <Notice message="El paso seleccionado ya no está en la ficha recibida. Su borrador no se ha eliminado. Elige un paso del resumen para continuar." tone="warning" /> : null}
@@ -155,7 +171,10 @@ function ChecklistContent(props: ChecklistTabProps & { scopeKey: string }) {
         {notices}
       </ScrollView> : <StepEditor key={`${checklist.checklistId}:${step.stepId}`} step={step} context={props} notices={notices}
         onPrevious={index > 0 ? () => jump(String(steps[index - 1].stepId)) : undefined}
-        onNext={index + 1 < steps.length ? () => jump(String(steps[index + 1].stepId)) : undefined} />}
+        onNext={index + 1 < steps.length ? () => jump(String(steps[index + 1].stepId)) : undefined} onFinish={props.inline ? undefined : closeDialog} />}
+      </View>
     </View>
   );
+  if (props.inline) return workspace;
+  return <>{catalog}<ChecklistDialog visible={props.active !== false} onRequestClose={() => { goBack(); }}>{workspace}</ChecklistDialog></>;
 }

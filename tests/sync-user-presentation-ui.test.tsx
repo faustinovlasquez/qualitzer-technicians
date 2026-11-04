@@ -233,8 +233,8 @@ test("actual queued answer list is compact and preserves attention while step gu
     assertQuiet(tree); assert.match(visibleText(tree), /2 respuesta\(s\) pendientes/);
     assert.match(visibleText(tree), /Respuesta registrada en el teléfono/);
     assert.doesNotMatch(visibleText(tree), /Esta versión ya está registrada|responseValue|isCompleted/);
-    assert.equal(action(tree, "Respuesta ya registrada en cola").disabled, true);
-    action(tree, "Respuesta ya registrada en cola").onPress(); assert.equal(saves, 0);
+    // En cola no queda ningún botón que vuelva a enviar la respuesta; terminar tampoco la guarda otra vez.
+    action(tree, "Terminar").onPress(); assert.equal(saves, 0);
     assert.equal(context.draft.answers["1"].saved, false);
     const conflict = vm.render(<QueuedNotice answers={[{ ...answerOperation, status: "needs_review", lastError: "OFFLINE_STORAGE_FULL" }]} />);
     assertQuiet(conflict); assert.match(visibleText(conflict), /Requiere revisión/);

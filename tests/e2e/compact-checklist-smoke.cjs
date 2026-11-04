@@ -198,7 +198,8 @@ async function main() {
       await heading("Pregunta 2").waitFor();
       await button("Guardar y paso anterior").click();
       await page.getByText("Respuesta registrada en el teléfono", { exact: true }).waitFor();
-      assert.equal(await button("Respuesta ya registrada en cola").isDisabled(), true);
+      assert.equal(await button("Guardar y siguiente").count(), 0);
+      assert.equal(await button("Siguiente").isEnabled(), true);
       assert.match(await page.getByTestId("connection-status-bar").innerText(), /1/);
       await page.screenshot({ path: path.join(output, "390-queued.png") });
     });

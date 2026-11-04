@@ -12,10 +12,13 @@ import { checklistStyles } from "./styles";
 export function ChecklistProgress({ checklist, compact = false }: { checklist: Checklist; compact?: boolean }) {
   const progress = checklistFillProgress(checklist.steps);
   if (checklist.steps.length === 0) return <BodyText>No se recibieron pasos. No se puede verificar este checklist.</BodyText>;
-  if (compact) return <View style={{ gap: 3 }}>
-    <Text style={checklistStyles.progress}>{progress.total === 0 ? "Sin respuestas obligatorias computables" : `${progress.completed}/${progress.total} requisitos confirmados · ${progress.percentage}%`}</Text>
-    {progress.total > 0 ? <View style={checklistStyles.progressTrack} accessibilityRole="progressbar" accessibilityLabel="Requisitos confirmados" accessibilityValue={{ min: 0, max: progress.total, now: progress.completed }}>
-      <View style={[styles.progressFill, { width: `${progress.percentage}%` }]} />
+  if (compact) return <View style={checklistStyles.dialogProgress}>
+    <View style={checklistStyles.dialogProgressRow}>
+      <Text style={checklistStyles.dialogSubtitle}>{progress.total === 0 ? "Sin respuestas obligatorias" : `${progress.completed} de ${progress.total} requisitos confirmados`}</Text>
+      {progress.total > 0 ? <Text style={checklistStyles.dialogSubtitle}>{progress.percentage}%</Text> : null}
+    </View>
+    {progress.total > 0 ? <View style={checklistStyles.dialogProgressTrack} accessibilityRole="progressbar" accessibilityLabel="Requisitos confirmados" accessibilityValue={{ min: 0, max: progress.total, now: progress.completed }}>
+      <View style={[checklistStyles.dialogProgressFill, { width: `${progress.percentage}%` }]} />
     </View> : null}
   </View>;
   if (progress.total === 0) return <BodyText>Sin respuestas obligatorias computables · {checklist.steps.length} pasos informativos u opcionales.</BodyText>;

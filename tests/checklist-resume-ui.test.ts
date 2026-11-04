@@ -28,9 +28,14 @@ function element<P extends object>(node: ReactNode, type: string): ReactElement<
   assert.ok(result, `Missing ${type}`);
   return result;
 }
+/** Todos los elementos del árbol, también los componentes propios de la pantalla que la prueba no llega a dibujar. */
+function allElements(node: ReactNode): ReactElement<ActionProps & { children?: ReactNode }>[] {
+  if (Array.isArray(node)) return node.flatMap(allElements);
+  if (!isValidElement<ActionProps & { children?: ReactNode }>(node)) return [];
+  return [node, ...allElements(node.props.children)];
+}
 function action(node: ReactNode, label: string): ActionProps {
-  const result = [...elements<ActionProps>(node, "Button"), ...elements<ActionProps>(node, "IconButton")]
-    .find(({ props }) => props.accessibilityLabel === label || props.label === label || props.title === label);
+  const result = allElements(node).find(({ props }) => props.onPress && (props.accessibilityLabel === label || props.label === label || props.title === label));
   assert.ok(result, `Missing action ${label}`);
   return result.props;
 }
@@ -78,6 +83,9 @@ async function fixture(confirmed = 20) {
     if (id === "./checklist/ChecklistOverview") return { ChecklistOverview: "ChecklistOverview" };
     if (id === "./checklist/StepEditor") return { StepEditor: "StepEditor" };
     if (id === "./checklist/styles") return { checklistStyles: {} };
+    if (id === "./checklist/ChecklistDialog") return { ChecklistDialog: "ChecklistDialog" };
+    if (id === "@expo/vector-icons") return { Ionicons: "Ionicons" };
+    if (id === "../../ui/theme") return { palette: {} };
     if (id === "./checklist/useChecklistNavigation") return navigation;
     if (id === "./DetailUi") return { Notice: "Notice" };
     if (id === "./detailRules") return rules;
@@ -97,6 +105,8 @@ async function fixture(confirmed = 20) {
     if (id === "./checklistPresentation") return presentation;
     if (id === "./ResponseInput") return { ResponseInput: "ResponseInput" };
     if (id === "./styles") return { checklistStyles: {} };
+    if (id === "@expo/vector-icons") return { Ionicons: "Ionicons" };
+    if (id === "../../../ui/theme") return { palette: {} };
     throw new Error(`UNEXPECTED_IMPORT ${id}`);
   };
   const editor = loadSource<typeof import("../src/screens/workDetail/checklist/StepEditor")>("screens/workDetail/checklist/StepEditor.tsx", (id) => id === "react" ? editorHooks.react : childrenImports(id));
@@ -132,9 +142,9 @@ test("resumed queued answer cannot resubmit and can move forward without changin
   f.props.isAnswerQueued = (current, value) => String(current.stepId) === operation.stepId && JSON.stringify(value) === JSON.stringify(operation.answer);
   f.open();
   const tree = f.renderEditor();
-  assert.equal(action(tree, "Respuesta ya registrada en cola").disabled, true);
-  action(tree, "Respuesta ya registrada en cola").onPress();
-  action(tree, "Guardar y paso siguiente").onPress();
+  assert.ok(allElements(tree).some(({ props }) => props.label === "Respuesta registrada en el teléfono"));
+  assert.ok(!allElements(tree).some(({ props }) => props.title === "Guardar y seguir" || props.title === "Guardar respuesta"));
+  action(tree, "Siguiente").onPress();
   assert.equal(element<EditorProps>(f.render(), "StepEditor").props.step.stepId, 22);
   assert.equal(f.saves(), 0);
   assert.deepEqual(operation, before);
@@ -172,7 +182,7 @@ test("missing evidence opens the answered step with a warning and returns from f
   assert.equal(element<EditorProps>(f.render(), "StepEditor").props.step.stepId, 4);
   const tree = f.renderEditor();
   assert.ok(elements<{ message: string }>(tree, "Notice").some(({ props }) => /falta evidencia confirmada/.test(props.message)));
-  assert.ok(elements<{ label: string }>(tree, "Badge").some(({ props }) => props.label === "1 archivos sin confirmar"));
+  assert.ok(allElements(tree).some(({ props }) => props.label === "1 archivos sin confirmar"));
   action(tree, "Adjuntar al paso").onPress();
   assert.equal(f.evidence(), "4");
   f.hooks.unmount();
@@ -198,7 +208,7 @@ test("removing the actively visited step shows summary without discarding its dr
   assert.deepEqual(f.props.draft, before);
 });
 
-test("outer back handler traverses checklist steps and catalog before leaving", async () => {
+test("outer back handler closes the checklist dialog, keeping the summary one step away, before leaving", async () => {
   const fixtureState = await fixture();
   const back = { current: null as ((home?: boolean) => boolean) | null };
   fixtureState.props.backHandler = back;
@@ -206,9 +216,12 @@ test("outer back handler traverses checklist steps and catalog before leaving", 
   const first = element<EditorProps>(fixtureState.render(), "StepEditor");
   first.props.onNext?.(); fixtureState.render();
   assert.equal(element<EditorProps>(fixtureState.render(), "StepEditor").props.step.stepId, 22);
-  assert.equal(back.current?.(), true); fixtureState.render();
-  assert.equal(element<EditorProps>(fixtureState.render(), "StepEditor").props.step.stepId, 21);
-  assert.equal(back.current?.(), true); fixtureState.render();
+  action(fixtureState.render(), "Resumen de pasos").onPress();
+  assert.equal(elements(fixtureState.render(), "StepEditor").length, 0);
+  assert.equal(back.current?.(), true);
+  assert.equal(element<EditorProps>(fixtureState.render(), "StepEditor").props.step.stepId, 22);
+  assert.equal(back.current?.(), true);
+  assert.equal(elements(fixtureState.render(), "ChecklistDialog").length, 0);
   assert.equal(elements(fixtureState.render(), "ChecklistCatalog").length, 1);
   assert.equal(back.current?.(), false);
   fixtureState.hooks.unmount();

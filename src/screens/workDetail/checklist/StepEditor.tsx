@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { checklistAnswerError, hasChecklistStepAnswer, isChecklistStepProgressRelevant, normalizeChecklistAnswer } from "../../../domain/checklistProgress";
 import { answerFromStep, plainText } from "../../../domain/format";
 import type { ChecklistStep, StepAnswer } from "../../../domain/models";
-import { Badge, BodyText, Button, Field, IconButton } from "../../../ui/components";
+import { BodyText, Button, Field, IconButton, type BadgeTone } from "../../../ui/components";
+import { palette } from "../../../ui/theme";
 import type { ChecklistTabProps } from "../ChecklistTab";
 import { AttachmentList, Notice } from "../DetailUi";
 import { userActionError as errorMessage } from "../../offline/syncUserPresentation";
@@ -18,7 +20,36 @@ function answerChangesOnlyComment(previous: StepAnswer, next: StepAnswer): boole
   return (previous.comment ?? "") !== (next.comment ?? "") && JSON.stringify({ ...previous, comment: "" }) === JSON.stringify({ ...next, comment: "" });
 }
 
-export function StepEditor({ step, context, onPrevious, onNext, notices }: { step: ChecklistStep; context: ChecklistTabProps; onPrevious?: () => void; onNext?: () => void; notices?: ReactNode }) {
+function StepTag({ label, color }: { label: string; color: string }) {
+  return <View style={checklistStyles.tag}>
+    <View style={[checklistStyles.tagDot, { backgroundColor: color }]} />
+    <Text style={[checklistStyles.tagText, { color }]}>{label}</Text>
+  </View>;
+}
+
+function StepAction({ icon, title, subtitle, label, disabled, divided, onPress }: { icon: ComponentProps<typeof Ionicons>["name"]; title: string; subtitle: string; label: string; disabled: boolean; divided?: boolean; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [checklistStyles.actionRow, divided && checklistStyles.actionDivider, pressed && checklistStyles.pressed, disabled && checklistStyles.disabledRow]}>
+    <View style={checklistStyles.actionIcon}><Ionicons name={icon} size={20} color={palette.primary} accessible={false} /></View>
+    <View style={checklistStyles.actionText}>
+      <Text style={checklistStyles.actionTitle}>{title}</Text>
+      <Text numberOfLines={1} style={checklistStyles.actionSubtitle}>{subtitle}</Text>
+    </View>
+    <Ionicons name="chevron-forward" size={18} color={palette.textMuted} accessible={false} />
+  </Pressable>;
+}
+
+function tagColor(tone: BadgeTone): string {
+  switch (tone) {
+    case "warning": return palette.amber;
+    case "info": return palette.info;
+    case "success": return palette.success;
+    case "danger": return palette.danger;
+    case "teal": return palette.primary;
+    case "neutral": return palette.textSecondary;
+  }
+}
+
+export function StepEditor({ step, context, onPrevious, onNext, onFinish, notices }: { step: ChecklistStep; context: ChecklistTabProps; onPrevious?: () => void; onNext?: () => void; onFinish?: () => void; notices?: ReactNode }) {
   const [validation, setValidation] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
@@ -36,6 +67,9 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
   const confirmedAnswer = entry?.saved === true ? displayedAnswer(step, entry) : answerFromStep(step);
   const answer = context.readOnly ? confirmedAnswer : displayedAnswer(step, entry);
   const queued = context.isAnswerQueued?.(step, answer) === true;
+  const pendingSave = dirty && !queued;
+  const title = plainText(step.title) || "Paso sin título";
+  const description = plainText(step.description);
   const confirmed = entry?.saved === true || hasChecklistStepAnswer(step) || step.comment.trim() !== "";
   const pendingFiles = context.draft.photos.filter((item) => item.stepId === id && !item.uploaded).length + (context.pendingEvidenceCount?.(id) ?? 0);
   const disabled = context.disabled || context.readOnly || saving || context.savingStep !== null;
@@ -95,27 +129,30 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
   }
 
   return (
-    <View style={checklistStyles.screen}>
+    <View style={checklistStyles.dialogBody}>
       <ScrollView ref={scroll} testID="checklist-question-scroll" style={checklistStyles.scroll} contentContainerStyle={checklistStyles.scrollContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets={false}>
-      <View style={checklistStyles.question}>
-        <Text accessibilityRole="header" style={checklistStyles.questionHeading}>{plainText(step.title) || "Paso sin título"}</Text>
-        <View style={checklistStyles.stepMeta}>
-          {isChecklistStepProgressRelevant(step) ? <Badge label="Respuesta obligatoria" tone="warning" /> : null}
-          {step.isFilesRequired ? <Badge label="Evidencia obligatoria" tone="warning" /> : null}
-          {pendingFiles > 0 ? <Badge label={`${pendingFiles} archivos sin confirmar`} tone="warning" /> : null}
-          {step.tag.trim() ? <Badge label={plainText(step.tag)} /> : null}
-          {queued ? <Badge label="Respuesta registrada en el teléfono" tone="neutral" /> : dirty ? <Badge label="Borrador · no enviado" tone="warning" /> : <Badge {...status} />}
-        </View>
-        {plainText(step.description) ? <BodyText>{plainText(step.description)}</BodyText> : null}
-      </View>
       {validation ? <Notice message={validation} tone="error" /> : null}
-      <ResponseInput step={step} answer={answer} disabled={disabled} onChange={change} />
+      <View style={checklistStyles.section}>
+        <View style={checklistStyles.question}>
+          <Text accessibilityRole="header" style={checklistStyles.questionHeading}>{title}</Text>
+          {/* Muchas plantillas repiten el título como descripción: no se muestra dos veces. */}
+          {description && description !== title ? <Text style={checklistStyles.questionDescription}>{description}</Text> : null}
+          <View style={checklistStyles.stepMeta}>
+            {isChecklistStepProgressRelevant(step) ? <StepTag label="Respuesta obligatoria" color={tagColor("warning")} /> : null}
+            {step.isFilesRequired ? <StepTag label="Evidencia obligatoria" color={tagColor("warning")} /> : null}
+            {pendingFiles > 0 ? <StepTag label={`${pendingFiles} archivos sin confirmar`} color={tagColor("warning")} /> : null}
+            {step.tag.trim() ? <StepTag label={plainText(step.tag)} color={tagColor("neutral")} /> : null}
+            {queued ? <StepTag label="Respuesta registrada en el teléfono" color={tagColor("info")} /> : dirty ? <StepTag label="Borrador · no enviado" color={tagColor("warning")} /> : <StepTag label={status.label} color={tagColor(status.tone)} />}
+          </View>
+        </View>
+        <ResponseInput step={step} answer={answer} disabled={disabled} onChange={change} />
+      </View>
       {step.type === "validation" && answer.responseValue === false ? <Notice message="«No» es una respuesta válida, pero no una validación exitosa. El progreso mide respuestas y evidencia confirmadas; no significa aprobación." tone="warning" /> : null}
       {answer.responseValue === "not_applicable" ? <BodyText>«No aplica» registra una respuesta, sin afirmar aprobación.</BodyText> : null}
       {step.type === "approval" && answer.responseValue === "rejected" ? <Notice message="La respuesta es «Rechazado». Responder este paso no equivale a aprobarlo." tone="warning" /> : null}
-      <View style={checklistStyles.actions}>
-        {!showComment && !answer.comment?.trim() && !context.readOnly ? <Button title="Comentario" accessibilityLabel="Añadir comentario del paso" icon="chatbubble-outline" variant="ghost" style={checklistStyles.compactButton} disabled={disabled} onPress={() => setShowComment(true)} /> : null}
-        <Button title={context.readOnly ? "Ver archivos" : "Archivos"} accessibilityLabel={context.readOnly ? "Consultar evidencias del paso" : "Adjuntar al paso"} icon="attach-outline" variant="ghost" style={checklistStyles.compactButton} disabled={!context.readOnly && disabled} onPress={() => context.onEvidence(id)} />
+      <View style={checklistStyles.sectionFlush}>
+        <StepAction icon="camera-outline" title={context.readOnly ? "Ver archivos" : "Fotos y archivos"} subtitle={`${step.attachments.length} confirmados${pendingFiles > 0 ? ` · ${pendingFiles} por confirmar` : ""}${step.isFilesRequired ? " · Obligatorio" : " · Opcional"}`} label={context.readOnly ? "Consultar evidencias del paso" : "Adjuntar al paso"} disabled={!context.readOnly && disabled} onPress={() => context.onEvidence(id)} />
+        {!showComment && !answer.comment?.trim() && !context.readOnly ? <StepAction divided icon="chatbubble-ellipses-outline" title="Comentario" subtitle="Agrega una observación" label="Añadir comentario del paso" disabled={disabled} onPress={() => setShowComment(true)} /> : null}
       </View>
       {showComment || answer.comment?.trim() ? <Field label="Comentario del paso (opcional)" value={answer.comment ?? ""} onChangeText={(comment) => change(normalizeChecklistAnswer(step, { ...answer, comment }))} editable={!disabled} multiline maxLength={10000} style={checklistStyles.comment} placeholder="Observaciones o motivo de la respuesta…" hint={!isChecklistStepProgressRelevant(step) ? "Puedes guardar solo el comentario, sin seleccionar una respuesta." : undefined} /> : null}
       {step.isFilesRequired || step.attachments.length > 0 || pendingFiles > 0 ? <View style={styles.tight}>
@@ -144,7 +181,9 @@ export function StepEditor({ step, context, onPrevious, onNext, notices }: { ste
       </ScrollView>
       <View style={checklistStyles.dock} testID="checklist-step-dock">
         <IconButton name="chevron-back-outline" label="Guardar y paso anterior" disabled={!onPrevious || context.disabled || saving} onPress={() => { void move(onPrevious); }} />
-        {context.readOnly ? <Text style={checklistStyles.dockHint}>Solo lectura</Text> : <Button title={queued ? "Registrada" : onNext ? "Guardar y seguir" : "Guardar respuesta"} accessibilityLabel={queued ? "Respuesta ya registrada en cola" : onNext ? "Guardar y siguiente" : "Guardar respuesta"} style={checklistStyles.dockSave} loading={saving || context.savingStep === id} disabled={disabled || !dirty || !supported || queued} onPress={() => { void save(Boolean(onNext)); }} />}
+        {context.readOnly ? <Text style={checklistStyles.dockHint}>Solo lectura</Text> : pendingSave
+          ? <Button title={onNext ? "Guardar y seguir" : "Guardar respuesta"} accessibilityLabel={onNext ? "Guardar y siguiente" : "Guardar respuesta"} style={checklistStyles.dockSave} loading={saving || context.savingStep === id} disabled={disabled || !supported} onPress={() => { void save(Boolean(onNext)); }} />
+          : <Button title={onNext ? "Siguiente" : "Terminar"} icon={onNext ? undefined : "checkmark-outline"} style={checklistStyles.dockSave} loading={saving || context.savingStep === id} disabled={context.disabled || saving} onPress={() => { if (onNext) void move(onNext); else onFinish?.(); }} />}
         <IconButton name="chevron-forward-outline" label="Guardar y paso siguiente" disabled={!onNext || context.disabled || saving} onPress={() => { void move(onNext); }} />
       </View>
     </View>

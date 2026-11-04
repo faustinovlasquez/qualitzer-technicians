@@ -60,7 +60,7 @@ export function InspectionChecklistScreen({ inspectionId, checklists, checklistI
         </View>
         <Ionicons name="cloud-done-outline" size={20} color={palette.success} accessible={false} />
       </View>
-      <ChecklistTab work={work} draft={draft} maintenance={false} disabled={false} readOnly={false} mode={mode} savingStep={savingStep}
+      <ChecklistTab inline work={work} draft={draft} maintenance={false} disabled={false} readOnly={false} mode={mode} savingStep={savingStep}
         storageKey={`workshop-inspection-${inspectionId}`} initialChecklistId={checklistId} backHandler={backHandler} allowAnswerWithoutFiles
         labels={{ catalogTitle: "Listas de la inspección", catalogSubtitle: "Elige una lista para responder.", progressNote: "El avance cuenta las respuestas ya guardadas en Qualitzer." }}
         onChange={change} onDiscard={discard} onSave={save}

@@ -235,6 +235,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const [target, setTarget] = useState<string | undefined>();
   const viewHistory = useRef<Array<{ tab: Tab; target?: string; checklistId?: number }>>([]);
   const childBack = useRef<((home?: boolean) => boolean) | null>(null);
+  const stepFilesBack = useRef<((home?: boolean) => boolean) | null>(null);
   const checklistVisited = useRef(tab === "checklist");
   if (tab === "checklist") checklistVisited.current = true;
   const detailScroll = useRef<ScrollView>(null);
@@ -680,13 +681,13 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
 
   const evidenceStep = work.checklists.flatMap((checklist) => checklist.steps).find((step) => String(step.stepId) === target);
   const workspaceContent = <FileWorkspace
-    backHandler={childBack}
+    backHandler={tab === "checklist" ? stepFilesBack : childBack}
     compact
     scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:${target ?? "files"}`}
     resourceKey={JSON.stringify([resourceKey, target])}
     title={target !== undefined ? plainText(evidenceStep?.title ?? "Paso no disponible") : "Archivos del trabajo"}
     requirement={target !== undefined ? evidenceStep?.isFilesRequired ? "Evidencia obligatoria · debe estar confirmada" : "Evidencia opcional del paso" : work.isFilesRequired ? "Evidencia obligatoria del trabajo" : undefined}
-    headerAction={target !== undefined ? <IconButton name="folder-open-outline" label="Archivos del trabajo" onPress={() => navigateTab("evidence")} /> : undefined}
+    headerAction={target !== undefined && tab !== "checklist" ? <IconButton name="folder-open-outline" label="Archivos del trabajo" onPress={() => navigateTab("evidence")} /> : undefined}
     notices={<>
       {operationError ? <Notice message={operationError} tone="error" onDismiss={() => setOperationError(null)} /> : null}
       {draft.error ? <Notice message={userErrorText(draft.error)} tone="error" /> : null}
@@ -845,7 +846,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
         <Text style={styles.label}>{work.status === "delivered" ? "Trabajo entregado" : "Trabajo finalizado"}</Text>
       </View> : null}
-      {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => navigateTab("evidence", id)} notices={checklistNotices} catalogHeader={
+      {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab active={tab === "checklist"} backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => { if (!running.current && !parentBusy.current) setTarget(id); }} stepFiles={tab === "checklist" && target !== undefined ? workspaceContent : null} stepFilesBack={stepFilesBack} onCloseStepFiles={() => setTarget(undefined)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /></View> : null}
       {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : tab === "comments" && chat ? <ChatThread key={`${group.id}:${work.id}`} embedded api={chat} title="Comentarios del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled}

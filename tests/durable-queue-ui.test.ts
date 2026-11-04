@@ -73,7 +73,10 @@ test("actual detail and step editor advance after durable answer queue, not serv
   assert.equal(context.draft.answers[String(f.candidateStep.stepId)].saved, false);
   assert.equal(context.isAnswerQueued?.(f.candidateStep, f.answer), true);
   assert.equal(JSON.stringify(f.props.work), before);
-  assert.equal(action(f.renderEditor(), "Respuesta ya registrada en cola").disabled, true);
+  // En cola solo se puede avanzar: no queda ningún botón que vuelva a enviar la respuesta.
+  const titles = elements<UiAction>(f.renderEditor(), "Button").map(({ props }) => props.title);
+  assert.ok(!titles.includes("Guardar y seguir") && !titles.includes("Guardar respuesta"));
+  assert.ok(titles.includes("Siguiente") || titles.includes("Terminar"));
   f.editorHooks.unmount(); f.hooks.unmount();
 });
 

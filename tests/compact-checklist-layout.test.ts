@@ -109,8 +109,12 @@ test("pending evidence stays visible beside requirements, separate from confirme
 
 test("compact layout preserves readable headings and minimum 44px action dimensions", () => {
   const text = source("workDetail/checklist/styles.ts");
-  assert.match(text, /questionHeading:.*fontSize: 20, lineHeight: 27/);
+  assert.match(text, /questionHeading:.*fontSize: 22, lineHeight: 29/);
   assert.match(text, /compactButton:.*minHeight: 44/);
-  assert.match(text, /dockSave:.*minHeight: 44/);
+  assert.match(text, /dockSave:.*minHeight: 48/);
+  assert.match(text, /answerTile:.*minHeight: 80/);
   assert.match(source("workDetail/DetailUi.tsx"), /aria-checked=\{selected\} aria-disabled=\{disabled\}/);
+  assert.match(source("workDetail/checklist/ResponseInput.tsx"), /aria-checked=\{selected\} aria-disabled=\{disabled\}/);
+  // La ventana del checklist nunca debe tapar la pantalla de bloqueo del teléfono.
+  assert.match(source("workDetail/checklist/ChecklistDialog.tsx"), /PrivateModal as Modal/);
 });

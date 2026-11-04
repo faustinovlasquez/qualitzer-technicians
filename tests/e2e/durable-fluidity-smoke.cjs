@@ -182,7 +182,7 @@ async function main() {
         assert.equal((await metrics()).refreshes, 0);
         await button("Paso anterior sin guardar").click();
         await page.getByText("Respuesta registrada en el teléfono", { exact: true }).waitFor();
-        assert.equal(await button("Respuesta ya registrada en cola").isDisabled(), true);
+        assert.equal(await button("Guardar y siguiente").count(), 0);
         assert.equal((await metrics()).attempts.length, 1);
         await screenshot(`${width}-answer-queued-no-progress`);
         await page.evaluate(() => window.durableFluidity.applied()); await settle();

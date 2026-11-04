@@ -1,11 +1,24 @@
-import { View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import type { ComponentProps } from "react";
+import { Pressable, Text, View } from "react-native";
 import { checklistStepOptions, normalizeChecklistAnswer } from "../../../domain/checklistProgress";
 import { plainText } from "../../../domain/format";
 import type { ChecklistStep, StepAnswer } from "../../../domain/models";
 import { BodyText, Button, Field } from "../../../ui/components";
+import { palette } from "../../../ui/theme";
 import { ChoiceButton, Notice } from "../DetailUi";
 import { styles } from "../detailStyles";
 import { checklistAnswerLabel } from "./checklistPresentation";
+import { checklistStyles } from "./styles";
+
+/** Respuesta de Sí, No o No aplica: se reconoce a primera vista y es fácil de tocar con guantes. */
+function AnswerTile({ label, icon, color, soft, selected, disabled, onPress }: { label: string; icon: ComponentProps<typeof Ionicons>["name"]; color: string; soft: string; selected: boolean; disabled: boolean; onPress: () => void }) {
+  return <Pressable onPress={onPress} disabled={disabled} accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{ checked: selected, disabled }} aria-checked={selected} aria-disabled={disabled}
+    style={({ pressed }) => [checklistStyles.answerTile, selected && { borderColor: color, backgroundColor: soft }, (pressed || disabled) && checklistStyles.pressed]}>
+    <Ionicons name={icon} size={28} color={selected ? color : palette.textMuted} accessible={false} />
+    <Text numberOfLines={1} style={[checklistStyles.answerText, selected && { color }]}>{label}</Text>
+  </Pressable>;
+}
 
 export function ResponseInput({ step, answer, disabled, onChange }: { step: ChecklistStep; answer: StepAnswer; disabled: boolean; onChange: (answer: StepAnswer) => void }) {
   const value = answer.responseValue;
@@ -14,10 +27,10 @@ export function ResponseInput({ step, answer, disabled, onChange }: { step: Chec
   switch (step.type) {
     case "validation": return (
       <View style={styles.tight}>
-        <View style={styles.row} accessibilityRole="radiogroup" accessibilityLabel={`Validación: ${plainText(step.title)}`}>
-          <ChoiceButton label="Sí" selected={value === true} disabled={disabled} onPress={() => change(true)} />
-          <ChoiceButton label="No" selected={value === false} disabled={disabled} onPress={() => change(false)} />
-          <ChoiceButton label="No aplica" selected={value === "not_applicable"} disabled={disabled} onPress={() => change("not_applicable")} />
+        <View style={checklistStyles.answerRow} accessibilityRole="radiogroup" accessibilityLabel={`Validación: ${plainText(step.title)}`}>
+          <AnswerTile label="Sí" icon={value === true ? "checkmark-circle" : "checkmark-circle-outline"} color={palette.success} soft={palette.successSoft} selected={value === true} disabled={disabled} onPress={() => change(true)} />
+          <AnswerTile label="No" icon={value === false ? "close-circle" : "close-circle-outline"} color={palette.danger} soft={palette.dangerSoft} selected={value === false} disabled={disabled} onPress={() => change(false)} />
+          <AnswerTile label="No aplica" icon={value === "not_applicable" ? "remove-circle" : "remove-circle-outline"} color={palette.textSecondary} soft={palette.track} selected={value === "not_applicable"} disabled={disabled} onPress={() => change("not_applicable")} />
         </View>
         {step.isRequired === false && value !== null ? <Button title="Dejar sin respuesta" variant="ghost" disabled={disabled} onPress={() => change(null)} /> : null}
       </View>
