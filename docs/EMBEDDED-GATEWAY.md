@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.51
+# @qualitzer/mobile-gateway 1.0.52
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.51. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.52. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.52 hace dos cambios sin rutas nuevas ni migraciones. La cola de envíos (`POST /api/offline/documents`) ya no rechaza un archivo cuyo nombre o tipo declarado no coincide con su contenido: manda el contenido real y corrige la extensión, igual que las demás subidas; los tipos no permitidos, los programas, HTML, SVG, macros y HEIC se siguen rechazando. Y el gestor de archivos de un trabajo dentro de un mantenimiento (`.../works/:workId/drive`) muestra las subcarpetas de su carpeta fija, como «Lista de chequeo», solo de ese trabajo y de solo lectura; si el backend niega el árbol de carpetas (403 o 404), sigue mostrando los archivos como antes. Cada listado de ese gestor hace una consulta más a `/maintenance_files/folders/:id`.
 
 1.0.51 agrega el correo de confirmación de ingreso al cliente en el Taller: `GET /workshop/entries/:id/emails/eligibility`, `GET /workshop/emails/options` (plantillas activas y canales), `POST /workshop/entries/:id/emails/preview` (vista previa en párrafos de texto), `POST /workshop/entries/:id/emails` (enviar; permiso `workshopReception`) y `GET /workshop/entries/:id/emails` (historial con lectura). Requiere el backend con el módulo `customerEmails` y sus migraciones (`history_send_mail` ampliado, `email_templates`, `email_template_settings`). También corrige la lista de rutas permitidas de la firma (`/users/select`, `/user_signatures/users/:id`).
 

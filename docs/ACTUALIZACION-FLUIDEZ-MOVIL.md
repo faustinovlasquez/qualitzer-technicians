@@ -1,3 +1,7 @@
+# Imágenes con extensión equivocada y carpeta «Lista de chequeo» en mantenimientos: gateway 1.0.52
+
+La cola de envíos guarda el archivo según su contenido real y corrige la extensión, y el trabajo de un mantenimiento muestra su carpeta «Lista de chequeo» en el gestor. Sin migraciones ni rutas nuevas; compatible con la APK 1.0.150. Requiere solo actualizar el backend con esta pasarela.
+
 # Correo de confirmación de ingreso al cliente en la app: gateway 1.0.51 (APK 1.0.144)
 
 La app muestra «¡Ingreso realizado!» con el estado del correo (automático: a quién y por qué canal; manual: enviar ahora o después), envía la confirmación eligiendo plantilla, destinatarios, canal y adjunto, y muestra el historial de envíos con lectura en la ficha del ingreso. Requiere el backend con el módulo de correos al cliente y sus migraciones del 20261029.
