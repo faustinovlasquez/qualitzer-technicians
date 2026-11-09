@@ -10,6 +10,7 @@ import { UserSignaturesPanel } from "../../signatures/UserSignaturesPanel";
 import { Button, Field, SectionTitle } from "../../../ui/components";
 import { palette, radius } from "../../../ui/theme";
 import { Notice } from "../../workDetail/DetailUi";
+import { NumericSelectField } from "../../../ui/time/NumericSelectField";
 import { DELIVERY_NOTE_LIMIT, deliveryDraftErrors, technicianDeliveryInput, lifecycleError, type DeliveryDraft, type DeliveryErrors } from "./lifecycleRules";
 import { styles } from "./lifecycleStyles";
 import { SignatureField } from "./SignatureField";
@@ -177,7 +178,15 @@ export function MaintenanceDeliveryDialog(props: MaintenanceDeliveryDialogProps)
               </View> : <SignatureField label="Firma del técnico" name={props.technicianName} strokes={draft.technicianStrokes} signatureRef={technicianPad} disabled={blocked} error={errors.technicianSignature} onChange={(technicianStrokes) => { selectionVersion.current += 1; update({ technicianStrokes, technicianProfileSignature: null }); }} onDrawingChange={setDrawing} />}
               {props.signatureAccess ? <Button title="Mis firmas: elegir, agregar o editar" icon="create-outline" variant="secondary" disabled={blocked || drawing || !props.signatureAccess.available} onPress={() => setManagingSignatures(true)} /> : null}
             </DeliveryCard>
-            {errors.duration ? <Text accessibilityRole="alert" style={styles.error}>{errors.duration}</Text> : null}
+            {/* Igual que en la web: parte con la duración guardada o la sugerida por los cronómetros, y el técnico la puede ajustar. */}
+            <DeliveryCard icon="time-outline" title="Duración del mantenimiento">
+              <View style={cards.durationRow}>
+                <NumericSelectField label="Horas" max={99} value={draft.hours} disabled={blocked} scopeKey={`${props.orderLabel}:duration`} onChange={(hours) => update({ hours })} containerStyle={cards.durationField} />
+                <NumericSelectField label="Minutos" max={59} value={draft.minutes} disabled={blocked} scopeKey={`${props.orderLabel}:duration`} onChange={(minutes) => update({ minutes })} containerStyle={cards.durationField} />
+              </View>
+              <Text style={cards.optionDetail}>{context.durationMinutes !== null && context.durationMinutes > 0 ? "Duración registrada anteriormente; puedes ajustarla." : "Sugerido según cronómetros de trabajos."}</Text>
+              {errors.duration ? <Text accessibilityRole="alert" style={styles.error}>{errors.duration}</Text> : null}
+            </DeliveryCard>
           </View>
         </ScrollView>
         <View style={styles.footer}>
@@ -203,4 +212,6 @@ const cards = StyleSheet.create({
   optionText: { flex: 1, minWidth: 0, gap: 2 },
   optionTitle: { fontSize: 14, lineHeight: 19, fontWeight: "800", color: palette.heading },
   optionDetail: { fontSize: 12, lineHeight: 17, color: palette.textSecondary },
+  durationRow: { flexDirection: "row", gap: 10 },
+  durationField: { flex: 1, minWidth: 0 },
 });
