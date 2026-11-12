@@ -37,6 +37,7 @@ function utilitiesFixture(options: { os?: "android" | "web"; permission?: boolea
   const photos = loadSource<typeof import("../src/screens/workDetail/localPhotos")>("screens/workDetail/localPhotos.ts", id => {
     if (id === "expo-file-system") return filesystem;
     if (id === "expo-image-picker") return sdk;
+    if (id === "expo-image-manipulator") return { ImageManipulator: { manipulate: () => { throw new Error("MANIPULATOR_OUTSIDE_PICKER"); } }, SaveFormat: { JPEG: "jpeg" } };
     if (id === "react-native") return native;
     if (id === "./detailRules") return rules;
     if (id === "../../domain/cameraErrors") return cameraErrors;

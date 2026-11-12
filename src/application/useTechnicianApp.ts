@@ -184,6 +184,8 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const pausesPending = useRef(0);
   const manualRefresh = useRef<{ session: Session; range: DateRange } | null>(null);
   const appliedRefresh = useRef<{ repo: OfflineTechnicianRepository; revision: string } | null>(null);
+  const answerChain = useRef<Promise<void>>(Promise.resolve());
+  const pendingAnswers = useRef(0);
   const baselinePrepared = useRef<{ controller: OfflineTechnicianRepository; day: string } | null>(null);
   const state = useRef({ session, data, range, gatewayUrl, selected, selectedOrder, selectedCreationKind, tab });
   state.current = { session, data, range, gatewayUrl, selected, selectedOrder, selectedCreationKind, tab };
@@ -980,8 +982,19 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       return;
     }
     if (busy || actionLock.current || selectedCreationKind || offline?.syncing || appliedRefresh.current.revision === appliedRevision) return;
-    appliedRefresh.current = { repo: offlineController, revision: appliedRevision };
-    void refreshAssignments(true).catch(() => undefined);
+    const refreshNow = () => {
+      appliedRefresh.current = { repo: offlineController, revision: appliedRevision };
+      void refreshAssignments(true).catch(() => undefined);
+    };
+    const known = new Set(appliedRefresh.current.revision.split("|"));
+    const fresh = offline?.operations.filter((operation) => operation.status === "applied" && !known.has(operation.id)) ?? [];
+    if (!fresh.length || fresh.some((operation) => operation.kind !== "answer")) { refreshNow(); return; }
+    // Solo respuestas confirmadas (ya visibles en el teléfono): una descarga al terminar la ráfaga, no una por respuesta.
+    const timer = setTimeout(() => {
+      if (actionLock.current || appliedRefresh.current?.repo !== offlineController) return;
+      refreshNow();
+    }, 4000);
+    return () => clearTimeout(timer);
   }, [offlineController, session, appliedRevision, offline?.syncing, offline?.authBlocked, busy, selectedCreationKind, refreshAssignments, accessAllowed]);
 
   // La semana para trabajar sin señal se prepara al iniciar y otra vez cada vez que cambia el día (la app puede quedar abierta).
@@ -1523,6 +1536,12 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     if (!repo) throw new Error("La sesión no está disponible.");
     const version = sessionVersion.current;
     const action = beginAction();
+    // Antes de cualquier otra acción, terminar de guardar las respuestas que aún se están anotando (mantiene el orden).
+    if (pendingAnswers.current > 0) {
+      try { await answerChain.current; } catch {}
+      if (actionLock.current !== action) throw new Error("Hay una operación en curso. Espera a que termine.");
+      if (version !== sessionVersion.current || repository.current !== repo) { endAction(action); throw new Error("La sesión cambió. Actualiza antes de repetir la operación."); }
+    }
     let locationComplete: ReturnType<LocationActionRecorder> | undefined;
     try { if (locationAction) locationComplete = locationActions.current?.(locationAction, value, targetId); } catch {}
     assignmentRead.current?.controller.abort();
@@ -1554,8 +1573,53 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     return performMutation(value, operation, false, action, stepId);
   }
 
+  // Respuestas del checklist y fotos/archivos van en su propia fila (una tras otra) y NO encienden el "ocupado" global:
+  // el técnico sigue respondiendo, avanzando y tomando fotos mientras se anotan. Las demás acciones esperan a que esta fila termine.
   function saveAnswer(stepId: string, answer: StepAnswer): Promise<void> {
-    return performMutation(scope(stepId), (repo, value) => repo.answer(value, stepId, answer), true, "CHECKLIST_SAVED", stepId);
+    return backgroundMutation(scope(stepId), (repo, value) => repo.answer(value, stepId, answer), "CHECKLIST_SAVED", stepId, true);
+  }
+
+  function uploadDocumentsInBackground(files: LocalPhoto[], stepId?: string): Promise<void> {
+    const value = scope(stepId);
+    // Igual que mutation(..., retainCreationDependency): un trabajo creado sin conexión usa sus identificadores locales.
+    if (!stepId && selected?.draftGroupId && selected.draftWorkId) { value.groupId = selected.draftGroupId; value.workId = selected.draftWorkId; }
+    return backgroundMutation(value, (repo, scoped) => repo.uploadDocuments(scoped, files, stepId), "FILE_UPLOADED", stepId, false);
+  }
+
+  function backgroundMutation(value: WorkScope, operation: (repo: TechnicianRepository, value: WorkScope) => Promise<void>, locationAction: LocationAction, targetId: string | undefined, refreshAfter: boolean): Promise<void> {
+    if (!isAccessAllowed()) return Promise.reject(new Error("Desbloquea la aplicación antes de continuar."));
+    if (actionLock.current) return Promise.reject(new Error("Hay una operación en curso. Espera a que termine."));
+    const repo = repository.current;
+    if (!repo) return Promise.reject(new Error("La sesión no está disponible."));
+    const version = sessionVersion.current;
+    // Una lectura de la agenda iniciada antes de responder no puede pisar la respuesta nueva.
+    assignmentRead.current?.controller.abort();
+    baselineRead.current?.abort();
+    requestVersion.current += 1;
+    setLoading(false);
+    const run = async (): Promise<void> => {
+      if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió. Actualiza antes de repetir la operación.");
+      let locationComplete: ReturnType<LocationActionRecorder> | undefined;
+      try { locationComplete = locationActions.current?.(locationAction, value, targetId); } catch {}
+      try {
+        await operation(repo, value);
+        if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la operación. Verifica el resultado antes de repetir el envío.");
+        await locationComplete?.("CONFIRMED").catch(() => {});
+        if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió después del guardado. Verifica el resultado antes de repetirlo.");
+      } catch (error: unknown) {
+        if (version === sessionVersion.current && repository.current === repo && isOfflineQueuedError(error)) await locationComplete?.("QUEUED", error.operationId).catch(() => {});
+        throw error;
+      }
+      // Confirmada por el servidor al momento (sin cola): actualizar contadores. Si quedó en la cola no se re-descarga nada.
+      if (refreshAfter) void refreshAssignments(true).catch((caught: unknown) => {
+        if (version === sessionVersion.current && repository.current === repo) setError(`El cambio fue confirmado, pero no se pudo actualizar la información. No repitas el envío; actualiza las asignaciones. ${errorText(caught)}`);
+      });
+    };
+    pendingAnswers.current += 1;
+    // Si no hay otra respuesta anotándose, se envía de inmediato; si la hay, espera su turno.
+    const next = (pendingAnswers.current === 1 ? run() : answerChain.current.then(run)).finally(() => { pendingAnswers.current -= 1; });
+    answerChain.current = next.catch(() => undefined);
+    return next;
   }
 
   function performMutationGroup(operation: (repo: TechnicianRepository, value: GroupScope) => Promise<void>, action: LocationAction): Promise<void> {
@@ -2050,7 +2114,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
     loadFiles: (): Promise<Attachment[]> => readWork((repo, value) => repo.files(value)),
     loadStepFiles: (stepId: string): Promise<Attachment[]> => readWork((repo, value) => repo.stepFiles(value, stepId)),
     upload: (photos: LocalPhoto[], stepId?: string) => mutation((repo, value) => repo.upload(value, photos, stepId), stepId, true, "FILE_UPLOADED"),
-    uploadDocuments: (files: LocalPhoto[], stepId?: string) => mutation((repo, value) => repo.uploadDocuments(value, files, stepId), stepId, true, "FILE_UPLOADED"),
+    uploadDocuments: uploadDocumentsInBackground,
     deleteFile: (fileId: string, stepId?: string) => mutation((repo, value) => repo.deleteFile(value, requireFileId(fileId), stepId), stepId, false, "FILE_DELETED"),
     loadComments: (page: number): Promise<CommentPage> => readWork((repo, value) => {
       if (!Number.isSafeInteger(page) || page < 0) throw new Error("La página de comentarios no es válida.");

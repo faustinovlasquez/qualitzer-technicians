@@ -94,16 +94,29 @@ class DraftStore {
     });
   }
 
-  private update(data: WorkDraft): void {
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Escribe ya lo que estaba esperando por la pausa de escritura. */
+  private commitPending(): void {
+    if (!this.persistTimer) return;
+    clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    this.persist();
+  }
+
+  private update(data: WorkDraft, debounced = false): void {
     if (this.closed) return;
     this.revision += 1;
     this.publish({ data });
-    this.persist();
+    if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = null; }
+    // Al escribir el informe se espera 400 ms sin teclas antes de guardar en el teléfono (antes era en cada tecla).
+    if (debounced) this.persistTimer = setTimeout(() => { this.persistTimer = null; this.persist(); }, 400);
+    else this.persist();
   }
 
   setReport = (report: string): void => {
     this.reportTouched = true;
-    this.update({ ...this.snapshot.data, report });
+    this.update({ ...this.snapshot.data, report }, true);
   };
 
   confirmReport = (submitted: string): void => {
@@ -139,6 +152,7 @@ class DraftStore {
 
   flush = async (): Promise<void> => {
     await this.ready;
+    this.commitPending();
     let pending: Promise<void>;
     do { pending = this.tail; await pending; } while (pending !== this.tail);
     if (this.closed) throw new Error("La sesión de borradores está cerrada.");
@@ -153,6 +167,7 @@ class DraftStore {
   };
 
   close = async (): Promise<void> => {
+    this.commitPending();
     this.closed = true;
     await this.ready;
     await this.tail;

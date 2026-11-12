@@ -33,6 +33,7 @@ function pickerFixture(options: { os?: "android" | "web"; read?: () => Promise<I
   const photos = loadSource<typeof import("../src/screens/workDetail/localPhotos")>("screens/workDetail/localPhotos.ts", id => {
     if (id === "expo-image-picker") return sdk;
     if (id === "expo-file-system") return {};
+    if (id === "expo-image-manipulator") return { ImageManipulator: { manipulate: () => { throw new Error("NO_MANIPULATOR_IN_TESTS"); } }, SaveFormat: { JPEG: "jpeg" } };
     if (id === "react-native") return { Platform: { OS: options.os ?? "android" } };
     if (id === "../../domain/cameraErrors") return cameraErrors;
     if (id === "./detailRules") return { errorMessage: (error: unknown) => error instanceof Error ? error.message : "error" };

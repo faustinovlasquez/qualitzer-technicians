@@ -145,8 +145,8 @@ for (const outcome of ["queued", "persist-failed"] as const) test(`hook answer $
   const error = outcome === "queued" ? queued("answer") : new Error("DISK_FULL");
   const save = opened.saveAnswer("1009", answer);
   const checked = assert.rejects(save, (caught: unknown) => caught === error);
-  assert.equal((await f.flush()).busy, true);
-  await assert.rejects(f.render().saveAnswer("1009", answer), /operación en curso/);
+  // Guardar una respuesta ya no bloquea la pantalla (fluidez): el técnico puede seguir avanzando.
+  assert.equal((await f.flush()).busy, false);
   gate.reject(error); await checked;
   const after = await f.flush();
   assert.equal(after.busy, false); assert.equal(after.loading, false);

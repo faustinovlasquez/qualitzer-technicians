@@ -87,6 +87,7 @@ function fixture() {
     "react": view.react, "react/jsx-runtime": view.jsx, "react-native": native,
     "@react-native-async-storage/async-storage": storage.storage,
     "expo-file-system": { File, Directory, Paths: { document: "file:///documents", cache: "file:///cache" } },
+    "expo-image-manipulator": { ImageManipulator: { manipulate: () => { throw new Error("NO_MANIPULATOR_IN_TESTS"); } }, SaveFormat: { JPEG: "jpeg" } },
     "expo-image-picker": {
       UIImagePickerPreferredAssetRepresentationMode: { Current: "current" },
       getCameraPermissionsAsync: async () => { control.permissionReads++; events.push("permission:read"); return control.permission; },

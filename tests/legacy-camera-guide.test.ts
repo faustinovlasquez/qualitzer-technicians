@@ -53,6 +53,7 @@ function legacyFixture() {
     "expo-file-system": {},
     "react-native": { Platform: { OS: "android" } },
     "../../domain/cameraErrors": cameraErrors,
+    "expo-image-manipulator": { ImageManipulator: { manipulate: () => { throw new Error("NO_MANIPULATOR_IN_TESTS"); } }, SaveFormat: { JPEG: "jpeg" } },
     "expo-image-picker": {
       UIImagePickerPreferredAssetRepresentationMode: { Current: "current" },
       getCameraPermissionsAsync: async () => { calls.reads += 1; return ports.read(); },

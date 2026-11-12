@@ -48,9 +48,35 @@ const stateSchema = z.object({
 });
 export function emptyState(): OfflineState { return { version: 1, revision: 0, operations: [], cache: [], revokedResources: [], passports: [], reservations: [], attachments: [], lease: null, authBlocked: false, lastSyncedAt: null }; }
 export function decodeState(json: string): OfflineState {
+  return decodeStateValue(JSON.parse(json));
+}
+/**
+ * Copia independiente y barata de un estado ya validado: las operaciones y listas pequeñas se copian completas; de la caché
+ * se copian las entradas, pero el texto de cada una (inmutable, puede pesar megas) se comparte en vez de duplicarlo.
+ */
+export function copyState(state: OfflineState): OfflineState {
+  const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  return {
+    ...state,
+    operations: plain(state.operations),
+    revokedResources: plain(state.revokedResources),
+    passports: plain(state.passports),
+    reservations: plain(state.reservations),
+    attachments: plain(state.attachments),
+    lease: state.lease ? { ...state.lease } : null,
+    cache: state.cache.map((entry) => ({
+      ...entry,
+      ...(entry.coverage ? { coverage: { ...entry.coverage } } : {}),
+      ...(entry.timerReadOperationIds ? { timerReadOperationIds: [...entry.timerReadOperationIds] } : {}),
+      ...(entry.fileReadOperationIds ? { fileReadOperationIds: [...entry.fileReadOperationIds] } : {}),
+      ...(entry.activityReadOperationIds ? { activityReadOperationIds: [...entry.activityReadOperationIds] } : {}),
+    })),
+    ...(state.quarantine ? { quarantine: plain(state.quarantine) } : {}),
+  };
+}
+export function decodeStateValue(raw: unknown): OfflineState {
   // Cada operación se lee por separado: una que esta versión no entiende se aparta (sin borrarla) en vez de dejar
   // ilegible toda la cola.
-  const raw: unknown = JSON.parse(json);
   const record = raw !== null && typeof raw === "object" ? raw as Record<string, unknown> : {};
   const rawOperations = Array.isArray(record.operations) ? record.operations : [];
   const operations: unknown[] = [];

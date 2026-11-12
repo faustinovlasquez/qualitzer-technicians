@@ -267,7 +267,7 @@ test("post-answer invalidation never joins a same-range pre-answer read", async 
   const save = f.render().saveAnswer("1009", { responseValue: "approved", isCompleted: true, executionStatus: "completed", comment: null });
   await f.flush();
   assert.equal(f.calls.answers, 1);
-  assert.equal(f.render().busy, true);
+  assert.equal(f.render().busy, false, "saving an answer no longer blocks the screen");
   confirm(); await f.flush();
   assert.equal(f.reads.length, 3);
   assert.deepEqual(f.reads[2].range, f.reads[1].range);
@@ -303,7 +303,7 @@ test("request-version invalidation discards a pre-answer result before any repla
   f.reads[1].resolve(stale); await previous;
   const pending = await f.flush();
   assert.equal(pending.data?.generatedAt, loaded.data?.generatedAt);
-  assert.equal(pending.busy, true);
+  assert.equal(pending.busy, false, "saving an answer no longer blocks the screen");
   confirm(); await f.flush();
   assert.equal(f.reads.length, 3);
   f.reads[2].resolve(); await save;

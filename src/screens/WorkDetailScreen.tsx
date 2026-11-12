@@ -266,6 +266,9 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const [queuedAnswers, setQueuedAnswers] = useState<{ [stepId: string]: { signature: string; operationId: string } }>({});
   const queuedAnswersRef = useRef(queuedAnswers);
   const [action, setAction] = useState<string | null>(null);
+  /** Paso que se está guardando (solo para mostrar "Guardando…"; no bloquea la pantalla). */
+  const [savingStep, setSavingStep] = useState<string | null>(null);
+  const stepSaves = useRef<Promise<void>>(Promise.resolve());
   const [operationError, setOperationError] = useState<string | null>(workActionError(props.error));
   const [message, setMessage] = useState<string | null>(null);
   const [exitWarning, setExitWarning] = useState(false);
@@ -353,7 +356,8 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     previousResource.current = resourceKey;
     void files.load();
   }, [resourceKey, files.load]);
-  const appliedRevision = scopedOperations.filter((operation) => operation.status === "applied").map((operation) => operation.id).join("|");
+  // Solo fotos y documentos confirmados cambian la lista de archivos; una respuesta no obliga a recargarla.
+  const appliedRevision = scopedOperations.filter((operation) => operation.status === "applied" && operation.kind === "document").map((operation) => operation.id).join("|");
   const previousAppliedRevision = useRef(appliedRevision);
   useEffect(() => {
     if (previousAppliedRevision.current === appliedRevision) return;
@@ -484,26 +488,32 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     });
   }
 
-  async function saveStep(step: ChecklistStep, answer: StepAnswer): Promise<void> {
-    if (!mounted.current || readOnly || disabled || running.current) throw new Error("Espera a que termine la operación actual.");
+  // Guardar un paso no bloquea la pantalla: los guardados van en fila (uno tras otro) y solo se muestra "Guardando…".
+  function saveStep(step: ChecklistStep, answer: StepAnswer): Promise<void> {
+    if (!mounted.current || readOnly || !draft.hydrated || !offlineReady || awaitingConfirmation || parentBusy.current) return Promise.reject(new Error("Espera a que termine la operación actual."));
+    const next = stepSaves.current.then(() => saveStepNow(step, answer));
+    stepSaves.current = next.catch(() => undefined);
+    return next;
+  }
+
+  async function saveStepNow(step: ChecklistStep, answer: StepAnswer): Promise<void> {
     const id = String(step.stepId);
     const signature = answerKey(step, answer);
     if (registeredAnswerKey(answerOperations, step, queuedAnswersRef.current[id]) === signature) {
       setMessage("Respuesta registrada en el teléfono.");
       return;
     }
-    running.current = true;
-    setAction(`step:${step.stepId}`);
+    if (mounted.current) setSavingStep(id);
     try {
       const validation = answerError(step, answer);
       if (validation) throw new Error(validation);
+      // Si el borrador no se puede proteger en el teléfono, no se envía (se conserva para reintentar).
       draft.store.setAnswer(step, answer);
       await draft.store.flush();
       if (!mounted.current || callbacks.current.offline === null || callbacks.current.offline?.authBlocked || callbacks.current.staleReadOnly || readOnlyWork(callbacks.current.group, callbacks.current.work)) throw new Error("La ficha no permite guardar ahora. El borrador se conserva.");
       await onSaveStep(String(step.stepId), answer);
       draft.store.confirmAnswer(step, answer);
       if (mounted.current) setMessage(mode === "demo" ? "Respuesta guardada localmente en demostración." : "Respuesta guardada en Qualitzer.");
-      await draft.store.flush();
     } catch (error) {
       if (isOfflineQueuedError(error) && error.kind === "answer") {
         queuedAnswersRef.current = { ...queuedAnswersRef.current, [id]: { signature, operationId: error.operationId } };
@@ -517,8 +527,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       if (mounted.current) setOperationError(errorMessage(error));
       throw error;
     } finally {
-      running.current = false;
-      if (mounted.current) setAction(null);
+      if (mounted.current) setSavingStep((current) => current === id ? null : current);
     }
   }
 
@@ -679,6 +688,33 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
     </View> : null}
   </View>;
 
+  // Fotos y archivos dentro del mismo paso del checklist (sin abrir otra vista): cámara, galería, archivos y su avance.
+  const renderStepFiles = (stepId: string) => {
+    const step = work.checklists.flatMap((checklist) => checklist.steps).find((item) => String(item.stepId) === stepId);
+    return <FileWorkspace
+      key={stepId}
+      gallery
+      autoSave
+      scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:${stepId}`}
+      resourceKey={JSON.stringify([resourceKey, stepId])}
+      title="Fotos y archivos"
+      requirement={step?.isFilesRequired ? "Evidencia obligatoria · debe estar confirmada" : "Evidencia opcional del paso"}
+      mode={mode} readOnly={readOnly || !currentStepIds.has(stepId)} busy={staleReadOnly || !offlineReady} offline={props.offline} pending={pendingDocuments} readLocalFile={props.readLocalFile}
+      onLoad={async () => {
+        const current = callbacks.current;
+        if (!currentStepIds.has(stepId)) return [];
+        const attachments = await current.onLoadStepFiles(stepId);
+        const operations = operationsForWork(current.offline, { groupId: current.group.id, workId: current.work.id, ...current.range, companyBranchId: current.companyBranchId });
+        return attachments.filter((file) => {
+          const operationId = offlineAttachment(file)?.offline.operationId;
+          return !operationId || operations.some((operation) => operation.id === operationId && operation.kind === "document" && operation.stepId === stepId);
+        });
+      }}
+      onUpload={async (documents) => { await props.onUploadDocuments(documents, stepId); void refreshAfterSave(); }}
+      onDelete={async (fileId) => { await props.onDeleteFile(fileId, stepId); await refreshAfterSave(); }}
+      onDiscardPending={props.onDiscardOperation ? async (operationId) => { await callbacks.current.onDiscardOperation?.(operationId); } : undefined}
+    />;
+  };
   const evidenceStep = work.checklists.flatMap((checklist) => checklist.steps).find((step) => String(step.stepId) === target);
   const workspaceContent = <FileWorkspace
     backHandler={tab === "checklist" ? stepFilesBack : childBack}
@@ -849,7 +885,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
         <Text style={styles.label}>{work.status === "delivered" ? "Trabajo entregado" : "Trabajo finalizado"}</Text>
       </View> : null}
-      {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab active={tab === "checklist"} backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={action?.startsWith("step:") ? action.slice(5) : null} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} onEvidence={(id) => { if (!running.current && !parentBusy.current) setTarget(id); }} stepFiles={tab === "checklist" && target !== undefined ? workspaceContent : null} stepFilesBack={stepFilesBack} onCloseStepFiles={() => setTarget(undefined)} notices={checklistNotices} catalogHeader={
+      {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab active={tab === "checklist"} backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={savingStep} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} renderStepFiles={renderStepFiles} onEvidence={(id) => { if (!running.current && !parentBusy.current) setTarget(id); }} stepFiles={tab === "checklist" && target !== undefined ? workspaceContent : null} stepFilesBack={stepFilesBack} onCloseStepFiles={() => setTarget(undefined)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /></View> : null}
       {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : tab === "comments" && chat ? <ChatThread key={`${group.id}:${work.id}`} embedded api={chat} title="Comentarios del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled}

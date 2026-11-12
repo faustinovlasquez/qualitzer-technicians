@@ -5,7 +5,7 @@ import { sameTenant } from "../domain/tenantSession";
 import { OfflineUnavailableError, type OfflineCommand, type OfflineConnection, type OfflineFile, type OfflineOperation, type OfflineReceipt, type OfflineScope, type OfflineSnapshot } from "../domain/offline";
 import { ApiError, NetworkError } from "../infrastructure/errors";
 import { OFFLINE_LIMITS, type EngineDependencies, type OfflineState } from "./contracts";
-import { cloneState, emptyState, hasPendingChanges, pendingOperation, pruneApplied, receiptSchema, updateState } from "./state";
+import { emptyState, hasPendingChanges, pendingOperation, pruneApplied, receiptSchema, updateState } from "./state";
 import { resourceCacheKey, sameResource } from "./cacheSchemas";
 import { connectionErrorCode as errorCode, failedConnection, isServiceFailure, requiresDeployment } from "./connection";
 import { prepareQueuedActivity, prepareQueuedIntention } from "./queueIntentions";
@@ -113,7 +113,8 @@ export class OfflineEngine {
       cachedAt: this.state.cache.length ? Math.max(...this.state.cache.map((entry) => entry.fetchedAt)) : undefined,
       coverage: this.state.cache.flatMap((entry) => entry.coverage ? [entry.coverage] : []),
       awaitingDeploymentByKind: awaitingDeploymentCounts(this.state.operations),
-      operations: cloneState(this.state).operations,
+      // Solo se copian las operaciones (antes se copiaba y validaba el estado completo, caché de hasta 16 MB incluida, en cada aviso).
+      operations: JSON.parse(JSON.stringify(this.state.operations)) as OfflineState["operations"],
     };
     for (const listener of this.listeners) {
       try { listener(); } catch { /* UI observers cannot invalidate an already committed queue write. */ }
@@ -320,7 +321,9 @@ export class OfflineEngine {
   }
   hasPendingChanges(): Promise<boolean> { return hasPendingChanges(this.dependencies.store); }
   async readLocalFile(id: string): Promise<LocalPhoto> {
-    await this.refresh();
+    // Cada miniatura pide su archivo: se relee el estado (permisos revocados incluidos) pero sin medir el
+    // almacenamiento ni avisar a la pantalla; antes esto redibujaba la app completa por cada foto.
+    this.state = await this.dependencies.store.read(this.dependencies.namespace);
     if (this.state.authBlocked || (this.dependencies.canAccessLocal && !await this.dependencies.canAccessLocal())) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
     const cached = this.state.attachments.find((entry) => entry.file.id === id && entry.file.namespace === this.dependencies.namespace);
     const document = this.state.operations.find((entry) => entry.kind === "document" && entry.file.id === id);

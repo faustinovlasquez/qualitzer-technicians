@@ -32,6 +32,7 @@ function fileHarness(platform = "web") {
       removeItem: async (key) => storage.delete(key),
     },
     "expo-document-picker": { getDocumentAsync: async (options) => { pickerCalls.push({ source: "document", options }); return control.result; } },
+    "expo-image-manipulator": { ImageManipulator: { manipulate: () => { throw new Error("NO_MANIPULATOR_IN_TESTS"); } }, SaveFormat: { JPEG: "jpeg" } },
     "expo-image-picker": {
       UIImagePickerPreferredAssetRepresentationMode: { Current: "current" },
       requestCameraPermissionsAsync: async () => ({ granted: true }),

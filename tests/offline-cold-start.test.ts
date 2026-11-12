@@ -38,7 +38,7 @@ function persistentRuntime(databasePath: string, connected: () => boolean) {
   const queries = {
     execAsync: async (sql: string) => { connection.exec(sql); },
     getFirstAsync: async (sql: string, ...params: Array<string | number>) => connection.prepare(sql).get(...params) ?? null,
-    getAllAsync: async (sql: string) => connection.prepare(sql).all(),
+    getAllAsync: async (sql: string, ...params: Array<string | number>) => connection.prepare(sql).all(...params),
     runAsync: async (sql: string, ...params: Array<string | number>) => connection.prepare(sql).run(...params),
   };
   const sqlite = {

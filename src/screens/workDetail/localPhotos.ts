@@ -1,5 +1,6 @@
 import { Directory, File, Paths } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Platform } from "react-native";
 import type { LocalPhoto } from "../../domain/models";
 import { errorMessage } from "./detailRules";
@@ -71,16 +72,45 @@ function assetMetadata(asset: ImagePicker.ImagePickerAsset): { size: number; mim
   const extensions: { [key: string]: string } = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", heic: "image/heic" };
   const detectedMime = asset.mimeType ?? asset.file?.type ?? nativeFile?.type;
   const mimeType = detectedMime?.trim() ? detectedMime.toLowerCase() : extensions[extension ?? ""] ?? "";
-  if (!["image/jpeg", "image/png", "image/webp", "image/heic"].includes(mimeType)) throw new Error("Formato no admitido. Selecciona JPEG, PNG, WebP o HEIC; no se convierten ni comprimen las fotos.");
+  if (!["image/jpeg", "image/png", "image/webp", "image/heic"].includes(mimeType)) throw new Error("Formato no admitido. Selecciona JPEG, PNG, WebP o HEIC.");
   if (size === undefined || !Number.isFinite(size) || size <= 0) throw new Error("No se pudo verificar el tamaño de una foto. Vuelve a seleccionarla.");
   if (size > MAX_PHOTO_BYTES) throw new Error("Cada foto debe pesar como máximo 25 MB (25 MiB).");
   return { size, mimeType, name };
 }
 
+/** Lado mayor y calidad de las fotos guardadas: legibles para inspección y livianas para guardar y subir rápido. */
+const PHOTO_MAX_SIDE = 1920;
+const PHOTO_QUALITY = 0.75;
+
+/** Reduce la foto a JPEG (lado mayor ≤ 1920 px) directamente en `destination`. Devuelve null si no se pudo (se usa la original). */
+async function compressInto(asset: ImagePicker.ImagePickerAsset, destination: File): Promise<number | null> {
+  let context: ReturnType<typeof ImageManipulator.manipulate> | undefined;
+  let rendered: Awaited<ReturnType<ReturnType<typeof ImageManipulator.manipulate>["renderAsync"]>> | undefined;
+  try {
+    context = ImageManipulator.manipulate(asset.uri);
+    const width = asset.width ?? 0; const height = asset.height ?? 0;
+    // Con medidas conocidas se redimensiona sin decodificar la foto dos veces; sin medidas se fija el ancho igual.
+    if (width > 0 && height > 0) {
+      if (Math.max(width, height) > PHOTO_MAX_SIDE) context.resize(width >= height ? { width: PHOTO_MAX_SIDE } : { height: PHOTO_MAX_SIDE });
+    } else context.resize({ width: PHOTO_MAX_SIDE });
+    rendered = await context.renderAsync();
+    const result = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: PHOTO_QUALITY });
+    const output = new File(result.uri);
+    output.move(destination);
+    const size = new File(destination.uri).size;
+    return Number.isFinite(size) && size > 0 ? size : null;
+  } catch {
+    try { if (destination.exists) destination.delete(); } catch {}
+    return null;
+  } finally {
+    rendered?.release(); context?.release();
+  }
+}
+
 async function copyPhotos(storageKey: string, assets: ImagePicker.ImagePickerAsset[], existing: LocalPhoto[]): Promise<LocalPhoto[]> {
   if (existing.length + assets.length > MAX_PHOTOS) throw new Error("El máximo es de 4 fotos pendientes en total, incluidos los pasos del checklist.");
   const metadata = assets.map(assetMetadata);
-  if (existing.some((photo) => photo.size === undefined) || existing.reduce((sum, photo) => sum + (photo.size ?? 0), 0) + metadata.reduce((sum, photo) => sum + photo.size, 0) > MAX_TOTAL_BYTES) throw new Error("Las fotos pendientes no pueden superar 40 MB (40 MiB) en total.");
+  if (existing.some((photo) => photo.size === undefined)) throw new Error("Las fotos pendientes no pueden superar 40 MB (40 MiB) en total.");
   const prepared: LocalPhoto[] = [];
   try {
     for (const [index, asset] of assets.entries()) {
@@ -91,13 +121,21 @@ async function copyPhotos(storageKey: string, assets: ImagePicker.ImagePickerAss
       } else {
         const directory = photoDirectory(storageKey);
         directory.create({ idempotent: true, intermediates: true });
-        const extension = info.mimeType === "image/jpeg" ? "jpg" : info.mimeType.slice(6);
-        const destination = new File(directory, `${id}.${extension}`);
-        const photo: LocalPhoto = { id, uri: destination.uri, ...info };
-        prepared.push(photo);
-        await new File(asset.uri).copy(destination);
+        const compressed = new File(directory, `${id}.jpg`);
+        const compressedSize = await compressInto(asset, compressed);
+        if (compressedSize !== null) {
+          const baseName = info.name.replace(/\.[^./]+$/, "") || "foto";
+          prepared.push({ id, uri: compressed.uri, size: compressedSize, mimeType: "image/jpeg", name: `${baseName}.jpg` });
+        } else {
+          const extension = info.mimeType === "image/jpeg" ? "jpg" : info.mimeType.slice(6);
+          const destination = new File(directory, `${id}.${extension}`);
+          prepared.push({ id, uri: destination.uri, ...info });
+          await new File(asset.uri).copy(destination);
+        }
       }
     }
+    // El total se mide con el peso real ya reducido.
+    if (existing.reduce((sum, photo) => sum + (photo.size ?? 0), 0) + prepared.reduce((sum, photo) => sum + (photo.size ?? 0), 0) > MAX_TOTAL_BYTES) throw new Error("Las fotos pendientes no pueden superar 40 MB (40 MiB) en total.");
     return prepared;
   } catch (error) {
     for (const photo of prepared) deleteLocalPhoto(storageKey, photo);

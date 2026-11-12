@@ -43,6 +43,8 @@ export interface ChecklistTabProps {
   onDiscard: (step: ChecklistStep) => void;
   onSave: (step: ChecklistStep, answer: StepAnswer) => Promise<void>;
   onEvidence: (stepId?: string) => void;
+  /** Fotos y archivos del paso dentro del mismo paso (sin abrir otra vista). Sin esto se usa onEvidence. */
+  renderStepFiles?: (stepId: string) => ReactNode;
   storageKey: string;
   onRefresh?: () => Promise<void>;
   isAnswerQueued?: (step: ChecklistStep, answer: StepAnswer) => boolean;
