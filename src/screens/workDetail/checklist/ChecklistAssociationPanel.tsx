@@ -53,7 +53,9 @@ function ChecklistAssociationContent(props: ChecklistAssociationPanelProps) {
   const current = useRef(props);
   current.current = props;
   function alreadyQueued(id: number): boolean {
-    return queuedRef.current.some((entry) => entry.checklistId === id) || (current.current.pending ?? []).some((entry) => entry.payload.checklistId === id);
+    // Una asociación ya aplicada no cuenta como "en cola": si después se quitó el checklist (por ejemplo en la web),
+    // se debe poder agregar de nuevo. Antes quedaba bloqueado hasta que se archivara el envío (14 días).
+    return queuedRef.current.some((entry) => entry.checklistId === id) || (current.current.pending ?? []).some((entry) => entry.payload.checklistId === id && entry.status !== "applied");
   }
   useEffect(() => {
     mounted.current = true;

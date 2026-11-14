@@ -85,14 +85,16 @@ const PHOTO_QUALITY = 0.75;
 /** Reduce la foto a JPEG (lado mayor ≤ 1920 px) directamente en `destination`. Devuelve null si no se pudo (se usa la original). */
 async function compressInto(asset: ImagePicker.ImagePickerAsset, destination: File): Promise<number | null> {
   let context: ReturnType<typeof ImageManipulator.manipulate> | undefined;
+  let initial: Awaited<ReturnType<ReturnType<typeof ImageManipulator.manipulate>["renderAsync"]>> | undefined;
   let rendered: Awaited<ReturnType<ReturnType<typeof ImageManipulator.manipulate>["renderAsync"]>> | undefined;
   try {
+    // Mismos pasos que la foto del equipo del ingreso (avatarImage.scaledJpeg), probada en producción: primero se lee la
+    // foto ya orientada para conocer sus medidas reales y después se reduce. Las medidas del selector pueden venir sin rotar.
     context = ImageManipulator.manipulate(asset.uri);
-    const width = asset.width ?? 0; const height = asset.height ?? 0;
-    // Con medidas conocidas se redimensiona sin decodificar la foto dos veces; sin medidas se fija el ancho igual.
-    if (width > 0 && height > 0) {
-      if (Math.max(width, height) > PHOTO_MAX_SIDE) context.resize(width >= height ? { width: PHOTO_MAX_SIDE } : { height: PHOTO_MAX_SIDE });
-    } else context.resize({ width: PHOTO_MAX_SIDE });
+    initial = await context.renderAsync();
+    const longest = Math.max(initial.width, initial.height);
+    if (!Number.isFinite(longest) || longest <= 0) throw new Error("No se pudo leer la foto.");
+    if (longest > PHOTO_MAX_SIDE) context.resize(initial.width >= initial.height ? { width: PHOTO_MAX_SIDE } : { height: PHOTO_MAX_SIDE });
     rendered = await context.renderAsync();
     const result = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: PHOTO_QUALITY });
     const output = new File(result.uri);
@@ -103,7 +105,7 @@ async function compressInto(asset: ImagePicker.ImagePickerAsset, destination: Fi
     try { if (destination.exists) destination.delete(); } catch {}
     return null;
   } finally {
-    rendered?.release(); context?.release();
+    rendered?.release(); initial?.release(); context?.release();
   }
 }
 

@@ -323,6 +323,22 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
   const photoIdentity = photoContext.current.identity;
   const photoGates = useRef(false);
   photoGates.current = !readOnly && draft.hydrated && !awaitingConfirmation && (target === undefined || currentStepIds.has(target));
+  // Una respuesta que quedó en la cola y luego el servidor aplicó seguía marcada como "borrador" para siempre (y
+  // bloqueaba la entrega). Se marca guardada cuando el servidor ya tiene esa misma respuesta o aplicó exactamente ese envío.
+  const draftAnswers = draft.data.answers;
+  useEffect(() => {
+    if (!draft.hydrated) return;
+    for (const checklist of work.checklists) for (const step of checklist.steps) {
+      const entry = draftAnswers[String(step.stepId)];
+      if (!entry || entry.saved) continue;
+      const key = answerKey(step, entry.answer);
+      const applied = answerOperations.filter((operation) => operation.stepId === String(step.stepId))
+        .reduce<PendingAnswer | undefined>((latest, operation) => !latest || operation.createdAt >= latest.createdAt ? operation : latest, undefined);
+      const serverHasIt = key === answerKey(step, answerFromStep(step));
+      const appliedSame = applied?.status === "applied" && registeredAnswerKey([applied], step) === key;
+      if (serverHasIt || appliedSame) draft.store.confirmAnswer(step, entry.answer);
+    }
+  }, [draft.hydrated, draftAnswers, work.checklists, answerOperations, draft.store]);
   const photoCallbacks = useRef(choosePhotos);
   photoCallbacks.current = choosePhotos;
   const cameraGuide = useCameraPermissionGuide(photoScope, () => mounted.current && photoGates.current && !callbacks.current.busy && callbacks.current.offline !== null && !callbacks.current.offline?.authBlocked && callbacks.current.offline?.connection?.foreground !== false);
@@ -698,6 +714,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
       scopeKey={`${storageKey}:work:${draftGroupId}:${draftWorkId}:${stepId}`}
       resourceKey={JSON.stringify([resourceKey, stepId])}
       title="Fotos y archivos"
+      initialFiles={step?.attachments}
       requirement={step?.isFilesRequired ? "Evidencia obligatoria · debe estar confirmada" : "Evidencia opcional del paso"}
       mode={mode} readOnly={readOnly || !currentStepIds.has(stepId)} busy={staleReadOnly || !offlineReady} offline={props.offline} pending={pendingDocuments} readLocalFile={props.readLocalFile}
       onLoad={async () => {
@@ -885,7 +902,16 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
         <Ionicons name={work.status === "delivered" ? "checkmark-circle" : "lock-closed"} size={22} color={palette.primary} accessible={false} />
         <Text style={styles.label}>{work.status === "delivered" ? "Trabajo entregado" : "Trabajo finalizado"}</Text>
       </View> : null}
-      {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab active={tab === "checklist"} backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={savingStep} isAnswerQueued={(step, answer) => registeredAnswerKey(answerOperations, step, queuedAnswers[String(step.stepId)]) === answerKey(step, answer)} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} renderStepFiles={renderStepFiles} onEvidence={(id) => { if (!running.current && !parentBusy.current) setTarget(id); }} stepFiles={tab === "checklist" && target !== undefined ? workspaceContent : null} stepFilesBack={stepFilesBack} onCloseStepFiles={() => setTarget(undefined)} notices={checklistNotices} catalogHeader={
+      {checklistVisited.current ? <View style={tab === "checklist" ? styles.screen : styles.hidden} accessibilityElementsHidden={tab !== "checklist"} importantForAccessibility={tab === "checklist" ? "auto" : "no-hide-descendants"}><ChecklistTab active={tab === "checklist"} backHandler={tab === "checklist" ? childBack : undefined} initialChecklistId={initialChecklistId} work={evidenceWork} draft={draft.data} maintenance={maintenance} disabled={disabled || tab !== "checklist"} readOnly={readOnly} mode={mode} storageKey={identity} onRefresh={onRefresh} savingStep={savingStep} isAnswerQueued={(step, answer) => {
+            // "Registrada en el teléfono" solo mientras falte confirmarla: aplicada por el servidor ya no está en cola.
+            const id = String(step.stepId);
+            const marker = queuedAnswers[id];
+            const forStep = answerOperations.filter((operation) => operation.stepId === id);
+            const latest = forStep.reduce<PendingAnswer | undefined>((current, operation) => !current || operation.createdAt >= current.createdAt ? operation : current, undefined);
+            const markerApplied = marker !== undefined && forStep.some((operation) => operation.id === marker.operationId && operation.status === "applied");
+            if (latest?.status === "applied" && (marker === undefined || markerApplied)) return false;
+            return registeredAnswerKey(answerOperations, step, marker) === answerKey(step, answer);
+          }} pendingEvidenceCount={(id) => allPendingDocuments.filter((operation) => operation.stepId === id).length} onChange={draft.store.setAnswer} onDiscard={draft.store.discardAnswer} onSave={saveStep} renderStepFiles={renderStepFiles} onEvidence={(id) => { if (!running.current && !parentBusy.current) setTarget(id); }} stepFiles={tab === "checklist" && target !== undefined ? workspaceContent : null} stepFilesBack={stepFilesBack} onCloseStepFiles={() => setTarget(undefined)} notices={checklistNotices} catalogHeader={
         <ChecklistAssociationPanel storageKey={storageKey} group={group} work={work} mode={mode} online={online} busy={locked} pendingLocalWork={localWork} readOnly={staleReadOnly || props.offline?.authBlocked} offlineReady={offlineReady} pending={checklistOperations} loadOptions={props.onLoadChecklistOptions} attach={props.onAttachChecklist} onAttached={async () => { await callbacks.current.onRefresh(); }} />
       } /></View> : null}
       {tab === "evidence" ? evidenceContent : tab === "checklist" ? null : tab === "comments" && chat ? <ChatThread key={`${group.id}:${work.id}`} embedded api={chat} title="Comentarios del trabajo" subtitle={codes.workCode ?? undefined} readOnly={disabled}

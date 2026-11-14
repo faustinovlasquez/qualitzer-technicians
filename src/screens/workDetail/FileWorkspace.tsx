@@ -51,6 +51,11 @@ export interface FileWorkspaceProps {
   offline?: OfflineSnapshot | null;
   pending?: PendingDocument[];
   readLocalFile?: OfflineController["readLocalFile"];
+  /**
+   * Archivos ya conocidos (por ejemplo, los que trae el paso del checklist): se muestran sin consultar al servidor al abrir.
+   * Se vuelve a consultar solo al subir o eliminar, al confirmarse un envío o con el botón actualizar.
+   */
+  initialFiles?: Attachment[];
 }
 
 interface WorkspaceMessage { text: string; tone: "error" | "success" | "warning"; }
@@ -98,8 +103,9 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
   const pickerContext = useRef({ resource: props.resourceKey, identity: Symbol() });
   if (pickerContext.current.resource !== props.resourceKey) pickerContext.current = { resource: props.resourceKey, identity: Symbol() };
   const selectionLease = useRef<symbol | null>(null);
-  const [files, setFiles] = useState<Attachment[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles] = useState<Attachment[] | null>(props.initialFiles ?? null);
+  const [loading, setLoading] = useState(props.initialFiles === undefined);
+  const skipInitialLoad = useRef(props.initialFiles !== undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<WorkspaceMessage | null>(null);
   const [operation, setOperation] = useState<"select" | "prepare" | "upload" | "delete" | "remove" | null>(null);
@@ -177,7 +183,8 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
 
   useEffect(() => {
     active.current = true;
-    void load();
+    // Con archivos ya conocidos no se consulta al abrir (al recorrer pasos rápido se superaba el límite de peticiones).
+    if (skipInitialLoad.current) skipInitialLoad.current = false; else void load();
     return () => {
       active.current = false;
       generation.current += 1;
