@@ -32,12 +32,13 @@ export function demoCreationOptions(query: CreationOptionsQuery): CreationOption
   };
   return creationOptionsSchema.parse({ companyBranchId: input.companyBranchId, userId: demoUser.id, workerId: demoUser.workerId, timezone: demoUser.system.timezone,
     priorities: ["low", "medium", "high"], nonProductiveReasons: nonProductiveReasonSchema.options.map((value, index) => ({ value, label: reasons[index] })),
-    maintenanceTypes: ["correctivo", "detencion", "preventivo", "rutinario", "checklist"].map((value) => ({ value, enabled: ["correctivo", "detencion"].includes(value), instruction: ["correctivo", "detencion"].includes(value) ? null : "MOBILE_CREATION_MAINTENANCE_WEB_WIZARD_REQUIRED" })),
+    maintenanceTypes: ["correctivo", "detencion", "preventivo", "rutinario", "checklist"].map((value) => ({ value, enabled: true, instruction: null })),
     schedule: { sameDayOnly: true, conflictPolicy: "warning" },
     ...(input.kind === undefined || input.kind === "equipment" ? { equipment: catalog(equipment) } : {}),
     ...(input.kind === undefined || input.kind === "specialties" ? { specialties: catalog(specialties) } : {}),
     ...(input.kind === "systems" ? { systems: catalog(systems) } : {}),
     ...(input.kind === "components" ? { components: catalog(components.filter((item) => item.systemId === input.systemId).map(({ id, label }) => ({ id, label }))) } : {}),
+    ...(input.kind === "checklists" ? { checklists: catalog([{ id: 41, label: "CHK-01 · Inspección diaria" }, { id: 42, label: "CHK-02 · Revisión de despacho" }]) } : {}),
   });
 }
 

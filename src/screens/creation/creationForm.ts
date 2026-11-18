@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, workEditInputSchema, type WorkEditDocument, type WorkEditInput, type CreationCatalogResource, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
+import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, maintenanceTypeSchema, MAX_CREATION_CHECKLISTS, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, workEditInputSchema, type WorkEditDocument, type WorkEditInput, type CreationCatalogResource, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
 import type { Assignments } from "../../domain/models";
 import type { OfflineSnapshot } from "../../domain/offline";
 import { buildWeeklySchedule, scheduleTimeMinutes } from "../../domain/weeklySchedule";
@@ -12,7 +12,10 @@ export const creationFormSchema = z.object({
   /** Ingreso a taller al que pertenece el trabajo: el equipo y el cliente salen del ingreso. */
   operationAreaEntryId: positiveCreationIdSchema.optional(),
   title: draftText(255), summary: draftText(5000), motive: draftText(5000),
-  priority: creationPrioritySchema, maintenanceType: z.enum(["correctivo", "detencion"]),
+  priority: creationPrioritySchema, maintenanceType: maintenanceTypeSchema,
+  /** Mantenimiento checklist: listas elegidas (se agregan al trabajo al crear) y categoría opcional. */
+  checklists: z.array(catalogReferenceSchema).max(MAX_CREATION_CHECKLISTS).default([]),
+  checklistCategory: z.enum(["", "routine", "dispatch", "return"]).default(""),
   equipment: z.object({ id: positiveCreationIdSchema, label: draftText(500), internalNumber: draftText(500).nullish(), identifier: draftText(500).nullish(), equipmentType: draftText(500).nullish() }).strict().nullable(),
   specialty: catalogReferenceSchema.nullable(),
   system: catalogReferenceSchema.nullable().default(null),
@@ -26,17 +29,26 @@ export const creationFormSchema = z.object({
 export type CreationForm = z.infer<typeof creationFormSchema>;
 export type CatalogItem = NonNullable<CreationForm["equipment"]>;
 export type CreationFormErrors = Partial<{ [Key in keyof CreationForm]: string }>;
-export const catalogFormField = { equipment: "equipment", specialties: "specialty", systems: "system", components: "component" } as const satisfies { [Resource in CreationCatalogResource]: keyof CreationForm };
+export const catalogFormField = { equipment: "equipment", specialties: "specialty", systems: "system", components: "component", checklists: "checklists" } as const satisfies { [Resource in CreationCatalogResource]: keyof CreationForm };
+
+/** Lo elegido en un catálogo de una sola opción; las listas se agregan de a una y no quedan marcadas. */
+export function catalogSelection(form: CreationForm, resource: CreationCatalogResource): CatalogItem | null {
+  return resource === "checklists" ? null : form[catalogFormField[resource]];
+}
 
 export function applyCatalogSelection(form: CreationForm, resource: CreationCatalogResource, item: CatalogItem): CreationForm {
   if (resource === "equipment") return { ...form, equipment: item };
   const reference = { id: item.id, label: item.label };
+  if (resource === "checklists") {
+    if (form.checklists.some((checklist) => checklist.id === item.id) || form.checklists.length >= MAX_CREATION_CHECKLISTS) return form;
+    return { ...form, checklists: [...form.checklists, reference] };
+  }
   if (resource === "systems") return { ...form, system: reference, component: form.system?.id === item.id ? form.component : null };
   return { ...form, [catalogFormField[resource]]: reference };
 }
 
 export function emptyCreationForm(initialDate: string): CreationForm {
-  return { title: "", summary: "", motive: "", priority: "medium", maintenanceType: "correctivo", equipment: null, specialty: null, system: null, component: null,
+  return { title: "", summary: "", motive: "", priority: "medium", maintenanceType: "correctivo", checklists: [], checklistCategory: "", equipment: null, specialty: null, system: null, component: null,
     damageType: "", reason: "waiting_parts", reasonText: "", initialComment: "", date: calendarDateSchema.safeParse(initialDate).success ? initialDate : "", startTime: "", endTime: "", plannedMinutes: null };
 }
 
@@ -55,6 +67,10 @@ export function creationPayload(kind: CreationKind, form: CreationForm, companyB
     type: form.maintenanceType, title: form.title, motive: form.motive, priority: form.priority,
     ...(form.operationAreaEntryId ? { operationAreaEntryId: form.operationAreaEntryId } : { equipmentId: form.equipment?.id }),
     ...specialty, ...(form.damageType ? { damageType: form.damageType } : {}), ...workSystem,
+    ...(form.maintenanceType === "checklist" ? {
+      checklistIds: form.checklists.map((checklist) => checklist.id),
+      ...(form.checklistCategory ? { checklistCategory: form.checklistCategory } : {}),
+    } : {}),
   } });
   return creationInputSchema.parse({ ...base, kind, nonProductive: {
     reason: form.reason, ...(form.reasonText.trim() ? { reasonText: form.reasonText } : {}),
@@ -68,7 +84,11 @@ export function validateCreationForm(kind: CreationKind, form: CreationForm): Cr
     if (!form[field].trim()) errors[field] = `${label} es obligatorio.`;
   };
   if (kind !== "non_productive") requiredText("title", "El título");
-  if (kind === "maintenance") { requiredText("motive", "El motivo"); if (!form.equipment && !form.operationAreaEntryId) errors.equipment = "Selecciona un equipo."; }
+  if (kind === "maintenance") {
+    requiredText("motive", "El motivo");
+    if (!form.equipment && !form.operationAreaEntryId) errors.equipment = "Selecciona un equipo.";
+    if (form.maintenanceType === "checklist" && form.checklists.length === 0) errors.checklists = "Agrega al menos una lista de chequeo.";
+  }
   if (kind === "non_productive" && form.reason === "other") requiredText("reasonText", "El detalle del motivo");
   if (!calendarDateSchema.safeParse(form.date).success) errors.date = "Ingresa una fecha real YYYY-MM-DD entre 2000 y 2100.";
   const time = /^([01]\d|2[0-3]):[0-5]\d$/;

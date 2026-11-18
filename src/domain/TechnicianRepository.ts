@@ -10,8 +10,9 @@ import type { UserSignaturesPort } from "./userSignatures";
 import type { OwnProfilePort } from "./ownProfile";
 import type { LocationPoint } from "./locationTracking";
 import type { WorkTeamPort } from "./workTeam";
+import type { MaintenancePautaPort } from "./maintenancePauta";
 
-export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort>, Partial<OwnProfilePort>, Partial<WorkTeamPort> {
+export interface TechnicianRepository extends Partial<OfflineSyncPort>, Partial<ChecklistAssignmentPort>, Partial<WorkActivitiesPort>, Partial<UserSignaturesPort>, Partial<OwnProfilePort>, Partial<WorkTeamPort>, Partial<MaintenancePautaPort> {
   materialReceipts?: import("./materialReceipts").MaterialReceiptPort["materialReceipts"];
   confirmMaterialReceipts?: import("./materialReceipts").MaterialReceiptPort["confirmMaterialReceipts"];
   workshops?: import("./workshopBoard").WorkshopBoardPort["workshops"];

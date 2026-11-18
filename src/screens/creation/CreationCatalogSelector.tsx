@@ -10,6 +10,7 @@ export type CreationCatalogPage = NonNullable<CreationOptions["equipment"]>;
 export type CreationCatalogCache = Map<string, CreationCatalogPage>;
 const catalogTitles: { [Resource in CreationCatalogResource]: string } = {
   equipment: "Seleccionar equipo", specialties: "Seleccionar especialidad", systems: "Seleccionar sistema", components: "Seleccionar subsistema",
+  checklists: "Agregar lista de chequeo",
 };
 interface Props {
   embedded?: boolean;

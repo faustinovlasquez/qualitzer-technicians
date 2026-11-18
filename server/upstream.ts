@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GatewayError } from "./errors";
+import { pautaErrorMessage } from "../src/domain/maintenancePauta";
 import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, syncReceiptSchema, type SyncReceipt } from "../src/domain/offlineProtocol";
 
 export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
@@ -56,6 +57,7 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/technician-dashboard/panel/${string}/works/${number}/activities/${number}/files/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/reopen` |
   `/technician-dashboard/panel/${string}/works/${number}/team` |
+  `/technician-dashboard/panel/${string}/works/${number}/pauta` |
   `/technician-dashboard/panel/${string}/works/${number}/team/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/equipment-location/${"work" | "group"}` |
   `/technician-dashboard/panel/${string}/works/${number}/steps/${number}/files`;
@@ -230,6 +232,15 @@ export class Upstream {
           if (response.status === 404) throw new GatewayError(503, "WORK_TEAM_NOT_AVAILABLE", workTeamErrorMessage("WORK_TEAM_NOT_AVAILABLE"));
           throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó el cambio de equipo.");
         }
+        if (/\/works\/[1-9]\d*\/pauta$/.test(path) && [400, 404, 409].includes(response.status)) {
+          let failure: unknown;
+          try { failure = JSON.parse(await readBody(response)); } catch { failure = null; }
+          const parsed = z.object({ error: z.string().regex(/^(?:PANEL_PAUTA_[A-Z_]+|MAINTENANCE_WORKER_NOT_PLANNABLE)$/) }).safeParse(failure);
+          if (parsed.success) throw new GatewayError(response.status, parsed.data.error, pautaErrorMessage(parsed.data.error));
+          // Servidor sin la ruta de pauta (versión anterior).
+          if (response.status === 404) throw new GatewayError(503, "PANEL_PAUTA_NOT_AVAILABLE", pautaErrorMessage("PANEL_PAUTA_NOT_AVAILABLE"));
+          throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó la acción con la pauta.");
+        }
         if (WORKSHOP_BACKEND_PATH.test(path) && [400, 403, 404, 409, 413].includes(response.status)) {
           let failure: unknown;
           try { failure = JSON.parse(await readBody(response)); } catch { failure = null; }
@@ -338,7 +349,13 @@ function mobileErrorMessage(code: string): string {
   if (code === "OWN_PROFILE_NOT_FOUND") return "Tu cuenta no tiene un perfil asociado. Contacta a un administrador.";
   if (code.startsWith("OWN_PROFILE_")) return "No se pudo guardar el perfil. Revisa los datos ingresados.";
   if (code === "MOBILE_CREATION_REQUEST_CONFLICT") return "Este intento ya se usó con otros datos. Inicia una nueva creación; para reintentar, conserva los datos originales.";
-  if (code === "MOBILE_CREATION_MAINTENANCE_WEB_WIZARD_REQUIRED") return "Este mantenimiento requiere el asistente web.";
+  if (code === "MOBILE_CREATION_MAINTENANCE_WEB_WIZARD_REQUIRED") return "El servidor todavía no permite crear este tipo de mantenimiento desde la app. Créalo en la web.";
+  if (code === "MOBILE_CREATION_INVALID_ENUM") return "El servidor no reconoce uno de los valores elegidos. Si es un tipo de mantenimiento nuevo, créalo en la web.";
+  if (code === "MOBILE_CREATION_CHECKLIST_REQUIRED") return "Agrega al menos una lista de chequeo.";
+  if (code === "MOBILE_CREATION_TOO_MANY_CHECKLISTS") return "Puedes agregar hasta 10 listas de chequeo.";
+  if (code === "MOBILE_CREATION_DUPLICATED_CHECKLIST") return "Una lista de chequeo está repetida. Quítala e intenta de nuevo.";
+  if (code === "MOBILE_CREATION_CHECKLIST_NOT_FOUND") return "Una de las listas ya no existe o fue desactivada. Quítala y elige otra.";
+  if (code === "MOBILE_CREATION_CHECKLIST_EMPTY") return "Una de las listas no tiene preguntas activas. Quítala y elige otra.";
   if (code === "MOBILE_CREATION_ENTRY_NOT_FOUND") return "El ingreso ya no existe o no es de tu sucursal. Actualiza el taller.";
   if (code === "MOBILE_CREATION_ENTRY_DELIVERED") return "Este equipo ya fue entregado: no se le pueden agregar trabajos.";
   if (code === "MOBILE_CREATION_ENTRY_NOT_INTERNAL") return "Solo los ingresos de equipos propios pueden tener mantenimientos.";

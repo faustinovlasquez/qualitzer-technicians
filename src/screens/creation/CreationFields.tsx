@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { CreationCatalogResource, CreationKind, CreationOptions } from "../../domain/creation";
+import { MAX_CREATION_CHECKLISTS, type CreationCatalogResource, type CreationKind, type CreationOptions } from "../../domain/creation";
 import { Field } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { CreationForm, CreationFormErrors } from "./creationForm";
@@ -66,6 +66,44 @@ export function LinkedEquipmentCard({ title, label, detail, hint }: { title: str
   </View>;
 }
 
+const MOTIVE_PLACEHOLDERS: { [Type in CreationForm["maintenanceType"]]: string } = {
+  correctivo: "Describe la falla a corregir", detencion: "Describe la falla o el motivo de detención",
+  preventivo: "Describe el mantenimiento preventivo a ejecutar", rutinario: "Describe el mantenimiento rutinario a ejecutar",
+  checklist: "Describe para qué se aplican las listas",
+};
+const MAINTENANCE_TYPE_HINTS: { [Type in CreationForm["maintenanceType"]]?: string } = {
+  preventivo: "Después de crearlo podrás agregar los ítems de la pauta del equipo desde el trabajo.",
+  checklist: "Las listas elegidas quedan en el trabajo para responderlas.",
+};
+const CHECKLIST_CATEGORIES = [["", "Sin tipo"], ["routine", "Rutinaria"], ["dispatch", "Despacho"], ["return", "Devolución"]] as const;
+
+/** Mantenimiento checklist: tipo de lista (opcional) y las listas que se agregan al trabajo. */
+function ChecklistFields({ form, errors, disabled, onChange, onSelectCatalog }: Pick<Props, "form" | "errors" | "disabled" | "onChange" | "onSelectCatalog">) {
+  const full = form.checklists.length >= MAX_CREATION_CHECKLISTS;
+  return <View style={styles.checklists}>
+    <Text style={styles.label}>Tipo de lista de chequeo (opcional)</Text>
+    <View style={styles.choices} accessibilityRole="radiogroup">
+      {CHECKLIST_CATEGORIES.map(([value, label]) => <CreationChoice key={value} label={label} selected={form.checklistCategory === value} disabled={disabled}
+        onPress={() => onChange("checklistCategory", value)} />)}
+    </View>
+    <Text style={styles.label}>Listas de chequeo *</Text>
+    {form.checklists.map((checklist) => <View key={checklist.id} style={styles.checklistRow}>
+      <Ionicons name="checkbox-outline" size={18} color={palette.primary} accessible={false} />
+      <Text style={styles.checklistLabel} numberOfLines={2}>{checklist.label}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Quitar ${checklist.label}`} hitSlop={10} disabled={disabled}
+        onPress={() => onChange("checklists", form.checklists.filter((item) => item.id !== checklist.id))} style={styles.pickerClear}>
+        <Ionicons name="close" size={16} color={palette.textSecondary} accessible={false} />
+      </Pressable>
+    </View>)}
+    <Pressable accessibilityRole="button" accessibilityLabel="Agregar lista de chequeo" accessibilityState={{ disabled: disabled || full }} disabled={disabled || full}
+      onPress={() => onSelectCatalog("checklists")} style={({ pressed }) => [styles.addChecklist, (disabled || full) && styles.disabled, pressed && styles.pressed]}>
+      <Ionicons name="add-circle-outline" size={20} color={palette.primary} accessible={false} />
+      <Text style={styles.addChecklistText}>{full ? `Máximo ${MAX_CREATION_CHECKLISTS} listas` : "Agregar lista de chequeo"}</Text>
+    </Pressable>
+    {errors.checklists ? <Text accessibilityRole="alert" style={styles.error}>{errors.checklists}</Text> : null}
+  </View>;
+}
+
 function WorkSystemFields({ form, disabled, onChange, onSelectCatalog }: Pick<Props, "form" | "disabled" | "onChange" | "onSelectCatalog">) {
   return <>
     <CatalogPicker label="Sistema (opcional)" icon="git-network-outline" value={form.system?.label ?? null} placeholder="Elegir sistema" disabled={disabled}
@@ -81,17 +119,17 @@ export function CreationFields({ kind, form, errors, options, disabled, editing 
       <Text style={styles.label}>Tipo de mantenimiento *</Text>
       <View style={styles.choices} accessibilityRole="radiogroup">
         {options.maintenanceTypes.map((type) => <CreationChoice key={type.value} label={maintenanceLabels[type.value]} selected={type.value === form.maintenanceType}
-          disabled={disabled || !type.enabled || (type.value !== "correctivo" && type.value !== "detencion")}
-          onPress={() => { if (type.value === "correctivo" || type.value === "detencion") onChange("maintenanceType", type.value); }} />)}
+          disabled={disabled || !type.enabled} onPress={() => { if (type.enabled) onChange("maintenanceType", type.value); }} />)}
       </View>
-      <Text style={styles.hint}>Preventivo, rutinario y checklist requieren el asistente web para aplicar pautas, rutinas o listas. No se pueden crear desde este formulario.</Text>
+      {MAINTENANCE_TYPE_HINTS[form.maintenanceType] ? <Text style={styles.hint}>{MAINTENANCE_TYPE_HINTS[form.maintenanceType]}</Text> : null}
+      {form.maintenanceType === "checklist" ? <ChecklistFields form={form} errors={errors} disabled={disabled} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
     </> : null}
     {kind !== "non_productive" ? <>
       <Field label="Título *" value={form.title} editable={!disabled} maxLength={255} error={errors.title} onChangeText={(value) => onChange("title", value)} placeholder="¿Qué necesitas realizar?" />
       {kind === "work" ? <Field label="Resumen del trabajo (opcional)" value={form.summary} editable={!disabled} maxLength={5000} multiline error={errors.summary}
         onChangeText={(value) => onChange("summary", value)} placeholder="Describe el alcance del trabajo" /> :
         <Field label="Motivo del mantenimiento *" value={form.motive} editable={!disabled} maxLength={5000} multiline error={errors.motive}
-          onChangeText={(value) => onChange("motive", value)} placeholder="Describe la falla o el motivo de detención" />}
+          onChangeText={(value) => onChange("motive", value)} placeholder={MOTIVE_PLACEHOLDERS[form.maintenanceType]} />}
       {equipmentLookup}
       <Text style={styles.label}>Prioridad{kind === "work" ? " *" : ""}</Text>
       <View style={styles.choices} accessibilityRole="radiogroup">
@@ -145,6 +183,11 @@ const styles = StyleSheet.create({
   pickerValue: { flex: 1, fontSize: 15, fontWeight: "700", color: palette.heading },
   pickerPlaceholder: { fontWeight: "500", color: palette.textMuted },
   pickerClear: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: palette.surface },
+  checklists: { gap: 10 },
+  checklistRow: { minHeight: 50, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, borderWidth: 1, borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
+  checklistLabel: { flex: 1, fontSize: 15, fontWeight: "700", color: palette.heading },
+  addChecklist: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: palette.primary },
+  addChecklistText: { ...typography.label, color: palette.primary },
   linked: { flexDirection: "row", gap: 12, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
   linkedIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: palette.primary },
   linkedText: { flex: 1, minWidth: 0, gap: 3 },

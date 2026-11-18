@@ -19,6 +19,9 @@ export const workCreationScheduleSchema = z.object({ date: calendarDateSchema, s
   .refine((value) => !value.startTime || !value.endTime || value.startTime < value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE")
   .refine((value) => value.plannedMinutes === undefined || !value.startTime || !value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE");
 const base = { companyBranchId: positiveCreationIdSchema, clientRequestId: mobileUuidSchema, schedule: creationScheduleSchema };
+export const maintenanceTypeSchema = z.enum(["correctivo", "detencion", "preventivo", "rutinario", "checklist"]);
+export const checklistCategorySchema = z.enum(["routine", "dispatch", "return"]);
+export const MAX_CREATION_CHECKLISTS = 10;
 const workSystemFields = { systemId: positiveCreationIdSchema.optional(), componentId: positiveCreationIdSchema.optional() };
 const hasValidSystem = (value: { systemId?: number; componentId?: number }): boolean => value.componentId === undefined || value.systemId !== undefined;
 export const creationInputSchema = z.discriminatedUnion("kind", [
@@ -28,12 +31,15 @@ export const creationInputSchema = z.discriminatedUnion("kind", [
     .refine(value => value.work.operationAreaEntryId === undefined || (value.maintenanceId === undefined && value.work.rentalEquipmentId === undefined), "MOBILE_CREATION_INHERITED_EQUIPMENT")
     .refine(value => value.maintenanceId !== undefined || (value.work.systemId === undefined && value.work.componentId === undefined), "MOBILE_CREATION_SYSTEM_REQUIRES_MAINTENANCE"),
   // Mantenimiento de un ingreso a taller (equipo propio): el equipo sale del ingreso en el servidor, el teléfono no lo envía.
-  z.object({ ...base, kind: z.literal("maintenance"), maintenance: z.object({ type: z.enum(["correctivo", "detencion"]), title: text(255), motive: text(5000), equipmentId: positiveCreationIdSchema.optional(), operationAreaEntryId: positiveCreationIdSchema.optional(), priority: creationPrioritySchema.optional(), specialtyId: positiveCreationIdSchema.optional(), damageType: z.enum(["operacional", "desgaste"]).optional(), ...workSystemFields }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED")
-    .refine(value => (value.equipmentId === undefined) !== (value.operationAreaEntryId === undefined), "MOBILE_CREATION_INHERITED_EQUIPMENT") }).strict(),
+  z.object({ ...base, kind: z.literal("maintenance"), maintenance: z.object({ type: maintenanceTypeSchema, title: text(255), motive: text(5000), equipmentId: positiveCreationIdSchema.optional(), operationAreaEntryId: positiveCreationIdSchema.optional(), priority: creationPrioritySchema.optional(), specialtyId: positiveCreationIdSchema.optional(), damageType: z.enum(["operacional", "desgaste"]).optional(), ...workSystemFields,
+    checklistCategory: checklistCategorySchema.optional(), checklistIds: z.array(positiveCreationIdSchema).min(1).max(MAX_CREATION_CHECKLISTS).optional() }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED")
+    .refine(value => (value.equipmentId === undefined) !== (value.operationAreaEntryId === undefined), "MOBILE_CREATION_INHERITED_EQUIPMENT")
+    // Checklist: al menos una lista, sin repetir; los demás tipos no llevan listas ni categoría.
+    .refine(value => value.type === "checklist" ? value.checklistIds !== undefined && new Set(value.checklistIds).size === value.checklistIds.length : value.checklistIds === undefined && value.checklistCategory === undefined, "MOBILE_CREATION_CHECKLIST_REQUIRED") }).strict(),
   z.object({ ...base, kind: z.literal("non_productive"), nonProductive: z.object({ reason: nonProductiveReasonSchema, reasonText: text(500).optional(), initialComment: text(5000).optional() }).strict().refine((value) => value.reason !== "other" || !!value.reasonText, "NON_PRODUCTIVE_REASON_TEXT_REQUIRED") }).strict(),
 ]);
 export const normalizeEquipmentInternalNumber = (value: string): string => value.trim().toLowerCase();
-export const creationCatalogResourceSchema = z.enum(["equipment", "specialties", "systems", "components"]);
+export const creationCatalogResourceSchema = z.enum(["equipment", "specialties", "systems", "components", "checklists"]);
 export const creationOptionsQuerySchema = z.object({ companyBranchId: positiveCreationIdSchema, kind: creationCatalogResourceSchema.optional(), search: z.string().max(100).trim().optional(),
   internalNumber: z.string().max(100).regex(/^[^\x00-\x1f\x7f]*$/).trim().min(1).transform(normalizeEquipmentInternalNumber).optional(),
   systemId: positiveCreationIdSchema.optional(),
@@ -45,10 +51,11 @@ export const creationCatalogPageSchema = z.object({ items: z.array(z.object({ id
 export const creationOptionsSchema = z.object({
   companyBranchId: positiveCreationIdSchema, userId: positiveCreationIdSchema, workerId: positiveCreationIdSchema, timezone: z.string().min(1),
   priorities: z.array(creationPrioritySchema), nonProductiveReasons: z.array(z.object({ value: nonProductiveReasonSchema, label: z.string() })),
-  maintenanceTypes: z.array(z.object({ value: z.enum(["correctivo", "detencion", "preventivo", "rutinario", "checklist"]), enabled: z.boolean(), instruction: z.string().nullable() })),
+  maintenanceTypes: z.array(z.object({ value: maintenanceTypeSchema, enabled: z.boolean(), instruction: z.string().nullable() })),
   schedule: z.object({ sameDayOnly: z.literal(true), conflictPolicy: z.literal("warning") }),
   equipment: creationCatalogPageSchema.optional(), specialties: creationCatalogPageSchema.optional(),
   systems: creationCatalogPageSchema.optional(), components: creationCatalogPageSchema.optional(),
+  checklists: creationCatalogPageSchema.optional(),
 });
 export const creationResultSchema = z.object({
   kind: creationKindSchema, groupId: z.string(), workId: positiveCreationIdSchema, companyBranchId: positiveCreationIdSchema,
@@ -75,6 +82,8 @@ export type CreationOptionsQuery = z.infer<typeof creationOptionsQuerySchema>;
 export type CreationOptions = z.infer<typeof creationOptionsSchema>;
 export type CreationKind = z.infer<typeof creationKindSchema>;
 export type CreationCatalogResource = z.infer<typeof creationCatalogResourceSchema>;
+export type MaintenanceCreationType = z.infer<typeof maintenanceTypeSchema>;
+export type ChecklistCategory = z.infer<typeof checklistCategorySchema>;
 export type CreationSchedule = z.infer<typeof creationScheduleSchema>;
 export type NonProductiveReason = z.infer<typeof nonProductiveReasonSchema>;
 

@@ -36,6 +36,7 @@ import { answerKey, confirmedEvidenceWork, isConfirmedAttachment, offlineAttachm
 import { operationNeedsAttention, syncUserError, userActionError as errorMessage, userErrorText, workActionError } from "./offline/syncUserPresentation";
 import { QueuedNotice } from "./offline/QueuedNotice";
 import { ChecklistAssociationPanel } from "./workDetail/checklist/ChecklistAssociationPanel";
+import { isPreventiveMaintenance, MaintenancePautaPanel, type MaintenancePautaActions } from "./workDetail/MaintenancePautaPanel";
 import type { ChecklistAssignmentResult, ChecklistCatalogPage, ChecklistCatalogQuery } from "../domain/checklistAssignment";
 import { useTrustedNativePicker } from "../security/useTrustedNativePicker";
 import { DeviceSecurityContext } from "../security/DeviceSecurityContext";
@@ -94,6 +95,8 @@ export interface WorkDetailScreenProps {
   onSaveStep: (stepId: string, answer: StepAnswer) => Promise<void>;
   onLoadChecklistOptions: (query: ChecklistCatalogQuery) => Promise<ChecklistCatalogPage>;
   onAttachChecklist: (checklistId: number) => Promise<ChecklistAssignmentResult>;
+  /** Pauta del equipo (solo preventivos, con conexión). */
+  maintenancePauta?: MaintenancePautaActions;
   onLoadFiles: () => Promise<Attachment[]>;
   onLoadStepFiles: (stepId: string) => Promise<Attachment[]>;
   onUpload: (photos: LocalPhoto[], stepId?: string) => Promise<void>;
@@ -954,6 +957,7 @@ function WorkDetailContent(props: WorkDetailScreenProps) {
             {draft.error ? <View style={styles.tight}><Notice message={userErrorText(draft.error)} tone="error" /><Button title="Reintentar almacenamiento local" variant="secondary" disabled={locked} onPress={() => { void runAction("draft", draft.store.retry); }} /></View> : null}
           </View> : null}
           </> : null}
+          {tab === "work" && props.maintenancePauta && isPreventiveMaintenance(group) && !localWork ? <MaintenancePautaPanel group={group} work={work} actions={props.maintenancePauta} online={online} disabled={locked || Boolean(staleReadOnly)} /> : null}
           {tab === "work" && work.workedDates?.length ? <View style={styles.tight}>
             <Text style={styles.label}>Días trabajados registrados</Text>
             <BodyText>{work.workedDates.map(day => new Intl.DateTimeFormat("es", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`))).join(" · ")}</BodyText>

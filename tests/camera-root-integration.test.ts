@@ -119,6 +119,7 @@ function fixture() {
     "screens/workDetail/ChecklistTab": { ChecklistTab: "ChecklistTab" }, "screens/workDetail/CompletionDialog": { CompletionDialog: "CompletionDialog" },
     "screens/workDetail/CommentsTab": { CommentsTab: "CommentsTab" }, "screens/workDetail/EvidenceTab": { EvidenceTab: "EvidenceTab" },
     "screens/workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },
+    "screens/workDetail/MaintenancePautaPanel": { MaintenancePautaPanel: "MaintenancePautaPanel", isPreventiveMaintenance: () => false },
     "screens/offline/QueuedNotice": { QueuedNotice: "QueuedNotice" }, "screens/offline/OfflineFileCard": { OfflineFileCard: "OfflineFileCard" },
     "screens/offline/OfflineStatusBar": { OfflineStatusBar: "OfflineStatusBar" }, "screens/offline/OfflineCenterScreen": { OfflineCenterScreen: "OfflineCenterScreen" },
     "screens/creation": {}, "notifications": {}, "screens/notifications/NotificationSettingsScreen": {},

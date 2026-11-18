@@ -17,6 +17,7 @@ import { DemoCreationStore, demoCreationOptions } from "./creationDemo";
 import { DemoNotifications } from "./notificationsDemo";
 import { DemoChecklistAssignments } from "./checklistAssignmentDemo";
 import type { ChecklistCatalogQuery } from "../domain/checklistAssignment";
+import { pautaErrorMessage, pautaSchema, type MaintenancePautaPort } from "../domain/maintenancePauta";
 import { isWorkActivity, workActivityInputSchema, type WorkActivitiesPort } from "../domain/workActivities";
 
 export class DemoTechnicianRepository implements TechnicianRepository {
@@ -137,6 +138,24 @@ export class DemoTechnicianRepository implements TechnicianRepository {
     if (!demoUser.accessBranchs.some((branch) => branch.id === scope.companyBranchId)) throw new Error("Sucursal no autorizada.");
     return this.checklistAssignments.attach(this.find(scope).work, checklistId);
   }
+  // Pauta de demostración: solo marca los ítems agregados, no crea trabajos.
+  private demoPautaLinked = new Set<number>();
+  maintenancePauta: MaintenancePautaPort["maintenancePauta"] = async (scope) => {
+    const { group } = this.find(scope);
+    if (group.type !== "internal_maintenance") throw new Error(pautaErrorMessage("PANEL_PAUTA_NOT_PREVENTIVE"));
+    const item = (id: number, pautaValue: number, title: string, product: { code: string; name: string } | null = null) =>
+      ({ id, pautaValue, title, system: "Motor", component: null, action: null, product, quantity: 1, linked: this.demoPautaLinked.has(id) });
+    return pautaSchema.parse({ maintenanceId: Number(group.id.split("-")[1]), planName: "Pauta CAT 320 · Demo", measurementType: "hourmeter", canEdit: true, items: [
+      item(1, 250, "Cambio Aceite de Motor", { code: "ACE-15W40", name: "Aceite 15W40" }), item(2, 250, "Cambio Filtro Aceite Motor", { code: "FIL-AC1", name: "Filtro de aceite" }),
+      item(3, 500, "Cambio Filtro Aire Primario", { code: "FIL-AI2", name: "Filtro de aire" }), item(4, 500, "Inspección de correas"),
+    ] });
+  };
+  addPautaItems: MaintenancePautaPort["addPautaItems"] = async (scope, itemIds) => {
+    this.find(scope);
+    const pending = itemIds.filter((id) => !this.demoPautaLinked.has(id));
+    pending.forEach((id) => this.demoPautaLinked.add(id));
+    return { added: pending.length, alreadyLinked: itemIds.length - pending.length };
+  };
   private filesByWork = new Map<string, Attachment[]>();
   private reportsByWork = new Map<string, string[]>();
   private commentsByWork = new Map<string, WorkComment[]>();

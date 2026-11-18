@@ -67,7 +67,7 @@ test("demo initial comment inserts once and options use the actual demo user wit
   assert.equal(options.userId, demoUser.id);
   assert.equal(options.workerId, demoUser.workerId);
   assert.equal(options.nonProductiveReasons.length, 10);
-  assert.deepEqual(options.maintenanceTypes.filter((item) => item.enabled).map((item) => item.value), ["correctivo", "detencion"]);
+  assert.deepEqual(options.maintenanceTypes.filter((item) => item.enabled).map((item) => item.value), ["correctivo", "detencion", "preventivo", "rutinario", "checklist"]);
   assert.ok(options.equipment?.items.some((item) => item.id === 15));
   assert.ok(options.specialties?.items.some((item) => item.id === 2));
   assert.deepEqual(demoCreationOptions({ companyBranchId: 1, kind: "equipment", page: 1 }).equipment?.items, []);

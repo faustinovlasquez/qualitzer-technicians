@@ -39,6 +39,7 @@ async function detailFixture(initialAction?: "deliver", storedAnswer?: StepAnswe
     "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true }, "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
     "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },
+    "./workDetail/MaintenancePautaPanel": { MaintenancePautaPanel: "MaintenancePautaPanel", isPreventiveMaintenance: () => false },
   });
   const dialog = uiModule<{ CompletionDialog: (props: CompletionDialogProps) => ReactNode }>("screens/workDetail/CompletionDialog.tsx", dialogHooks, {
     "./DetailUi": { ChoiceButton: "ChoiceButton", Notice: "Notice", SegmentOption: "SegmentOption" },

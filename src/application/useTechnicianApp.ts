@@ -12,6 +12,7 @@ const initialsOf = (firstNames: string, lastNames: string): string => `${firstNa
 import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import type { WorkTeam, WorkTeamPort } from "../domain/workTeam";
+import { pautaAddResultSchema, pautaSchema, type Pauta, type PautaAddResult } from "../domain/maintenancePauta";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
 import { dateKey, monthRange, shiftDate, weekRange } from "../domain/format";
@@ -1897,6 +1898,21 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
   const changeWorkTeam = (group: AssignmentGroup, work: AssignmentWork, workerId: number, add: boolean): Promise<WorkTeam> =>
     performMutation(teamScope(group, work), (repo, value) => add ? workTeamPortOf(repo).addWorkTeamMember(value, workerId) : workTeamPortOf(repo).removeWorkTeamMember(value, workerId), true);
 
+  // Pauta del preventivo: se lee con conexión y, al agregar ítems, se recargan las asignaciones para ver los trabajos nuevos.
+  async function loadMaintenancePauta(group: AssignmentGroup, work: AssignmentWork): Promise<Pauta> {
+    const value = teamScope(group, work); const repo = repository.current!;
+    if (!repo.maintenancePauta) throw new Error("Actualiza el servidor para ver la pauta del equipo.");
+    const version = sessionVersion.current;
+    const result = pautaSchema.parse(await repo.maintenancePauta(value));
+    if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la consulta.");
+    return result;
+  }
+  const addMaintenancePautaItems = (group: AssignmentGroup, work: AssignmentWork, itemIds: number[]): Promise<PautaAddResult> =>
+    performMutation(teamScope(group, work), async (repo, value) => {
+      if (!repo.addPautaItems) throw new Error("Actualiza el servidor para agregar ítems de la pauta.");
+      return pautaAddResultSchema.parse(await repo.addPautaItems(value, itemIds));
+    }, true);
+
   async function guideOrderDelivery(repo: TechnicianRepository, value: WorkScope): Promise<void> {
     const owner = state.current.session;
     const version = sessionVersion.current;
@@ -2068,6 +2084,7 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       add: (group: AssignmentGroup, work: AssignmentWork, workerId: number) => changeWorkTeam(group, work, workerId, true),
       remove: (group: AssignmentGroup, work: AssignmentWork, workerId: number) => changeWorkTeam(group, work, workerId, false),
     },
+    maintenancePauta: { load: loadMaintenancePauta, add: addMaintenancePautaItems },
     orderCreation: { onLoadOptions: orderCreationOptions, onSubmit: createOrderWork, onCreated: onOrderWorkCreated },
     workshopCreation: { onLoadOptions: workshopCreationOptions, onSubmit: createWorkshopWork },
     openWorkshopWork, workshopAssignments, workshopWorkStatus,

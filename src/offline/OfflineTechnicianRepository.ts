@@ -151,6 +151,15 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = (scope, id, files) => this.onlineOnly(() => workActions(this.remote).uploadActivityFiles(scope, id, files), scope);
   reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.onlineOnly(() => workActions(this.remote).reopenWork(scope), scope);
+  // La pauta del preventivo solo con conexión: se lee del catálogo vigente y agrega trabajos en el servidor.
+  maintenancePauta: NonNullable<TechnicianRepository["maintenancePauta"]> = scope => this.onlineOnly(() => {
+    if (!this.remote.maintenancePauta) throw new Error("Actualiza el servidor para ver la pauta del equipo.");
+    return this.remote.maintenancePauta(scope);
+  }, scope);
+  addPautaItems: NonNullable<TechnicianRepository["addPautaItems"]> = (scope, itemIds) => this.onlineOnly(() => {
+    if (!this.remote.addPautaItems) throw new Error("Actualiza el servidor para agregar ítems de la pauta.");
+    return this.remote.addPautaItems(scope, itemIds);
+  }, scope);
   // El equipo del trabajo solo se gestiona con conexión: cambia la jornada de otros técnicos.
   workTeam: NonNullable<TechnicianRepository["workTeam"]> = scope => this.onlineOnly(() => {
     if (!this.remote.workTeam) throw new Error("Actualiza el servidor para gestionar el equipo del trabajo.");

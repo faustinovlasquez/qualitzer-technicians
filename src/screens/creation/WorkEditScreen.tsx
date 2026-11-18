@@ -12,7 +12,7 @@ import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
 import { CreationCatalogSelector, type CreationCatalogCache } from "./CreationCatalogSelector";
 import { CreationScheduleFields } from "./CreationScheduleFields";
 import { CreationModal } from "./CreationModal";
-import { applyCatalogSelection, catalogFormField, validateCreationForm, workEditForm, workEditPayload, type CatalogItem, type CreationForm, type CreationFormErrors } from "./creationForm";
+import { applyCatalogSelection, catalogFormField, catalogSelection, validateCreationForm, workEditForm, workEditPayload, type CatalogItem, type CreationForm, type CreationFormErrors } from "./creationForm";
 
 export interface WorkEditScreenProps {
   editing: WorkEditDocument; user: User; tenant: Tenant; storageKey: string; busy: boolean; online: boolean;
@@ -115,7 +115,7 @@ export function WorkEditScreen(props: WorkEditScreenProps) {
       {options && step < 2 && !saved ? <Button title={step === 0 ? "Continuar a horario" : "Revisar cambios"} disabled={disabled} onPress={next} /> : options ? <Button title={saved ? "Volver al trabajo actualizado" : "Guardar cambios"} icon="save-outline" loading={saving} disabled={props.busy || !props.online} onPress={() => void save()} /> : null}
       {step > 0 && !saved ? <Button title="Paso anterior" variant="ghost" disabled={disabled} onPress={() => setStep(step - 1)} /> : null}
     </ScrollView>
-    {catalog && !disabled ? <CreationCatalogSelector resource={catalog} systemId={form.system?.id} companyBranchId={document.companyBranchId} userId={props.user.id} workerId={props.user.workerId} cache={cache} selected={form[catalogFormField[catalog]]} onLoadOptions={props.onLoadOptions} onClose={() => setCatalog(null)} onSelect={item => selectCatalog(catalog, item)} /> : null}
+    {catalog && !disabled ? <CreationCatalogSelector resource={catalog} systemId={form.system?.id} companyBranchId={document.companyBranchId} userId={props.user.id} workerId={props.user.workerId} cache={cache} selected={catalogSelection(form, catalog)} onLoadOptions={props.onLoadOptions} onClose={() => setCatalog(null)} onSelect={item => selectCatalog(catalog, item)} /> : null}
     {exit ? <CreationModal title="Descartar cambios sin guardar" onClose={() => setExit(false)}><Button title="Descartar cambios" variant="danger" onPress={props.onBack} /><Button title="Seguir editando" variant="secondary" onPress={() => setExit(false)} /></CreationModal> : null}
   </SafeAreaView>;
 }

@@ -60,6 +60,7 @@ import { withAssignmentReadBatch } from "./assignmentReadBatch";
 import { workActivityInputSchema, workActivityResultSchema, workActivitySchema, type WorkActivitiesPort } from "../domain/workActivities";
 import { cachedAttachmentSchema } from "../offline/cacheSchemas";
 import { workTeamAddInputSchema, workTeamSchema, type WorkTeamPort } from "../domain/workTeam";
+import { pautaAddInputSchema, pautaAddResultSchema, pautaSchema, type MaintenancePautaPort } from "../domain/maintenancePauta";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, mobileUuidSchema, positiveCreationIdSchema, type CreationInput, type CreationOptionsQuery } from "../domain/creation";
 import { activeTimersSchema, notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadAllResultSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
 
@@ -483,6 +484,10 @@ export class HttpTechnicianRepository implements TechnicianRepository {
     workTeamSchema.parse(await this.request<unknown>(this.scopePath(scope, "/team"), "POST", workTeamAddInputSchema.parse({ workerId })));
   removeWorkTeamMember: WorkTeamPort["removeWorkTeamMember"] = async (scope, workerId) =>
     workTeamSchema.parse(await this.request<unknown>(this.scopePath(scope, `/team/${positiveCreationIdSchema.parse(workerId)}`), "DELETE"));
+
+  maintenancePauta: MaintenancePautaPort["maintenancePauta"] = async scope => pautaSchema.parse(await this.request<unknown>(this.scopePath(scope, "/pauta")));
+  addPautaItems: MaintenancePautaPort["addPautaItems"] = async (scope, itemIds) =>
+    pautaAddResultSchema.parse(await this.request<unknown>(this.scopePath(scope, "/pauta"), "POST", pautaAddInputSchema.parse({ itemIds })));
 
   async checklistOptions(scope: WorkScope, input: ChecklistCatalogQuery) {
     const query = checklistCatalogQuerySchema.parse(input);

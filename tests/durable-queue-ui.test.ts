@@ -35,6 +35,7 @@ async function detailFixture() {
     "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
     "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },
+    "./workDetail/MaintenancePautaPanel": { MaintenancePautaPanel: "MaintenancePautaPanel", isPreventiveMaintenance: () => false },
   });
   const editor = uiModule<typeof import("../src/screens/workDetail/checklist/StepEditor")>("screens/workDetail/checklist/StepEditor.tsx", editorHooks, {
     "../useWorkDraft": drafts, "./ResponseInput": { ResponseInput: "ResponseInput" }, "./styles": { checklistStyles: {} },

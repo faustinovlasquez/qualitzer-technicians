@@ -1,3 +1,7 @@
+# Preventivo, rutinario y checklist desde la app, y pauta del preventivo: gateway 1.0.53 (APK 1.0.157)
+
+La app crea los cinco tipos de mantenimiento; el checklist lleva sus listas al crearlo y el preventivo permite agregar los ítems de la pauta del equipo desde el trabajo. Desplegar primero el backend con estos cambios y esta pasarela. Sin migraciones. Ver [actualización 1.0.157](ACTUALIZACION-1.0.157.md).
+
 # Imágenes con extensión equivocada y carpeta «Lista de chequeo» en mantenimientos: gateway 1.0.52
 
 La cola de envíos guarda el archivo según su contenido real y corrige la extensión, y el trabajo de un mantenimiento muestra su carpeta «Lista de chequeo» en el gestor. Sin migraciones ni rutas nuevas; compatible con la APK 1.0.150. Requiere solo actualizar el backend con esta pasarela.

@@ -186,6 +186,7 @@ async function detailFixture() {
     "./workDetail/WorkInformation": { EquipmentTab: "EquipmentTab", WorkTab: "WorkTab" }, "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
     "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" }, "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },
+    "./workDetail/MaintenancePautaPanel": { MaintenancePautaPanel: "MaintenancePautaPanel", isPreventiveMaintenance: () => false },
   });
   const candidate = work({ status: "pending", elapsedSeconds: 45 }); let refreshes = 0; let mutations = 0;
   const unused = async (): Promise<never> => { throw new Error("UNEXPECTED_ACTION"); };

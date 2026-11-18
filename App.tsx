@@ -248,6 +248,7 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
       onSaveStep={app.saveAnswer}
       onLoadChecklistOptions={app.loadChecklistOptions}
       onAttachChecklist={app.attachChecklist}
+      maintenancePauta={app.maintenancePauta}
       onLoadFiles={app.loadFiles}
       onLoadStepFiles={app.loadStepFiles}
       onUpload={app.upload}

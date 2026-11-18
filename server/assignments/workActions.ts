@@ -10,6 +10,7 @@ import type { UploadConcurrency } from "./routes";
 import { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocationUpdateSchema } from "../../src/domain/equipmentLocation";
 import { workEditDocumentSchema, workEditInputSchema, type WorkEditInput } from "../../src/domain/creation";
 import { workTeamAddInputSchema, workTeamSchema } from "../../src/domain/workTeam";
+import { pautaAddInputSchema, pautaAddResultSchema, pautaErrorMessage, pautaSchema } from "../../src/domain/maintenancePauta";
 import { assertAppPermission } from "../workshop/support";
 
 export function registerWorkActions(router: Router, upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency): void {
@@ -166,6 +167,21 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
     if (!workerId) throw new GatewayError(400, "WORK_TEAM_INVALID_INPUT");
     const { scope, query, prefix } = await team(req, true);
     res.json(parseUpstream(workTeamSchema, await upstream.request(`${prefix}/team/${workerId}`, { token: scope.token, query, method: "DELETE" })));
+  });
+  // Pauta del equipo en un mantenimiento preventivo: el backend revalida tipo, estado y que los ítems sean de la pauta.
+  router.get(`${base}/pauta`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const { scope, query, prefix } = await owned(req, false);
+    if (scope.group.type !== "internal_maintenance") throw new GatewayError(409, "PANEL_PAUTA_NOT_PREVENTIVE", pautaErrorMessage("PANEL_PAUTA_NOT_PREVENTIVE"));
+    res.set("Cache-Control", "no-store").json(parseUpstream(pautaSchema, await upstream.request(`${prefix}/pauta`, { token: scope.token, query })));
+  });
+  router.post(`${base}/pauta`, async (req, res) => {
+    const input = pautaAddInputSchema.parse(req.body);
+    const { scope, query, prefix } = await owned(req, true);
+    if (scope.group.type !== "internal_maintenance") throw new GatewayError(409, "PANEL_PAUTA_NOT_PREVENTIVE", pautaErrorMessage("PANEL_PAUTA_NOT_PREVENTIVE"));
+    const result = parseUpstream(pautaAddResultSchema, await upstream.request(`${prefix}/pauta`, { token: scope.token, query, method: "POST", json: input }));
+    if (result.added + result.alreadyLinked !== input.itemIds.length) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    res.set("Cache-Control", "no-store").status(result.added > 0 ? 201 : 200).json(result);
   });
   router.post(`${base}/reopen`, async (req, res) => {
     emptySchema.parse(req.body ?? {});

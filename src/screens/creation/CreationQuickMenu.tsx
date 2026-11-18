@@ -17,7 +17,7 @@ type MenuAction = { id: CreationKind | "order"; label: string; detail: string; i
 const actions: MenuAction[] = [
   { id: "work", label: "Nuevo trabajo", detail: "Crea y planifica un trabajo propio", icon: "construct", tone: palette.primary, soft: palette.primarySoft },
   { id: "order", label: "Nueva OT", detail: "Orden de trabajo de un equipo en taller", icon: "document-text", tone: palette.info, soft: palette.infoSoft },
-  { id: "maintenance", label: "Nuevo mantenimiento", detail: "Correctivo o detención de un equipo", icon: "build", tone: palette.orange, soft: palette.orangeSoft },
+  { id: "maintenance", label: "Nuevo mantenimiento", detail: "Correctivo, detención, preventivo, rutinario o checklist", icon: "build", tone: palette.orange, soft: palette.orangeSoft },
   { id: "non_productive", label: "Tiempo no productivo", detail: "Registra una espera, traslado u otro motivo", icon: "time", tone: palette.violet, soft: palette.violetSoft },
 ];
 

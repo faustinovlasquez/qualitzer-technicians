@@ -19,7 +19,7 @@ import { CatalogPicker, CreationFields, LinkedEquipmentCard, creationLabels } fr
 import { CreationModal } from "./CreationModal";
 import { CreationDone, CreationStepper } from "./CreationUi";
 import { creationDraftKey, openCreationDraftStore } from "./creationDrafts";
-import { applyCatalogSelection, catalogFormField, creationAssignedMinutes, creationConflictPreview, creationDuration, durationText, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
+import { applyCatalogSelection, catalogFormField, catalogSelection, creationAssignedMinutes, creationConflictPreview, creationDuration, durationText, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
 
 export { clearCreationDrafts } from "./creationDrafts";
 export type { CreationInput, CreationKind, CreationOptions, CreationOptionsQuery, CreationResult } from "../../domain/creation";
@@ -433,7 +433,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
       secondary={{ label: kind === "maintenance" ? "Crear otro mantenimiento" : "Crear otro trabajo", icon: "add-circle-outline", onPress: () => void editAsNew(true) }}
       tertiary={successFlow.hideOpen ? undefined : { label: kind === "maintenance" ? "Abrir el mantenimiento" : "Abrir el trabajo creado", onPress: () => void openSaved() }} /> : null}
     {catalog && !frozen ? <CreationCatalogSelector resource={catalog} systemId={form.system?.id} companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId} cache={catalogCache}
-      selected={form[catalogFormField[catalog]]} onLoadOptions={onLoadOptions} onClose={() => setCatalog(null)}
+      selected={catalogSelection(form, catalog)} onLoadOptions={onLoadOptions} onClose={() => setCatalog(null)}
       onSelect={(item) => selectCatalog(catalog, item)} /> : null}
     {dialog ? <CreationModal title={dialog === "back" ? "Volver sin perder tus datos" : "Crear otro registro"} onClose={() => { if (!lock.current) setDialog(null); }}>
       <Text style={styles.body}>{dialog === "back" ? "Se conservará el borrador. Si ya intentaste crear el registro, podrás reintentar sin duplicarlo." : "El registro anterior podría haberse creado aunque no recibieras respuesta. Revisa tu agenda primero. Continuar prepara una creación distinta y podría generar un duplicado."}</Text>

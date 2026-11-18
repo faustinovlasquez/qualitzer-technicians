@@ -304,7 +304,7 @@ export function agendaFixture(options: { online?: boolean; overrides?: { [specif
     if (id === "../screens/workDetail/useWorkDraft") return { clearWorkDetailDrafts: noop };
     if (id === "../screens/workDetail/files/WorkspaceDraftStore") return { cleanupFileWorkspace: noop };
     if (id === "../screens/creation/creationDrafts") return { clearCreationDrafts: noop };
-    if (["../infrastructure/DemoTechnicianRepository", "../infrastructure/tenantChallengeClock", "../domain/creation", "../notifications/notificationSafety", "../offline/DurableStore", "../domain/checklistAssignment"].includes(id)) return {};
+    if (["../infrastructure/DemoTechnicianRepository", "../infrastructure/tenantChallengeClock", "../domain/creation", "../notifications/notificationSafety", "../offline/DurableStore", "../domain/checklistAssignment", "../domain/maintenancePauta"].includes(id)) return {};
     throw new Error(`UNEXPECTED_IMPORT:${id}`);
   }, { AbortController, __DEV__: false, fetch: () => { throw new Error("NETWORK_FORBIDDEN"); } });
 

@@ -1,4 +1,4 @@
-# @qualitzer/mobile-gateway 1.0.52
+# @qualitzer/mobile-gateway 1.0.53
 
 Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un artefacto generado: no editarlo ni modificar el bundle instalado.** Los cambios se realizan en las fuentes del móvil y se regenera con scripts/pack-mobile-gateway.cjs. No contiene Expo, React Native, sharp, QR, router de desarrollo, listener, secretos ni datos de sesiones.
 
@@ -7,7 +7,9 @@ Runtime Node reutilizable generado desde Qualitzer-Mobile. **El tarball es un ar
 **1.0.6 admite avisos de mantenimiento completo sin trabajo hijo.** El contrato acepta `groupType: "maintenance"` y `workId: null` exclusivamente para asignaciones, no para recordatorios de cronómetro. Conserva todas las comprobaciones de destinatario, empresa y sucursal. Requiere el backend de asignaciones completas y la APK 1.0.17 para mostrar y abrir estas órdenes. Los paquetes 1.0.5 y anteriores no se sustituyen. Sin migración nueva.
 
 ## API pública
-La entrega vigente usa 1.0.52. Se conservan sin sobrescribir todos los artefactos anteriores.
+La entrega vigente usa 1.0.53. Se conservan sin sobrescribir todos los artefactos anteriores.
+
+1.0.53 permite crear mantenimientos preventivo, rutinario y checklist desde la app y agrega la pauta del preventivo. `POST /api/creation` acepta los cinco tipos; el checklist exige `checklistIds` (1 a 10, sin repetir) y acepta `checklistCategory` (`routine | dispatch | return`). `GET /api/creation/options?kind=checklists` devuelve el buscador de listas. Rutas nuevas `GET /api/assignments/:groupId/works/:workId/pauta` (ítems de la pauta del equipo) y `POST` a la misma ruta con `{ itemIds }` (agrega cada ítem como trabajo con su repuesto); solo mantenimientos internos, el backend revalida tipo preventivo, estado y que los ítems sean de la pauta. Requiere el backend con `PanelPautaUseCase` y la creación móvil de los cinco tipos; con un backend anterior la pauta responde `PANEL_PAUTA_NOT_AVAILABLE` (503) y los tipos nuevos `MOBILE_CREATION_INVALID_ENUM`. Sin migraciones (la columna `maintenances.checklistCategory` ya existe desde la migración `20261030120000`).
 
 1.0.52 hace dos cambios sin rutas nuevas ni migraciones. La cola de envíos (`POST /api/offline/documents`) ya no rechaza un archivo cuyo nombre o tipo declarado no coincide con su contenido: manda el contenido real y corrige la extensión, igual que las demás subidas; los tipos no permitidos, los programas, HTML, SVG, macros y HEIC se siguen rechazando. Y el gestor de archivos de un trabajo dentro de un mantenimiento (`.../works/:workId/drive`) muestra las subcarpetas de su carpeta fija, como «Lista de chequeo», solo de ese trabajo y de solo lectura; si el backend niega el árbol de carpetas (403 o 404), sigue mostrando los archivos como antes. Cada listado de ese gestor hace una consulta más a `/maintenance_files/folders/:id`.
 

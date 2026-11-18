@@ -93,6 +93,7 @@ function legacyFixture() {
     "./workDetail/CommentsTab": { CommentsTab: "CommentsTab" },
     "./offline/QueuedNotice": { QueuedNotice: "QueuedNotice" },
     "./workDetail/checklist/ChecklistAssociationPanel": { ChecklistAssociationPanel: "ChecklistAssociationPanel" },
+    "./workDetail/MaintenancePautaPanel": { MaintenancePautaPanel: "MaintenancePautaPanel", isPreventiveMaintenance: () => false },
     "./workDetail/files/useCameraPermissionGuide": guideModule,
     "./workDetail/files/CameraPermissionGuide": { CameraPermissionGuide: "CameraPermissionGuide" },
   });
