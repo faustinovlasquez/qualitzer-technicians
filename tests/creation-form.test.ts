@@ -55,7 +55,7 @@ test("maintenance requires equipment and sends correct type without unused varia
   if (input.kind !== "maintenance") throw new Error("Unexpected variant");
   assert.equal(input.maintenance.type, "detencion");
   assert.equal(input.maintenance.equipmentId, 5);
-  assert.equal(input.maintenance.damageType, "desgaste");
+  assert.equal("damageType" in input.maintenance, false); // el tipo de daño se indica al entregar
   assert.equal("work" in input, false);
   assert.equal("timezone" in input.schedule, false);
 });

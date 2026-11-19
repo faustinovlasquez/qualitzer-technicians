@@ -66,7 +66,7 @@ export function creationPayload(kind: CreationKind, form: CreationForm, companyB
   if (kind === "maintenance") return creationInputSchema.parse({ ...base, kind, maintenance: {
     type: form.maintenanceType, title: form.title, motive: form.motive, priority: form.priority,
     ...(form.operationAreaEntryId ? { operationAreaEntryId: form.operationAreaEntryId } : { equipmentId: form.equipment?.id }),
-    ...specialty, ...(form.damageType ? { damageType: form.damageType } : {}), ...workSystem,
+    // Especialidad, sistema y subsistema se eligen en cada trabajo; el tipo de daño, al entregar el mantenimiento.
     ...(form.maintenanceType === "checklist" ? {
       checklistIds: form.checklists.map((checklist) => checklist.id),
       ...(form.checklistCategory ? { checklistCategory: form.checklistCategory } : {}),

@@ -70,3 +70,14 @@ test("la pauta se agrupa por valor en orden y valida lo que llega y lo que se en
   assert.equal(pautaAddInputSchema.safeParse({ itemIds: [1, 1] }).success, false);
   assert.equal(pautaAddInputSchema.safeParse({ itemIds: [1, 2] }).success, true);
 });
+
+test("el mantenimiento no envía especialidad, sistema, subsistema ni tipo de daño", () => {
+  const form = { ...ready, damageType: "desgaste" as const, specialty: { id: 2, label: "Mecánica" }, system: { id: 5, label: "Motor" }, component: { id: 9, label: "Filtros" } };
+  const input = creationPayload("maintenance", form, 1, uuid);
+  assert.ok(input.kind === "maintenance");
+  if (input.kind !== "maintenance") return;
+  assert.equal("specialtyId" in input.maintenance, false);
+  assert.equal("systemId" in input.maintenance, false);
+  assert.equal("componentId" in input.maintenance, false);
+  assert.equal("damageType" in input.maintenance, false);
+});

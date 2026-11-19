@@ -125,39 +125,37 @@ function equipmentFixture(required: boolean) {
 
 for (const required of [false, true]) test(`compact equipment ${required ? "maintenance" : "work"}: select, cancel change, replace and remove`, async context => {
   const fixture = equipmentFixture(required); context.after(() => fixture.hooks.unmount());
-  assert.equal(elements(fixture.render(), "Field").length, 0);
+  assert.equal(elements(fixture.render(), "CreationCatalogSelector").length, 0);
   assert.equal(fixture.loads(), 0);
   action(fixture.render(), "Asociar equipo").onPress();
   let tree = fixture.render(); assert.equal(elements(tree, "CreationModal").length, 1);
-  elements<{ onChangeText(value: string): void }>(tree, "Field")[0].props.onChangeText("EQ-001");
-  action(fixture.render(), "Buscar equipo").onPress(); await settle(); tree = fixture.render();
-  assert.equal(fixture.selections.length, 0);
-  const result = elements<{ accessibilityLabel: string; onPress(): void }>(tree, "Pressable").find(item => item.props.accessibilityLabel === `Seleccionar ${first.label}`);
-  assert.ok(result); result.props.onPress(); tree = fixture.render();
+  // Solo el catálogo: sin pestañas ni búsqueda por código.
+  assert.equal(elements(tree, "Field").length, 0);
+  assert.equal(elements<{ accessibilityLabel: string }>(tree, "Pressable").some(item => item.props.accessibilityLabel === "Código"), false);
+  let catalog = elements<{ embedded: boolean; resource: string; onSelect(item: typeof first): void }>(tree, "CreationCatalogSelector")[0];
+  assert.equal(catalog.props.embedded, true); assert.equal(catalog.props.resource, "equipment");
+  const firstSelect = catalog.props.onSelect;
+  firstSelect(first); tree = fixture.render();
   assert.equal(fixture.props.selected?.id, 71); assert.equal(fixture.props.selected?.identifier, "PLACA-9");
-  assert.equal(elements(tree, "Field").length, 0); assert.equal(elements(tree, "CreationModal").length, 0);
+  assert.equal(elements(tree, "CreationModal").length, 0);
   action(tree, "Cambiar equipo").onPress(); tree = fixture.render();
   elements<{ onClose(): void }>(tree, "CreationModal")[0].props.onClose(); tree = fixture.render();
   assert.equal(fixture.props.selected?.id, 71);
   action(tree, "Cambiar equipo").onPress(); tree = fixture.render();
-  const tab = elements<{ accessibilityLabel: string; onPress(): void }>(tree, "Pressable").find(item => item.props.accessibilityLabel === "Catálogo");
-  assert.ok(tab); tab.props.onPress(); tree = fixture.render();
-  const catalog = elements<{ embedded: boolean; onSelect(item: typeof second): void }>(tree, "CreationCatalogSelector")[0];
-  assert.equal(catalog.props.embedded, true); catalog.props.onSelect(second); tree = fixture.render();
+  catalog = elements<{ embedded: boolean; resource: string; onSelect(item: typeof second): void }>(tree, "CreationCatalogSelector")[0];
+  catalog.props.onSelect(second); tree = fixture.render();
   assert.equal(fixture.props.selected?.id, 99);
   action(tree, "Quitar equipo").onPress(); tree = fixture.render();
   assert.equal(fixture.props.selected, null); assert.ok(action(tree, "Asociar equipo"));
-  result.props.onPress(); assert.equal(fixture.props.selected, null, "closed picker callback cannot reselect");
+  firstSelect(first); assert.equal(fixture.props.selected, null, "closed picker callback cannot reselect");
 });
 
 test("closing, locking or disabling the equipment picker prevents late results and retained selections", async context => {
   const fixture = equipmentFixture(false); context.after(() => fixture.hooks.unmount());
-  const gate = deferred<CreationOptions>(); fixture.props.onLoadOptions = () => gate.promise;
   fixture.render(); action(fixture.render(), "Asociar equipo").onPress();
-  elements<{ onChangeText(value: string): void }>(fixture.render(), "Field")[0].props.onChangeText("EQ-001");
-  action(fixture.render(), "Buscar equipo").onPress();
+  const late = elements<{ onSelect(item: typeof first): void }>(fixture.render(), "CreationCatalogSelector")[0].props.onSelect;
   elements<{ onClose(): void }>(fixture.render(), "CreationModal")[0].props.onClose();
-  gate.resolve(options([first])); await settle();
+  late(first); await settle();
   assert.equal(elements(fixture.render(), "CreationModal").length, 0); assert.equal(fixture.selections.length, 0);
   const open = action(fixture.render(), "Asociar equipo"); fixture.props.disabled = true; fixture.render(); open.onPress();
   assert.equal(elements(fixture.render(), "CreationModal").length, 0);

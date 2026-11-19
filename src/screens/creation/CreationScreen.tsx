@@ -379,7 +379,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar creación. Crear otro registro puede duplicar uno ya guardado.</Text>
             </Card> : null}
             {/* Trabajo: los datos son solo título, resumen y prioridad (sin equipo); la especialidad se elige al planificar. */}
-            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={kind === "maintenance" || !!parentMaintenance} hideSpecialty={kind === "work"} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
+            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={!!parentMaintenance} hideSpecialty={kind !== "non_productive"} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
               equipmentLookup={parentEntry ? <LinkedEquipmentCard title={`EQUIPO DEL INGRESO ${parentEntry.code}`} label={parentEntry.equipmentLabel}
                   hint={kind === "maintenance" ? "El mantenimiento queda unido al ingreso con su equipo propio." : "El trabajo queda unido al ingreso con su cliente y equipo."} />
                 : parentMaintenance ? <LinkedEquipmentCard title="EQUIPO DEL MANTENIMIENTO" label={parentMaintenance.equipment?.label ?? "No informado"}

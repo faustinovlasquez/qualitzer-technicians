@@ -143,14 +143,8 @@ export function CreationFields({ kind, form, errors, options, disabled, editing 
       {hideSpecialty ? null : <CatalogPicker label="Especialidad (opcional)" icon="hammer-outline" value={form.specialty?.label ?? null} placeholder="Elegir especialidad" disabled={disabled} locked={specialtyLocked}
         onPress={() => onSelectCatalog("specialties")} onClear={() => onChange("specialty", null)} />}
       {showWorkSystem ? <WorkSystemFields form={form} disabled={disabled} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
-      {kind === "maintenance" ? <>
-        <Text style={styles.label}>Tipo de daño (opcional)</Text>
-        <View style={styles.choices} accessibilityRole="radiogroup">
-          <CreationChoice label="Sin especificar" selected={!form.damageType} disabled={disabled} onPress={() => onChange("damageType", "")} />
-          <CreationChoice label="Operacional" selected={form.damageType === "operacional"} disabled={disabled} onPress={() => onChange("damageType", "operacional")} />
-          <CreationChoice label="Desgaste" selected={form.damageType === "desgaste"} disabled={disabled} onPress={() => onChange("damageType", "desgaste")} />
-        </View>
-      </> : !editing ? <Text style={styles.hint}>Se crea un trabajo propio independiente; no una OT comercial.</Text> : null}
+      {/* El tipo de daño (operacional o desgaste) se indica al entregar el mantenimiento, no al crearlo. */}
+      {kind !== "maintenance" && !editing ? <Text style={styles.hint}>Se crea un trabajo propio independiente; no una OT comercial.</Text> : null}
     </> : <>
       <Text style={styles.label}>Motivo *</Text>
       <View style={styles.reasons} accessibilityRole="radiogroup">

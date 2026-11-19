@@ -6,6 +6,8 @@ import { palette, radius, typography } from "../../ui/theme";
 import type { CatalogItem } from "./creationForm";
 import { CreationModal } from "./CreationModal";
 
+/** Pausa al escribir antes de filtrar el catálogo. */
+export const SEARCH_DELAY_MS = 350;
 export type CreationCatalogPage = NonNullable<CreationOptions["equipment"]>;
 export type CreationCatalogCache = Map<string, CreationCatalogPage>;
 const catalogTitles: { [Resource in CreationCatalogResource]: string } = {
@@ -75,10 +77,18 @@ export function CreationCatalogSelector({ resource, systemId, companyBranchId, u
     return () => { active.current = false; request.current += 1; };
   }, [resource, systemId, companyBranchId, userId, workerId]);
 
+  // Filtra mientras se escribe: espera una pausa breve para no consultar en cada letra.
+  const typed = useRef(false);
+  useEffect(() => {
+    if (!typed.current) return;
+    const query = search.trim();
+    const timer = setTimeout(() => { if (active.current && query !== appliedSearch) void load(query, 0); }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const content = <>
-    <Field label={resource === "equipment" ? "Buscar por número interno, identificación, tipo o modelo" : "Buscar en el catálogo"} value={search} maxLength={100} onChangeText={(value) => setSearch(value.replace(/[\x00-\x1f\x7f]/g, ""))}
+    <Field label={resource === "equipment" ? "Buscar por número interno, identificación, tipo o modelo" : "Buscar en el catálogo"} value={search} maxLength={100} onChangeText={(value) => { typed.current = true; setSearch(value.replace(/[\x00-\x1f\x7f]/g, "")); }}
       returnKeyType="search" onSubmitEditing={() => { if (!loading) void load(search.trim(), 0); }} />
-    <Button title="Buscar" icon="search-outline" disabled={loading} onPress={() => void load(search.trim(), 0)} />
     {loading ? <ActivityIndicator accessibilityLabel="Cargando catálogo" color={palette.primary} /> : null}
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
     {error ? <Button title="Reintentar catálogo" variant="secondary" onPress={() => void load(appliedSearch, page < 0 ? 0 : page + 1)} /> : null}
