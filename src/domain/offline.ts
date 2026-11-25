@@ -66,7 +66,8 @@ export interface OfflineOperationBase {
   receipt?: OfflineReceipt;
 }
 export type OfflineOperation = OfflineOperationBase & (
-  | { kind: "create"; input: CreationInput; localGroupId: string; localWorkId: string; result?: CreationResult }
+  /** `appliedAt`: hora del teléfono en que el servidor confirmó la creación (para saber si una agenda descargada ya debería traerla). */
+  | { kind: "create"; input: CreationInput; localGroupId: string; localWorkId: string; result?: CreationResult; appliedAt?: number }
   | { kind: "comment"; scope: WorkScope; text: string }
   | { kind: "answer"; scope: WorkScope; stepId: string; answer: OfflineAnswer; base: OfflineAnswer; wire?: { answer: SyncStepAnswer; base: SyncStepAnswer } }
   | { kind: "document"; scope: OfflineScope; stepId?: string; file: OfflineFile; sourceDraftId?: string; reportText?: string }

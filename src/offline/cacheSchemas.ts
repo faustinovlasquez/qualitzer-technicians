@@ -37,6 +37,7 @@ const work: z.ZodType<AssignmentWork> = z.lazy(() => z.object({
   workedDates: z.array(z.string()).refine(workedDatesAllowed).optional(),
   schedules: z.array(z.object({ date: z.string(), queryDates: z.array(z.string()), generatedAt: z.string(), work })).optional(),
   systemId: z.number().nullish(), componentId: z.number().nullish(), systemName: nullableText.optional(), componentName: nullableText.optional(),
+  workTypeName: nullableText.optional(), actionName: nullableText.optional(), interventionReasonName: nullableText.optional(),
   hasBreakTime: z.boolean().optional(), breakStartTime: nullableText.optional(), breakEndTime: nullableText.optional(),
 }));
 export const cachedAssignmentsSchema: z.ZodType<Assignments> = z.object({

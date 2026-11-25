@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { creationOptionsSchema, type CreationCatalogResource, type CreationOptions, type CreationOptionsQuery } from "../../domain/creation";
+import { creationOptionsSchema, type CatalogResource, type CreationOptions, type CreationOptionsQuery } from "../../domain/creation";
 import { Button, Field } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { CatalogItem } from "./creationForm";
@@ -10,13 +11,19 @@ import { CreationModal } from "./CreationModal";
 export const SEARCH_DELAY_MS = 350;
 export type CreationCatalogPage = NonNullable<CreationOptions["equipment"]>;
 export type CreationCatalogCache = Map<string, CreationCatalogPage>;
-const catalogTitles: { [Resource in CreationCatalogResource]: string } = {
+const catalogTitles: { [Resource in CatalogResource]: string } = {
   equipment: "Seleccionar equipo", specialties: "Seleccionar especialidad", systems: "Seleccionar sistema", components: "Seleccionar subsistema",
   checklists: "Agregar lista de chequeo",
+  workTypes: "Tipo de trabajo", actions: "Acción", interventionReasons: "Motivo de intervención",
+  failureCauses: "Causa de falla", detectionMethods: "Método de detección", causedDamageTypes: "Tipo de daño causado",
 };
 interface Props {
   embedded?: boolean;
-  resource: CreationCatalogResource;
+  resource: CatalogResource;
+  /** Ids que no se ofrecen (por ejemplo, el equipo principal en "activos afectados"). */
+  excludeIds?: number[];
+  /** Título propio del selector (por defecto, el del catálogo). */
+  title?: string;
   systemId?: number;
   companyBranchId: number;
   userId: number;
@@ -28,10 +35,10 @@ interface Props {
   onClose: () => void;
 }
 
-export function CreationCatalogSelector({ resource, systemId, companyBranchId, userId, workerId, selected, cache, onLoadOptions, onSelect, onClose, embedded = false }: Props) {
+export function CreationCatalogSelector({ resource, systemId, companyBranchId, userId, workerId, selected, cache, onLoadOptions, onSelect, onClose, embedded = false, excludeIds = [], title }: Props) {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [items, setItems] = useState<CatalogItem[]>([]);
+  const [items, setItems] = useState<Array<CatalogItem & { equipmentKind?: "equipment" | "implement" }>>([]);
   const [page, setPage] = useState(-1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -94,19 +101,31 @@ export function CreationCatalogSelector({ resource, systemId, companyBranchId, u
     {error ? <Button title="Reintentar catálogo" variant="secondary" onPress={() => void load(appliedSearch, page < 0 ? 0 : page + 1)} /> : null}
     {!loading && !error && items.length === 0 ? <Text style={styles.hint}>No se encontraron resultados.</Text> : null}
     <View style={styles.list}>
-      {items.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={item.label}
-        accessibilityState={{ selected: item.id === selected?.id }} onPress={() => { if (!active.current || loading) return; onSelect(resource === "equipment" ? item : { id: item.id, label: item.label }); onClose(); }} style={[styles.item, item.id === selected?.id && styles.selected]}>
-        <Text style={styles.label}>{item.label}</Text>
+      {items.filter((item) => !excludeIds.includes(item.id)).map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={item.label}
+        accessibilityState={{ selected: item.id === selected?.id }} onPress={() => {
+          if (!active.current || loading) return;
+          // El tipo (equipo o implemento) solo se usa para mostrar el ícono: no se guarda en el formulario.
+          onSelect(resource === "equipment" ? { id: item.id, label: item.label, internalNumber: item.internalNumber, identifier: item.identifier, equipmentType: item.equipmentType } : { id: item.id, label: item.label });
+          onClose();
+        }} style={[styles.item, styles.itemRow, item.id === selected?.id && styles.selected]}>
+        {resource === "equipment" && item.equipmentKind ? <View style={[styles.kindIcon, item.equipmentKind === "implement" && styles.kindImplement]}>
+          <Ionicons name={item.equipmentKind === "implement" ? "construct-outline" : "car-outline"} size={18} color={item.equipmentKind === "implement" ? palette.orange : palette.primary}
+            accessibilityLabel={item.equipmentKind === "implement" ? "Implemento" : "Equipo"} />
+        </View> : null}
+        <Text style={[styles.label, styles.labelFlex]}>{item.label}</Text>
       </Pressable>)}
     </View>
     {hasMore ? <Button title="Cargar más" variant="secondary" disabled={loading} onPress={() => void load(appliedSearch, page + 1)} /> : null}
   </>;
-  return embedded ? <View style={styles.content}>{content}</View> : <CreationModal title={catalogTitles[resource]} onClose={onClose}>{content}</CreationModal>;
+  return embedded ? <View style={styles.content}>{content}</View> : <CreationModal title={title ?? catalogTitles[resource]} onClose={onClose}>{content}</CreationModal>;
 }
 
 const styles = StyleSheet.create({
   content: { gap: 12 },
   list: { gap: 8 }, item: { minHeight: 54, justifyContent: "center", padding: 14, borderWidth: 1, borderColor: palette.border, borderRadius: radius.md },
   selected: { backgroundColor: palette.primarySoft, borderColor: palette.primary }, label: { ...typography.body, color: palette.text },
+  itemRow: { flexDirection: "row", alignItems: "center", gap: 12 }, labelFlex: { flex: 1 },
+  kindIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
+  kindImplement: { backgroundColor: palette.orangeSoft },
   error: { ...typography.body, color: palette.danger }, hint: { ...typography.caption, color: palette.textSecondary },
 });

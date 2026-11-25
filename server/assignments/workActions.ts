@@ -11,6 +11,8 @@ import { equipmentLocationSchema, equipmentLocationTargetSchema, equipmentLocati
 import { workEditDocumentSchema, workEditInputSchema, type WorkEditInput } from "../../src/domain/creation";
 import { workTeamAddInputSchema, workTeamSchema } from "../../src/domain/workTeam";
 import { pautaAddInputSchema, pautaAddResultSchema, pautaErrorMessage, pautaSchema } from "../../src/domain/maintenancePauta";
+import { maintenanceInfoErrorMessage, maintenanceInfoSchema, maintenanceInfoUpdateSchema } from "../../src/domain/maintenanceInfo";
+import { maintenanceResourcesSchema, resourceAddInputSchema, resourceCatalogPageSchema, resourceCatalogQuerySchema, resourceErrorMessage, resourceQuantityInputSchema } from "../../src/domain/maintenanceResources";
 import { assertAppPermission } from "../workshop/support";
 
 export function registerWorkActions(router: Router, upstream: Upstream, uploadLimiter: RequestHandler, uploads: UploadConcurrency): void {
@@ -182,6 +184,65 @@ export function registerWorkActions(router: Router, upstream: Upstream, uploadLi
     const result = parseUpstream(pautaAddResultSchema, await upstream.request(`${prefix}/pauta`, { token: scope.token, query, method: "POST", json: input }));
     if (result.added + result.alreadyLinked !== input.itemIds.length) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
     res.set("Cache-Control", "no-store").status(result.added > 0 ? 201 : 200).json(result);
+  });
+  // Información general del mantenimiento: ver con el trabajo en la agenda; guardar exige además "Editar mantenimientos".
+  router.get(`${base}/maintenance-info`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const { scope, query, prefix } = await owned(req, false);
+    if (scope.group.type !== "internal_maintenance") throw new GatewayError(409, "PANEL_MAINTENANCE_INFO_NOT_MAINTENANCE", maintenanceInfoErrorMessage("PANEL_MAINTENANCE_INFO_NOT_MAINTENANCE"));
+    res.set("Cache-Control", "no-store").json(parseUpstream(maintenanceInfoSchema, await upstream.request(`${prefix}/maintenance-info`, { token: scope.token, query })));
+  });
+  router.patch(`${base}/maintenance-info`, async (req, res) => {
+    const input = maintenanceInfoUpdateSchema.parse(req.body);
+    const { scope, query, prefix } = await owned(req, true);
+    if (scope.group.type !== "internal_maintenance") throw new GatewayError(409, "PANEL_MAINTENANCE_INFO_NOT_MAINTENANCE", maintenanceInfoErrorMessage("PANEL_MAINTENANCE_INFO_NOT_MAINTENANCE"));
+    await assertAppPermission(upstream, scope.token, scope.range.companyBranchId, "maintenanceEdit");
+    res.set("Cache-Control", "no-store").json(parseUpstream(maintenanceInfoSchema, await upstream.request(`${prefix}/maintenance-info`, { token: scope.token, query, method: "PATCH", json: input })));
+  });
+  // Recursos (productos) del mantenimiento: el backend revalida mantenimiento abierto, catálogo de la sucursal y cantidades.
+  async function resourcesScope(req: Request, mutation: boolean) {
+    const assigned = await owned(req, mutation);
+    if (assigned.scope.group.type !== "internal_maintenance") throw new GatewayError(409, "PANEL_RESOURCE_NOT_MAINTENANCE", resourceErrorMessage("PANEL_RESOURCE_NOT_MAINTENANCE"));
+    return assigned;
+  }
+  function resourceId(req: Request): number {
+    const value = String(req.params.resourceId ?? "");
+    if (!/^[1-9]\d{0,15}$/.test(value) || !Number.isSafeInteger(Number(value))) throw new GatewayError(400, "PANEL_RESOURCE_INVALID_INPUT");
+    return Number(value);
+  }
+  router.get(`${base}/resources`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const { scope, query, prefix } = await resourcesScope(req, false);
+    res.set("Cache-Control", "no-store").json(parseUpstream(maintenanceResourcesSchema, await upstream.request(`${prefix}/resources`, { token: scope.token, query })));
+  });
+  router.get(`${base}/resources/catalog`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const input = resourceCatalogQuerySchema.parse({ search: typeof req.query.search === "string" ? req.query.search : undefined,
+      page: typeof req.query.page === "string" && /^\d{1,4}$/.test(req.query.page) ? Number(req.query.page) : undefined });
+    // La autorización solo acepta el rango y la sucursal: la búsqueda viaja aparte.
+    const canonical: Request = Object.create(req, { query: { value: { startDate: req.query.startDate, endDate: req.query.endDate, companyBranchId: req.query.companyBranchId } } });
+    const { scope, query, prefix } = await resourcesScope(canonical, false);
+    query.set("search", input.search); query.set("page", String(input.page));
+    const result = parseUpstream(resourceCatalogPageSchema, await upstream.request(`${prefix}/resources/catalog`, { token: scope.token, query }));
+    if (result.page !== input.page) throw new GatewayError(502, "UPSTREAM_INVALID_RESPONSE");
+    res.set("Cache-Control", "no-store").json(result);
+  });
+  router.post(`${base}/resources`, async (req, res) => {
+    const input = resourceAddInputSchema.parse(req.body);
+    const { scope, query, prefix } = await resourcesScope(req, true);
+    res.set("Cache-Control", "no-store").status(201).json(parseUpstream(maintenanceResourcesSchema, await upstream.request(`${prefix}/resources`, { token: scope.token, query, method: "POST", json: input })));
+  });
+  router.patch(`${base}/resources/:resourceId`, async (req, res) => {
+    const input = resourceQuantityInputSchema.parse(req.body);
+    const id = resourceId(req);
+    const { scope, query, prefix } = await resourcesScope(req, true);
+    res.set("Cache-Control", "no-store").json(parseUpstream(maintenanceResourcesSchema, await upstream.request(`${prefix}/resources/${id}`, { token: scope.token, query, method: "PATCH", json: input })));
+  });
+  router.delete(`${base}/resources/:resourceId`, async (req, res) => {
+    emptySchema.parse(req.body ?? {});
+    const id = resourceId(req);
+    const { scope, query, prefix } = await resourcesScope(req, true);
+    res.set("Cache-Control", "no-store").json(parseUpstream(maintenanceResourcesSchema, await upstream.request(`${prefix}/resources/${id}`, { token: scope.token, query, method: "DELETE" })));
   });
   router.post(`${base}/reopen`, async (req, res) => {
     emptySchema.parse(req.body ?? {});

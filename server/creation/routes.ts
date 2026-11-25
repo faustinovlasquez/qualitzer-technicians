@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { creationCatalogResourceSchema, creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, creationExpectedMinutes } from "../../src/domain/creation";
+import { catalogResourceSchema, creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, creationExpectedMinutes } from "../../src/domain/creation";
 import { parseUpstream } from "../contracts";
 import { GatewayError } from "../errors";
 import type { Upstream } from "../upstream";
@@ -9,7 +9,7 @@ import { mobileActor } from "./authorization";
 import { assertAppPermission } from "../workshop/support";
 
 const optionsQuery = z.object({
-  companyBranchId: positiveId.transform(Number), kind: creationCatalogResourceSchema.optional(),
+  companyBranchId: positiveId.transform(Number), kind: catalogResourceSchema.optional(),
   search: z.string().optional(), page: z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).optional(),
   internalNumber: z.string().optional(), systemId: positiveId.transform(Number).optional(),
 }).strict().pipe(creationOptionsQuerySchema);

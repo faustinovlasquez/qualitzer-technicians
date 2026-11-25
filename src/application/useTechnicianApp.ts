@@ -13,6 +13,8 @@ import type { MaintenanceDeliveryInput } from "../domain/orderLifecycle";
 import { workActions, type WorkActivityInput } from "../domain/workActivities";
 import type { WorkTeam, WorkTeamPort } from "../domain/workTeam";
 import { pautaAddResultSchema, pautaSchema, type Pauta, type PautaAddResult } from "../domain/maintenancePauta";
+import { maintenanceInfoSchema, type MaintenanceInfo, type MaintenanceInfoChanges } from "../domain/maintenanceInfo";
+import { maintenanceResourcesSchema, type MaintenanceResources, type MaintenanceResourcesPort, type ResourceCatalogQuery } from "../domain/maintenanceResources";
 import { clearOrderLifecycleDrafts } from "../screens/orders/lifecycle/lifecycleDrafts";
 import type { AssignmentGroup, Assignments, AssignmentWork, Attachment, CommentPage, DateRange, GroupScope, Health, LocalPhoto, LoginResult, Session, StatusInput, StepAnswer, Tenant, TenantLoginChallenge, User, WorkDetailTab, WorkOpenOptions, WorkScope } from "../domain/models";
 import { dateKey, monthRange, shiftDate, weekRange } from "../domain/format";
@@ -1913,6 +1915,43 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       return pautaAddResultSchema.parse(await repo.addPautaItems(value, itemIds));
     }, true);
 
+  // Recursos del mantenimiento: se consultan con el alcance de un trabajo del mantenimiento (el servidor lo exige) y
+  // después de cada cambio se recargan las asignaciones para que la lista de repuestos quede al día.
+  function resourcesScope(group: AssignmentGroup): WorkScope {
+    const work = group.works[0];
+    if (!work) throw new Error("El mantenimiento no tiene trabajos en tu agenda.");
+    return teamScope(group, work);
+  }
+  const resourcesPortOf = (repo: TechnicianRepository): MaintenanceResourcesPort => {
+    if (!repo.maintenanceResources || !repo.maintenanceResourceCatalog || !repo.addMaintenanceResource || !repo.setMaintenanceResourceQuantity || !repo.removeMaintenanceResource) {
+      throw new Error("Actualiza el servidor para gestionar los recursos desde la app.");
+    }
+    return repo as MaintenanceResourcesPort;
+  };
+  async function readResources<T>(group: AssignmentGroup, operation: (port: MaintenanceResourcesPort, value: WorkScope) => Promise<T>): Promise<T> {
+    const value = resourcesScope(group); const repo = repository.current!;
+    const version = sessionVersion.current;
+    const result = await operation(resourcesPortOf(repo), value);
+    if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la consulta.");
+    return result;
+  }
+  // Información general del mantenimiento: se lee y se guarda con el alcance de un trabajo; al guardar se recarga la agenda.
+  async function loadMaintenanceInfo(group: AssignmentGroup): Promise<MaintenanceInfo> {
+    const value = resourcesScope(group); const repo = repository.current!;
+    if (!repo.maintenanceInfo) throw new Error("Actualiza el servidor para ver la información del mantenimiento.");
+    const version = sessionVersion.current;
+    const result = maintenanceInfoSchema.parse(await repo.maintenanceInfo(value));
+    if (version !== sessionVersion.current || repository.current !== repo) throw new Error("La sesión cambió durante la consulta.");
+    return result;
+  }
+  const saveMaintenanceInfo = (group: AssignmentGroup, expectedRevision: string, changes: MaintenanceInfoChanges): Promise<MaintenanceInfo> =>
+    performMutation(resourcesScope(group), async (repo, value) => {
+      if (!repo.updateMaintenanceInfo) throw new Error("Actualiza el servidor para editar el mantenimiento.");
+      return maintenanceInfoSchema.parse(await repo.updateMaintenanceInfo(value, expectedRevision, changes));
+    }, true);
+  const changeResources = (group: AssignmentGroup, operation: (port: MaintenanceResourcesPort, value: WorkScope) => Promise<MaintenanceResources>): Promise<MaintenanceResources> =>
+    performMutation(resourcesScope(group), async (repo, value) => maintenanceResourcesSchema.parse(await operation(resourcesPortOf(repo), value)), true);
+
   async function guideOrderDelivery(repo: TechnicianRepository, value: WorkScope): Promise<void> {
     const owner = state.current.session;
     const version = sessionVersion.current;
@@ -2085,6 +2124,14 @@ export function useTechnicianApp(access?: { allowed: boolean; isAllowed(): boole
       remove: (group: AssignmentGroup, work: AssignmentWork, workerId: number) => changeWorkTeam(group, work, workerId, false),
     },
     maintenancePauta: { load: loadMaintenancePauta, add: addMaintenancePautaItems },
+    maintenanceInfo: { load: loadMaintenanceInfo, save: saveMaintenanceInfo },
+    maintenanceResources: {
+      load: (group: AssignmentGroup) => readResources(group, (port, value) => port.maintenanceResources(value)),
+      catalog: (group: AssignmentGroup, query: ResourceCatalogQuery) => readResources(group, (port, value) => port.maintenanceResourceCatalog(value, query)),
+      add: (group: AssignmentGroup, productId: number, quantity: number) => changeResources(group, (port, value) => port.addMaintenanceResource(value, productId, quantity)),
+      setQuantity: (group: AssignmentGroup, resourceId: number, quantity: number) => changeResources(group, (port, value) => port.setMaintenanceResourceQuantity(value, resourceId, quantity)),
+      remove: (group: AssignmentGroup, resourceId: number) => changeResources(group, (port, value) => port.removeMaintenanceResource(value, resourceId)),
+    },
     orderCreation: { onLoadOptions: orderCreationOptions, onSubmit: createOrderWork, onCreated: onOrderWorkCreated },
     workshopCreation: { onLoadOptions: workshopCreationOptions, onSubmit: createWorkshopWork },
     openWorkshopWork, workshopAssignments, workshopWorkStatus,

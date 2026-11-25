@@ -48,7 +48,7 @@ function orderFixture() {
     "../ui/SessionContextBar": { SessionContextBar: "SessionContextBar" },
     "./orders/AssignmentOrderCard": { AssignmentOrderSummary: "AssignmentOrderSummary" },
     "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" },
-    "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" },
+    "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" }, "./orders/MaintenanceResourcesPanel": { MaintenanceResourcesPanel: "MaintenanceResourcesPanel" }, "./orders/MaintenanceInfoPanel": { MaintenanceInfoPanel: "MaintenanceInfoPanel" },
     "./orders/OrderLifecyclePanel": { OrderLifecyclePanel: "OrderLifecyclePanel" },
     "./offline/OfflineOrderLifecyclePanel": { OfflineOrderLifecyclePanel: "OfflineOrderLifecyclePanel" },
     "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { calendarDateSchema, mobileUuidSchema } from "../../domain/creation";
+import { calendarDateSchema, maintenanceDisplayTitle, mobileUuidSchema } from "../../domain/creation";
 import { normalizeChecklistAnswer } from "../../domain/checklistProgress";
 import { syncResponseForStep } from "../../domain/offlineProtocol";
 import type { AssignmentWork, Attachment, ChecklistStep, DateRange, LocalPhoto, StepAnswer } from "../../domain/models";
@@ -173,7 +173,7 @@ export function operationTitle(operation: OfflineOperation): string {
   if (operation.kind === "checklist") return `Asociar checklist · ${operation.payload.checklistId}`;
   if (operation.kind === "completion") return operation.payload.input.status === "delivered" ? "Entregar trabajo" : "Terminar trabajo";
   const input = operation.input;
-  return input.kind === "work" ? `Crear trabajo · ${input.work.title}` : input.kind === "maintenance" ? `Crear mantenimiento · ${input.maintenance.title}` : "Registrar tiempo no productivo";
+  return input.kind === "work" ? `Crear trabajo · ${input.work.title}` : input.kind === "maintenance" ? `Crear mantenimiento · ${maintenanceDisplayTitle(input.maintenance)}` : "Registrar tiempo no productivo";
 }
 
 export function operationErrorReason(code: string | undefined): string {

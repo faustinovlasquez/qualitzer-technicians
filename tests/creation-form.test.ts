@@ -100,9 +100,9 @@ test("work accepts missing description and either time without inventing a durat
     const draft = { version: 1, kind: "work", phase: "pending", form: value, input };
     assert.ok(readCreationDraft(JSON.stringify(draft), "work", 1));
   }
-  for (const kind of ["maintenance", "non_productive"] as const) {
-    assert.ok(validateCreationForm(kind, form({ startTime: "", endTime: "" })).startTime);
-  }
+  // El mantenimiento también acepta horario opcional; solo el tiempo no productivo exige inicio y fin.
+  assert.equal(validateCreationForm("maintenance", form({ startTime: "", endTime: "" })).startTime, undefined);
+  assert.ok(validateCreationForm("non_productive", form({ startTime: "", endTime: "" })).startTime);
 });
 
 test("pending draft restores the same UUID and exact canonical payload", () => {

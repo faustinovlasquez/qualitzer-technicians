@@ -113,7 +113,7 @@ function equipmentFixture(required: boolean) {
   const security = { blocked: false, isUnlocked: () => !security.blocked };
   const module = uiModule<{ CreationEquipmentLookup: typeof CreationEquipmentLookup }>("screens/creation/CreationEquipmentLookup.tsx", hooks, {
     react: { ...hooks.react, useContext: () => security },
-    "./CreationModal": { CreationModal: "CreationModal" },
+    "./CreationModal": { CreationModal: "CreationModal" }, "./MaintenanceDetailsFields": { MaintenanceDetailsFields: "MaintenanceDetailsFields" },
     "./CreationCatalogSelector": { CreationCatalogSelector: "CreationCatalogSelector" },
   });
   const selections: ComponentProps<typeof CreationEquipmentLookup>["selected"][] = [];

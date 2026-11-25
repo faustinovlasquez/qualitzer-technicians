@@ -1,4 +1,4 @@
-import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, nonProductiveReasonSchema, normalizeEquipmentInternalNumber, type CreationInput, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../domain/creation";
+import { creationInputSchema, maintenanceDisplayTitle, workPriority, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, nonProductiveReasonSchema, normalizeEquipmentInternalNumber, type CreationInput, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../domain/creation";
 import type { AssignmentGroup, AssignmentWork } from "../domain/models";
 import { demoUser } from "./demoData";
 
@@ -31,7 +31,7 @@ export function demoCreationOptions(query: CreationOptionsQuery): CreationOption
     return { items: filtered.slice(page * 25, (page + 1) * 25), page, pageSize: 25, hasMore: filtered.length > (page + 1) * 25 };
   };
   return creationOptionsSchema.parse({ companyBranchId: input.companyBranchId, userId: demoUser.id, workerId: demoUser.workerId, timezone: demoUser.system.timezone,
-    priorities: ["low", "medium", "high"], nonProductiveReasons: nonProductiveReasonSchema.options.map((value, index) => ({ value, label: reasons[index] })),
+    priorities: ["low", "medium", "high"], maintenancePriorities: ["very_high", "high", "medium", "low", "very_low"], nonProductiveReasons: nonProductiveReasonSchema.options.map((value, index) => ({ value, label: reasons[index] })),
     maintenanceTypes: ["correctivo", "detencion", "preventivo", "rutinario", "checklist"].map((value) => ({ value, enabled: true, instruction: null })),
     schedule: { sameDayOnly: true, conflictPolicy: "warning" },
     ...(input.kind === undefined || input.kind === "equipment" ? { equipment: catalog(equipment) } : {}),
@@ -67,11 +67,11 @@ export class DemoCreationStore {
     const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
     const plannedMinutes = hasTimes ? minutes(input.schedule.endTime) - minutes(input.schedule.startTime) : 0;
     const selectedEquipment = equipment.find((item) => item.id === equipmentId);
-    const title = input.kind === "work" ? input.work.title : input.kind === "maintenance" ? input.maintenance.title : input.nonProductive.reasonText ?? reasons[nonProductiveReasonSchema.options.indexOf(input.nonProductive.reason)]!;
+    const title = input.kind === "work" ? input.work.title : input.kind === "maintenance" ? maintenanceDisplayTitle(input.maintenance) : input.nonProductive.reasonText ?? reasons[nonProductiveReasonSchema.options.indexOf(input.nonProductive.reason)]!;
     const work: AssignmentWork = {
       id: String(workId), title, summary: input.kind === "work" ? input.work.summary : input.kind === "maintenance" ? input.maintenance.motive : input.nonProductive.reasonText ?? title,
       workType: input.kind === "non_productive" ? "non_productive" : "productive", specialty: specialties.find((item) => item.id === specialtyId)?.label ?? "",
-      status: "pending", priority: input.kind === "work" ? input.work.priority : input.kind === "maintenance" ? input.maintenance.priority ?? "medium" : "medium",
+      status: "pending", priority: input.kind === "work" ? input.work.priority : input.kind === "maintenance" ? workPriority(input.maintenance.priority ?? "medium") : "medium",
       scheduledDate: input.schedule.date, scheduledStartTime: input.schedule.startTime, scheduledEndTime: input.schedule.endTime, plannedMinutes,
       plannedDates: [input.schedule.date], executedMinutes: 0, elapsedSeconds: 0, commentsCount: input.kind === "non_productive" && input.nonProductive.initialComment ? 1 : 0,
       filesCount: 0, checklistDone: 0, checklistTotal: 0, isOverdue: false, canExecute: true, canEditDefinition: false,

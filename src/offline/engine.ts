@@ -495,6 +495,7 @@ export class OfflineEngine {
             if (current.kind === "create" && result.kind === "creation") {
               current.result = result.result;
               current.status = "applied";
+              current.appliedAt = now();
             } else if (result.kind === "receipt") {
               current.receipt = result.receipt;
               current.status = result.receipt.state === "rejected" ? "blocked" : result.receipt.state;

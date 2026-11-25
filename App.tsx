@@ -291,6 +291,8 @@ function Application({ app, allowAutomaticPin }: { app: ReturnType<typeof useTec
         onDeleted={() => { app.closeOrder(); void app.refresh().catch(() => undefined); }}
         creation={app.session.mode === "live" ? { ...app.orderCreation, user: app.session.user } : undefined}
         group={app.orderGroup}
+        maintenanceResources={app.session.mode === "live" ? app.maintenanceResources : undefined}
+        maintenanceInfo={app.session.mode === "live" ? app.maintenanceInfo : undefined}
         tenant={app.session.tenant}
         branchName={branchName}
         connectionStatus={connectionStatus}

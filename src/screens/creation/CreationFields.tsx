@@ -1,13 +1,14 @@
 import type { ComponentProps, ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { MAX_CREATION_CHECKLISTS, type CreationCatalogResource, type CreationKind, type CreationOptions } from "../../domain/creation";
+import { MAX_CREATION_CHECKLISTS, type CreationKind, type CreationOptions } from "../../domain/creation";
 import { Field } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
-import type { CreationForm, CreationFormErrors } from "./creationForm";
+import type { CreationForm, CreationFormErrors, FormCatalogResource } from "./creationForm";
+import { CreationSelectField } from "./CreationSelectField";
 
 export const creationLabels: { [Kind in CreationKind]: string } = { work: "Nuevo trabajo", maintenance: "Nuevo mantenimiento", non_productive: "Tiempo no productivo" };
-export const priorityLabels = { low: "Baja", medium: "Media", high: "Alta" };
+export const priorityLabels = { very_high: "Muy alta", high: "Alta", medium: "Media", low: "Baja", very_low: "Muy baja" };
 const maintenanceLabels = { correctivo: "Correctivo", detencion: "Detención", preventivo: "Preventivo", rutinario: "Rutinario", checklist: "Checklist" };
 
 export function CreationChoice({ label, selected, disabled, onPress }: { label: string; selected: boolean; disabled: boolean; onPress: () => void }) {
@@ -27,12 +28,20 @@ interface Props {
   hideSpecialty?: boolean;
   showWorkSystem?: boolean;
   equipmentLookup: ReactNode;
+  /** Mantenimiento: información general y análisis de falla según el tipo (como la web). */
+  maintenanceDetails?: ReactNode;
   onChange: <Key extends keyof CreationForm>(field: Key, value: CreationForm[Key]) => void;
-  onSelectCatalog: (resource: CreationCatalogResource) => void;
+  onSelectCatalog: (resource: FormCatalogResource) => void;
+  /** Editar trabajo de mantenimiento: tipo de trabajo, acción, motivo y tiempo asignado (como la web). */
+  showClassification?: boolean;
+  /** Agregar trabajo a un mantenimiento: misma clasificación, sin tiempo asignado (va en el horario). */
+  creatingClassification?: boolean;
+  /** El tiempo asignado se escribe aquí solo si el horario no lo define. */
+  assignedMinutesEditable?: boolean;
 }
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
-const PRIORITY_TONES = { low: palette.success, medium: palette.orange, high: palette.danger };
+const PRIORITY_TONES = { very_high: palette.dangerSolid, high: palette.danger, medium: palette.orange, low: palette.success, very_low: palette.info };
 
 /** Fila para elegir de un catálogo: ícono, lo elegido (o qué falta elegir) y un botón para quitarlo. */
 export function CatalogPicker({ label, icon, value, placeholder, disabled, locked = false, onPress, onClear }: {
@@ -40,16 +49,20 @@ export function CatalogPicker({ label, icon, value, placeholder, disabled, locke
 }) {
   return <View style={styles.pickerField}>
     <Text style={styles.label}>{label}</Text>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${value ?? "sin elegir"}`} accessibilityState={{ disabled: disabled || locked }} disabled={disabled || locked} onPress={onPress}
-      style={({ pressed }) => [styles.picker, value !== null && styles.pickerChosen, (disabled || locked) && styles.disabled, pressed && styles.pressed]}>
-      <View style={[styles.pickerIcon, value !== null && styles.pickerIconChosen]}>
-        <Ionicons name={icon} size={18} color={value !== null ? palette.white : palette.primary} accessible={false} />
-      </View>
-      <Text style={[styles.pickerValue, value === null && styles.pickerPlaceholder]} numberOfLines={2}>{value ?? placeholder}</Text>
+    {/* La "X" va al lado y no dentro del botón: en la web un botón no puede contener otro. */}
+    <View style={[styles.picker, styles.pickerRow, value !== null && styles.pickerChosen, (disabled || locked) && styles.disabled]}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${value ?? "sin elegir"}`} accessibilityState={{ disabled: disabled || locked }} disabled={disabled || locked} onPress={onPress}
+        style={({ pressed }) => [styles.pickerMain, pressed && styles.pressed]}>
+        <View style={[styles.pickerIcon, value !== null && styles.pickerIconChosen]}>
+          <Ionicons name={icon} size={18} color={value !== null ? palette.white : palette.primary} accessible={false} />
+        </View>
+        <Text style={[styles.pickerValue, value === null && styles.pickerPlaceholder]} numberOfLines={2}>{value ?? placeholder}</Text>
+        {value !== null && onClear && !locked ? null : <Ionicons name={locked ? "lock-closed-outline" : "chevron-forward"} size={18} color={palette.textMuted} accessible={false} />}
+      </Pressable>
       {value !== null && onClear && !locked ? <Pressable accessibilityRole="button" accessibilityLabel={`Quitar ${label.toLowerCase()}`} hitSlop={10} disabled={disabled} onPress={onClear} style={styles.pickerClear}>
         <Ionicons name="close" size={16} color={palette.textSecondary} accessible={false} />
-      </Pressable> : <Ionicons name={locked ? "lock-closed-outline" : "chevron-forward"} size={18} color={palette.textMuted} accessible={false} />}
-    </Pressable>
+      </Pressable> : null}
+    </View>
   </View>;
 }
 
@@ -66,6 +79,14 @@ export function LinkedEquipmentCard({ title, label, detail, hint }: { title: str
   </View>;
 }
 
+/** Color e ícono de cada tipo, como en la web. */
+const MAINTENANCE_TYPE_STYLES: { [Type in CreationForm["maintenanceType"]]: { icon: IconName; tone: string; soft: string } } = {
+  detencion: { icon: "alert-circle-outline", tone: palette.danger, soft: palette.dangerSoft },
+  correctivo: { icon: "construct-outline", tone: palette.orange, soft: palette.orangeSoft },
+  preventivo: { icon: "shield-checkmark-outline", tone: palette.success, soft: palette.successSoft },
+  rutinario: { icon: "calendar-outline", tone: palette.info, soft: palette.infoSoft },
+  checklist: { icon: "clipboard-outline", tone: palette.teal, soft: palette.primarySoft },
+};
 const MOTIVE_PLACEHOLDERS: { [Type in CreationForm["maintenanceType"]]: string } = {
   correctivo: "Describe la falla a corregir", detencion: "Describe la falla o el motivo de detención",
   preventivo: "Describe el mantenimiento preventivo a ejecutar", rutinario: "Describe el mantenimiento rutinario a ejecutar",
@@ -113,36 +134,54 @@ function WorkSystemFields({ form, disabled, onChange, onSelectCatalog }: Pick<Pr
   </>;
 }
 
-export function CreationFields({ kind, form, errors, options, disabled, editing = false, specialtyLocked = false, hideSpecialty = false, showWorkSystem = false, equipmentLookup, onChange, onSelectCatalog }: Props) {
+/** Clasificación del trabajo de mantenimiento: los mismos catálogos que la web y el tiempo asignado. */
+function ClassificationFields({ form, errors, disabled, assignedMinutesEditable, creating, onChange, onSelectCatalog }: Pick<Props, "form" | "errors" | "disabled" | "assignedMinutesEditable" | "onChange" | "onSelectCatalog"> & { creating: boolean }) {
+  return <>
+    <CatalogPicker label="Tipo de trabajo (opcional)" icon="pricetag-outline" value={form.workType?.label ?? null} placeholder="Elegir tipo de trabajo" disabled={disabled}
+      onPress={() => onSelectCatalog("workTypes")} onClear={() => onChange("workType", null)} />
+    <CatalogPicker label="Acción (opcional)" icon="build-outline" value={form.action?.label ?? null} placeholder="Elegir acción" disabled={disabled}
+      onPress={() => onSelectCatalog("actions")} onClear={() => onChange("action", null)} />
+    <CatalogPicker label="Motivo de intervención (opcional)" icon="help-circle-outline" value={form.interventionReason?.label ?? null} placeholder="Elegir motivo" disabled={disabled}
+      onPress={() => onSelectCatalog("interventionReasons")} onClear={() => onChange("interventionReason", null)} />
+    {/* Al crear, el tiempo asignado se indica en el paso del horario. */}
+    {creating ? null : assignedMinutesEditable ? <Field label="Tiempo asignado en minutos (opcional)" value={form.assignedMinutes === null ? "" : String(form.assignedMinutes)} editable={!disabled} keyboardType="number-pad" maxLength={6}
+      error={errors.assignedMinutes} placeholder="Ej.: 90" onChangeText={(value) => { const digits = value.replace(/[^0-9]/g, ""); onChange("assignedMinutes", digits === "" ? null : Math.min(Number(digits), 100000)); }} />
+      : <Text style={styles.hint}>El tiempo asignado sale del horario del trabajo (paso 2).</Text>}
+  </>;
+}
+
+export function CreationFields({ kind, form, errors, options, disabled, editing = false, specialtyLocked = false, hideSpecialty = false, showWorkSystem = false, showClassification = false, creatingClassification = false, assignedMinutesEditable = false, equipmentLookup, maintenanceDetails, onChange, onSelectCatalog }: Props) {
+  const priority = <CreationSelectField compact={kind === "maintenance"} label={kind === "work" ? "Prioridad *" : "Prioridad"} value={form.priority} disabled={disabled}
+    options={(kind === "maintenance" ? options.maintenancePriorities ?? options.priorities : options.priorities).map((level) => ({ value: level, label: priorityLabels[level], tone: PRIORITY_TONES[level] }))}
+    onChange={(value) => onChange("priority", value)} />;
   return <View style={styles.fields}>
     {kind === "maintenance" ? <>
-      <Text style={styles.label}>Tipo de mantenimiento *</Text>
-      <View style={styles.choices} accessibilityRole="radiogroup">
-        {options.maintenanceTypes.map((type) => <CreationChoice key={type.value} label={maintenanceLabels[type.value]} selected={type.value === form.maintenanceType}
-          disabled={disabled || !type.enabled} onPress={() => { if (type.enabled) onChange("maintenanceType", type.value); }} />)}
+      {/* Tipo y prioridad en la misma fila: la prioridad es secundaria y ocupa poco. */}
+      <View style={styles.typeRow}>
+        <View style={styles.typeCell}><CreationSelectField label="Tipo de mantenimiento *" value={form.maintenanceType} disabled={disabled}
+          options={options.maintenanceTypes.map((type) => ({ value: type.value, label: maintenanceLabels[type.value], ...MAINTENANCE_TYPE_STYLES[type.value], disabled: !type.enabled, hint: type.enabled ? undefined : "No disponible desde la app" }))}
+          onChange={(value) => onChange("maintenanceType", value)} /></View>
+        <View style={styles.priorityCell}>{priority}</View>
       </View>
       {MAINTENANCE_TYPE_HINTS[form.maintenanceType] ? <Text style={styles.hint}>{MAINTENANCE_TYPE_HINTS[form.maintenanceType]}</Text> : null}
       {form.maintenanceType === "checklist" ? <ChecklistFields form={form} errors={errors} disabled={disabled} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
     </> : null}
     {kind !== "non_productive" ? <>
-      <Field label="Título *" value={form.title} editable={!disabled} maxLength={255} error={errors.title} onChangeText={(value) => onChange("title", value)} placeholder="¿Qué necesitas realizar?" />
+      <Field label={kind === "maintenance" ? "Título (opcional)" : "Título *"} value={form.title} editable={!disabled} maxLength={255} error={errors.title} onChangeText={(value) => onChange("title", value)} placeholder="¿Qué necesitas realizar?" />
       {kind === "work" ? <Field label="Resumen del trabajo (opcional)" value={form.summary} editable={!disabled} maxLength={5000} multiline error={errors.summary}
         onChangeText={(value) => onChange("summary", value)} placeholder="Describe el alcance del trabajo" /> :
-        <Field label="Motivo del mantenimiento *" value={form.motive} editable={!disabled} maxLength={5000} multiline error={errors.motive}
+        <Field label="Motivo (opcional)" value={form.motive} editable={!disabled} maxLength={5000} multiline error={errors.motive}
           onChangeText={(value) => onChange("motive", value)} placeholder={MOTIVE_PLACEHOLDERS[form.maintenanceType]} />}
       {equipmentLookup}
-      <Text style={styles.label}>Prioridad{kind === "work" ? " *" : ""}</Text>
-      <View style={styles.choices} accessibilityRole="radiogroup">
-        {options.priorities.map((priority) => <Pressable key={priority} accessibilityRole="radio" accessibilityLabel={priorityLabels[priority]} accessibilityState={{ checked: form.priority === priority, disabled }}
-          disabled={disabled} onPress={() => onChange("priority", priority)}
-          style={[styles.priority, form.priority === priority && { borderColor: PRIORITY_TONES[priority], backgroundColor: PRIORITY_TONES[priority] }, disabled && styles.disabled]}>
-          <View style={[styles.priorityDot, { backgroundColor: form.priority === priority ? palette.white : PRIORITY_TONES[priority] }]} />
-          <Text style={[styles.choiceText, form.priority === priority && styles.priorityTextOn]}>{priorityLabels[priority]}</Text>
-        </Pressable>)}
-      </View>
+      {kind === "maintenance" ? null : priority}
       {hideSpecialty ? null : <CatalogPicker label="Especialidad (opcional)" icon="hammer-outline" value={form.specialty?.label ?? null} placeholder="Elegir especialidad" disabled={disabled} locked={specialtyLocked}
         onPress={() => onSelectCatalog("specialties")} onClear={() => onChange("specialty", null)} />}
       {showWorkSystem ? <WorkSystemFields form={form} disabled={disabled} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
+      {kind === "maintenance" && maintenanceDetails ? <>
+        {maintenanceDetails}
+        {errors.maintenanceDetails ? <Text accessibilityRole="alert" style={styles.error}>{errors.maintenanceDetails}</Text> : null}
+      </> : null}
+      {showClassification ? <ClassificationFields form={form} errors={errors} disabled={disabled} assignedMinutesEditable={assignedMinutesEditable} creating={creatingClassification} onChange={onChange} onSelectCatalog={onSelectCatalog} /> : null}
       {/* El tipo de daño (operacional o desgaste) se indica al entregar el mantenimiento, no al crearlo. */}
       {kind !== "maintenance" && !editing ? <Text style={styles.hint}>Se crea un trabajo propio independiente; no una OT comercial.</Text> : null}
     </> : <>
@@ -160,6 +199,9 @@ export function CreationFields({ kind, form, errors, options, disabled, editing 
 }
 
 const styles = StyleSheet.create({
+  typeRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  typeCell: { flex: 1, minWidth: 0 },
+  priorityCell: { width: 128 },
   fields: { gap: 14 }, choices: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, reasons: { gap: 8 },
   choice: { minHeight: 48, justifyContent: "center", paddingHorizontal: 15, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
   selected: { borderColor: palette.primary, backgroundColor: palette.primarySoft }, selectedText: { color: palette.primary, fontWeight: "700" },
@@ -172,6 +214,8 @@ const styles = StyleSheet.create({
   pickerField: { gap: 6 },
   picker: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.background },
   pickerChosen: { borderColor: palette.primaryBorder, backgroundColor: palette.primarySoft },
+  pickerRow: { paddingHorizontal: 0, paddingVertical: 0, paddingRight: 12 },
+  pickerMain: { flex: 1, minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 10 },
   pickerIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: palette.primarySoft },
   pickerIconChosen: { backgroundColor: palette.primary },
   pickerValue: { flex: 1, fontSize: 15, fontWeight: "700", color: palette.heading },

@@ -5,7 +5,7 @@ import { z } from "zod";
  * por defecto y lo no configurado también. Mismas claves que el backend (IMobileAppConfig).
  */
 export const MOBILE_APP_PERMISSION_KEYS = [
-  "createWorks", "createMaintenances", "createNonProductive", "workTeam", "deleteOwn",
+  "createWorks", "createMaintenances", "createNonProductive", "workTeam", "deleteOwn", "maintenanceEdit", "maintenancePlanning",
   "workshop", "workshopEntries", "workshopCustomers", "workshopInspections", "workshopReception", "workshopDelivery", "workshopManage",
   "workshopWorks", "workshopMaintenances",
   "ordersCreate", "ordersSend", "ordersDelete", "ordersGeneral", "ordersWorks", "ordersProducts", "ordersTransports", "ordersOthers",
@@ -27,6 +27,7 @@ export const mobileAppConfigSchema = z.object(Object.fromEntries(MOBILE_APP_PERM
 export const APP_PERMISSION_LABELS: Record<MobileAppPermission, string> = {
   createWorks: "crear trabajos", createMaintenances: "crear mantenimientos", createNonProductive: "registrar tiempo no productivo",
   workTeam: "asignar técnicos a un trabajo", deleteOwn: "eliminar trabajos, mantenimientos u OT que creó",
+  maintenanceEdit: "editar mantenimientos", maintenancePlanning: "planificar mantenimientos",
   workshop: "usar el Taller", workshopEntries: "registrar o editar ingresos", workshopCustomers: "crear clientes, sucursales o contactos",
   workshopInspections: "hacer inspecciones", workshopReception: "firmar la recepción", workshopDelivery: "entregar equipos",
   workshopManage: "mover de nave, cambiar fecha o estado", workshopWorks: "agregar trabajos al ingreso", workshopMaintenances: "agregar mantenimientos al ingreso",

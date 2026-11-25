@@ -61,6 +61,8 @@ import { workActivityInputSchema, workActivityResultSchema, workActivitySchema, 
 import { cachedAttachmentSchema } from "../offline/cacheSchemas";
 import { workTeamAddInputSchema, workTeamSchema, type WorkTeamPort } from "../domain/workTeam";
 import { pautaAddInputSchema, pautaAddResultSchema, pautaSchema, type MaintenancePautaPort } from "../domain/maintenancePauta";
+import { maintenanceInfoSchema, maintenanceInfoUpdateSchema, type MaintenanceInfoPort } from "../domain/maintenanceInfo";
+import { maintenanceResourcesSchema, resourceAddInputSchema, resourceCatalogPageSchema, resourceCatalogQuerySchema, resourceQuantityInputSchema, type MaintenanceResourcesPort } from "../domain/maintenanceResources";
 import { creationInputSchema, creationOptionsQuerySchema, creationOptionsSchema, creationResultSchema, mobileUuidSchema, positiveCreationIdSchema, type CreationInput, type CreationOptionsQuery } from "../domain/creation";
 import { activeTimersSchema, notificationDeleteResultSchema, notificationDeviceInputSchema, notificationDeviceResultSchema, notificationInboxSchema, notificationReadAllResultSchema, notificationReadResultSchema, notificationStatusSchema, notificationTestResultSchema, type NotificationDeviceInput } from "../domain/notifications";
 
@@ -488,6 +490,21 @@ export class HttpTechnicianRepository implements TechnicianRepository {
   maintenancePauta: MaintenancePautaPort["maintenancePauta"] = async scope => pautaSchema.parse(await this.request<unknown>(this.scopePath(scope, "/pauta")));
   addPautaItems: MaintenancePautaPort["addPautaItems"] = async (scope, itemIds) =>
     pautaAddResultSchema.parse(await this.request<unknown>(this.scopePath(scope, "/pauta"), "POST", pautaAddInputSchema.parse({ itemIds })));
+
+  maintenanceInfo: MaintenanceInfoPort["maintenanceInfo"] = async scope => maintenanceInfoSchema.parse(await this.request<unknown>(this.scopePath(scope, "/maintenance-info")));
+  updateMaintenanceInfo: MaintenanceInfoPort["updateMaintenanceInfo"] = async (scope, expectedRevision, changes) =>
+    maintenanceInfoSchema.parse(await this.request<unknown>(this.scopePath(scope, "/maintenance-info"), "PATCH", maintenanceInfoUpdateSchema.parse({ expectedRevision, changes })));
+  maintenanceResources: MaintenanceResourcesPort["maintenanceResources"] = async scope => maintenanceResourcesSchema.parse(await this.request<unknown>(this.scopePath(scope, "/resources")));
+  maintenanceResourceCatalog: MaintenanceResourcesPort["maintenanceResourceCatalog"] = async (scope, input) => {
+    const query = resourceCatalogQuerySchema.parse(input);
+    return resourceCatalogPageSchema.parse(await this.request<unknown>(`${this.scopePath(scope, "/resources/catalog")}&${new URLSearchParams({ search: query.search, page: String(query.page) })}`));
+  };
+  addMaintenanceResource: MaintenanceResourcesPort["addMaintenanceResource"] = async (scope, productId, quantity) =>
+    maintenanceResourcesSchema.parse(await this.request<unknown>(this.scopePath(scope, "/resources"), "POST", resourceAddInputSchema.parse({ productId, quantity })));
+  setMaintenanceResourceQuantity: MaintenanceResourcesPort["setMaintenanceResourceQuantity"] = async (scope, resourceId, quantity) =>
+    maintenanceResourcesSchema.parse(await this.request<unknown>(this.scopePath(scope, `/resources/${positiveCreationIdSchema.parse(resourceId)}`), "PATCH", resourceQuantityInputSchema.parse({ quantity })));
+  removeMaintenanceResource: MaintenanceResourcesPort["removeMaintenanceResource"] = async (scope, resourceId) =>
+    maintenanceResourcesSchema.parse(await this.request<unknown>(this.scopePath(scope, `/resources/${positiveCreationIdSchema.parse(resourceId)}`), "DELETE"));
 
   async checklistOptions(scope: WorkScope, input: ChecklistCatalogQuery) {
     const query = checklistCatalogQuerySchema.parse(input);

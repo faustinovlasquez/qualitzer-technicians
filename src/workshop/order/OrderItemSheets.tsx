@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { plainText } from "../../domain/format";
 import { Button } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 import type { WorkshopOrderItemInput, WorkshopProductOption, WorkshopTransportOption } from "../../domain/workshopOrders";
@@ -46,9 +47,10 @@ function useAttempt() {
 }
 
 /** Buscar un producto del catálogo y elegir la cantidad. Sin precios: la pasarela usa los del catálogo, como la web. */
-export function AddProductSheet({ load, onAdd, onClose }: {
+export function AddProductSheet({ load, onAdd, onClose, addLabel = "Agregar a la OT", priceNote = "El precio lo toma del catálogo; comercial lo revisa." }: {
   load: (search: string, page: number) => Promise<{ items: WorkshopProductOption[]; hasMore: boolean }>;
   onAdd: (input: Omit<WorkshopOrderItemInput, "companyBranchId">) => Promise<void>; onClose: () => void;
+  addLabel?: string; priceNote?: string;
 }) {
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<WorkshopProductOption[]>([]);
@@ -89,20 +91,20 @@ export function AddProductSheet({ load, onAdd, onClose }: {
 
   if (chosen) return <PickerSheet title="Agregar producto" onClose={saving ? () => undefined : () => setChosen(null)}
     footer={<View style={styles.footer}>
-      <Button title="Agregar a la OT" icon="add" loading={saving} disabled={saving} onPress={() => void add()} />
+      <Button title={addLabel} icon="add" loading={saving} disabled={saving} onPress={() => void add()} />
       <Button title="Elegir otro producto" variant="secondary" disabled={saving} onPress={() => setChosen(null)} />
     </View>}>
     <View style={styles.chosen}>
       {chosen.code ? <Text style={styles.code}>{chosen.code}</Text> : null}
       <Text style={styles.title}>{chosen.name}</Text>
-      {chosen.description ? <Text style={styles.hint}>{chosen.description}</Text> : null}
+      {chosen.description && plainText(chosen.description) ? <Text style={styles.hint}>{plainText(chosen.description)}</Text> : null}
       {chosen.stock !== null ? <Text style={[styles.stock, chosen.stock <= 0 && { color: palette.danger }]}>Stock disponible: {chosen.stock}</Text> : null}
     </View>
     <Text style={styles.label}>Cantidad</Text>
     <QuantityField value={quantity} onChange={(value) => { setQuantity(value); setError(""); }} integer unit={chosen.unit?.toLowerCase()} />
     {chosen.stock !== null && validQuantity(quantity, true) !== null && validQuantity(quantity, true)! > chosen.stock
       ? <Notice tone="warning" icon="alert-circle-outline" message="La cantidad supera el stock disponible. Se puede agregar igual; bodega lo gestionará." /> : null}
-    <View style={styles.info}><Ionicons name="pricetag-outline" size={16} color={palette.info} accessible={false} /><Text style={styles.infoText}>El precio lo toma del catálogo; comercial lo revisa.</Text></View>
+    <View style={styles.info}><Ionicons name="pricetag-outline" size={16} color={palette.info} accessible={false} /><Text style={styles.infoText}>{priceNote}</Text></View>
     {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
   </PickerSheet>;
 
@@ -110,7 +112,7 @@ export function AddProductSheet({ load, onAdd, onClose }: {
   return <PickerSheet title="Agregar producto" onClose={onClose} onEndReached={() => { if (hasMore && !loading && !error) fetch(search, page + 1); }}
     search={<SearchBox value={search} onChange={setSearch} placeholder="Buscar producto por código o nombre" />}>
     {items.map((product) => <OptionRow key={product.id} title={`${product.code ? `${product.code} · ` : ""}${product.name}`}
-      subtitle={[product.description, product.stock !== null ? `Stock: ${product.stock}${product.unit ? ` ${product.unit.toLowerCase()}` : ""}` : null].filter(Boolean).join(" · ") || null}
+      subtitle={[product.description ? plainText(product.description) : null, product.stock !== null ? `Stock: ${product.stock}${product.unit ? ` ${product.unit.toLowerCase()}` : ""}` : null].filter(Boolean).join(" · ") || null}
       selected={false} onPress={() => { setChosen(product); setQuantity("1"); setError(""); }} />)}
     {loading ? <ActivityIndicator color={palette.primary} /> : null}
     {!loading && items.length === 0 && !error ? <Text style={styles.hint}>No hay productos con esa búsqueda.</Text> : null}

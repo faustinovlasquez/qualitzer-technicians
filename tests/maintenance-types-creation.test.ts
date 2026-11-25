@@ -81,3 +81,26 @@ test("el mantenimiento no envía especialidad, sistema, subsistema ni tipo de da
   assert.equal("componentId" in input.maintenance, false);
   assert.equal("damageType" in input.maintenance, false);
 });
+
+test("el mantenimiento se crea con solo el día, solo la hora de inicio o con horario completo", () => {
+  const dayOnly = { ...ready, startTime: "", endTime: "" };
+  assert.deepEqual(validateCreationForm("maintenance", dayOnly), {});
+  const input = creationPayload("maintenance", dayOnly, 1, uuid);
+  assert.deepEqual(input.schedule, { date: "2028-02-29", startTime: "", endTime: "" });
+  const startOnly = { ...ready, startTime: "09:00", endTime: "" };
+  assert.deepEqual(validateCreationForm("maintenance", startOnly), {});
+  assert.equal(creationPayload("maintenance", startOnly, 1, uuid).schedule.startTime, "09:00");
+  const withMinutes = creationPayload("maintenance", { ...dayOnly, plannedMinutes: 90 }, 1, uuid);
+  assert.equal(withMinutes.schedule.plannedMinutes, 90);
+  // El tiempo no productivo sigue exigiendo inicio y fin.
+  assert.ok(validateCreationForm("non_productive", dayOnly).startTime);
+});
+
+test("el mantenimiento acepta 5 niveles de prioridad y sus trabajos quedan con 3", () => {
+  for (const priority of ["very_high", "high", "medium", "low", "very_low"] as const) {
+    const input = creationPayload("maintenance", { ...ready, priority }, 1, uuid);
+    assert.ok(input.kind === "maintenance" && input.maintenance.priority === priority);
+  }
+  const work = creationPayload("work", { ...ready, priority: "very_high" }, 1, uuid);
+  assert.ok(work.kind === "work" && work.work.priority === "high");
+});

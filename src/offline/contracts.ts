@@ -15,7 +15,8 @@ export const OFFLINE_LIMITS = {
   /** Lo ya confirmado (y sus copias de archivos) se archiva pasados estos días para no llenar el teléfono. */
   retainAppliedMs: 14 * 24 * 60 * 60_000,
 } as const;
-export interface CacheEntry { key: string; json: string; fetchedAt: number; coverage?: OfflineCoverage; timerReadOperationIds?: string[]; fileReadOperationIds?: string[]; activityReadOperationIds?: string[]; }
+/** `requestedAt`: hora (del teléfono) en que se pidió la agenda al servidor; lo confirmado antes de esa hora ya viene reflejado. */
+export interface CacheEntry { key: string; json: string; fetchedAt: number; requestedAt?: number; coverage?: OfflineCoverage; timerReadOperationIds?: string[]; fileReadOperationIds?: string[]; activityReadOperationIds?: string[]; }
 export interface Passport { key: string; user: User; verifiedAt: number; disabled: boolean; }
 export interface OfflineState {
   version: 1;

@@ -90,6 +90,10 @@ export interface AssignmentWork {
   schedules?: AssignmentWorkSnapshot[];
   systemName?: string | null;
   componentName?: string | null;
+  /** Clasificación del trabajo de mantenimiento (como en la web). */
+  workTypeName?: string | null;
+  actionName?: string | null;
+  interventionReasonName?: string | null;
   /** Colación planificada del trabajo (HH:mm); solo si hasBreakTime es true. */
   hasBreakTime?: boolean;
   breakStartTime?: string | null;

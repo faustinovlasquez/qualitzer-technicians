@@ -37,7 +37,7 @@ test("edit form preloads the same fields, guards double save and retries navigat
     "../../security/DeviceSecurityContext": { useDeviceSecurity: () => ({ isUnlocked: () => unlocked }) },
     "./CreationFields": { CreationFields: "CreationFields", priorityLabels: { medium: "Media" } },
     "./CreationEquipmentLookup": { CreationEquipmentLookup: "CreationEquipmentLookup" }, "./CreationCatalogSelector": { CreationCatalogSelector: "CreationCatalogSelector" },
-    "./CreationScheduleFields": { CreationScheduleFields: "CreationScheduleFields" }, "./CreationModal": { CreationModal: "CreationModal" },
+    "./CreationScheduleFields": { CreationScheduleFields: "CreationScheduleFields" }, "./CreationModal": { CreationModal: "CreationModal" }, "./MaintenanceDetailsFields": { MaintenanceDetailsFields: "MaintenanceDetailsFields" },
   });
   const render = () => { const tree = hooks.render(() => module.WorkEditScreen(props)); hooks.flush(); return tree; };
   render(); await settle();
@@ -110,7 +110,7 @@ async function creationFixture(initial?: CreationDraft, parentMaintenance?: Crea
     "./WorkEditScreen": { WorkEditScreen: "WorkEditScreen" },
     "./CreationEquipmentLookup": { CreationEquipmentLookup: "CreationEquipmentLookup" },
     "./CreationFields": { CreationFields: "CreationFields", CatalogPicker: "CatalogPicker", LinkedEquipmentCard: "LinkedEquipmentCard", creationLabels: { work: "Trabajo", maintenance: "Mantenimiento", non_productive: "Tiempo no productivo" }, priorityLabels: { medium: "Media" } },
-    "./CreationModal": { CreationModal: "CreationModal" },
+    "./CreationModal": { CreationModal: "CreationModal" }, "./MaintenanceDetailsFields": { MaintenanceDetailsFields: "MaintenanceDetailsFields" },
     "./CreationUi": { CreationStepper: "CreationStepper", CreationReview: "CreationReview", CreationDone: "CreationDone" },
   });
   let backs = 0;
@@ -283,7 +283,9 @@ for (const phase of ["queued", "confirmed"] as const) {
     f.controls.gate.resolve(); await settle();
     assert.equal(f.queued.length + f.created.length, 1);
     assert.ok(f.events.indexOf(`stored:${phase}`) < f.events.indexOf(`open:${phase}`));
-    assert.equal(creationDraftSchema.parse(JSON.parse(f.memory.values.get(f.key()) ?? "null")).phase, phase);
+    // En cola se conserva; confirmada y ya abierta, se limpia para que "Nuevo" empiece en blanco la próxima vez.
+    if (phase === "queued") assert.equal(creationDraftSchema.parse(JSON.parse(f.memory.values.get(f.key()) ?? "null")).phase, phase);
+    else assert.equal(f.memory.values.get(f.key()), undefined);
     save.onPress(); await settle();
     assert.equal(f.submitted.length, 1);
     assert.deepEqual(f.submitted[0], input);

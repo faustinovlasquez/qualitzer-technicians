@@ -1,4 +1,5 @@
 import type { TechnicianRepository } from "../domain/TechnicianRepository";
+import type { MaintenanceResourcesPort } from "../domain/maintenanceResources";
 import { userSignaturesPort, type UserSignaturesPort } from "../domain/userSignatures";
 import { ownProfilePort, type OwnProfilePort } from "../domain/ownProfile";
 import type { Assignments, Attachment, CommentPage, DateRange, GroupScope, LocalPhoto, Session, StepAnswer, User, WorkScope } from "../domain/models";
@@ -10,7 +11,7 @@ import { ApiError, NetworkError } from "../infrastructure/errors";
 import { OFFLINE_LIMITS, type CacheEntry, type EngineDependencies } from "./contracts";
 import { OfflineEngine, canUseCache, findDraftDocument, resolveScope, sameOfflineUser } from "./engine";
 import { offlineUserSchema, putCache, updateState } from "./state";
-import { overlayCreations } from "./overlay";
+import { overlayCreations, type SnapshotTimes } from "./overlay";
 import { syncAnswerFromStep, toSyncAnswer, syncCompletionInputSchema } from "../domain/offlineProtocol";
 import { notificationInboxSchema, notificationStatusSchema } from "../domain/notifications";
 import { cachedAssignmentsSchema, cachedAttachmentSchema, cachedCommentsSchema, cachedDeliverySchema, resourceCacheKey, sameResource } from "./cacheSchemas";
@@ -151,6 +152,28 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
   };
   uploadActivityFiles: WorkActivitiesPort["uploadActivityFiles"] = (scope, id, files) => this.onlineOnly(() => workActions(this.remote).uploadActivityFiles(scope, id, files), scope);
   reopenWork: WorkActivitiesPort["reopenWork"] = scope => this.onlineOnly(() => workActions(this.remote).reopenWork(scope), scope);
+  // La información general del mantenimiento solo con conexión: se guarda contra la versión vigente del servidor.
+  maintenanceInfo: NonNullable<TechnicianRepository["maintenanceInfo"]> = scope => this.onlineOnly(() => {
+    if (!this.remote.maintenanceInfo) throw new Error("Actualiza el servidor para ver la información del mantenimiento.");
+    return this.remote.maintenanceInfo(scope);
+  }, scope);
+  updateMaintenanceInfo: NonNullable<TechnicianRepository["updateMaintenanceInfo"]> = (scope, expectedRevision, changes) => this.onlineOnly(() => {
+    if (!this.remote.updateMaintenanceInfo) throw new Error("Actualiza el servidor para editar el mantenimiento.");
+    return this.remote.updateMaintenanceInfo(scope, expectedRevision, changes);
+  }, scope);
+  // Los recursos del mantenimiento solo con conexión: catálogo, precios y stock se resuelven en el servidor.
+  private resourcesPort(): MaintenanceResourcesPort {
+    const remote = this.remote;
+    if (!remote.maintenanceResources || !remote.maintenanceResourceCatalog || !remote.addMaintenanceResource || !remote.setMaintenanceResourceQuantity || !remote.removeMaintenanceResource) {
+      throw new Error("Actualiza el servidor para gestionar los recursos desde la app.");
+    }
+    return remote as MaintenanceResourcesPort;
+  }
+  maintenanceResources: NonNullable<TechnicianRepository["maintenanceResources"]> = scope => this.onlineOnly(() => this.resourcesPort().maintenanceResources(scope), scope);
+  maintenanceResourceCatalog: NonNullable<TechnicianRepository["maintenanceResourceCatalog"]> = (scope, query) => this.onlineOnly(() => this.resourcesPort().maintenanceResourceCatalog(scope, query), scope);
+  addMaintenanceResource: NonNullable<TechnicianRepository["addMaintenanceResource"]> = (scope, productId, quantity) => this.onlineOnly(() => this.resourcesPort().addMaintenanceResource(scope, productId, quantity), scope);
+  setMaintenanceResourceQuantity: NonNullable<TechnicianRepository["setMaintenanceResourceQuantity"]> = (scope, resourceId, quantity) => this.onlineOnly(() => this.resourcesPort().setMaintenanceResourceQuantity(scope, resourceId, quantity), scope);
+  removeMaintenanceResource: NonNullable<TechnicianRepository["removeMaintenanceResource"]> = (scope, resourceId) => this.onlineOnly(() => this.resourcesPort().removeMaintenanceResource(scope, resourceId), scope);
   // La pauta del preventivo solo con conexión: se lee del catálogo vigente y agrega trabajos en el servidor.
   maintenancePauta: NonNullable<TechnicianRepository["maintenancePauta"]> = scope => this.onlineOnly(() => {
     if (!this.remote.maintenancePauta) throw new Error("Actualiza el servidor para ver la pauta del equipo.");
@@ -214,7 +237,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
     });
     await this.engine.refresh();
   }
-  private async rememberAssignments(date: string, incoming: Assignments, batch: AssignmentReadBatch, timerReadOperationIds: string[]): Promise<Assignments> {
+  private async rememberAssignments(date: string, incoming: Assignments, batch: AssignmentReadBatch, timerReadOperationIds: string[], requestedAt?: number): Promise<Assignments> {
     const { now, store, namespace, branchId } = this.dependencies;
     const key = `assignments:${date}`;
     let value = incoming;
@@ -238,7 +261,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
         } catch {}
       }
       const fetchedAt = now();
-      putCache(state, { key, json: JSON.stringify(incoming), fetchedAt, timerReadOperationIds, coverage: { date, branchId, fetchedAt } });
+      putCache(state, { key, json: JSON.stringify(incoming), fetchedAt, ...(requestedAt === undefined ? {} : { requestedAt }), timerReadOperationIds, coverage: { date, branchId, fetchedAt } });
       state.revokedResources = state.revokedResources.filter((entry) => entry.key !== key);
     });
     batch.check();
@@ -308,6 +331,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       const results = await batch.map(requestedDays, async (date) => {
         let data: Assignments;
         let timerReadOperationIds: string[] = [];
+        let requestedAt: number | undefined;
         const fresh = options?.maxAgeMs !== undefined ? await this.freshAssignments(date, branchId, options.maxAgeMs, batch) : null;
         try {
           data = fresh ?? await batch.wait(() => this.read(`assignments:${date}`, async () => {
@@ -319,6 +343,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
             // Con copia local del día se envía su huella: si el servidor confirma que no cambió se reutiliza sin descargarla.
             const known = this.revisionCopy(beforeRead.cache, date, branchId);
             let value: Assignments;
+            requestedAt = this.dependencies.now();
             try { value = await this.remote.assignments(dailyRange(date), branchId, { signal: batch.signal, ...(known ? { knownRevision: known.revision } : {}) }); }
             catch (error) {
               if (!known || !(error instanceof AssignmentsUnchangedError) || error.revision !== known.revision) throw error;
@@ -332,7 +357,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
             const value = cachedAssignmentsSchema.parse(JSON.parse(json));
             if (value.technician.id !== this.session.user.workerId) throw new OfflineUnavailableError("OFFLINE_CACHE_IDENTITY_MISMATCH");
             return assignmentsWithTimerRead(value, date, branchId, entry.timerReadOperationIds);
-          }, date, (value) => this.rememberAssignments(date, value, batch, timerReadOperationIds), batch));
+          }, date, (value) => this.rememberAssignments(date, value, batch, timerReadOperationIds, requestedAt), batch));
         } catch (error) {
           batch.check();
           if (!(error instanceof OfflineUnavailableError) || error.code !== "OFFLINE_CACHE_MISS") throw error;
@@ -344,7 +369,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
         await batch.wait(() => this.assertReadable());
         const state = await batch.wait(() => this.dependencies.store.read(this.dependencies.namespace));
         if (state.authBlocked) throw new OfflineUnavailableError("OFFLINE_AUTH_REQUIRED");
-        const snapshot = { date, data: overlayCreations(data, date, state.operations, this.session) };
+        const snapshot = { date, data: overlayCreations(data, date, state.operations, this.session, this.assignmentsTimes(state.cache, date, branchId, missingDates)) };
         completed.push(snapshot);
         batch.check();
         options?.onProgress?.(mergeDailyAssignments(completed, range.startDate), completed.map(item => item.date));
@@ -356,6 +381,13 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
       if (!snapshots.length) throw new OfflineUnavailableError("OFFLINE_CACHE_MISS");
       return mergeDailyAssignments(snapshots, range.startDate);
     });
+  }
+  /** Horas (del teléfono) de la copia del día usada; sin copia (día vacío por falta de datos) no hay horas. */
+  private assignmentsTimes(cache: readonly CacheEntry[], date: string, branchId: number, missingDates: ReadonlySet<string>): SnapshotTimes {
+    if (missingDates.has(date)) return {};
+    const key = `assignments:${date}`;
+    const entry = cache.filter((item) => item.key === key).sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
+    return entry && entry.coverage?.branchId === branchId && entry.coverage.date === date ? { fetchedAt: entry.fetchedAt, requestedAt: entry.requestedAt } : {};
   }
   /** Copia local del día con la huella que entregó el gateway, para preguntar si cambió antes de volver a descargarla. */
   private revisionCopy(cache: readonly CacheEntry[], date: string, branchId: number): { revision: string; value: Assignments } | null {
@@ -411,7 +443,7 @@ export class OfflineTechnicianRepository implements TechnicianRepository, Offlin
         if (!state.operations.some((op) => op.kind === "create" && op.input.companyBranchId === branchId && op.input.schedule.date === date)) continue;
         data = this.emptyAssignments();
       }
-      snapshots.push({ date, data: overlayCreations(data, date, state.operations, this.session) });
+      snapshots.push({ date, data: overlayCreations(data, date, state.operations, this.session, entry ? { fetchedAt: entry.fetchedAt, requestedAt: entry.requestedAt } : {}) });
     }
     await this.assertReadable();
     this.engine.setMissingDates(missingDates);

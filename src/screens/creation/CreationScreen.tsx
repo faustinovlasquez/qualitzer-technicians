@@ -2,7 +2,7 @@ import * as Crypto from "expo-crypto";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, BackHandler, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { creationOptionsSchema, creationResultSchema, type CreationCatalogResource, type CreationInput, type CreationKind, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../../domain/creation";
+import { creationOptionsSchema, creationResultSchema, type CreationInput, type CreationKind, type CreationOptions, type CreationOptionsQuery, type CreationResult } from "../../domain/creation";
 import { assignmentWorkCode } from "../../domain/assignmentCodes";
 import type { Assignments, Tenant, User } from "../../domain/models";
 import { isOfflineQueuedError, type OfflineQueuedOutcome, type OfflineSnapshot } from "../../domain/offline";
@@ -17,9 +17,10 @@ import { WorkEditScreen, type WorkEditScreenProps } from "./WorkEditScreen";
 import { CreationEquipmentLookup } from "./CreationEquipmentLookup";
 import { CatalogPicker, CreationFields, LinkedEquipmentCard, creationLabels } from "./CreationFields";
 import { CreationModal } from "./CreationModal";
+import { MaintenanceDetailsFields } from "./MaintenanceDetailsFields";
 import { CreationDone, CreationStepper } from "./CreationUi";
 import { creationDraftKey, openCreationDraftStore } from "./creationDrafts";
-import { applyCatalogSelection, catalogFormField, catalogSelection, creationAssignedMinutes, creationConflictPreview, creationDuration, durationText, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type CreationForm, type CreationFormErrors } from "./creationForm";
+import { applyCatalogSelection, catalogFormField, catalogSelection, creationAssignedMinutes, creationConflictPreview, creationDuration, durationText, creationPayload, emptyCreationForm, queuedCreationState, validateCreationForm, type CatalogItem, type CreationDraft, type FormCatalogResource, type CreationForm, type CreationFormErrors } from "./creationForm";
 
 export { clearCreationDrafts } from "./creationDrafts";
 export type { CreationInput, CreationKind, CreationOptions, CreationOptionsQuery, CreationResult } from "../../domain/creation";
@@ -102,7 +103,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [dialog, setDialog] = useState<"back" | "new" | "invalid" | null>(null);
-  const [catalog, setCatalog] = useState<CreationCatalogResource | null>(null);
+  const [catalog, setCatalog] = useState<FormCatalogResource | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
   const latest = useRef({ busy, offline, onBack, onSubmit, onCreated, onQueued, successFlow, isUnlocked: security.isUnlocked });
@@ -112,7 +113,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
   loadOptionsRef.current = onLoadOptions;
   const form = draft.form;
   const frozen = draft.phase !== "editing" || !ready || busy || sending;
-  const minutes = kind === "work" ? creationAssignedMinutes(form) : creationDuration(form);
+  const minutes = kind !== "non_productive" ? creationAssignedMinutes(form) : creationDuration(form);
   const preview = useMemo(() => creationConflictPreview(data, { date: form.date, startTime: form.startTime, endTime: form.endTime }), [data, form.date, form.startTime, form.endTime]);
   const branch = user.accessBranchs.find((item) => item.id === companyBranchId);
   const queuedState = draft.phase === "queued" ? queuedCreationState(draft, offline) : null;
@@ -197,7 +198,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     setError("");
   }
 
-  function selectCatalog(resource: CreationCatalogResource, item: CatalogItem): void {
+  function selectCatalog(resource: FormCatalogResource, item: CatalogItem): void {
     if (lock.current || frozen || current.current.phase !== "editing") return;
     changed.current = true;
     replaceDraft({ ...current.current, form: applyCatalogSelection(current.current.form, resource, item) });
@@ -225,7 +226,7 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     try {
       let pending = current.current;
       if (pending.phase === "editing") {
-        if ((kind !== "non_productive" && !options.priorities.includes(pending.form.priority)) ||
+        if ((kind !== "non_productive" && !(kind === "maintenance" ? options.maintenancePriorities ?? options.priorities : options.priorities).some((priority) => priority === pending.form.priority)) ||
           (kind === "maintenance" && !options.maintenanceTypes.some((item) => item.value === pending.form.maintenanceType && item.enabled)) ||
           (kind === "non_productive" && !options.nonProductiveReasons.some((item) => item.value === pending.form.reason))) throw new Error("CREATION_OPTION_UNAVAILABLE");
         const input = creationPayload(kind, pending.form, companyBranchId, Crypto.randomUUID());
@@ -278,6 +279,16 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     finally { lock.current = false; if (mounted.current) setSending(false); }
   }
 
+  /** Salir descartando lo escrito: solo antes de enviar (si ya se intentó crear, el borrador evita duplicados). */
+  async function leaveDiscarding(): Promise<void> {
+    if (lock.current || current.current.phase !== "editing") return;
+    lock.current = true;
+    setSending(true);
+    try { await store.reset(); setDialog(null); onBack(); }
+    catch { setSaveError("No se pudo descartar el borrador. Intenta de nuevo."); setDialog(null); }
+    finally { lock.current = false; if (mounted.current) setSending(false); }
+  }
+
   async function editAsNew(resetForm: boolean): Promise<void> {
     if (!mounted.current || !latest.current.isUnlocked() || latest.current.busy || lock.current) return;
     lock.current = true;
@@ -306,11 +317,13 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     if (!mounted.current || current.current !== saved) return;
     setSaveError("");
     if (!latest.current.isUnlocked()) return;
-    if (automatic && saved.phase === "confirmed" && latest.current.successFlow) { latest.current.successFlow.onConfirmed?.(saved.result); return; }
+    // Ya confirmada y entregada al aviso de éxito (que abre lo creado): se limpia el borrador para que la próxima vez
+    // "Nuevo" empiece en blanco. Si la app se cierra antes de llegar aquí, la confirmación se recupera como siempre.
+    if (automatic && saved.phase === "confirmed" && latest.current.successFlow) { latest.current.successFlow.onConfirmed?.(saved.result); void store.reset().catch(() => {}); return; }
     if (automatic && !(saved.phase === "queued" ? latest.current.onQueued : latest.current.onCreated)) return;
     try {
       if (saved.phase === "queued" && latest.current.onQueued) await latest.current.onQueued(saved.outcome);
-      else if (saved.phase === "confirmed" && latest.current.onCreated) await latest.current.onCreated(saved.result);
+      else if (saved.phase === "confirmed" && latest.current.onCreated) { await latest.current.onCreated(saved.result); void store.reset().catch(() => {}); }
       else latest.current.onBack();
     } catch {
       if (mounted.current) setSaveError(saved.phase === "queued"
@@ -379,7 +392,10 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
               <Text style={styles.hint}>Si se perdió la conexión, usa Reintentar creación. Crear otro registro puede duplicar uno ya guardado.</Text>
             </Card> : null}
             {/* Trabajo: los datos son solo título, resumen y prioridad (sin equipo); la especialidad se elige al planificar. */}
-            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={!!parentMaintenance} hideSpecialty={kind !== "non_productive"} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
+            {step === 0 ? <Card><CreationFields kind={kind} editing={!!parentMaintenance} showWorkSystem={!!parentMaintenance} showClassification={!!parentMaintenance && kind === "work"} creatingClassification hideSpecialty={kind !== "non_productive"} form={form} errors={errors} options={options} disabled={frozen} onChange={change} onSelectCatalog={setCatalog}
+              maintenanceDetails={kind === "maintenance" ? <MaintenanceDetailsFields creating type={form.maintenanceType} value={form.maintenanceDetails} disabled={frozen} scopeKey={`${draftKey}:details`}
+                equipmentId={form.equipment?.id} catalogs={{ companyBranchId, userId: user.id, workerId: user.workerId, onLoadOptions }}
+                onChange={(patch) => change("maintenanceDetails", { ...current.current.form.maintenanceDetails, ...patch })} /> : undefined}
               equipmentLookup={parentEntry ? <LinkedEquipmentCard title={`EQUIPO DEL INGRESO ${parentEntry.code}`} label={parentEntry.equipmentLabel}
                   hint={kind === "maintenance" ? "El mantenimiento queda unido al ingreso con su equipo propio." : "El trabajo queda unido al ingreso con su cliente y equipo."} />
                 : parentMaintenance ? <LinkedEquipmentCard title="EQUIPO DEL MANTENIMIENTO" label={parentMaintenance.equipment?.label ?? "No informado"}
@@ -389,8 +405,8 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
             {step === 1 ? <Card style={styles.card}>
               {kind === "work" ? <CatalogPicker label="Especialidad (opcional)" icon="hammer-outline" value={form.specialty?.label ?? null} placeholder="Elegir especialidad" disabled={frozen}
                 onPress={() => setCatalog("specialties")} onClear={() => change("specialty", null)} /> : null}
-              <CreationScheduleFields form={form} errors={errors} disabled={frozen} optionalTimes={kind === "work"} scopeKey={JSON.stringify([draftKey, form.date])} today={initialDate} onChange={change} />
-              {kind !== "work" ? <Text accessibilityLiveRegion="polite" style={styles.body}>Duración: {minutes === null ? "completa un horario válido" : durationText(minutes)}</Text> : null}
+              <CreationScheduleFields form={form} errors={errors} disabled={frozen} optionalTimes={kind !== "non_productive"} scopeKey={JSON.stringify([draftKey, form.date])} today={initialDate} onChange={change} />
+              {kind === "non_productive" ? <Text accessibilityLiveRegion="polite" style={styles.body}>Duración: {minutes === null ? "completa un horario válido" : durationText(minutes)}</Text> : null}
               <Text style={styles.hint}>Un solo día, en hora de {options.timezone}. Para cruzar la medianoche o repetir, planifícalo desde la web.</Text>
             </Card> : null}
             {step > 0 && preview.overlaps.length > 0 ? <Card style={styles.card}>
@@ -435,9 +451,10 @@ function CreationScreenContent({ kind, user, tenant, connectionStatus, companyBr
     {catalog && !frozen ? <CreationCatalogSelector resource={catalog} systemId={form.system?.id} companyBranchId={companyBranchId} userId={user.id} workerId={user.workerId} cache={catalogCache}
       selected={catalogSelection(form, catalog)} onLoadOptions={onLoadOptions} onClose={() => setCatalog(null)}
       onSelect={(item) => selectCatalog(catalog, item)} /> : null}
-    {dialog ? <CreationModal title={dialog === "back" ? "Volver sin perder tus datos" : "Crear otro registro"} onClose={() => { if (!lock.current) setDialog(null); }}>
-      <Text style={styles.body}>{dialog === "back" ? "Se conservará el borrador. Si ya intentaste crear el registro, podrás reintentar sin duplicarlo." : "El registro anterior podría haberse creado aunque no recibieras respuesta. Revisa tu agenda primero. Continuar prepara una creación distinta y podría generar un duplicado."}</Text>
+    {dialog ? <CreationModal title={dialog === "back" ? (draft.phase === "editing" ? "¿Salir del formulario?" : "Volver sin perder tus datos") : "Crear otro registro"} onClose={() => { if (!lock.current) setDialog(null); }}>
+      <Text style={styles.body}>{dialog === "back" ? (draft.phase === "editing" ? "Puedes guardar lo escrito como borrador para continuar después, o salir sin guardar." : "Se conservará el borrador. Si ya intentaste crear el registro, podrás reintentar sin duplicarlo.") : "El registro anterior podría haberse creado aunque no recibieras respuesta. Revisa tu agenda primero. Continuar prepara una creación distinta y podría generar un duplicado."}</Text>
       <Button title={dialog === "back" ? "Guardar borrador y volver" : "Entiendo: editar como nueva creación"} loading={sending} onPress={() => { if (dialog === "back") void leaveWithDraft(); else void editAsNew(dialog === "invalid"); }} />
+      {dialog === "back" && draft.phase === "editing" ? <Button title="Salir sin guardar" variant="danger" disabled={sending} onPress={() => void leaveDiscarding()} /> : null}
       <Button title="Seguir aquí" variant="secondary" disabled={sending} onPress={() => setDialog(null)} />
     </CreationModal> : null}
   </SafeAreaView>;

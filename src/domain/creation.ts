@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maintenanceCreationDetailsSchema } from "./maintenanceInfo";
 
 export const positiveCreationIdSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const mobileUuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i).transform((value) => value.toLowerCase());
@@ -9,6 +10,11 @@ export const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine
 export const clockTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const text = (max: number, minimum = 1) => z.string().max(max).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/).trim().min(minimum);
 export const creationPrioritySchema = z.enum(["low", "medium", "high"]);
+/** El mantenimiento tiene 5 niveles (como la web); sus trabajos siguen con 3. */
+export const maintenancePrioritySchema = z.enum(["very_high", "high", "medium", "low", "very_low"]);
+/** Los trabajos usan 3 niveles: "muy alta" y "muy baja" del mantenimiento quedan como alta y baja, igual que en la web. */
+export const workPriority = (priority: z.infer<typeof maintenancePrioritySchema>): "low" | "medium" | "high" =>
+  priority === "very_high" ? "high" : priority === "very_low" ? "low" : priority;
 export const nonProductiveReasonSchema = z.enum(["waiting_parts", "waiting_authorization", "waiting_equipment", "travel", "safety_stop", "weather", "no_access", "administrative", "training", "other"]);
 export const creationKindSchema = z.enum(["work", "maintenance", "non_productive"]);
 export const creationScheduleSchema = z.object({ date: calendarDateSchema, startTime: clockTimeSchema, endTime: clockTimeSchema, endDateOffset: z.literal(0).optional() }).strict().refine((value) => value.startTime < value.endTime, "MOBILE_CREATION_INVALID_TIME_RANGE");
@@ -25,14 +31,19 @@ export const MAX_CREATION_CHECKLISTS = 10;
 const workSystemFields = { systemId: positiveCreationIdSchema.optional(), componentId: positiveCreationIdSchema.optional() };
 const hasValidSystem = (value: { systemId?: number; componentId?: number }): boolean => value.componentId === undefined || value.systemId !== undefined;
 export const creationInputSchema = z.discriminatedUnion("kind", [
-  z.object({ ...base, schedule: workCreationScheduleSchema, kind: z.literal("work"), maintenanceId: positiveCreationIdSchema.optional(), work: z.object({ title: text(255), summary: text(5000, 0).default(""), priority: creationPrioritySchema, specialtyId: positiveCreationIdSchema.optional(), rentalEquipmentId: positiveCreationIdSchema.optional(), operationAreaEntryId: positiveCreationIdSchema.optional(), ...workSystemFields }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED") }).strict()
+  z.object({ ...base, schedule: workCreationScheduleSchema, kind: z.literal("work"), maintenanceId: positiveCreationIdSchema.optional(), work: z.object({ title: text(255), summary: text(5000, 0).default(""), priority: creationPrioritySchema, specialtyId: positiveCreationIdSchema.optional(), rentalEquipmentId: positiveCreationIdSchema.optional(), operationAreaEntryId: positiveCreationIdSchema.optional(), ...workSystemFields,
+    // Clasificación (solo trabajo de un mantenimiento), como en la web; se envía solo si se eligió.
+    workTypeId: positiveCreationIdSchema.optional(), actionId: positiveCreationIdSchema.optional(), interventionReasonId: positiveCreationIdSchema.optional() }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED") }).strict()
     .refine(value => value.maintenanceId === undefined || value.work.rentalEquipmentId === undefined, "MOBILE_CREATION_INHERITED_EQUIPMENT")
     // Trabajo de un ingreso a taller: cliente y equipo salen del ingreso en el servidor.
     .refine(value => value.work.operationAreaEntryId === undefined || (value.maintenanceId === undefined && value.work.rentalEquipmentId === undefined), "MOBILE_CREATION_INHERITED_EQUIPMENT")
-    .refine(value => value.maintenanceId !== undefined || (value.work.systemId === undefined && value.work.componentId === undefined), "MOBILE_CREATION_SYSTEM_REQUIRES_MAINTENANCE"),
+    .refine(value => value.maintenanceId !== undefined || (value.work.systemId === undefined && value.work.componentId === undefined
+      && value.work.workTypeId === undefined && value.work.actionId === undefined && value.work.interventionReasonId === undefined), "MOBILE_CREATION_SYSTEM_REQUIRES_MAINTENANCE"),
   // Mantenimiento de un ingreso a taller (equipo propio): el equipo sale del ingreso en el servidor, el teléfono no lo envía.
-  z.object({ ...base, kind: z.literal("maintenance"), maintenance: z.object({ type: maintenanceTypeSchema, title: text(255), motive: text(5000), equipmentId: positiveCreationIdSchema.optional(), operationAreaEntryId: positiveCreationIdSchema.optional(), priority: creationPrioritySchema.optional(), specialtyId: positiveCreationIdSchema.optional(), damageType: z.enum(["operacional", "desgaste"]).optional(), ...workSystemFields,
-    checklistCategory: checklistCategorySchema.optional(), checklistIds: z.array(positiveCreationIdSchema).min(1).max(MAX_CREATION_CHECKLISTS).optional() }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED")
+  z.object({ ...base, schedule: workCreationScheduleSchema, kind: z.literal("maintenance"), maintenance: z.object({ type: maintenanceTypeSchema, title: text(255, 0), motive: text(5000, 0), equipmentId: positiveCreationIdSchema.optional(), operationAreaEntryId: positiveCreationIdSchema.optional(), priority: maintenancePrioritySchema.optional(), specialtyId: positiveCreationIdSchema.optional(), damageType: z.enum(["operacional", "desgaste"]).optional(), ...workSystemFields,
+    checklistCategory: checklistCategorySchema.optional(), checklistIds: z.array(positiveCreationIdSchema).min(1).max(MAX_CREATION_CHECKLISTS).optional(),
+    /** Información general como en la web (fecha de reporte, instrucciones, análisis de falla...); solo se envía si hay datos. */
+    details: maintenanceCreationDetailsSchema.optional() }).strict().refine(hasValidSystem, "MOBILE_CREATION_SYSTEM_REQUIRED")
     .refine(value => (value.equipmentId === undefined) !== (value.operationAreaEntryId === undefined), "MOBILE_CREATION_INHERITED_EQUIPMENT")
     // Checklist: al menos una lista, sin repetir; los demás tipos no llevan listas ni categoría.
     .refine(value => value.type === "checklist" ? value.checklistIds !== undefined && new Set(value.checklistIds).size === value.checklistIds.length : value.checklistIds === undefined && value.checklistCategory === undefined, "MOBILE_CREATION_CHECKLIST_REQUIRED") }).strict(),
@@ -40,29 +51,36 @@ export const creationInputSchema = z.discriminatedUnion("kind", [
 ]);
 export const normalizeEquipmentInternalNumber = (value: string): string => value.trim().toLowerCase();
 export const creationCatalogResourceSchema = z.enum(["equipment", "specialties", "systems", "components", "checklists"]);
-export const creationOptionsQuerySchema = z.object({ companyBranchId: positiveCreationIdSchema, kind: creationCatalogResourceSchema.optional(), search: z.string().max(100).trim().optional(),
+/** Catálogos de mantenimiento (información general y clasificación de trabajos). Solo se eligen; las opciones nuevas se crean en la web. */
+export const maintenanceCatalogResourceSchema = z.enum(["workTypes", "actions", "interventionReasons", "failureCauses", "detectionMethods", "causedDamageTypes"]);
+export const catalogResourceSchema = z.union([creationCatalogResourceSchema, maintenanceCatalogResourceSchema]);
+export const creationOptionsQuerySchema = z.object({ companyBranchId: positiveCreationIdSchema, kind: catalogResourceSchema.optional(), search: z.string().max(100).trim().optional(),
   internalNumber: z.string().max(100).regex(/^[^\x00-\x1f\x7f]*$/).trim().min(1).transform(normalizeEquipmentInternalNumber).optional(),
   systemId: positiveCreationIdSchema.optional(),
   page: z.number().int().min(0).max(1000).optional() }).strict().refine((query) => query.internalNumber === undefined || (query.kind === "equipment" && !query.search), "MOBILE_CREATION_INVALID_INTERNAL_NUMBER")
   .refine((query) => (query.kind === "components") === (query.systemId !== undefined), "MOBILE_CREATION_SYSTEM_REQUIRED");
 export const creationCatalogPageSchema = z.object({ items: z.array(z.object({ id: positiveCreationIdSchema, label: z.string(),
   internalNumber: z.string().nullable().optional(), identifier: z.string().nullable().optional(), equipmentType: z.string().nullable().optional(),
+  /** Equipo o implemento (solo en el buscador de equipos; servidores anteriores no lo envían). */
+  equipmentKind: z.enum(["equipment", "implement"]).optional(),
 })).max(25), page: z.number().int().min(0).max(1000), pageSize: z.literal(25), hasMore: z.boolean() });
 export const creationOptionsSchema = z.object({
   companyBranchId: positiveCreationIdSchema, userId: positiveCreationIdSchema, workerId: positiveCreationIdSchema, timezone: z.string().min(1),
-  priorities: z.array(creationPrioritySchema), nonProductiveReasons: z.array(z.object({ value: nonProductiveReasonSchema, label: z.string() })),
+  priorities: z.array(creationPrioritySchema), maintenancePriorities: z.array(maintenancePrioritySchema).optional(), nonProductiveReasons: z.array(z.object({ value: nonProductiveReasonSchema, label: z.string() })),
   maintenanceTypes: z.array(z.object({ value: maintenanceTypeSchema, enabled: z.boolean(), instruction: z.string().nullable() })),
   schedule: z.object({ sameDayOnly: z.literal(true), conflictPolicy: z.literal("warning") }),
   equipment: creationCatalogPageSchema.optional(), specialties: creationCatalogPageSchema.optional(),
   systems: creationCatalogPageSchema.optional(), components: creationCatalogPageSchema.optional(),
   checklists: creationCatalogPageSchema.optional(),
+  workTypes: creationCatalogPageSchema.optional(), actions: creationCatalogPageSchema.optional(), interventionReasons: creationCatalogPageSchema.optional(),
+  failureCauses: creationCatalogPageSchema.optional(), detectionMethods: creationCatalogPageSchema.optional(), causedDamageTypes: creationCatalogPageSchema.optional(),
 });
 export const creationResultSchema = z.object({
   kind: creationKindSchema, groupId: z.string(), workId: positiveCreationIdSchema, companyBranchId: positiveCreationIdSchema,
   schedule: z.object({ date: calendarDateSchema, startTime: optionalClockTimeSchema, endTime: optionalClockTimeSchema, plannedMinutes: z.number().int().positive().max(1439).nullable(), timezone: z.string().min(1) }),
 }).refine((value) => new RegExp(value.kind === "maintenance" ? "^maintenance-[1-9]\\d*$" : value.kind === "non_productive" ? "^direct-np-[1-9]\\d*$" : "^(?:direct|maintenance)-[1-9]\\d*$").test(value.groupId), "MOBILE_CREATION_INVALID_RESULT")
-  .refine(value => (creationPlannedMinutes(value.schedule) === null ? value.kind === "work" || value.schedule.plannedMinutes === null : value.schedule.plannedMinutes === creationPlannedMinutes(value.schedule))
-    && (value.kind === "work" || !!value.schedule.startTime && !!value.schedule.endTime)
+  .refine(value => (creationPlannedMinutes(value.schedule) === null ? value.kind !== "non_productive" || value.schedule.plannedMinutes === null : value.schedule.plannedMinutes === creationPlannedMinutes(value.schedule))
+    && (value.kind !== "non_productive" || !!value.schedule.startTime && !!value.schedule.endTime)
     && (!value.schedule.startTime || !value.schedule.endTime || value.schedule.startTime < value.schedule.endTime), "MOBILE_CREATION_INVALID_TIME_RANGE");
 
 export function creationPlannedMinutes(schedule: { startTime: string; endTime: string }): number | null {
@@ -82,6 +100,8 @@ export type CreationOptionsQuery = z.infer<typeof creationOptionsQuerySchema>;
 export type CreationOptions = z.infer<typeof creationOptionsSchema>;
 export type CreationKind = z.infer<typeof creationKindSchema>;
 export type CreationCatalogResource = z.infer<typeof creationCatalogResourceSchema>;
+export type MaintenanceCatalogResource = z.infer<typeof maintenanceCatalogResourceSchema>;
+export type CatalogResource = z.infer<typeof catalogResourceSchema>;
 export type MaintenanceCreationType = z.infer<typeof maintenanceTypeSchema>;
 export type ChecklistCategory = z.infer<typeof checklistCategorySchema>;
 export type CreationSchedule = z.infer<typeof creationScheduleSchema>;
@@ -103,10 +123,22 @@ export const workEditDocumentSchema = z.object({
     system: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable(),
     component: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable(),
     editable: z.boolean(),
+    // Clasificación del trabajo de mantenimiento (servidores anteriores no la envían).
+    workType: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable().optional(),
+    action: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable().optional(),
+    interventionReason: z.object({ id: positiveCreationIdSchema, label: z.string() }).nullable().optional(),
+    assignedMinutes: z.number().int().min(0).optional(),
+    assignedMinutesEditable: z.boolean().optional(),
   }).strict().optional(),
 }).strict();
-export const workSystemInputSchema = z.object({ systemId: positiveCreationIdSchema.nullable(), componentId: positiveCreationIdSchema.nullable() }).strict()
+export const workSystemInputSchema = z.object({ systemId: positiveCreationIdSchema.nullable(), componentId: positiveCreationIdSchema.nullable(),
+  workTypeId: positiveCreationIdSchema.nullable().optional(), actionId: positiveCreationIdSchema.nullable().optional(),
+  interventionReasonId: positiveCreationIdSchema.nullable().optional(), assignedMinutes: z.number().int().min(0).max(100000).optional() }).strict()
   .refine((value) => value.componentId === null || value.systemId !== null, "MOBILE_CREATION_SYSTEM_REQUIRED");
 export const workEditInputSchema = z.object({ expectedRevision: z.string().regex(/^[a-f0-9]{64}$/), fields: workEditFieldsSchema, workSystem: workSystemInputSchema.optional() }).strict();
 export type WorkEditDocument = z.infer<typeof workEditDocumentSchema>;
 export type WorkEditInput = z.infer<typeof workEditInputSchema>;
+const MAINTENANCE_TITLE_TYPES: Record<string, string> = { correctivo: "correctivo", detencion: "por detención", preventivo: "preventivo", rutinario: "rutinario", checklist: "checklist" };
+/** Título que se muestra cuando el mantenimiento no tiene (es opcional); el servidor usa el mismo para su trabajo. */
+export const maintenanceDisplayTitle = (maintenance: { title: string; type: string }): string =>
+  maintenance.title.trim() !== "" ? maintenance.title : `Mantenimiento ${MAINTENANCE_TITLE_TYPES[maintenance.type] ?? maintenance.type}`;

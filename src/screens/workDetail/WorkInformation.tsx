@@ -36,6 +36,10 @@ export function WorkDescription({ work, disabled = false }: { work: AssignmentWo
             <View style={styles.column} testID="work-system-summary"><Fact label="Sistema" value={work.systemName} /></View>
             <View style={styles.column}><Fact label="Subsistema" value={work.componentName} /></View>
           </View> : null}
+          {work.workTypeName || work.actionName || work.interventionReasonName ? <View style={styles.columns} testID="work-classification-summary">
+            <View style={styles.column}><Fact label="Tipo de trabajo" value={work.workTypeName} /><Fact label="Motivo de intervención" value={work.interventionReasonName} /></View>
+            <View style={styles.column}><Fact label="Acción" value={work.actionName} /></View>
+          </View> : null}
           <Text style={styles.label}>Descripción</Text>
           <Text selectable style={styles.descriptionFull} testID="work-description-full">{description}</Text>
         </ScrollView>
@@ -184,6 +188,7 @@ export function EquipmentTab({ group, work, locationPort, identity = "", disable
   const equipment = inherited ? group.equipment : work.workEquipment ?? group.equipment;
   const showGroupEquipment = !inherited && work.workEquipment && group.equipment && JSON.stringify(work.workEquipment) !== JSON.stringify(group.equipment);
   const activities = (work.activities ?? []).filter(isWorkActivity);
+  const hasClassification = !!(work.workTypeName?.trim() || work.actionName?.trim() || work.interventionReasonName?.trim());
   return <View style={styles.stack}>
     {equipment ? <EquipmentCard equipment={equipment} title={inherited ? "Equipo del mantenimiento" : work.workEquipment ? "Equipo del trabajo" : "Equipo de la asignación"}>
       {locationPort ? <EquipmentLocationPanel key={`${identity}:work`} port={locationPort} target="work" identity={identity} disabled={disabled} online={online} /> : null}
@@ -199,7 +204,12 @@ export function EquipmentTab({ group, work, locationPort, identity = "", disable
         <ContextRow icon="business-outline" label="Cliente" value={work.workCustomerName ?? group.customerName} />
         <ContextRow icon="location-outline" label="Ubicación" value={group.locationName} />
         <ContextRow icon="cog-outline" label="Sistema" value={work.systemName} />
-        <ContextRow icon="git-branch-outline" label="Subsistema" value={work.componentName} last={!group.locationAddress?.trim()} />
+        <ContextRow icon="git-branch-outline" label="Subsistema" value={work.componentName} last={!group.locationAddress?.trim() && !hasClassification} />
+        {hasClassification ? <>
+          <ContextRow icon="pricetag-outline" label="Tipo de trabajo" value={work.workTypeName} />
+          <ContextRow icon="hammer-outline" label="Acción" value={work.actionName} />
+          <ContextRow icon="help-circle-outline" label="Motivo de intervención" value={work.interventionReasonName} last={!group.locationAddress?.trim()} />
+        </> : null}
       </View>
       {group.locationAddress?.trim() ? <View style={equipmentStyles.address}>
         <Ionicons name="navigate-outline" size={16} color={palette.primary} accessible={false} />

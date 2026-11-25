@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { calendarDateSchema, creationInputSchema, creationKindSchema, creationPrioritySchema, creationResultSchema, maintenanceTypeSchema, MAX_CREATION_CHECKLISTS, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, workEditInputSchema, type WorkEditDocument, type WorkEditInput, type CreationCatalogResource, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
+import { calendarDateSchema, creationInputSchema, creationKindSchema, maintenancePrioritySchema, workPriority, creationResultSchema, maintenanceTypeSchema, MAX_CREATION_CHECKLISTS, mobileUuidSchema, nonProductiveReasonSchema, positiveCreationIdSchema, workEditInputSchema, type WorkEditDocument, type WorkEditInput, type CreationCatalogResource, type CreationInput, type CreationKind, type CreationSchedule } from "../../domain/creation";
+import { emptyMaintenanceDetails, maintenanceCreationDetails, maintenanceDetailsDraftSchema } from "../../domain/maintenanceInfo";
 import type { Assignments } from "../../domain/models";
 import type { OfflineSnapshot } from "../../domain/offline";
 import { buildWeeklySchedule, scheduleTimeMinutes } from "../../domain/weeklySchedule";
@@ -12,7 +13,7 @@ export const creationFormSchema = z.object({
   /** Ingreso a taller al que pertenece el trabajo: el equipo y el cliente salen del ingreso. */
   operationAreaEntryId: positiveCreationIdSchema.optional(),
   title: draftText(255), summary: draftText(5000), motive: draftText(5000),
-  priority: creationPrioritySchema, maintenanceType: maintenanceTypeSchema,
+  priority: maintenancePrioritySchema, maintenanceType: maintenanceTypeSchema,
   /** Mantenimiento checklist: listas elegidas (se agregan al trabajo al crear) y categoría opcional. */
   checklists: z.array(catalogReferenceSchema).max(MAX_CREATION_CHECKLISTS).default([]),
   checklistCategory: z.enum(["", "routine", "dispatch", "return"]).default(""),
@@ -20,23 +21,33 @@ export const creationFormSchema = z.object({
   specialty: catalogReferenceSchema.nullable(),
   system: catalogReferenceSchema.nullable().default(null),
   component: catalogReferenceSchema.nullable().default(null),
+  /** Clasificación del trabajo de mantenimiento (solo al editar). */
+  workType: catalogReferenceSchema.nullable().default(null),
+  action: catalogReferenceSchema.nullable().default(null),
+  interventionReason: catalogReferenceSchema.nullable().default(null),
+  assignedMinutes: z.number().int().min(0).max(100000).nullable().default(null),
   damageType: z.enum(["", "operacional", "desgaste"]), reason: nonProductiveReasonSchema,
   reasonText: draftText(500), initialComment: draftText(5000),
   date: z.string().max(10).regex(/^[0-9-]*$/), startTime: z.string().max(5).regex(/^[0-9:]*$/), endTime: z.string().max(5).regex(/^[0-9:]*$/),
   /** Tiempo asignado sin horario (solo trabajos): se usa cuando no hay inicio y fin. */
   plannedMinutes: z.number().int().min(0).max(1439).nullable().default(null),
+  /** Mantenimiento: información general como en la web (según el tipo). */
+  maintenanceDetails: maintenanceDetailsDraftSchema.default(emptyMaintenanceDetails),
 }).strict();
 export type CreationForm = z.infer<typeof creationFormSchema>;
 export type CatalogItem = NonNullable<CreationForm["equipment"]>;
 export type CreationFormErrors = Partial<{ [Key in keyof CreationForm]: string }>;
-export const catalogFormField = { equipment: "equipment", specialties: "specialty", systems: "system", components: "component", checklists: "checklists" } as const satisfies { [Resource in CreationCatalogResource]: keyof CreationForm };
+/** Catálogos que se eligen en el formulario: los de creación más la clasificación del trabajo de mantenimiento. */
+export type FormCatalogResource = CreationCatalogResource | "workTypes" | "actions" | "interventionReasons";
+export const catalogFormField = { equipment: "equipment", specialties: "specialty", systems: "system", components: "component", checklists: "checklists",
+  workTypes: "workType", actions: "action", interventionReasons: "interventionReason" } as const satisfies { [Resource in FormCatalogResource]: keyof CreationForm };
 
 /** Lo elegido en un catálogo de una sola opción; las listas se agregan de a una y no quedan marcadas. */
-export function catalogSelection(form: CreationForm, resource: CreationCatalogResource): CatalogItem | null {
+export function catalogSelection(form: CreationForm, resource: FormCatalogResource): CatalogItem | null {
   return resource === "checklists" ? null : form[catalogFormField[resource]];
 }
 
-export function applyCatalogSelection(form: CreationForm, resource: CreationCatalogResource, item: CatalogItem): CreationForm {
+export function applyCatalogSelection(form: CreationForm, resource: FormCatalogResource, item: CatalogItem): CreationForm {
   if (resource === "equipment") return { ...form, equipment: item };
   const reference = { id: item.id, label: item.label };
   if (resource === "checklists") {
@@ -48,20 +59,25 @@ export function applyCatalogSelection(form: CreationForm, resource: CreationCata
 }
 
 export function emptyCreationForm(initialDate: string): CreationForm {
-  return { title: "", summary: "", motive: "", priority: "medium", maintenanceType: "correctivo", checklists: [], checklistCategory: "", equipment: null, specialty: null, system: null, component: null,
-    damageType: "", reason: "waiting_parts", reasonText: "", initialComment: "", date: calendarDateSchema.safeParse(initialDate).success ? initialDate : "", startTime: "", endTime: "", plannedMinutes: null };
+  return { title: "", summary: "", motive: "", priority: "medium", maintenanceType: "correctivo", checklists: [], checklistCategory: "", equipment: null, specialty: null, system: null, component: null, workType: null, action: null, interventionReason: null, assignedMinutes: null,
+    damageType: "", reason: "waiting_parts", reasonText: "", initialComment: "", date: calendarDateSchema.safeParse(initialDate).success ? initialDate : "", startTime: "", endTime: "", plannedMinutes: null, maintenanceDetails: emptyMaintenanceDetails() };
 }
 
 export function creationPayload(kind: CreationKind, form: CreationForm, companyBranchId: number, clientRequestId: string): CreationInput {
-  const assigned = kind === "work" && !(form.startTime && form.endTime) && form.plannedMinutes ? { plannedMinutes: form.plannedMinutes } : {};
+  const assigned = kind !== "non_productive" && !(form.startTime && form.endTime) && form.plannedMinutes ? { plannedMinutes: form.plannedMinutes } : {};
   const base = { companyBranchId, clientRequestId, schedule: { date: form.date, startTime: form.startTime, endTime: form.endTime, ...assigned } };
   const specialty = form.specialty ? { specialtyId: form.specialty.id } : {};
   const workSystem = form.system ? { systemId: form.system.id, ...(form.component ? { componentId: form.component.id } : {}) } : {};
   if (kind === "work") return creationInputSchema.parse({ ...base, kind, ...(form.maintenanceId ? { maintenanceId: form.maintenanceId } : {}), work: {
-    title: form.title, summary: form.summary.trim(), priority: form.priority, ...specialty,
+    title: form.title, summary: form.summary.trim(), priority: workPriority(form.priority), ...specialty,
     ...(form.operationAreaEntryId ? { operationAreaEntryId: form.operationAreaEntryId } : {}),
     ...(form.equipment && !form.maintenanceId && !form.operationAreaEntryId ? { rentalEquipmentId: form.equipment.id } : {}),
-    ...(form.maintenanceId ? workSystem : {}),
+    ...(form.maintenanceId ? {
+      ...workSystem,
+      ...(form.workType ? { workTypeId: form.workType.id } : {}),
+      ...(form.action ? { actionId: form.action.id } : {}),
+      ...(form.interventionReason ? { interventionReasonId: form.interventionReason.id } : {}),
+    } : {}),
   } });
   if (kind === "maintenance") return creationInputSchema.parse({ ...base, kind, maintenance: {
     type: form.maintenanceType, title: form.title, motive: form.motive, priority: form.priority,
@@ -71,6 +87,8 @@ export function creationPayload(kind: CreationKind, form: CreationForm, companyB
       checklistIds: form.checklists.map((checklist) => checklist.id),
       ...(form.checklistCategory ? { checklistCategory: form.checklistCategory } : {}),
     } : {}),
+    // Sin datos no se envía nada (sirve con servidores anteriores). Fechas inválidas ya se rechazan al validar.
+    ...maintenanceDetailsPayload(form),
   } });
   return creationInputSchema.parse({ ...base, kind, nonProductive: {
     reason: form.reason, ...(form.reasonText.trim() ? { reasonText: form.reasonText } : {}),
@@ -78,22 +96,31 @@ export function creationPayload(kind: CreationKind, form: CreationForm, companyB
   } });
 }
 
+function maintenanceDetailsPayload(form: CreationForm): { details?: NonNullable<ReturnType<typeof maintenanceCreationDetails>["details"]> } {
+  // Sin "ahora" variable: el borrador guardado debe producir siempre el mismo envío.
+  // Las instrucciones no se piden al crear (se agregan en la pestaña Información): un borrador antiguo no las envía.
+  const { details } = maintenanceCreationDetails(form.maintenanceType, { ...form.maintenanceDetails, instructions: "" }, Number.MAX_SAFE_INTEGER);
+  return details ? { details } : {};
+}
+
 export function validateCreationForm(kind: CreationKind, form: CreationForm): CreationFormErrors {
   const errors: CreationFormErrors = {};
   const requiredText = (field: "title" | "summary" | "motive" | "reasonText", label: string): void => {
     if (!form[field].trim()) errors[field] = `${label} es obligatorio.`;
   };
-  if (kind !== "non_productive") requiredText("title", "El título");
+  // En el mantenimiento, título y motivo son opcionales (como en la web).
+  if (kind === "work") requiredText("title", "El título");
   if (kind === "maintenance") {
-    requiredText("motive", "El motivo");
     if (!form.equipment && !form.operationAreaEntryId) errors.equipment = "Selecciona un equipo.";
     if (form.maintenanceType === "checklist" && form.checklists.length === 0) errors.checklists = "Agrega al menos una lista de chequeo.";
+    const details = maintenanceCreationDetails(form.maintenanceType, form.maintenanceDetails);
+    if (details.error) errors.maintenanceDetails = details.error;
   }
   if (kind === "non_productive" && form.reason === "other") requiredText("reasonText", "El detalle del motivo");
   if (!calendarDateSchema.safeParse(form.date).success) errors.date = "Ingresa una fecha real YYYY-MM-DD entre 2000 y 2100.";
   const time = /^([01]\d|2[0-3]):[0-5]\d$/;
-  if ((kind !== "work" || form.startTime) && !time.test(form.startTime)) errors.startTime = "Usa HH:mm, por ejemplo 09:00.";
-  if ((kind !== "work" || form.endTime) && !time.test(form.endTime)) errors.endTime = "Usa HH:mm, por ejemplo 10:30.";
+  if ((kind === "non_productive" || form.startTime) && !time.test(form.startTime)) errors.startTime = "Usa HH:mm, por ejemplo 09:00.";
+  if ((kind === "non_productive" || form.endTime) && !time.test(form.endTime)) errors.endTime = "Usa HH:mm, por ejemplo 10:30.";
   else if (form.startTime && form.endTime && !errors.startTime && form.startTime >= form.endTime) errors.endTime = "El fin debe ser posterior al inicio, en el mismo día.";
   const parsed = creationFormSchema.safeParse(form);
   if (!parsed.success) for (const issue of parsed.error.issues) {
@@ -184,14 +211,21 @@ export function workEditForm(document: WorkEditDocument): CreationForm {
   return { ...emptyCreationForm(document.fields.schedule.date), title: document.fields.title, summary: document.fields.summary,
     priority: document.fields.priority, equipment: document.equipment, specialty: document.specialty,
     system: document.workSystem?.system ?? null, component: document.workSystem?.component ?? null,
+    workType: document.workSystem?.workType ?? null, action: document.workSystem?.action ?? null,
+    interventionReason: document.workSystem?.interventionReason ?? null, assignedMinutes: document.workSystem?.assignedMinutes ?? null,
     startTime: document.fields.schedule.startTime, endTime: document.fields.schedule.endTime };
 }
 
 export function workEditPayload(document: WorkEditDocument, form: CreationForm): WorkEditInput {
   return workEditInputSchema.parse({ expectedRevision: document.revision, fields: {
-    title: form.title, summary: form.summary, priority: form.priority,
+    title: form.title, summary: form.summary, priority: workPriority(form.priority),
     specialtyId: document.equipmentInherited ? document.fields.specialtyId : form.specialty?.id ?? null,
     rentalEquipmentId: document.equipmentInherited ? document.fields.rentalEquipmentId : form.equipment?.id ?? null,
     schedule: document.scheduleEditable ? { date: form.date, startTime: form.startTime, endTime: form.endTime, endDateOffset: 0 } : document.fields.schedule,
-  }, ...(document.workSystem?.editable ? { workSystem: { systemId: form.system?.id ?? null, componentId: form.system && form.component ? form.component.id : null } } : {}) });
+  }, ...(document.workSystem?.editable ? { workSystem: {
+    systemId: form.system?.id ?? null, componentId: form.system && form.component ? form.component.id : null,
+    // Solo si el servidor ya conoce la clasificación (si no, se rechazaría por campo desconocido).
+    ...(document.workSystem.workType !== undefined ? { workTypeId: form.workType?.id ?? null, actionId: form.action?.id ?? null, interventionReasonId: form.interventionReason?.id ?? null } : {}),
+    ...(document.workSystem.assignedMinutesEditable && form.assignedMinutes !== null ? { assignedMinutes: form.assignedMinutes } : {}),
+  } } : {}) });
 }

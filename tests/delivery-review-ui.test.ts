@@ -323,7 +323,7 @@ test("actual order-to-card callback retains delivery review action for offline, 
   const orderHooks = durableReactFixture(); const cardHooks = durableReactFixture();
   const order = uiModule<{ OrderDetailScreen: Wrapped<OrderDetailScreenProps> }>("screens/OrderDetailScreen.tsx", orderHooks, {
     "../ui/SessionContextBar": { SessionContextBar: "SessionContextBar" }, "./orders/AssignmentOrderCard": { AssignmentOrderSummary: "AssignmentOrderSummary" },
-    "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" }, "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" },
+    "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" }, "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" }, "./orders/MaintenanceResourcesPanel": { MaintenanceResourcesPanel: "MaintenanceResourcesPanel" }, "./orders/MaintenanceInfoPanel": { MaintenanceInfoPanel: "MaintenanceInfoPanel" },
     "./orders/OrderLifecyclePanel": { OrderLifecyclePanel: "OrderLifecyclePanel" }, "./offline/OfflineOrderLifecyclePanel": { OfflineOrderLifecyclePanel: "OfflineOrderLifecyclePanel" },
     "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
   });
@@ -398,7 +398,7 @@ for (const type of ["internal_maintenance", "external_ot"] as const) test(`${typ
   const hooks = durableReactFixture();
   const module = uiModule<{ OrderDetailScreen: Wrapped<OrderDetailScreenProps> }>("screens/OrderDetailScreen.tsx", hooks, {
     "../ui/SessionContextBar": { SessionContextBar: "SessionContextBar" }, "./orders/AssignmentOrderCard": { AssignmentOrderSummary: "AssignmentOrderSummary" },
-    "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" }, "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" },
+    "./orders/AssignmentWorkCard": { AssignmentWorkCard: "AssignmentWorkCard" }, "./orders/OrderMaterialsTab": { OrderMaterialsTab: "OrderMaterialsTab" }, "./orders/MaintenanceResourcesPanel": { MaintenanceResourcesPanel: "MaintenanceResourcesPanel" }, "./orders/MaintenanceInfoPanel": { MaintenanceInfoPanel: "MaintenanceInfoPanel" },
     "./orders/OrderLifecyclePanel": { OrderLifecyclePanel: "OrderLifecyclePanel" }, "./offline/OfflineOrderLifecyclePanel": { OfflineOrderLifecyclePanel: "OfflineOrderLifecyclePanel" },
     "./workDetail/FileWorkspace": { FileWorkspace: "FileWorkspace" }, "../files/FileDrive": { FileDrive: "FileDrive" }, "../chat/ChatThread": { ChatThread: "ChatThread" }, "../deletion/DeleteRecordDialog": { DeleteRecordDialog: "DeleteRecordDialog" }, "../application/appPermissions": { useAppPermission: () => true },
   });

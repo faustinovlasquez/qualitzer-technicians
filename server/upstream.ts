@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { GatewayError } from "./errors";
 import { pautaErrorMessage } from "../src/domain/maintenancePauta";
+import { resourceErrorMessage } from "../src/domain/maintenanceResources";
+import { maintenanceInfoErrorMessage } from "../src/domain/maintenanceInfo";
 import { receiptForOperation, syncErrorSchema, syncOperationIdSchema, syncReceiptSchema, type SyncReceipt } from "../src/domain/offlineProtocol";
 
 export const MOBILE_USER_AGENT = "Qualitzer-Mobile/1.0 (Mobile; Gateway)";
@@ -58,6 +60,10 @@ type BackendPath = "/auth/login" | "/auth/me" | "/auth/logout" | "/auth/forced_p
   `/technician-dashboard/panel/${string}/works/${number}/reopen` |
   `/technician-dashboard/panel/${string}/works/${number}/team` |
   `/technician-dashboard/panel/${string}/works/${number}/pauta` |
+  `/technician-dashboard/panel/${string}/works/${number}/resources` |
+  `/technician-dashboard/panel/${string}/works/${number}/maintenance-info` |
+  `/technician-dashboard/panel/${string}/works/${number}/resources/catalog` |
+  `/technician-dashboard/panel/${string}/works/${number}/resources/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/team/${number}` |
   `/technician-dashboard/panel/${string}/works/${number}/equipment-location/${"work" | "group"}` |
   `/technician-dashboard/panel/${string}/works/${number}/steps/${number}/files`;
@@ -203,7 +209,7 @@ export class Upstream {
         if (/\/works\/[1-9]\d*\/edit$/.test(path)) {
           let data: unknown;
           try { data = JSON.parse(await readBody(response)); } catch { data = null; }
-          const failure = z.object({ error: z.enum(["WORK_EDIT_CONFLICT", "WORK_EDIT_INVALID_INPUT", "WORK_EDIT_NOT_AVAILABLE", "WORK_EDIT_MAINTENANCE_REQUIRED", "WORK_EQUIPMENT_INHERITED", "WORK_SCHEDULE_READ_ONLY", "WORK_SPECIALTY_READ_ONLY", "WORK_READ_ONLY", "PANEL_WORK_NOT_FOUND", "MOBILE_CREATION_EQUIPMENT_NOT_FOUND", "MOBILE_CREATION_SPECIALTY_NOT_FOUND", "MOBILE_CREATION_TIMEZONE_NOT_CONFIGURED"]) }).safeParse(data);
+          const failure = z.object({ error: z.enum(["WORK_EDIT_CONFLICT", "WORK_EDIT_INVALID_INPUT", "WORK_EDIT_NOT_AVAILABLE", "WORK_EDIT_MAINTENANCE_REQUIRED", "WORK_EQUIPMENT_INHERITED", "WORK_SCHEDULE_READ_ONLY", "WORK_SPECIALTY_READ_ONLY", "WORK_READ_ONLY", "PANEL_WORK_NOT_FOUND", "MOBILE_CREATION_EQUIPMENT_NOT_FOUND", "MOBILE_CREATION_SPECIALTY_NOT_FOUND", "MOBILE_CREATION_TIMEZONE_NOT_CONFIGURED", "MOBILE_CREATION_SYSTEM_NOT_FOUND", "MOBILE_CREATION_COMPONENT_NOT_FOUND", "WORK_EDIT_OPTION_NOT_FOUND"]) }).safeParse(data);
           if (failure.success && [400, 404, 409].includes(response.status)) throw new GatewayError(response.status, failure.data.error);
           if (response.status === 401) throw new GatewayError(401, "UNAUTHORIZED");
           if (response.status === 404) throw new GatewayError(503, "WORK_EDIT_NOT_AVAILABLE");
@@ -231,6 +237,24 @@ export class Upstream {
           if (parsed.success) throw new GatewayError(response.status, parsed.data.error, workTeamErrorMessage(parsed.data.error));
           if (response.status === 404) throw new GatewayError(503, "WORK_TEAM_NOT_AVAILABLE", workTeamErrorMessage("WORK_TEAM_NOT_AVAILABLE"));
           throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó el cambio de equipo.");
+        }
+        if (/\/works\/[1-9]\d*\/maintenance-info$/.test(path) && [400, 404, 409].includes(response.status)) {
+          let failure: unknown;
+          try { failure = JSON.parse(await readBody(response)); } catch { failure = null; }
+          const parsed = z.object({ error: z.string().regex(/^(?:PANEL_MAINTENANCE_INFO_[A-Z_]+|INVALID_MAINTENANCE_[A-Z_]+)$/) }).safeParse(failure);
+          if (parsed.success) throw new GatewayError(response.status, parsed.data.error, maintenanceInfoErrorMessage(parsed.data.error));
+          // Servidor sin la ruta de información (versión anterior).
+          if (response.status === 404) throw new GatewayError(503, "PANEL_MAINTENANCE_INFO_NOT_AVAILABLE", maintenanceInfoErrorMessage("PANEL_MAINTENANCE_INFO_NOT_AVAILABLE"));
+          throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó el cambio del mantenimiento.");
+        }
+        if (/\/works\/[1-9]\d*\/resources(?:\/catalog|\/[1-9]\d*)?$/.test(path) && [400, 404, 409].includes(response.status)) {
+          let failure: unknown;
+          try { failure = JSON.parse(await readBody(response)); } catch { failure = null; }
+          const parsed = z.object({ error: z.string().regex(/^PANEL_RESOURCE_[A-Z_]+$/) }).safeParse(failure);
+          if (parsed.success) throw new GatewayError(response.status, parsed.data.error, resourceErrorMessage(parsed.data.error));
+          // Servidor sin las rutas de recursos (versión anterior).
+          if (response.status === 404) throw new GatewayError(503, "PANEL_RESOURCE_NOT_AVAILABLE", resourceErrorMessage("PANEL_RESOURCE_NOT_AVAILABLE"));
+          throw new GatewayError(response.status, "UPSTREAM_REJECTED", "El backend rechazó el cambio de recursos.");
         }
         if (/\/works\/[1-9]\d*\/pauta$/.test(path) && [400, 404, 409].includes(response.status)) {
           let failure: unknown;
@@ -359,6 +383,9 @@ function mobileErrorMessage(code: string): string {
   if (code === "MOBILE_CREATION_ENTRY_NOT_FOUND") return "El ingreso ya no existe o no es de tu sucursal. Actualiza el taller.";
   if (code === "MOBILE_CREATION_ENTRY_DELIVERED") return "Este equipo ya fue entregado: no se le pueden agregar trabajos.";
   if (code === "MOBILE_CREATION_ENTRY_NOT_INTERNAL") return "Solo los ingresos de equipos propios pueden tener mantenimientos.";
+  if (code === "MOBILE_CREATION_OPTION_NOT_FOUND") return "Una opción del análisis de falla ya no está disponible. Elige otra.";
+  if (code === "MOBILE_CREATION_FUTURE_DATE") return "La fecha de reporte y \"Detenido desde\" no pueden estar en el futuro.";
+  if (code === "MOBILE_CREATION_INVALID_FIELDS") return "El servidor no aceptó uno de los datos. Si incluiste información general, actualiza el servidor o revisa los valores.";
   if (code.includes("TIMEZONE")) return "La sucursal necesita una zona horaria válida configurada en el servidor.";
   if (code.includes("SCHEMA") || code === "MOBILE_PUSH_UNAVAILABLE") return "La función no está habilitada o requiere completar el despliegue del servidor.";
   if (code === "MOBILE_PUSH_TEST_RATE_LIMIT") return "Se alcanzó el límite de cinco pruebas por hora.";

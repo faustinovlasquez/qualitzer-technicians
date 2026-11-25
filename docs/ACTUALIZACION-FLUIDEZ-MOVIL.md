@@ -1,3 +1,7 @@
+# Información, recursos y clasificación de trabajos del mantenimiento en la app: gateway 1.0.54 (APK 1.0.159)
+
+La app ve y edita la información general del mantenimiento (análisis de la falla, activos afectados), agrega productos, y elige tipo de trabajo, acción y motivo de intervención en cada trabajo. Desplegar primero las migraciones del 25-11 y sus seeders, luego el backend con estos cambios y esta pasarela. Ver [actualización 1.0.159](ACTUALIZACION-1.0.159.md).
+
 # Preventivo, rutinario y checklist desde la app, y pauta del preventivo: gateway 1.0.53 (APK 1.0.157)
 
 La app crea los cinco tipos de mantenimiento; el checklist lleva sus listas al crearlo y el preventivo permite agregar los ítems de la pauta del equipo desde el trabajo. Desplegar primero el backend con estos cambios y esta pasarela. Sin migraciones. Ver [actualización 1.0.157](ACTUALIZACION-1.0.157.md).

@@ -5,7 +5,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { IconButton } from "../../ui/components";
 import { palette, radius, typography } from "../../ui/theme";
 
-export function CreationModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+/** Ventana modal; `footer` queda fijo al pie (solo el contenido se desplaza). */
+export function CreationModal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   return <Modal transparent visible animationType="fade" onRequestClose={onClose}>
     <SafeAreaView style={styles.overlay}>
       <Pressable accessibilityRole="button" accessibilityLabel={`Cerrar ${title}`} onPress={onClose} style={StyleSheet.absoluteFill} />
@@ -15,6 +16,7 @@ export function CreationModal({ title, onClose, children }: { title: string; onC
           <IconButton name="close-outline" label={`Cerrar ${title}`} onPress={onClose} />
         </View>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>{children}</ScrollView>
+        {footer ? <View style={styles.footer}>{footer}</View> : null}
       </View>
     </SafeAreaView>
   </Modal>;
@@ -26,4 +28,5 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", padding: 16, borderBottomWidth: 1, borderColor: palette.border, gap: 8 },
   title: { ...typography.heading, color: palette.text, flex: 1, minWidth: 0, flexShrink: 1 },
   content: { padding: 16, gap: 12 },
+  footer: { padding: 16, gap: 8, borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.surface },
 });

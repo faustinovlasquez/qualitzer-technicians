@@ -282,6 +282,11 @@ function AssignmentWorkCardContent({ group, work, onOpenWork, onWorkStatus, busy
         <InfoBlock label="Sistema" icon="cog-outline" value={work.systemName?.trim() || "Sin sistema"} style={infoStyles.half} />
         <InfoBlock label="Subsistema" icon="layers-outline" value={work.componentName?.trim() || "Sin subsistema"} style={infoStyles.half} />
       </View> : null}
+      {work.workTypeName?.trim() || work.actionName?.trim() ? <View style={infoStyles.row} testID="assignment-work-classification">
+        <InfoBlock label="Tipo de trabajo" icon="pricetag-outline" value={work.workTypeName?.trim() || "Sin tipo"} style={infoStyles.half} />
+        <InfoBlock label="Acción" icon="hammer-outline" value={work.actionName?.trim() || "Sin acción"} style={infoStyles.half} />
+      </View> : null}
+      {work.interventionReasonName?.trim() ? <InfoBlock label="Motivo de intervención" icon="help-circle-outline" value={work.interventionReasonName.trim()} /> : null}
       <View style={infoStyles.row} testID="assignment-work-schedule" accessibilityLabel={`${fullDate(work.scheduledDate)}. ${scheduleTime(work)}`}>
         <InfoBlock label="Horario" icon="calendar-outline" tone="blue" value={`${scheduledLabel} · ${scheduleTime(work)}`} style={infoStyles.half}
           badge={work.isOverdue && !finished ? <Badge label="Atrasada" tone="danger" /> : null} badgeLabel={work.isOverdue && !finished ? "Atrasada" : undefined} />

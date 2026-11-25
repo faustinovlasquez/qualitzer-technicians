@@ -16,6 +16,8 @@ import { useHeroCollapsed } from "../ui/heroPreference";
 import { AssignmentOrderSummary } from "./orders/AssignmentOrderCard";
 import { AssignmentWorkCard } from "./orders/AssignmentWorkCard";
 import { OrderMaterialsTab } from "./orders/OrderMaterialsTab";
+import { MaintenanceResourcesPanel, type MaintenanceResourcesActions } from "./orders/MaintenanceResourcesPanel";
+import { MaintenanceInfoPanel, type MaintenanceInfoActions } from "./orders/MaintenanceInfoPanel";
 import { Notice } from "./workDetail/DetailUi";
 import { DeliverySuccess } from "./workDetail/DeliverySuccess";
 import { errorMessage } from "./workDetail/detailRules";
@@ -71,12 +73,17 @@ export interface OrderDetailScreenProps {
   companyBranchId?: number;
   readLocalFile?: OfflineController["readLocalFile"];
   staleReadOnly?: boolean;
+  /** Recursos (productos) del mantenimiento, con conexión. */
+  maintenanceResources?: MaintenanceResourcesActions;
+  /** Información general del mantenimiento (pestaña "Información"), con conexión. */
+  maintenanceInfo?: MaintenanceInfoActions;
 }
 
-type OrderTab = "works" | "materials" | "files";
+type OrderTab = "works" | "info" | "materials" | "files";
 type OrderAction = "refresh" | "timer" | "status" | "upload" | "delete" | "start" | "deliver";
 const tabs: { id: OrderTab; label: string; icon: IconName }[] = [
   { id: "works", label: "Trabajos", icon: "construct-outline" },
+  { id: "info", label: "Información", icon: "information-circle-outline" },
   { id: "materials", label: "Repuestos", icon: "cube-outline" },
   { id: "files", label: "Archivos", icon: "folder-open-outline" },
 ];
@@ -127,6 +134,12 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
   const deletion = props.deletionPort && canDeleteOwn && mode === "live" && !localGroup && !direct && props.range && props.companyBranchId !== undefined
     ? { port: props.deletionPort, scope: { groupId: group.id, range: { startDate: props.range.startDate, endDate: props.range.endDate, companyBranchId: props.companyBranchId } } }
     : null;
+  // En un mantenimiento la pestaña se llama "Recursos" (como en la web) y se ve siempre, para poder agregar el primero.
+  const manageResources = group.type === "internal_maintenance" && props.maintenanceResources !== undefined && !localGroup && group.works.length > 0;
+  const showInfo = group.type === "internal_maintenance" && props.maintenanceInfo !== undefined && !localGroup && group.works.length > 0;
+  const canEditMaintenance = useAppPermission("maintenanceEdit");
+  const visibleTabs = tabs.filter(item => (item.id !== "materials" || group.products.length > 0 || manageResources) && (item.id !== "info" || showInfo));
+  const tabLabel = (item: { id: OrderTab; label: string }): string => item.id === "materials" && group.type === "internal_maintenance" ? "Recursos" : item.label;
   const filesScope = JSON.stringify(["order-files", props.storageKey, mode, tenant.id, tenant.portalOrigin, tenant.environment, branchName, group.type, group.id]);
 
   useEffect(() => {
@@ -252,17 +265,17 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     <AssignmentOrderSummary group={group} collapsed={heroCollapsed} onToggle={toggleHero} />
     <View style={styles.tabsContainer}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabs} accessibilityRole="tablist" accessibilityLabel="Secciones de la orden">
-        {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map((item) => <Pressable
+        {visibleTabs.map((item) => <Pressable
           key={item.id}
           accessibilityRole="tab"
-          accessibilityLabel={`${item.label}${item.id === "works" ? `, ${group.works.length}` : item.id === "materials" ? `, ${group.products.length}` : ""}`}
+          accessibilityLabel={`${tabLabel(item)}${item.id === "works" ? `, ${group.works.length}` : item.id === "materials" ? `, ${group.products.length}` : ""}`}
           accessibilityState={{ selected: tab === item.id, disabled: locked }}
           disabled={locked}
           onPress={() => selectTab(item.id)}
           style={({ pressed }) => [styles.tab, tab === item.id && styles.tabSelected, pressed && styles.pressed]}
         >
           <Ionicons name={item.icon} size={18} color={tab === item.id ? palette.primary : palette.textSecondary} accessible={false} />
-          <Text numberOfLines={1} style={[styles.tabText, tab === item.id && styles.tabTextSelected]}>{item.label}{item.id === "works" ? ` (${group.works.length})` : item.id === "materials" ? ` (${group.products.length})` : ""}</Text>
+          <Text numberOfLines={1} style={[styles.tabText, tab === item.id && styles.tabTextSelected]}>{tabLabel(item)}{item.id === "works" ? ` (${group.works.length})` : item.id === "materials" ? ` (${group.products.length})` : ""}</Text>
         </Pressable>)}
       </ScrollView>
       <IconButton name="ellipsis-horizontal" label="Opciones de la orden" disabled={locked} onPress={() => { if (!actionRef.current && !busyRef.current && !childBack.current?.(true)) setSectionsOpen(true); }} />
@@ -299,8 +312,13 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
           onWorkStatus={(selectedGroup, selectedWork, input) => runOperation(input.status === "in_progress" || input.status === "paused" ? "timer" : "status", () => onWorkStatus(selectedGroup, selectedWork, input))}
         />)}
       </View></FadeIn> : null}
-      {tab === "materials" ? <FadeIn key="materials"><OrderMaterialsTab group={group} onShowWorks={() => selectTab("works")} /></FadeIn> : null}
-      <Text style={styles.footerNote}>Los estados, cantidades y asignaciones corresponden a la información recibida de Qualitzer.</Text>
+      {tab === "info" && showInfo && props.maintenanceInfo ? <FadeIn key="info"><MaintenanceInfoPanel group={group} actions={props.maintenanceInfo} online={online}
+        disabled={locked || Boolean(props.staleReadOnly)} canEditPermission={canEditMaintenance}
+        catalogs={props.creation && props.companyBranchId !== undefined ? { companyBranchId: props.companyBranchId, userId: props.creation.user.id, workerId: props.creation.user.workerId, onLoadOptions: props.creation.onLoadOptions } : null} /></FadeIn> : null}
+      {tab === "materials" ? <FadeIn key="materials">{manageResources && props.maintenanceResources
+        ? <MaintenanceResourcesPanel group={group} actions={props.maintenanceResources} online={online} disabled={locked || Boolean(props.staleReadOnly)} />
+        : <OrderMaterialsTab group={group} onShowWorks={() => selectTab("works")} />}</FadeIn> : null}
+      {(tab === "materials" && manageResources) || tab === "info" ? null : <Text style={styles.footerNote}>Los estados, cantidades y asignaciones corresponden a la información recibida de Qualitzer.</Text>}
     </ScrollView>
     </View>
       {filesVisited ? <View style={[styles.filePanel, showCreateWork && styles.createSpace, tab !== "files" && styles.hidden]}>
@@ -347,7 +365,7 @@ function OrderDetailContent(props: OrderDetailScreenProps) {
     {sectionsOpen ? <Modal visible transparent animationType="fade" onRequestClose={() => setSectionsOpen(false)}>
       <View style={styles.menuOverlay}><ScrollView style={styles.menu} contentContainerStyle={styles.menuContent} accessibilityViewIsModal>
         <SectionTitle title="Secciones de la orden" />
-        {tabs.filter(item => item.id !== "materials" || group.products.length > 0).map(item => <Button key={item.id} title={item.label} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); selectTab(item.id); }} />)}
+        {visibleTabs.map(item => <Button key={item.id} title={tabLabel(item)} icon={item.icon} variant={tab === item.id ? "primary" : "secondary"} disabled={locked} onPress={() => { setSectionsOpen(false); selectTab(item.id); }} />)}
         {props.onLocationHistory ? <Button title="Mi historial de ubicación" icon="location-outline" variant="secondary" disabled={locked} onPress={() => { setSectionsOpen(false); props.onLocationHistory?.(); }} /> : null}
         {deletion ? <Button title={group.type === "internal_maintenance" ? "Eliminar mantenimiento" : "Eliminar OT"} icon="trash-outline" variant="secondary" iconColor={palette.danger} textStyle={{ color: palette.danger }}
           disabled={locked || !online} onPress={() => { setSectionsOpen(false); setDeleting(true); }} /> : null}

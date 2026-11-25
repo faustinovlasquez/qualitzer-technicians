@@ -6,7 +6,7 @@ import { OfflineQueuedError, isOfflineQueuedError, type OfflineOperation } from 
 import { OFFLINE_LIMITS } from "../contracts";
 import { OfflineEngine, backoffMs, canUseCache, resolveScope, sameOfflineUser } from "../engine";
 import { cloneState, decodeState, emptyState, hasPendingChanges, putCache, updateState, validateQuota } from "../state";
-import { overlayCreations } from "../overlay";
+import { CREATION_SNAPSHOT_MARGIN_MS, overlayCreations } from "../overlay";
 import { creation, fixture, MemoryStore, result, user, uuid } from "./fakes";
 import type { Assignments, LocalPhoto, Session } from "../../domain/models";
 import type { OfflineDocumentMetadata } from "../../domain/offline";
@@ -220,6 +220,28 @@ test("local overlay has no fabricated checklist or execution permission and dedu
   const applied = create(); if (applied.kind === "create") { applied.status = "applied"; applied.result = result(applied.input); }
   const overlay = overlayCreations(assignments, "2026-09-08", [applied], session);
   assert.equal(overlayCreations(overlay, "2026-09-08", [applied], session).groups.length, 1);
+});
+test("creación confirmada que la agenda posterior ya no trae (borrada o reasignada) deja de mostrarse", () => {
+  const session: Session = { token: "test-only", user, tenant: user.tenant!, branchId: 1, mode: "live" };
+  const assignments: Assignments = { generatedAt: "2026-09-08T00:00:00Z", technician: { id: user.workerId, name: user.name, allowEditExecutionTime: false }, summary: { totalGroups: 0, totalWorks: 0, activeWorks: 0, overdueWorks: 0, plannedMinutes: 0 }, groups: [] };
+  const applied = create(); assert.ok(applied.kind === "create");
+  Object.assign(applied, { status: "applied", result: result(applied.input), createdAt: 1_000, appliedAt: 5_000 });
+  const day = "2026-09-08";
+  // Agenda pedida antes de confirmar (aunque llegue después): aún no la trae, se muestra la tarjeta local.
+  assert.equal(overlayCreations(assignments, day, [applied], session, { requestedAt: 4_999, fetchedAt: 6_000 }).groups.length, 1);
+  // Agenda pedida después de confirmar y sin el registro (la persona se quitó o se borró): no aparece, aunque sea al instante.
+  assert.equal(overlayCreations(assignments, day, [applied], session, { requestedAt: 5_001, fetchedAt: 5_200 }).groups.length, 0);
+  // Copias antiguas sin hora de petición: se usa la de llegada con un minuto de margen.
+  assert.equal(overlayCreations(assignments, day, [applied], session, { fetchedAt: 5_000 + CREATION_SNAPSHOT_MARGIN_MS }).groups.length, 1);
+  assert.equal(overlayCreations(assignments, day, [applied], session, { fetchedAt: 5_001 + CREATION_SNAPSHOT_MARGIN_MS }).groups.length, 0);
+  // Operaciones antiguas sin hora de confirmación: se usa la de creación con margen (nunca la hora de petición sola).
+  const legacy = { ...applied, appliedAt: undefined };
+  assert.equal(overlayCreations(assignments, day, [legacy], session, { requestedAt: 1_500, fetchedAt: 1_600 }).groups.length, 1);
+  assert.equal(overlayCreations(assignments, day, [legacy], session, { fetchedAt: 1_001 + CREATION_SNAPSHOT_MARGIN_MS }).groups.length, 0);
+  // Sin copia del día (no se sabe qué tiene el servidor) se sigue mostrando.
+  assert.equal(overlayCreations(assignments, day, [applied], session).groups.length, 1);
+  // Lo que aún no se envía se muestra siempre.
+  assert.equal(overlayCreations(assignments, day, [create()], session, { requestedAt: 999_999_999, fetchedAt: 999_999_999 }).groups.length, 1);
 });
 test("Expo 57 native FetchError wrapper is classified without masking malformed JSON", () => {
   assert.ok(classifyTransportError(new Error("fetch failed: network connection lost"), false, true) instanceof NetworkError);

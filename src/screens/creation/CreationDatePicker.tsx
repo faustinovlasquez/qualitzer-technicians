@@ -14,7 +14,12 @@ type DatePickerProps = { value: string; onClose: () => void; showInputHint?: boo
 export function CreationDatePicker(props: DatePickerProps) {
   const { value, onClose } = props;
   const [selectedDates, setSelectedDates] = useState(() => props.multiple ? [...props.selectedDates] : []);
-  const [month, setMonth] = useState(() => calendarDateSchema.safeParse(value).success ? value.slice(0, 7) : "2000-01");
+  // Sin fecha elegida se abre en el mes actual (antes abría en enero de 2000).
+  const [month, setMonth] = useState(() => {
+    if (calendarDateSchema.safeParse(value).success) return value.slice(0, 7);
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
   const first = new Date(`${month}-01T00:00:00Z`);
   const leading = (first.getUTCDay() + 6) % 7;
   const count = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();

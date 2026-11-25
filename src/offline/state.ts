@@ -19,7 +19,7 @@ const fileSchema = z.object({ id: z.string(), namespace: z.string(), name: z.str
 export const receiptSchema = z.object({ operationId: z.string(), state: z.enum(["applied", "conflict", "rejected", "needs_review"]), error: z.string().optional(), fileId: z.union([z.string(), z.number()]).optional(), activityId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 const common = z.object({ id: z.string(), createdAt: z.number(), status: z.enum(["pending", "syncing", "applied", "blocked", "auth_required", "needs_review", "conflict"]), attempts: z.number(), nextAttemptAt: z.number(), lastError: z.string().optional(), contractRecoveryVersion: z.literal(1).optional(), dependencyId: z.string().optional(), receipt: receiptSchema.optional() });
 const operation = z.discriminatedUnion("kind", [
-  common.extend({ kind: z.literal("create"), input: creationInputSchema, localGroupId: z.string(), localWorkId: z.string(), result: creationResultSchema.optional() }),
+  common.extend({ kind: z.literal("create"), input: creationInputSchema, localGroupId: z.string(), localWorkId: z.string(), result: creationResultSchema.optional(), appliedAt: z.number().optional() }),
   common.extend({ kind: z.literal("comment"), scope: workScope, text: z.string() }),
   common.extend({ kind: z.literal("activity"), scope: workScope, payload: workActivityInputSchema }),
   common.extend({ kind: z.literal("answer"), scope: workScope, stepId: z.string(), answer, base: answer, wire: z.object({ answer: syncAnswerSchema, base: syncAnswerSchema }).optional() }),
@@ -39,7 +39,7 @@ export const offlineUserSchema = z.object({
 const stateSchema = z.object({
   version: z.literal(1), revision: z.number().int().nonnegative(), operations: z.array(operation),
   revokedResources: z.array(z.object({ key: z.string(), status: z.union([z.literal(403), z.literal(404)]) })).default([]),
-  cache: z.array(z.object({ key: z.string(), json: z.string(), fetchedAt: z.number().nonnegative(), timerReadOperationIds: z.array(z.string()).optional(), fileReadOperationIds: z.array(z.string()).optional(), activityReadOperationIds: z.array(z.string()).optional(), coverage: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), branchId: z.number().int().positive(), fetchedAt: z.number().nonnegative() }).optional() })),
+  cache: z.array(z.object({ key: z.string(), json: z.string(), fetchedAt: z.number().nonnegative(), requestedAt: z.number().nonnegative().optional(),timerReadOperationIds: z.array(z.string()).optional(), fileReadOperationIds: z.array(z.string()).optional(), activityReadOperationIds: z.array(z.string()).optional(), coverage: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), branchId: z.number().int().positive(), fetchedAt: z.number().nonnegative() }).optional() })),
   passports: z.array(z.object({ key: z.string(), user: offlineUserSchema, verifiedAt: z.number(), disabled: z.boolean() })),
   reservations: z.array(z.object({ id: z.string(), size: z.number(), namespace: z.string() })),
   attachments: z.array(z.object({ scope, stepId: z.string().optional(), attachmentId: z.string(), file: fileSchema })).default([]),
